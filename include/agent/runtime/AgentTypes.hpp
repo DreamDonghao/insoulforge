@@ -12,23 +12,6 @@
 #include <string_view>
 
 namespace insoulforge {
-    /// @brief Agent 主处理的结构化结果
-    /// @details 将路由跳过、会话繁忙、抢占取消与回复计划区分开，调用方无需再通过空字符串推断分支。
-    struct AgentProcessResult {
-        /// @brief Agent 主处理结束原因
-        enum class Outcome {
-            Reply, ///< 已生成待发送的有效回复文本
-            Skipped, ///< Router 或 Executor 决定不回复
-            Busy, ///< 普通消息到达时，该会话已有 Agent 正在处理
-            Cancelled, ///< 被同会话的高优先级消息抢占取消
-            Unavailable, ///< Agent 未运行或尚未完成初始化
-            Failed, ///< Executor 未能生成有效回复
-        };
-
-        Outcome outcome{Outcome::Skipped}; ///< 决定后续消息路由的结果类别
-        std::string content; ///< outcome 为 Reply 时待发送的回复文本
-    };
-
     /// @brief Router Agent 决策结果（合并了规划功能）
     struct RouterDecision {
         enum class Action {

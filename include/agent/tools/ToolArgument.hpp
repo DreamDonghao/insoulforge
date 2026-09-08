@@ -4,7 +4,7 @@
 #pragma once
 
 #include <string>
-#include <util/JsonUtil.hpp>
+#include <infrastructure/JsonUtil.hpp>
 
 namespace insoulforge {
     /// @brief 从工具调用参数中读取字符串

@@ -31,7 +31,7 @@ WORKDIR /src
 COPY . .
 
 # 构建后端；CMake 会自动触发前端 npm install + build
-# 产物输出到 build/insoulforge-<版本号>/（exe/、public/、run.sh）
+# 产物输出到 build/insoulforge/（exe/、public/）
 RUN cmake -S . -B build-cmake -G Ninja -DCMAKE_BUILD_TYPE=Release \
     && cmake --build build-cmake -j"$(nproc)"
 

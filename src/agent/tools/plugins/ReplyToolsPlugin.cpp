@@ -3,8 +3,8 @@
 /// @details handler 为占位实现：回复工具在 ExecutorAgent::processToolCalls 内拦截执行，
 ///          不经 ToolRegistry::executeTool（需要改写回复决策而非返回工具结果）
 
+#include <include/agent/tools/ToolRegistry.hpp>
 #include <agent/tools/plugins/ReplyToolsPlugin.hpp>
-#include <service/ToolRegistry.hpp>
 
 namespace insoulforge {
     std::string_view ReplyToolsPlugin::id() const noexcept { return "builtin.reply"; }

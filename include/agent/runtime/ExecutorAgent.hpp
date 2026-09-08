@@ -9,8 +9,8 @@
 #include <agent/runtime/AgentTypes.hpp>
 #include <drogon/utils/coroutine.h>
 #include <optional>
-#include <service/ChatRecordManager.hpp>
-#include <service/MemoryManager.hpp>
+#include <conversation/history/ChatRecordManager.hpp>
+#include <agent/memory/MemoryManager.hpp>
 
 namespace insoulforge {
     /// @brief Executor Agent - 执行回复生成
@@ -24,7 +24,8 @@ namespace insoulforge {
     /// @param chatRecords 聊天记录
     /// @param memory 记忆管理器
     /// @param decision Router 的决策结果（包含回复策略）
+    /// @param messageSnapshot 本轮冻结的完整消息快照，工具可读取未投影的媒体来源
     /// @return 回复内容
-    [[nodiscard]] drogon::Task<std::optional<ReplyDecision>> execute(
-      const ChatRecordManager &chatRecords, const MemoryManager &memory, RouterDecision decision);
+    [[nodiscard]] drogon::Task<std::optional<ReplyDecision>> execute(const ChatRecordManager &chatRecords,
+      const MemoryManager &memory, RouterDecision decision, json messageSnapshot = {});
 } // namespace insoulforge

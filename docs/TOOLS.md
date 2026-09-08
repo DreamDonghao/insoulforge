@@ -1,8 +1,7 @@
 # 内置工具参考
 
 Executor（`ExecutorAgent`）在单个 Agent 循环中通过工具调用生成回复。所有内置工具经 `ToolRegistry`
-的进程内插件注册，按类别分为三组，注册代码按类别拆分在
-`src/agent/` 的三个文件中：
+的进程内插件注册，按类别拆分在 `src/agent/tools/plugins/`：
 
 | 类别          | 插件实现文件                          | 语义                         |
 |---------------|---------------------------------------|------------------------------|
@@ -68,10 +67,9 @@ Executor（`ExecutorAgent`）在单个 Agent 循环中通过工具调用生成�
 | `send_poke`      | `qq`              | 拍一拍群成员，打招呼、引起注意等轻松互动；私聊中禁用。拍一拍不是文字消息（无 message_id），成功后以 `segments` 中的 `poke` 条目记入聊天记录并推送 WebSocket，后续轮次模型能看到自己拍过谁 |
 | `recall_message` | `message_id`      | 撤回消息：撤引用的消息用 `reply_to` 字段值，撤某条消息本身用 `message_id` 字段值                                                                                                          |
 
-拍一拍的接收：OneBot notice 事件（`notice_type=notify, sub_type=poke`）由 `MessagePipeline` 的事件归一化中间件
-处理。禁用会话会提前跳过；已启用会话中，拍一拍被归一化为独立 `poke` 段，戳机器人时由 Router 决策是否回应；其他人拍
-其他人仅写入群聊天记录（`sender`=戳人者），不触发回复；机器人自己拍的已由 `send_poke` 工具记录，忽略。群成员入群、退群以
-`member_event` 段走同一消息链路。
+拍一拍的接收：OneBot notice 事件（`notice_type=notify, sub_type=poke`）先由 `OneBotEventNormalizer` 归一化，再进入
+`OneBotEventWorkflow` 的会话消息预处理队列。禁用会话会提前跳过；已启用会话中，拍一拍保存为独立 `poke` 段，所有拍一拍通知均与普通消息一样由 Router
+决策是否回应。群成员入群、退群以 `member_event` 段走同一工作流。
 
 ### 定时任务
 
@@ -82,11 +80,12 @@ Executor（`ExecutorAgent`）在单个 Agent 循环中通过工具调用生成�
 
 ## 共同模式
 
-- **会话上下文**：所有工具签名统一为 `(json args, ToolCallContext)`，会话 id 从 `ctx.sessionId` 取得；群操作类工具统一做私聊拦截与
+- **会话上下文**：所有工具签名统一为 `(json args, ToolCallContext)`，会话 ID 从 `ctx.sessionId` 取得；`ctx.messageSnapshot`
+  是本轮冻结的完整消息快照，媒体工具可用它按 `message_id` 与 `image_index` 解析图片来源。群操作类工具统一做私聊拦截与
   `sessionId == 0` 校验
 - **参数来源**：QQ 号、消息 ID、图片索引等参数取自聊天记录 JSON 的 `sender.qq` / `message_id` /
   `segments[].image_index` / `reply_to` 等字段；图片 `file/url` 仅由服务端从 `assets.images` 读取，不会提供给模型
-- **宽容取值**：参数读取统一走 `argString` / `getInt` / `getUInt` / `getBool`（见 `include/util/JsonUtil.hpp`
+- **宽容取值**：参数读取统一走 `argString` / `getInt` / `getUInt` / `getBool`（见 `include/infrastructure/JsonUtil.hpp`
   ），缺参数返回引导性错误提示而非异常
 - **注册方式**：见 `include/agent/tools/plugins/*ToolsPlugin.hpp`、`include/agent/tools/ToolArgument.hpp`
   与 [DEVELOPMENT.md](./DEVELOPMENT.md) 开发指南

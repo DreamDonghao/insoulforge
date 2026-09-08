@@ -5,7 +5,7 @@
 ### 文件命名
 
 - **头文件**: `PascalCase.hpp` (如 `MemoryManager.hpp`, `LlmClient.hpp`)
-- **源文件**: `PascalCase.cpp` (如 `ProcessQQMessages.cpp`)
+- **源文件**: `PascalCase.cpp` (如 `OneBotEventWorkflow.cpp`)
 - **控制器**: `PascalCase.hpp/.cpp` (如 `AdminController.hpp`)
 
 ### 类命名
@@ -47,18 +47,16 @@
 ### 文件注释
 
 ```cpp
-/// @file MemoryManager.hpp
-/// @brief 短期记忆管理器
-/// @author donghao
-/// @date 2026-04-02
+/// @file OneBotEventWorkflow.hpp
+/// @brief 会话消息处理工作流
 ```
 
 ### 类注释
 
 ```cpp
-/// @brief 短期记忆管理类
-/// @details 管理单个群组的短期记忆，支持存储和检索操作
-class MemoryManager {
+/// @brief 单会话完整消息列表
+/// @details 为 Router、Executor 与工具提供冻结的运行时消息快照。
+class MessageList {
     // ...
 };
 ```
@@ -66,10 +64,9 @@ class MemoryManager {
 ### 方法注释
 
 ```cpp
-/// @brief 获取群的短期记忆
-/// @param groupId 群号
-/// @return 短期记忆文本，每行一条记忆条目
-[[nodiscard]] std::string getMemory(uint64_t groupId) const;
+/// @brief 获取模型可见的近期消息快照
+/// @return 按时间顺序排列的消息 JSON 数组
+[[nodiscard]] json snapshot() const;
 ```
 
 ### 成员变量注释
@@ -98,8 +95,8 @@ std::string m_name;  ///< 群名称
 #include <drogon/drogon.h>
 #include <spdlog/spdlog.h>
 
-#include <config/Config.hpp>
-#include <storage/Database.hpp>
+#include <infrastructure/config/Config.hpp>
+#include <infrastructure/storage/Database.hpp>
 ```
 
 ### 指定初始化器列表

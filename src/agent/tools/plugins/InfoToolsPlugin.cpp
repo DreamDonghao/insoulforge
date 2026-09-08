@@ -1,18 +1,18 @@
 /// @file InfoToolsPlugin.cpp
 /// @brief 信息工具插件实现（INFORMATION，查询数据、获取答案，不产生副作用）
 
+#include <include/agent/tools/ToolRegistry.hpp>
 #include <agent/tools/ToolArgument.hpp>
 #include <agent/tools/ToolRuntime.hpp>
 #include <agent/tools/plugins/InfoToolsPlugin.hpp>
 #include <algorithm>
-#include <config/Config.hpp>
+#include <infrastructure/config/Config.hpp>
 #include <fmt/core.h>
-#include <model/OneBotMessage.hpp>
-#include <service/LlmClient.hpp>
-#include <service/LongTermMemory.hpp>
-#include <service/ToolRegistry.hpp>
-#include <storage/TaskStore.hpp>
-#include <util/Logger.hpp>
+#include <conversation/message/SessionId.hpp>
+#include <llm/LlmClient.hpp>
+#include <agent/memory/LongTermMemory.hpp>
+#include <agent/ability/TaskStore.hpp>
+#include <infrastructure/logging/Logger.hpp>
 
 namespace insoulforge {
     namespace {
@@ -171,7 +171,7 @@ namespace insoulforge {
                 const uint64_t sessionId = ctx.sessionId;
                 if (sessionId == 0)
                     co_return std::string("会话上下文缺失，无法查询定时任务");
-                const auto [sessionType, targetId] = OneBotMessage::parseSessionTarget(sessionId);
+                const auto [sessionType, targetId] = SessionId::toStorageTarget(sessionId);
                 const auto tasks = TaskStore::getPendingScheduledTasksByTarget(sessionType, targetId);
                 if (tasks.empty()) {
                     co_return std::string("当前会话没有待触发的定时任务");

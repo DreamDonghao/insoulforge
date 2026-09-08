@@ -20,8 +20,10 @@ export interface LLMConfig {
 }
 
 export interface MemoryConfig {
-    windowTriggerCount: number
-    windowKeepCount: number
+    contextWindowLimit: number
+    memorySummaryTriggerCount: number
+    memorySummaryBatchSize: number
+    memorySummaryContextCount: number
     memoryExtractMaxTokens: number
     routerWindowTriggerCount: number
     routerWindowKeepCount: number

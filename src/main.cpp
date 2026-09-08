@@ -11,19 +11,18 @@
 ///          支持通过输入 "quit" 命令优雅退出
 
 #include <agent/runtime/AgentSystem.hpp>
-#include <config/Config.hpp>
+#include <infrastructure/config/Config.hpp>
 #include <drogon/drogon.h>
-#include <event/EventBus.hpp>
+#include <include/agent/ability/TaskScheduler.hpp>
 #include <iostream>
 #include <iterator>
-#include <message/MessagePipeline.hpp>
-#include <model/OneBotMessage.hpp>
-#include <service/TaskScheduler.hpp>
+#include <conversation/session/QQNameDirectory.hpp>
 #include <spdlog/spdlog.h>
-#include <storage/AdminStore.hpp>
-#include <storage/Database.hpp>
-#include <storage/SessionStore.hpp>
-#include <util/Logger.hpp>
+#include <admin/AdminStore.hpp>
+#include <infrastructure/storage/Database.hpp>
+#include <conversation/session/SessionStore.hpp>
+#include <infrastructure/logging/Logger.hpp>
+#include <conversation/workflow/OneBotEventWorkflow.hpp>
 
 int main() {
     using namespace insoulforge;
@@ -37,12 +36,11 @@ int main() {
         config.loadFromDatabase();
 
         // 初始化 QQ 昵称
-        OneBotMessage::setCustomQQName(config.selfQQNumber, config.botName + "(我)");
+        QQNameDirectory::setCustomName(config.selfQQNumber, config.botName + "(我)");
 
         // 初始化 Agent 系统
         AgentSystem::instance().initialize();
-        EventBus::instance().initialize();
-        MessagePipeline::instance().initialize();
+        static_cast<void>(OneBotEventWorkflow::instance());
 
         // 启动定时任务调度器
         TaskScheduler::instance().start();
@@ -84,6 +82,7 @@ int main() {
 
         // 先停调度线程再关库，避免触发中的任务写已关闭的数据库
         TaskScheduler::instance().stop();
+        OneBotEventWorkflow::instance().flushMessageListsToStorage();
         database.close();
         spdlog::info("系统正常退出");
     } catch (const std::exception &e) {

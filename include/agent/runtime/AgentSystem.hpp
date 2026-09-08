@@ -1,76 +1,31 @@
 /// @file AgentSystem.hpp
-/// @brief Agent 系统 - 两层代理架构
-/// @details 协调两层代理流程处理 OneBot 消息：
-///          - Layer 1 (Router): 判断是否回复 + 规划策略
-///          - Layer 2 (Executor): 执行回复生成
-///
-///          流程：
-///          - Router SKIP → 不回复
-///          - Router REPLY → Executor 生成回复
+/// @brief Agent 系统运行状态与公共依赖初始化
 
 #pragma once
-#include <agent/runtime/AgentTypes.hpp>
 #include <atomic>
-#include <drogon/utils/coroutine.h>
-#include <model/OneBotMessage.hpp>
-#include <mutex>
-#include <service/ChatRecordManager.hpp>
-#include <service/MemoryManager.hpp>
-#include <unordered_map>
 
 namespace insoulforge {
     /// @brief Agent 系统单例类
-    /// @details 协调两层代理流程，提供统一的消息处理接口
+    /// @details 消息处理流程由 OneBotEventWorkflow 协调；本类仅管理其所依赖的全局初始化状态。
     class AgentSystem {
     public:
         static AgentSystem &instance();
 
         [[nodiscard]] bool isRunning() const noexcept;
 
+        /// @brief 判断 Agent 是否已完成初始化且允许处理消息
+        [[nodiscard]] bool isReady() const noexcept;
+
+        /// @brief 设置 Agent 的运行开关
         void setRunning(bool running) noexcept;
 
-        /// @brief 初始化 Agent System（注册工具）
+        /// @brief 初始化工具运行时与提示词服务
         void initialize();
-
-        /// @brief 处理消息 - 主流程
-        /// @param chatRecords 聊天记录管理器
-        /// @param memory 长期记忆管理器
-        /// @param message OneBot 消息
-        /// @return 包含回复计划或跳过原因的结构化处理结果
-        drogon::Task<AgentProcessResult> process(
-          const ChatRecordManager &chatRecords, const MemoryManager &memory, OneBotMessage message);
 
     private:
         AgentSystem() = default;
 
-        bool m_initialized = false;
+        std::atomic_bool m_initialized{false};
         std::atomic_bool m_running{true};
-
-        /// @brief 会话处理状态
-        struct ProcessingState {
-            uint64_t generation; // 代际号，被抢占取消时递增
-            bool isPriority; // 在处理的消息是否优先（@/私聊/系统定时任务）；优先消息互不打断，只排队
-        };
-
-        // 正在处理中的会话，用于防止并发处理
-        // 优先消息到达时：在跑的是普通消息则递增代际打断，是优先消息则排队等待；
-        // 被打断的处理在关键点检查代际确认取消
-        std::unordered_map<uint64_t, ProcessingState> m_processingSessions;
-        std::mutex m_processingMutex;
-
-        /// @brief 尝试开始处理会话消息
-        /// @param sessionId
-        /// @param isPriority 本次要处理的消息是否优先
-        /// @return 代际号（>0 成功），0 表示会话正在处理中
-        uint64_t tryStartProcessing(uint64_t sessionId, bool isPriority);
-
-        /// @brief 取消会话当前的非优先处理（递增代际通知中断；优先消息在处理时不打断，调用方排队等待）
-        void cancelNonPriorityProcessing(uint64_t sessionId);
-
-        /// @brief 检查代际是否仍然有效
-        bool isCurrentGeneration(uint64_t sessionId, uint64_t generation);
-
-        /// @brief 完成处理，移除会话标记
-        void finishProcessing(uint64_t sessionId);
     };
 } // namespace insoulforge

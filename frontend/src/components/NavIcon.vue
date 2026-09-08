@@ -63,6 +63,11 @@ defineProps<{ name: string }>()
     <path d="M8 6h13M8 12h13M8 18h13"/>
     <path d="M3 6h.01M3 12h.01M3 18h.01"/>
   </svg>
+  <!-- 请求调试 -->
+  <svg v-else-if="name === 'requestDebug'" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+    <path d="M4 4h16v16H4z"/>
+    <path d="m8 9 3 3-3 3M13 15h3"/>
+  </svg>
   <!-- 自定义工具 -->
   <svg v-else-if="name === 'tool'" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
     <path

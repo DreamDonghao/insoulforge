@@ -1,12 +1,12 @@
 /// @file ToolPluginCatalog.cpp
 /// @brief 内置工具插件组合根
 
+#include <include/agent/tools/ToolRegistry.hpp>
 #include <agent/tools/ToolPluginCatalog.hpp>
 #include <agent/tools/plugins/ActionToolsPlugin.hpp>
 #include <agent/tools/plugins/InfoToolsPlugin.hpp>
 #include <agent/tools/plugins/ReplyToolsPlugin.hpp>
 #include <array>
-#include <service/ToolRegistry.hpp>
 
 namespace insoulforge::ToolPluginCatalog {
     /// @brief 构造并注册全部编译期内置插件

@@ -6,11 +6,10 @@
 #include <utility>
 
 #include <spdlog/spdlog.h>
-
+#include <include/agent/tools/ToolRegistry.hpp>
 #include <agent/tools/ToolPluginCatalog.hpp>
 #include <agent/tools/ToolRuntime.hpp>
-#include <service/ToolRegistry.hpp>
-#include <storage/ToolStore.hpp>
+#include <agent/tools/ToolStore.hpp>
 
 namespace insoulforge {
     namespace {
@@ -55,7 +54,7 @@ namespace insoulforge {
 
     void ToolRuntime::registerBuiltinTools() {
         ToolPluginCatalog::registerBuiltinPlugins();
-        spdlog::info("ToolRuntime: 内置工具注册完成（共20个）");
+        spdlog::info("ToolRuntime: 内置工具注册完成，当前工具总数 {}", ToolRegistry::instance().getAllTools().size());
     }
 
     void ToolRuntime::reloadCustomTools() {
@@ -64,20 +63,25 @@ namespace insoulforge {
         int registeredCount = 0;
 
         // 重载只替换 custom 插件，不会影响内置工具。
-        registry.registerPlugin("custom", [&tools, &registeredCount](ToolRegistry &pluginRegistry) {
-            for (const auto &tool: tools) {
-                auto definition = makeCustomTool(tool, parseCustomToolParameters(tool));
-                if (!definition) {
-                    spdlog::warn("ToolRuntime: 跳过不支持的自定义工具 '{}' ({})", tool.name, tool.executorType);
-                    continue;
-                }
-                if (pluginRegistry.registerTool(*definition, ToolCategory::INFORMATION)) {
-                    ++registeredCount;
-                    spdlog::info("ToolRuntime: 注册自定义工具 '{}' ({})", tool.name, tool.executorType);
-                }
-            }
-        });
+        const bool registered =
+          registry.registerPlugin("custom", [&tools, &registeredCount](ToolRegistry &pluginRegistry) {
+              for (const auto &tool: tools) {
+                  auto definition = makeCustomTool(tool, parseCustomToolParameters(tool));
+                  if (!definition) {
+                      spdlog::warn("ToolRuntime: 跳过不支持的自定义工具 '{}' ({})", tool.name, tool.executorType);
+                      continue;
+                  }
+                  if (pluginRegistry.registerTool(*definition, ToolCategory::INFORMATION)) {
+                      ++registeredCount;
+                      spdlog::info("ToolRuntime: 注册自定义工具 '{}' ({})", tool.name, tool.executorType);
+                  }
+              }
+          });
 
+        if (!registered) {
+            spdlog::error("ToolRuntime: 自定义工具重载失败，已保留此前注册结果");
+            return;
+        }
         spdlog::info("ToolRuntime: 自定义工具重载完成（共{}个）", registeredCount);
     }
 } // namespace insoulforge

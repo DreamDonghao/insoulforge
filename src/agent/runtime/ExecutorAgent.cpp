@@ -2,26 +2,25 @@
 /// @brief Executor Agent - 实现
 
 #include <agent/runtime/ExecutorAgent.hpp>
-#include <config/Config.hpp>
+#include <conversation/history/ChatRecordManager.hpp>
+#include <conversation/session/SessionStore.hpp>
+#include <conversation/maintenance/affinity/AffinityStore.hpp>
+#include <conversation/message/MessageRecord.hpp>
+#include <conversation/message/SessionId.hpp>
 #include <fmt/core.h>
-#include <message/MessageRecord.hpp>
-#include <model/OneBotMessage.hpp>
+#include <include/agent/tools/ToolRegistry.hpp>
+#include <infrastructure/CommonUtil.hpp>
+#include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/config/Config.hpp>
+#include <infrastructure/logging/Logger.hpp>
+#include <llm/LlmClient.hpp>
+#include <llm/PromptService.hpp>
 #include <ranges>
 #include <regex>
-#include <service/ChatRecordManager.hpp>
-#include <service/LlmClient.hpp>
-#include <service/MessageRecall.hpp>
-#include <service/PromptService.hpp>
-#include <service/ToolRegistry.hpp>
 #include <spdlog/spdlog.h>
-#include <storage/AffinityStore.hpp>
-#include <storage/SessionStore.hpp>
 #include <string>
 #include <tuple>
 #include <unordered_map>
-#include <util/CommonUtil.hpp>
-#include <util/JsonUtil.hpp>
-#include <util/Logger.hpp>
 #include <utility>
 #include <vector>
 
@@ -117,8 +116,8 @@ at_user、等 → 返回CQ码，嵌入 reply 的 content 参数中发送
 send_sticker/send_poke/reply_and_continue 都是中途动作：发出后回合不结束，最终仍要用 reply/no_reply 收尾。
 send_sticker：表情包直接作为独立消息发出，不拼进reply；若表情包就是全部回复，发完调 no_reply 收尾
 
-reply_and_continue：接下来要执行耗时操作（搜索、深度思考、查资料等用户需要等待的事）时，
-先用它发一句「稍等，我去查一下」，再调耗时工具，拿到结果后用 reply 给出最终回复；
+reply_and_continue：接下来要执行耗时操作（网络搜索、深度思考、查资料等用户需要等待的事）时，必须先用该工具提醒用户一下，
+再调耗时工具，拿到结果后用 reply 给出最终回复；
 操作失败也要 reply 告知结果，不能没有下文。想在正式回复前先发其他内容（连续多条消息）时也可以用它
 
 **输入的聊天记录是JSON格式，但你调用回复工具时的内容必须是纯文本，不是JSON！**
@@ -174,9 +173,9 @@ reply_and_continue：接下来要执行耗时操作（搜索、深度思考、�
             if (!truncateText) {
                 return content;
             }
-            constexpr size_t kOldRecordMaxChars = 500;
             for (auto &segment: content["segments"]) {
                 if (getStr(segment, "type") == "text") {
+                    constexpr size_t kOldRecordMaxChars = 500;
                     segment["text"] = truncateUtf8(getStr(segment, "text"), kOldRecordMaxChars);
                 }
             }
@@ -203,8 +202,7 @@ reply_and_continue：接下来要执行耗时操作（搜索、深度思考、�
 
         /// @brief 构建聊天记录上下文：
         /// 最新 kRecentRecordCount 条保留完整语义投影，更早记录的文本段截断到 500 字；
-        /// 每条 sender 注入当前好感度 affinity；最近记录按 message_id 注入召回的长期记忆 memories
-        /// （同一条记忆被多条消息命中时只挂在相似度最高的那条消息上）
+        /// 每条 sender 注入当前好感度 affinity；消息预处理阶段已将召回记忆写入完整消息。
         ChatContext buildChatContext(const ChatRecordManager &chatRecords) {
             const auto records = chatRecords.getRecords(); // 旧 → 新
             const size_t totalRecords = records.size();
@@ -214,22 +212,6 @@ reply_and_continue：接下来要执行耗时操作（搜索、深度思考、�
 
             const auto affinityMap = AffinityStore::getAffinityMap(chatRecords.getSessionId());
 
-            // 最近记录的召回缓存（下标与 recentRecords 旧 → 新对齐），并统计每条记忆的最佳归属消息
-            std::vector<std::vector<MessageRecallHit>> recentHits;
-            std::unordered_map<int64_t, std::pair<float, size_t>> bestOwner; // 记忆 id → (最高相似度, 消息下标)
-            for (const auto &record: recentRecords) {
-                std::vector<MessageRecallHit> hits;
-                const std::string messageIdStr = getStr(parseRecordContent(record), "message_id");
-                if (const uint64_t messageId = parseUInt64(messageIdStr); messageId > 0)
-                    hits = MessageRecall::getHits(chatRecords.getSessionId(), messageId);
-                for (const auto &hit: hits) {
-                    if (auto [it, inserted] = bestOwner.try_emplace(hit.id, hit.similarity, recentHits.size());
-                      !inserted && hit.similarity > it->second.first)
-                        it->second = {hit.similarity, recentHits.size()};
-                }
-                recentHits.push_back(std::move(hits));
-            }
-
             ChatContext context;
 
             // 处理更早的对话
@@ -237,21 +219,9 @@ reply_and_continue：接下来要执行耗时操作（搜索、深度思考、�
                 context.earlier.push_back(injectAffinity(projectRecordForAgent(record, true), affinityMap));
             }
 
-            // 处理最近对话（注入好感度与召回记忆）
-            size_t recentIndex = 0;
+            // 处理最近对话（消息预处理时已注入召回记忆）
             for (const auto &record: recentRecords) {
-                const size_t index = recentIndex++;
-                json content = injectAffinity(projectRecordForAgent(record, false), affinityMap);
-                if (!recentHits[index].empty()) {
-                    json memories = json::array();
-                    for (const auto &hit: recentHits[index]) {
-                        if (bestOwner.at(hit.id).second == index)
-                            memories.push_back(hit.content);
-                    }
-                    if (!memories.empty())
-                        content["memories"] = memories;
-                }
-                context.recent.push_back(std::move(content));
+                context.recent.push_back(injectAffinity(projectRecordForAgent(record, false), affinityMap));
             }
             return context;
         }
@@ -289,9 +259,9 @@ reply_and_continue：接下来要执行耗时操作（搜索、深度思考、�
             // 会话详情放最前：群名/群号供模型直接取用，无需再向工具查询
             const uint64_t sessionId = chatRecords.getSessionId();
             json sessionInfo;
-            if (OneBotMessage::isPrivateSession(sessionId)) {
+            if (SessionId::isPrivate(sessionId)) {
                 sessionInfo["type"] = "private";
-                sessionInfo["qq"] = OneBotMessage::parseSessionTarget(sessionId).second;
+                sessionInfo["qq"] = SessionId::toStorageTarget(sessionId).second;
             } else {
                 sessionInfo["type"] = "group";
                 sessionInfo["group_id"] = sessionId;
@@ -419,8 +389,8 @@ reply_and_continue：接下来要执行耗时操作（搜索、深度思考、�
         /// @brief 逐个处理本轮工具调用：回复工具直接产出回复决策；其余工具经 ToolRegistry 执行并把结果
         /// 作为 tool 消息回传，CQ 码类工具的结果累积备用
         /// @return {回复工具决策（同轮多个以最后一个为准，未命中为 nullopt）, 回传工具结果后的消息列表, 累积的 CQ 码}
-        drogon::Task<std::tuple<std::optional<ReplyDecision>, json, std::string>> processToolCalls(
-          json message, json messages, std::string accumulatedCQCodes, const uint64_t sessionId) {
+        drogon::Task<std::tuple<std::optional<ReplyDecision>, json, std::string>> processToolCalls(json message,
+          json messages, std::string accumulatedCQCodes, const uint64_t sessionId, const json &messageSnapshot) {
             ReplyDecision decision;
             bool hasDecision = false;
 
@@ -460,6 +430,7 @@ reply_and_continue：接下来要执行耗时操作（搜索、深度思考、�
                 // 随调用传给 handler；其余工具不拷贝这份上下文
                 ToolCallContext ctx;
                 ctx.sessionId = sessionId;
+                ctx.messageSnapshot = messageSnapshot;
                 if (name == "deep_think") {
                     ctx.conversationContext = json::array();
                     for (size_t i = 1; i < messages.size(); ++i) {
@@ -483,10 +454,10 @@ reply_and_continue：接下来要执行耗时操作（搜索、深度思考、�
         }
 
         /// @brief Agent 模式执行（带 tools）：循环「请求模型 → 处理工具调用」，直到产出回复决策或达最大轮数
-        drogon::Task<std::optional<ReplyDecision>> executeWithAgent(json messages, const uint64_t sessionId) {
+        drogon::Task<std::optional<ReplyDecision>> executeWithAgent(
+          json messages, const uint64_t sessionId, const json &messageSnapshot) {
             const auto &config = Config::instance();
-            const json tools =
-              ToolRegistry::instance().getTools({.isPrivateSession = OneBotMessage::isPrivateSession(sessionId)});
+            const json tools = ToolRegistry::instance().getTools({.isPrivateSession = SessionId::isPrivate(sessionId)});
             if (tools.empty()) {
                 Logger::session(sessionId).error("[Executor] 未注册工具");
                 co_return std::nullopt;
@@ -516,8 +487,8 @@ reply_and_continue：接下来要执行耗时操作（搜索、深度思考、�
 
                 // 有工具调用：回传 assistant 消息后逐个处理，未命中回复工具则继续下一轮
                 messages.push_back(buildAssistantToolCallMessage(message));
-                auto [roundDecision, nextMessages, nextAccumulatedCQCodes] =
-                  co_await processToolCalls(message, std::move(messages), std::move(accumulatedCQCodes), sessionId);
+                auto [roundDecision, nextMessages, nextAccumulatedCQCodes] = co_await processToolCalls(
+                  message, std::move(messages), std::move(accumulatedCQCodes), sessionId, messageSnapshot);
                 if (roundDecision) {
                     co_return std::move(roundDecision);
                 }
@@ -561,14 +532,14 @@ reply_and_continue：接下来要执行耗时操作（搜索、深度思考、�
         return result;
     }
 
-    drogon::Task<std::optional<ReplyDecision>> execute(
-      const ChatRecordManager &chatRecords, const MemoryManager &memory, RouterDecision decision) {
+    drogon::Task<std::optional<ReplyDecision>> execute(const ChatRecordManager &chatRecords,
+      const MemoryManager &memory, RouterDecision decision, const json messageSnapshot) {
         const uint64_t sessionId = chatRecords.getSessionId();
         Logger::session(sessionId).info(
           "[Executor] 开始执行 | priority={} | maxLength={}", decision.isPriority, decision.maxLength);
 
         json messages = buildPrompt(chatRecords, memory, decision);
 
-        co_return co_await executeWithAgent(std::move(messages), sessionId);
+        co_return co_await executeWithAgent(std::move(messages), sessionId, messageSnapshot);
     }
 } // namespace insoulforge

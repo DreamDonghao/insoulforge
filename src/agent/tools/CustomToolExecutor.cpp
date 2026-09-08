@@ -14,8 +14,8 @@
 #include <spdlog/spdlog.h>
 
 #include <agent/tools/ToolRuntime.hpp>
-#include <storage/ToolStore.hpp>
-#include <util/HttpUtil.hpp>
+#include <agent/tools/ToolStore.hpp>
+#include <infrastructure/http/HttpUtil.hpp>
 
 namespace insoulforge {
     namespace {

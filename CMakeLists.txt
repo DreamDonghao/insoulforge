@@ -29,7 +29,7 @@ find_package(nlohmann_json CONFIG QUIET)
 # 尽量静态链接：能找到系统静态库（.a）就直接链，找不到再回退到 Drogon 传入的动态依赖
 find_library(SQLITE3_STATIC_LIB NAMES libsqlite3.a)
 
-# 集中所有源文件（src 目录）
+# 收集按业务模块组织的全部后端源文件
 file(GLOB_RECURSE SRC_FILES CONFIGURE_DEPENDS src/*.cpp)
 set(BACKEND_SRC_FILES ${SRC_FILES})
 list(FILTER BACKEND_SRC_FILES EXCLUDE REGEX "/src/main\\.cpp$")
@@ -129,14 +129,3 @@ add_dependencies(${PROJECT_NAME} frontend)
 # 可执行文件直接输出到部署目录 build/insoulforge/exe
 set_target_properties(${PROJECT_NAME} PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${DEPLOY_DIR}/exe)
-
-configure_file(
-        ${CMAKE_CURRENT_SOURCE_DIR}/runScript/run.sh
-        ${DEPLOY_DIR}/run.sh
-        COPYONLY
-)
-configure_file(
-        ${CMAKE_CURRENT_SOURCE_DIR}/runScript/run.bat
-        ${DEPLOY_DIR}/run.bat
-        COPYONLY
-)

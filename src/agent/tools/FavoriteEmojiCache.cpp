@@ -8,7 +8,7 @@
 #include <fmt/format.h>
 
 #include <agent/tools/ToolRuntime.hpp>
-#include <service/OneBotClient.hpp>
+#include <onebot/OneBotClient.hpp>
 
 namespace insoulforge {
     namespace {

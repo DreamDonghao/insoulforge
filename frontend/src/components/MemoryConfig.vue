@@ -9,8 +9,10 @@ import type {ApiResponse, MemoryConfig} from '../vite-env.d'
 const showToast = inject<(msg: string, isError?: boolean) => void>('showToast')
 
 const memoryConfig = reactive<MemoryConfig>({
-  windowTriggerCount: 100,
-  windowKeepCount: 50,
+  contextWindowLimit: 100,
+  memorySummaryTriggerCount: 100,
+  memorySummaryBatchSize: 50,
+  memorySummaryContextCount: 10,
   memoryExtractMaxTokens: 4000,
   routerWindowTriggerCount: 20,
   routerWindowKeepCount: 10,
@@ -23,7 +25,7 @@ const saving: Ref<boolean> = ref(false)
 onMounted(async () => {
   const resp = await fetch('/admin/api/memory-config')
   const data = await resp.json()
-  if (data.windowTriggerCount !== undefined) {
+  if (data.contextWindowLimit !== undefined) {
     Object.assign(memoryConfig, data)
   }
 })
@@ -61,14 +63,26 @@ const saveMemoryConfig = async (): Promise<void> => {
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label">窗口触发条数</label>
-          <input v-model="memoryConfig.windowTriggerCount" class="form-input" type="number">
-          <p class="form-hint">上下文窗口超过 N 条时触发记忆提取与窗口滑动</p>
+          <label class="form-label">近期上下文上限</label>
+          <input v-model="memoryConfig.contextWindowLimit" class="form-input" type="number">
+          <p class="form-hint">Router 与 Agent 实际可见的最近消息数</p>
         </div>
         <div class="form-group">
-          <label class="form-label">窗口保留条数</label>
-          <input v-model="memoryConfig.windowKeepCount" class="form-input" type="number">
-          <p class="form-hint">滑动后保留的最近消息数，必须小于触发条数</p>
+          <label class="form-label">总结触发条数</label>
+          <input v-model="memoryConfig.memorySummaryTriggerCount" class="form-input" type="number">
+          <p class="form-hint">完整消息达到该数量时创建一批记忆总结任务</p>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">每批总结条数</label>
+          <input v-model="memoryConfig.memorySummaryBatchSize" class="form-input" type="number">
+          <p class="form-hint">成功总结后删除的最旧消息数，不能超过触发条数</p>
+        </div>
+        <div class="form-group">
+          <label class="form-label">总结补充上下文条数</label>
+          <input v-model="memoryConfig.memorySummaryContextCount" class="form-input" min="0" type="number">
+          <p class="form-hint">仅帮助理解被总结消息的后续语境，不会被提取或删除</p>
         </div>
       </div>
       <div class="form-row">
