@@ -3,10 +3,10 @@
 
 #include <agent/runtime/ExecutorAgent.hpp>
 #include <conversation/history/ChatRecordManager.hpp>
-#include <conversation/session/SessionStore.hpp>
 #include <conversation/maintenance/affinity/AffinityStore.hpp>
 #include <conversation/message/MessageRecord.hpp>
 #include <conversation/message/SessionId.hpp>
+#include <conversation/session/SessionStore.hpp>
 #include <fmt/core.h>
 #include <include/agent/tools/ToolRegistry.hpp>
 #include <infrastructure/CommonUtil.hpp>
@@ -24,7 +24,7 @@
 #include <utility>
 #include <vector>
 
-namespace insoulforge {
+namespace insoulforge::ExecutorAgent {
     namespace {
         /// @brief 工具调用循环最大轮数（防止模型无限循环调用工具）
         constexpr int kMaxToolRounds = 8;
@@ -542,4 +542,4 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
 
         co_return co_await executeWithAgent(std::move(messages), sessionId, messageSnapshot);
     }
-} // namespace insoulforge
+} // namespace insoulforge::ExecutorAgent

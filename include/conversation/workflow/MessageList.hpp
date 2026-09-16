@@ -16,11 +16,10 @@ namespace insoulforge {
         json contextMessages; ///< 仅帮助模型理解语境的后续消息，不参与提取或删除
     };
 
-    /// @brief 一次消息列表更新的冻结结果
+    /// @brief 一次成功消息列表更新的冻结结果
     struct MessageListAppendResult {
         json messageSnapshot; ///< 更新完成后按时间顺序排列的完整消息快照
         std::optional<MemorySummaryBatch> summaryBatch; ///< 本次触发的记忆总结批次
-        bool wasInserted{false}; ///< 当前消息是否实际写入列表
     };
 
     /// @brief 管理一个会话的完整消息列表
@@ -34,8 +33,8 @@ namespace insoulforge {
 
         /// @brief 追加完整消息并生成冻结快照
         /// @param message 完整消息 JSON；内部不会保留工作流专用 `session_id`
-        /// @return 包含受限快照与可能产生的记忆总结批次的更新结果
-        [[nodiscard]] MessageListAppendResult append(json message);
+        /// @return 成功插入时返回受限快照与可能产生的记忆总结批次；相同非空消息 ID 已存在时返回空值
+        [[nodiscard]] std::optional<MessageListAppendResult> append(json message);
 
         /// @brief 应用已经成功完成的记忆总结，并删除其对应的最旧消息
         /// @return 删除后若再次达到阈值，返回下一批待持久化的总结任务
@@ -48,6 +47,10 @@ namespace insoulforge {
 
         /// @brief 获取模型可见的近期消息值快照
         [[nodiscard]] json snapshot() const;
+
+        /// @brief 获取管理后台与持久化恢复使用的完整消息值快照
+        /// @note 线程安全。与模型上下文窗口无关，不会截断尚未总结删除的较早消息。
+        [[nodiscard]] json fullSnapshot() const;
 
         /// @brief 将当前完整列表持久化为会话的恢复副本
         void flushToStorage() const;

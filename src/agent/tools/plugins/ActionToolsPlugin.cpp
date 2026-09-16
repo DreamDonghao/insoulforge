@@ -1,27 +1,27 @@
 /// @file ActionToolsPlugin.cpp
 /// @brief 动作工具插件实现（ACTION，执行操作、产生副作用）
 
+#include <agent/ability/TaskStore.hpp>
 #include <agent/runtime/ExecutorAgent.hpp>
 #include <agent/tools/ToolArgument.hpp>
 #include <agent/tools/ToolRuntime.hpp>
 #include <agent/tools/plugins/ActionToolsPlugin.hpp>
 #include <chrono>
-#include <infrastructure/config/Config.hpp>
+#include <conversation/history/ChatRecordStore.hpp>
+#include <conversation/message/MessageRecord.hpp>
+#include <conversation/message/SessionId.hpp>
+#include <conversation/session/QQNameDirectory.hpp>
+#include <conversation/workflow/OneBotEventWorkflow.hpp>
 #include <fmt/core.h>
 #include <include/agent/ability/TaskScheduler.hpp>
 #include <include/agent/tools/ToolRegistry.hpp>
-#include <optional>
+#include <infrastructure/CommonUtil.hpp>
+#include <infrastructure/config/Config.hpp>
 #include <onebot/MessageService.hpp>
 #include <onebot/OneBotClient.hpp>
-#include <conversation/session/QQNameDirectory.hpp>
+#include <optional>
 #include <set>
 #include <spdlog/spdlog.h>
-#include <conversation/history/ChatRecordStore.hpp>
-#include <agent/ability/TaskStore.hpp>
-#include <infrastructure/CommonUtil.hpp>
-#include <conversation/workflow/OneBotEventWorkflow.hpp>
-#include <conversation/message/MessageRecord.hpp>
-#include <conversation/message/SessionId.hpp>
 
 namespace insoulforge {
     std::string_view ActionToolsPlugin::id() const noexcept { return "builtin.action"; }
@@ -156,7 +156,7 @@ namespace insoulforge {
                            "日常单条回复直接用 reply。",
             .parameters = continueParams,
             .handler = [](const json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
-                const std::string content = cleanReplyContent(argString(args, "content"));
+                const std::string content = ExecutorAgent::cleanReplyContent(argString(args, "content"));
                 if (content.empty()) {
                     co_return std::string("请提供要发送的过程消息内容");
                 }
@@ -514,8 +514,7 @@ namespace insoulforge {
                 msgJson["sender"]["name"] = Config::instance().botName + "(我)";
                 msgJson["sender"]["qq"] = "self";
                 msgJson["segments"] = json::array({poke});
-                OneBotEventWorkflow::instance().appendDeliveredAssistantMessage(
-                  sessionId, std::move(msgJson), fmt::format("拍一拍 {}({})", targetName, userId));
+                OneBotEventWorkflow::instance().appendDeliveredAssistantMessage(sessionId, std::move(msgJson));
                 co_return fmt::format("已拍一拍用户 {}", userId);
             },
             .scope = ToolScope::GROUP_ONLY,

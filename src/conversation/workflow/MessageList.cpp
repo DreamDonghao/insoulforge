@@ -20,24 +20,17 @@ namespace insoulforge {
         m_summaryBatchPending = ConversationMaintenanceService::hasPendingMemorySummary(sessionId);
     }
 
-    MessageListAppendResult MessageList::append(json message) {
+    std::optional<MessageListAppendResult> MessageList::append(json message) {
         message.erase("session_id");
         const std::string messageId = getStr(message, "message_id");
-        MessageListAppendResult update;
-        {
-            std::lock_guard lock(m_mutex);
-            if (!messageId.empty() && std::ranges::any_of(m_messages, [&messageId](const json &existing) {
-                    return getStr(existing, "message_id") == messageId;
-                })) {
-                return {.messageSnapshot = snapshotLocked()};
-            }
-            m_messages.push_back(std::move(message));
-            update.summaryBatch = createSummaryBatchLocked();
-            update.messageSnapshot = snapshotLocked();
-            update.wasInserted = true;
+        std::lock_guard lock(m_mutex);
+        if (!messageId.empty() && std::ranges::any_of(m_messages, [&messageId](const json &existing) {
+                return getStr(existing, "message_id") == messageId;
+            })) {
+            return std::nullopt;
         }
-
-        return update;
+        m_messages.push_back(std::move(message));
+        return MessageListAppendResult{.messageSnapshot = snapshotLocked(), .summaryBatch = createSummaryBatchLocked()};
     }
 
     std::optional<MemorySummaryBatch> MessageList::removeCompletedSummaryMessages() {
@@ -62,12 +55,13 @@ namespace insoulforge {
         return snapshotLocked();
     }
 
+    json MessageList::fullSnapshot() const {
+        std::lock_guard lock(m_mutex);
+        return fullSnapshotLocked();
+    }
+
     void MessageList::flushToStorage() const {
-        json currentMessages;
-        {
-            std::lock_guard lock(m_mutex);
-            currentMessages = fullSnapshotLocked();
-        }
+        const json currentMessages = fullSnapshot();
         ChatRecordStore::clearSessionChatRecords(m_sessionId);
         for (const json &message: currentMessages) {
             const bool isAssistant = getStr(atOrNull(message, "sender"), "qq") == "self";
@@ -95,8 +89,8 @@ namespace insoulforge {
 
     std::optional<MemorySummaryBatch> MessageList::createSummaryBatchLocked() {
         const auto &config = Config::instance();
-        const size_t trigger = static_cast<size_t>(std::max(config.memorySummaryTriggerCount, 1));
-        if (m_summaryBatchPending || m_messages.size() < trigger) {
+        if (const size_t trigger = static_cast<size_t>(std::max(config.memorySummaryTriggerCount, 1));
+          m_summaryBatchPending || m_messages.size() < trigger) {
             return std::nullopt;
         }
 

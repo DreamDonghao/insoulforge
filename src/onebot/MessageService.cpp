@@ -2,17 +2,17 @@
 /// @brief OneBot 消息服务 - 实现
 
 #include <algorithm>
-#include <infrastructure/config/Config.hpp>
-#include <regex>
-#include <onebot/MessageService.hpp>
-#include <onebot/OneBotClient.hpp>
-#include <conversation/session/QQNameDirectory.hpp>
-#include <conversation/session/SessionStore.hpp>
-#include <infrastructure/JsonUtil.hpp>
-#include <infrastructure/logging/Logger.hpp>
-#include <conversation/workflow/OneBotEventWorkflow.hpp>
 #include <conversation/message/MessageRecord.hpp>
 #include <conversation/message/SessionId.hpp>
+#include <conversation/session/QQNameDirectory.hpp>
+#include <conversation/session/SessionStore.hpp>
+#include <conversation/workflow/OneBotEventWorkflow.hpp>
+#include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/config/Config.hpp>
+#include <infrastructure/logging/Logger.hpp>
+#include <onebot/MessageService.hpp>
+#include <onebot/OneBotClient.hpp>
+#include <regex>
 
 namespace insoulforge {
     std::string MessageService::convertAtToCQCode(std::string text) {
@@ -74,7 +74,7 @@ namespace insoulforge {
             const json record =
               MessageRecord::createAssistantRecord(Config::instance().botName + "(我)", *messageId, processedMessage);
             // 发送成功后写入所属会话的内存消息列表；列表在正常退出时统一持久化。
-            OneBotEventWorkflow::instance().appendDeliveredAssistantMessage(sessionId, record, processedMessage);
+            OneBotEventWorkflow::instance().appendDeliveredAssistantMessage(sessionId, record);
 
             Logger::session(sessionId).info(
               "成功发送{}: {} (message_id={})", channelName, processedMessage, *messageId);

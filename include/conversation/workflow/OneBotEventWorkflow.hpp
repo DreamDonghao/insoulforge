@@ -2,13 +2,12 @@
 /// @brief OneBot 上报事件处理工作流
 
 #pragma once
-#include <conversation/workflow/MessageList.hpp>
+#include <conversation/workflow/SessionWorkflowState.hpp>
 #include <drogon/utils/coroutine.h>
 #include <infrastructure/JsonUtil.hpp>
 #include <memory>
 #include <mutex>
-#include <queue>
-#include <string>
+#include <optional>
 #include <unordered_map>
 
 namespace insoulforge {
@@ -18,19 +17,6 @@ namespace insoulforge {
     ///          不使用轮询或空转等待。运行时消息上下文仅来自 MessageList，数据库只承担启动恢复与正常退出
     ///          时的持久化职责。
     class OneBotEventWorkflow {
-        /// @brief 单个会话的工作流运行状态
-        /// @details 队列与消费者标志均由 mutex 保护；消息列表自行保护其内容与快照。
-        struct SessionWorkflowState {
-            explicit SessionWorkflowState(uint64_t sessionId);
-
-            std::mutex queueMutex; ///< 保护队列与消费者状态，绝不跨协程等待持有
-            std::shared_ptr<MessageList> messageList; ///< 当前会话的完整消息列表
-            std::queue<json> pendingPreparationMessages; ///< 等待媒体、召回、入库与快照的消息
-            bool isPreparationRunning{false}; ///< 是否已有预处理协程
-            std::queue<json> pendingReplySnapshots; ///< 等待 Router、Agent 与发送的消息快照
-            bool isReplyProcessing{false}; ///< 是否已有回复协程
-        };
-
     public:
         /// @brief 获取进程内唯一的工作流
         /// @return 单例工作流
@@ -44,10 +30,15 @@ namespace insoulforge {
         /// @brief 接收发送服务已确认投递的机器人消息
         /// @param sessionId 所属会话 ID
         /// @param message 完整助手消息 JSON
-        /// @param displayContent 管理后台展示的已发送消息文本
-        /// @details 发送服务完成写入后调用；消息会进入所属会话的内存列表并发布已记录事件。
+        /// @details 发送服务完成写入后调用；消息会进入所属会话的内存列表并向管理后台推送完整记录。
         /// @note 线程安全。函数完成时消息已写入内存列表；触发的记忆总结任务已持久化并异步执行。
-        void appendDeliveredAssistantMessage(uint64_t sessionId, json message, const std::string &displayContent = {});
+        void appendDeliveredAssistantMessage(uint64_t sessionId, json message);
+
+        /// @brief 获取运行中会话的完整消息列表快照
+        /// @param sessionId 所属会话 ID
+        /// @return 会话已在工作流中初始化时返回完整消息快照，否则返回空值
+        /// @note 线程安全。用于管理后台展示；结果不受模型上下文窗口长度限制。
+        [[nodiscard]] std::optional<json> getSessionMessages(uint64_t sessionId);
 
         /// @brief 将 OneBot 上报事件加入处理流程
         /// @param body 已通过 HTTP JSON 校验的 OneBot 事件对象

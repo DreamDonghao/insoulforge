@@ -1,9 +1,7 @@
 /// @file MessageRecord.cpp
 /// @brief 聊天记录富内容的构造、兼容与投影实现
 
-#include "conversation/message/MessageRecord.hpp"
-
-
+#include <conversation/message/MessageRecord.hpp>
 #include <conversation/session/QQNameDirectory.hpp>
 #include <infrastructure/JsonUtil.hpp>
 #include <ranges>
@@ -190,8 +188,8 @@ namespace insoulforge::MessageRecord {
             } else if (type == "face") {
                 segments.push_back({{"type", "face"}, {"id", param("id")}});
             } else if (type == "image" || type == "mface") {
-                const std::string name = param("summary");
-                if (type == "mface" || (param("sub_type") == "1" && !name.empty())) {
+                if (const std::string name = param("summary");
+                  type == "mface" || (param("sub_type") == "1" && !name.empty())) {
                     segments.push_back({{"type", "sticker"}, {"name", name.empty() ? "未命名表情" : name}});
                 } else {
                     segments.push_back({{"type", "image"}});
@@ -306,14 +304,11 @@ namespace insoulforge::MessageRecord {
 
     std::string extractRecallText(const json &record) {
         std::string text;
-        const json projected = projectForAgent(record);
-        for (const auto &segment: atOrNull(projected, "segments")) {
-            const std::string type = getStr(segment, "type");
-            if (type == "text") {
+        for (const json projected = projectForAgent(record); const auto &segment: atOrNull(projected, "segments")) {
+            if (const std::string type = getStr(segment, "type"); type == "text") {
                 text += getStr(segment, "text");
             } else if (type == "image" && getStr(segment, "recognition_status") == "succeeded") {
-                const std::string description = getStr(segment, "description");
-                if (!description.empty()) {
+                if (const std::string description = getStr(segment, "description"); !description.empty()) {
                     if (!text.empty()) {
                         text += '\n';
                     }

@@ -45,9 +45,15 @@ const sessionLabel = (g: Group): string =>
 // 当前查看聊天记录的会话
 const selectedGroup: Ref<string | null> = ref(null)
 const selectedGroupName: Ref<string> = ref('')
-const chatRecords: Ref<(ChatMessage & { id: number })[]> = ref([])
+type DisplayChatMessage = ChatMessage & {
+  /** 实时推送尚未持久化时使用的前端唯一键。 */
+  clientKey?: string
+}
+
+const chatRecords: Ref<DisplayChatMessage[]> = ref([])
 const chatContainer: Ref<HTMLDivElement | null> = ref(null)
 const chatLoading: Ref<boolean> = ref(false)
+let nextRealtimeMessageKey = 0
 
 // 编辑状态
 const editingId: Ref<number | null> = ref(null)
@@ -156,7 +162,9 @@ const selectGroup = async (sessionId: string, sessionName: string): Promise<void
 
   try {
     const resp = await fetch(`/admin/api/chat-records/${sessionId}?limit=200`)
-    chatRecords.value = await resp.json()
+    const records: ChatMessage[] = await resp.json()
+    chatRecords.value = records.map((record, index) =>
+        record.id === undefined ? {...record, clientKey: `snapshot-${index}`} : record)
 
     // 订阅 WebSocket（字符串形式传递，后端可正确解析大数）
     const ws = wsObj!.get()
@@ -191,7 +199,8 @@ const scrollToBottom = (): void => {
 }
 
 // 开始编辑
-const startEdit = (record: ChatMessage & { id: number }): void => {
+const startEdit = (record: DisplayChatMessage): void => {
+  if (record.id === undefined) return
   editingId.value = record.id
   editContent.value = record.content
 }
@@ -465,6 +474,89 @@ watch(anyModalOpen, (open) => {
   document.body.style.overflow = open ? 'hidden' : ''
 })
 
+/** 解析持久化的完整消息记录；旧版纯文本记录保持兼容。 */
+const parseMessageRecord = (content: string): Record<string, unknown> | null => {
+  try {
+    const value: unknown = JSON.parse(content)
+    return value !== null && typeof value === 'object' && !Array.isArray(value)
+        ? value as Record<string, unknown>
+        : null
+  } catch {
+    return null
+  }
+}
+
+const getString = (value: unknown): string => typeof value === 'string' ? value : ''
+const getRecord = (value: unknown): Record<string, unknown> | null =>
+    value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+
+/** 从统一资产或兼容的旧版图片字段取得图片识别描述。 */
+const imageDescription = (record: Record<string, unknown>, segment: Record<string, unknown>): string => {
+  if (getString(segment.description)) return getString(segment.description)
+
+  const index = typeof segment.image_index === 'number' ? segment.image_index : -1
+  const assets = getRecord(record.assets)
+  const images = Array.isArray(assets?.images) ? assets.images : Array.isArray(record.images) ? record.images : []
+  return index >= 0 ? getString(getRecord(images[index])?.description) : ''
+}
+
+/** 将统一消息记录渲染为适合会话管理阅读的内容，保留原始 JSON 供调试展开查看。 */
+const formatMessageContent = (content: string): string => {
+  const record = parseMessageRecord(content)
+  if (!record) return content
+
+  const segments = Array.isArray(record.segments) ? record.segments : []
+  const formatted = segments.map(segment => {
+    const item = getRecord(segment)
+    if (!item) return ''
+
+    switch (getString(item.type)) {
+      case 'text':
+        return getString(item.text)
+      case 'at': {
+        const target = getRecord(item.target)
+        if (getString(target?.kind) === 'all' || getString(item.qq) === '0') return '@全体成员'
+        const name = getString(target?.name) || getString(item.name)
+        const qq = getString(target?.qq) || getString(item.qq)
+        return name ? `@${name}` : qq ? `@${qq}` : '@成员'
+      }
+      case 'image': {
+        const description = imageDescription(record, item)
+        return description ? `[图片] ${description}` : '[图片]'
+      }
+      case 'face':
+        return `[QQ 表情${getString(item.label) ? `：${getString(item.label)}` : ''}]`
+      case 'sticker':
+        return `[表情包：${getString(item.name) || '未命名'}]`
+      case 'poke': {
+        const target = getRecord(item.target)
+        const name = getString(target?.name) || getString(item.target_name)
+        return `[拍一拍${name ? `：${name}` : ''}]`
+      }
+      case 'notification':
+      case 'member_event': {
+        const action = getString(item.action) || getString(item.kind)
+        return `[成员事件${action ? `：${action}` : ''}]`
+      }
+      case 'unsupported':
+        return `[${getString(item.segment_type) || '未知消息'}]`
+      default:
+        return `[${getString(item.type) || '未知消息'}]`
+    }
+  }).join('')
+
+  return formatted || getString(record.text) || '[空消息]'
+}
+
+const messageSender = (message: DisplayChatMessage): string => {
+  const record = parseMessageRecord(message.content)
+  const sender = getRecord(record?.sender)
+  return getString(sender?.name) || (message.role === 'user' ? '用户' : qqConfig!.botName)
+}
+
+const messageKey = (message: DisplayChatMessage): string | number => message.id ?? message.clientKey ?? message.content
+const canEditMessage = (message: DisplayChatMessage): boolean => message.id !== undefined
+
 // WebSocket 消息处理
 let originalOnMessage: ((event: MessageEvent) => void) | null | undefined = null
 
@@ -475,7 +567,7 @@ const setupWebSocket = (): void => {
     ws.onmessage = (event: MessageEvent) => {
       const data = JSON.parse(event.data)
       if (data.type === 'new_message' && data.groupId === selectedGroup.value) {
-        chatRecords.value.push(data.data)
+        chatRecords.value.push({...data.data, clientKey: `realtime-${++nextRealtimeMessageKey}`})
         nextTick(scrollToBottom)
       }
       if (originalOnMessage) originalOnMessage(event)
@@ -664,20 +756,24 @@ onUnmounted(restoreWebSocket)
         <template v-else>
           <div
               v-for="msg in chatRecords"
-              :key="msg.id"
+              :key="messageKey(msg)"
               :class="msg.role"
               class="chat-message"
           >
             <!-- 普通显示 -->
             <template v-if="editingId !== msg.id">
               <div class="msg-header">
-                <span class="msg-role">{{ msg.role === 'user' ? '用户' : qqConfig!.botName }}</span>
-                <div class="msg-actions">
+                <span class="msg-role">{{ messageSender(msg) }}</span>
+                <div v-if="canEditMessage(msg)" class="msg-actions">
                   <button class="action-btn" title="编辑" @click="startEdit(msg)">✏️</button>
-                  <button class="action-btn delete" title="删除" @click="deleteRecord(msg.id)">🗑️</button>
+                  <button class="action-btn delete" title="删除" @click="deleteRecord(msg.id!)">🗑️</button>
                 </div>
               </div>
-              <div class="msg-content">{{ msg.content }}</div>
+              <div class="msg-content">{{ formatMessageContent(msg.content) }}</div>
+              <details v-if="parseMessageRecord(msg.content)" class="message-debug">
+                <summary>原始 JSON</summary>
+                <pre>{{ msg.content }}</pre>
+              </details>
             </template>
 
             <!-- 编辑模式 -->
@@ -1041,6 +1137,30 @@ onUnmounted(restoreWebSocket)
 .msg-content {
   font-size: 14px;
   line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.message-debug {
+  margin-top: 10px;
+  color: inherit;
+  opacity: 0.75;
+}
+
+.message-debug summary {
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.message-debug pre {
+  max-height: 240px;
+  margin: 8px 0 0;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.4;
   white-space: pre-wrap;
   word-break: break-word;
 }

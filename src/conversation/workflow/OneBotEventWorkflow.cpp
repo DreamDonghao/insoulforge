@@ -48,16 +48,13 @@ namespace insoulforge {
             }
         }
 
-        /// @brief 将已插入消息推送至管理后台，推送失败不得影响消息工作流
+        /// @brief 将已插入的完整消息记录推送至管理后台，推送失败不得影响消息工作流
         /// @param sessionId
         /// @param message 已写入消息列表的完整消息
-        /// @param displayContent 后台展示内容；为空时使用完整消息 JSON
-        void pushRecordedMessage(
-          const uint64_t sessionId, const json &message, const std::string &displayContent = {}) {
+        void pushRecordedMessage(const uint64_t sessionId, const json &message) {
             try {
-                const std::string serializedMessage = displayContent.empty() ? dumpJson(message) : displayContent;
-                const std::string role = MessageRecord::isAssistant(message) ? "assistant" : "user";
-                WebSocketManager::instance().pushMessage(sessionId, role, serializedMessage);
+                const auto role = MessageRecord::isAssistant(message) ? "assistant" : "user";
+                WebSocketManager::instance().pushMessage(sessionId, role, dumpJson(message));
             } catch (const std::exception &error) {
                 Logger::session(sessionId).error("管理后台消息推送失败: {}", error.what());
             } catch (...) {
@@ -66,13 +63,10 @@ namespace insoulforge {
         }
 
         /// @brief 原子持久化会话派生状态任务，再分别启动异步消费者
-        void scheduleConversationMaintenance(const uint64_t sessionId, const std::shared_ptr<MessageList> &messageList,
-          const std::optional<MemorySummaryBatch> &batch) {
-            if (!batch) {
-                return;
-            }
+        void scheduleConversationMaintenance(
+          const uint64_t sessionId, const std::shared_ptr<MessageList> &messageList, const MemorySummaryBatch &batch) {
             try {
-                ConversationMaintenanceService::enqueue(sessionId, batch->messages, batch->contextMessages);
+                ConversationMaintenanceService::enqueue(sessionId, batch.messages, batch.contextMessages);
             } catch (const std::exception &error) {
                 messageList->cancelSummaryBatch();
                 Logger::session(sessionId).error("会话派生状态维护任务持久化失败: {}", error.what());
@@ -84,38 +78,37 @@ namespace insoulforge {
     } // namespace
 
     OneBotEventWorkflow &OneBotEventWorkflow::instance() {
-        static OneBotEventWorkflow workflow;
+        static auto workflow = OneBotEventWorkflow{};
         return workflow;
     }
-
-    OneBotEventWorkflow::SessionWorkflowState::SessionWorkflowState(const uint64_t sessionId) :
-        messageList(std::make_shared<MessageList>(sessionId)) {}
 
     OneBotEventWorkflow::OneBotEventWorkflow() {
         if (!Database::instance().handle()) {
             throw std::runtime_error("OneBotEventWorkflow requires an initialized database");
         }
-        for (const uint64_t sessionId: ChatRecordStore::getSessionIds()) {
+        for (const auto sessionId: ChatRecordStore::getSessionIds()) {
             m_sessions.emplace(sessionId, std::make_shared<SessionWorkflowState>(sessionId));
         }
         ConversationMaintenanceService::setMemorySummaryCompletedCallback([this](const uint64_t sessionId) {
             const auto sessionState = getOrCreateSessionState(sessionId);
-            scheduleConversationMaintenance(
-              sessionId, sessionState->messageList, sessionState->messageList->removeCompletedSummaryMessages());
+            if (const auto batch = sessionState->messageList()->removeCompletedSummaryMessages()) {
+                scheduleConversationMaintenance(sessionId, sessionState->messageList(), *batch);
+            }
         });
         for (const auto &[sessionId, sessionState]: m_sessions) {
-            scheduleConversationMaintenance(
-              sessionId, sessionState->messageList, sessionState->messageList->removeCompletedSummaryMessages());
+            if (const auto batch = sessionState->messageList()->removeCompletedSummaryMessages()) {
+                scheduleConversationMaintenance(sessionId, sessionState->messageList(), *batch);
+            }
         }
         ConversationMaintenanceService::resumePending();
     }
 
     void OneBotEventWorkflow::flushMessageListsToStorage() {
-        std::vector<std::shared_ptr<MessageList>> messageLists;
+        auto messageLists = std::vector<std::shared_ptr<MessageList>>{};
         {
             std::lock_guard lock(m_sessionsMutex);
             for (const auto &sessionState: m_sessions | std::views::values) {
-                messageLists.push_back(sessionState->messageList);
+                messageLists.push_back(sessionState->messageList());
             }
         }
         for (const auto &messageList: messageLists) {
@@ -123,18 +116,32 @@ namespace insoulforge {
         }
     }
 
-    void OneBotEventWorkflow::appendDeliveredAssistantMessage(
-      const uint64_t sessionId, json message, const std::string &displayContent) {
+    void OneBotEventWorkflow::appendDeliveredAssistantMessage(const uint64_t sessionId, json message) {
         const auto sessionState = getOrCreateSessionState(sessionId);
-        const auto [messageSnapshot, summaryBatch, wasInserted] = sessionState->messageList->append(std::move(message));
-        if (wasInserted) {
-            pushRecordedMessage(sessionId, messageSnapshot.back(), displayContent);
+        const auto update = sessionState->messageList()->append(std::move(message));
+        if (!update) {
+            return;
         }
-        scheduleConversationMaintenance(sessionId, sessionState->messageList, summaryBatch);
+        pushRecordedMessage(sessionId, update->messageSnapshot.back());
+        if (update->summaryBatch) {
+            scheduleConversationMaintenance(sessionId, sessionState->messageList(), *update->summaryBatch);
+        }
     }
 
-    std::shared_ptr<OneBotEventWorkflow::SessionWorkflowState> OneBotEventWorkflow::getOrCreateSessionState(
-      const uint64_t sessionId) {
+    std::optional<json> OneBotEventWorkflow::getSessionMessages(const uint64_t sessionId) {
+        std::shared_ptr<SessionWorkflowState> sessionState;
+        {
+            std::lock_guard lock(m_sessionsMutex);
+            const auto found = m_sessions.find(sessionId);
+            if (found == m_sessions.end()) {
+                return std::nullopt;
+            }
+            sessionState = found->second;
+        }
+        return sessionState->messageList()->fullSnapshot();
+    }
+
+    std::shared_ptr<SessionWorkflowState> OneBotEventWorkflow::getOrCreateSessionState(const uint64_t sessionId) {
         std::lock_guard lock(m_sessionsMutex);
         // 以有会话工作流状态则直接返回
         if (const auto found = m_sessions.find(sessionId); found != m_sessions.end()) {
@@ -147,15 +154,16 @@ namespace insoulforge {
     }
 
     drogon::Task<> OneBotEventWorkflow::executeCommand(const json &message) {
-        const uint64_t sessionId = getUInt(message, "session_id");
+        const auto sessionId = getUInt(message, "session_id");
         const auto sessionState = getOrCreateSessionState(sessionId);
-        const auto [messageSnapshot, summaryBatch, wasInserted] = sessionState->messageList->append(message);
-        if (wasInserted) {
-            pushRecordedMessage(sessionId, messageSnapshot.back());
+        const auto update = sessionState->messageList()->append(message);
+        if (!update) {
+            co_return;
         }
+        pushRecordedMessage(sessionId, update->messageSnapshot.back());
 
         try {
-            const std::string response = co_await CommandProcessor::execute(message);
+            const auto response = co_await CommandProcessor::execute(message);
             if (SessionId::isPrivate(sessionId)) {
                 co_await MessageService::sendPrivateMsg(SessionId::privateUserId(sessionId), response);
             } else {
@@ -166,27 +174,23 @@ namespace insoulforge {
         } catch (...) {
             Logger::session(sessionId).error("命令执行或回复失败: 未知错误");
         }
-        scheduleConversationMaintenance(sessionId, sessionState->messageList, summaryBatch);
+        if (update->summaryBatch) {
+            scheduleConversationMaintenance(sessionId, sessionState->messageList(), *update->summaryBatch);
+        }
         co_return;
     }
 
     void OneBotEventWorkflow::enqueueOneBotEvent(json body) {
         // 格式化 OneBot 上报原始内容
-        std::optional<json> normalizedMessage = OneBotEventNormalizer::normalize(std::move(body));
+        auto normalizedMessage = OneBotEventNormalizer::normalize(std::move(body));
         // 格式化失败或机器人没有启动则终止
         if (!normalizedMessage || !AgentSystem::instance().isReady()) {
             return;
         }
-        const uint64_t sessionId = MessageRecord::getSessionId(*normalizedMessage);
+        const auto sessionId = MessageRecord::getSessionId(*normalizedMessage);
         const auto sessionState = getOrCreateSessionState(sessionId);
-        {
-            std::lock_guard lock(sessionState->queueMutex);
-            sessionState->pendingPreparationMessages.push(std::move(*normalizedMessage));
-            // 已经在进行该会话消息队列的预处理，加入队列即可，不需要启动该会话消息队列的预处理
-            if (sessionState->isPreparationRunning) {
-                return;
-            }
-            sessionState->isPreparationRunning = true;
+        if (!sessionState->enqueuePreparation(std::move(*normalizedMessage))) {
+            return;
         }
         Logger::session(sessionId).debug("消息预处理队列已唤醒");
         drogon::async_run([this, sessionId]() -> drogon::Task<> { co_await processPreparationQueue(sessionId); });
@@ -195,59 +199,45 @@ namespace insoulforge {
     drogon::Task<> OneBotEventWorkflow::processPreparationQueue(const uint64_t sessionId) {
         const auto sessionState = getOrCreateSessionState(sessionId);
         while (true) {
-            json currentMessage;
-            {
-                std::lock_guard lock(sessionState->queueMutex);
-                // 该会话需要预处理的队列中的消息已为空时退出
-                if (sessionState->pendingPreparationMessages.empty()) {
-                    sessionState->isPreparationRunning = false;
-                    Logger::session(sessionId).debug("消息预处理队列已清空");
-                    co_return;
-                }
-                currentMessage = std::move(sessionState->pendingPreparationMessages.front());
-                sessionState->pendingPreparationMessages.pop();
+            auto nextMessage = sessionState->takePreparationMessage();
+            if (!nextMessage) {
+                Logger::session(sessionId).debug("消息预处理队列已清空");
+                co_return;
             }
+            auto currentMessage = json(std::move(*nextMessage));
 
             try {
-                if (!SessionConfigManager::contains(sessionId)) {
+                if (!SessionConfigManager::contains(sessionId)) { // 没有群聊配置则生成
                     SessionConfigManager::addConfig(sessionId);
                 }
-                if (CommandProcessor::isCommand(currentMessage)) {
+                if (CommandProcessor::isCommand(currentMessage)) { // 命令消息进入命令分支
                     co_await executeCommand(currentMessage);
                     continue;
                 }
-                if (!SessionStore::isSessionEnabled(sessionId)) {
+                if (!SessionStore::isSessionEnabled(sessionId)) { // 未启用该群聊则退出
                     continue;
                 }
 
                 currentMessage = co_await MessageContentEnricher::enrichImages(std::move(currentMessage), sessionId);
                 currentMessage = co_await MessageContentEnricher::injectMemories(std::move(currentMessage), sessionId);
-                const bool queueWhileReplying = shouldQueueWhileReplying(currentMessage); // 是否可在以有回复任务时排队
+                const auto queueWhileReplying = shouldQueueWhileReplying(currentMessage); // 是否可在以有回复任务时排队
                 currentMessage.erase("session_id");
 
-                const std::string serializedMessage = dumpJson(currentMessage);
-                auto [messageSnapshot, summaryBatch, wasInserted] =
-                  sessionState->messageList->append(std::move(currentMessage));
-                if (wasInserted) {
-                    pushRecordedMessage(sessionId, messageSnapshot.back(), serializedMessage);
+                const auto update = sessionState->messageList()->append(std::move(currentMessage));
+                if (!update) { // 插入失败则退出
+                    continue;
                 }
-                scheduleConversationMaintenance(sessionId, sessionState->messageList, summaryBatch);
+                pushRecordedMessage(sessionId, update->messageSnapshot.back());
+                if (update->summaryBatch) {
+                    scheduleConversationMaintenance(sessionId, sessionState->messageList(), *update->summaryBatch);
+                }
 
-                bool shouldSkipReply = false; // 是否跳过回复
-                {
-                    std::lock_guard lock(sessionState->queueMutex);
-                    if (sessionState->isReplyProcessing) {
-                        if (queueWhileReplying) {
-                            sessionState->pendingReplySnapshots.push(std::move(messageSnapshot));
-                            continue;
-                        }
-                        shouldSkipReply = true;
-                    } else {
-                        sessionState->pendingReplySnapshots.push(std::move(messageSnapshot));
-                        sessionState->isReplyProcessing = true;
-                    }
+                const auto replyEnqueueResult =
+                  sessionState->enqueueReplySnapshot(update->messageSnapshot, queueWhileReplying);
+                if (replyEnqueueResult == SessionWorkflowState::ReplyEnqueueResult::Queued) {
+                    continue;
                 }
-                if (shouldSkipReply) {
+                if (replyEnqueueResult == SessionWorkflowState::ReplyEnqueueResult::Skipped) {
                     // 普通消息在同会话回复进行中仍会完成预处理，但不触发第二个 Agent 请求
                     recordMessageProcessingStats(sessionId);
                     continue;
@@ -262,31 +252,27 @@ namespace insoulforge {
     drogon::Task<> OneBotEventWorkflow::processReplyQueue(const uint64_t sessionId) {
         const auto sessionState = getOrCreateSessionState(sessionId);
         while (true) {
-            json messageSnapshot;
-            {
-                std::lock_guard lock(sessionState->queueMutex);
-                if (sessionState->pendingReplySnapshots.empty()) {
-                    sessionState->isReplyProcessing = false;
-                    co_return;
-                }
-                messageSnapshot = std::move(sessionState->pendingReplySnapshots.front());
-                sessionState->pendingReplySnapshots.pop();
+            auto nextSnapshot = sessionState->takeReplySnapshot();
+            if (!nextSnapshot) {
+                co_return;
             }
+            auto messageSnapshot = json(std::move(*nextSnapshot));
 
             try {
                 if (!AgentSystem::instance().isReady()) {
                     Logger::session(sessionId).debug("回复任务跳过：Agent 不可用");
                 } else {
-                    if (RouterDecision routerDecision = co_await MessageRouter::route(sessionId, messageSnapshot);
+                    if (auto routerDecision = co_await MessageRouter::route(sessionId, messageSnapshot);
                       routerDecision.shouldReply) {
-                        std::deque<json> recordSnapshot;
-                        for (const json &message: messageSnapshot) {
+                        Logger::session(sessionId).info("Router 判断需要回复");
+                        auto recordSnapshot = std::deque<json>{};
+                        for (const auto &message: messageSnapshot) {
                             recordSnapshot.push_back({{"content", dumpJson(message)}});
                         }
-                        const ChatRecordManager records(sessionId, std::move(recordSnapshot));
-                        const MemoryManager memory(sessionId);
-                        const std::optional<ReplyDecision> replyDecision =
-                          co_await execute(records, memory, std::move(routerDecision), messageSnapshot);
+                        const auto records = ChatRecordManager{sessionId, std::move(recordSnapshot)};
+                        const auto memory = MemoryManager{sessionId};
+                        const auto replyDecision =
+                          co_await ExecutorAgent::execute(records, memory, std::move(routerDecision), messageSnapshot);
                         if (replyDecision && replyDecision->shouldReply && !replyDecision->content.empty()) {
                             if (SessionId::isPrivate(sessionId)) {
                                 co_await MessageService::sendPrivateMsg(

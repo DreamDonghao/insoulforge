@@ -2,16 +2,20 @@
 #include <admin/http/AdminController.hpp>
 #include <admin/http/AdminResponse.hpp>
 #include <agent/ability/TaskStore.hpp>
+#include <agent/memory/LongTermMemoryStore.hpp>
+#include <agent/memory/MemoryStore.hpp>
 #include <agent/runtime/AgentSystem.hpp>
 #include <agent/tools/ToolRuntime.hpp>
 #include <algorithm>
 #include <charconv>
 #include <chrono>
 #include <conversation/history/ChatRecordStore.hpp>
+#include <conversation/maintenance/affinity/AffinityStore.hpp>
+#include <conversation/message/MessageRecord.hpp>
+#include <conversation/message/SessionId.hpp>
 #include <conversation/session/QQNameDirectory.hpp>
 #include <conversation/session/SessionStore.hpp>
-#include <conversation/maintenance/affinity/AffinityStore.hpp>
-#include <conversation/message/SessionId.hpp>
+#include <conversation/workflow/OneBotEventWorkflow.hpp>
 #include <include/agent/ability/TaskScheduler.hpp>
 #include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/JsonUtil.hpp>
@@ -21,8 +25,6 @@
 #include <infrastructure/http/HttpUtil.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <llm/UsageStore.hpp>
-#include <agent/memory/LongTermMemoryStore.hpp>
-#include <agent/memory/MemoryStore.hpp>
 #include <onebot/OneBotClient.hpp>
 #include <spdlog/spdlog.h>
 
@@ -389,7 +391,20 @@ Task<> AdminController::getChatRecords(
         limit = std::stoi(limitParam);
     }
 
-    // 返回带ID的记录，支持编辑
+    // 运行中的消息仅在正常退出时才落库；管理后台必须优先读取其完整内存快照。
+    if (const auto messages = OneBotEventWorkflow::instance().getSessionMessages(gid)) {
+        json result = json::array();
+        const size_t first = messages->size() > static_cast<size_t>(limit) ? messages->size() - limit : 0;
+        for (size_t index = first; index < messages->size(); ++index) {
+            const json &message = (*messages)[index];
+            result.push_back(
+              {{"role", MessageRecord::isAssistant(message) ? "assistant" : "user"}, {"content", dumpJson(message)}});
+        }
+        callback(jsonResponse(result));
+        co_return;
+    }
+
+    // 工作流尚未初始化时回退到持久化恢复副本；该副本才有可编辑的数据库行 ID。
     const auto result = ChatRecordStore::getChatRecordsWithIds(gid, limit);
 
     // 反转顺序，最新的在底部
