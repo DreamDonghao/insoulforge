@@ -3,7 +3,9 @@
 export interface QQConfig {
     accessToken: string
     selfQQNumber: number
+    oneBotTransport: 'http' | 'websocket'
     qqHttpHost: string
+    qqWebSocketHost: string
     botName: string
 }
 

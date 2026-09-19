@@ -26,6 +26,7 @@
 #include <infrastructure/logging/Logger.hpp>
 #include <llm/UsageStore.hpp>
 #include <onebot/OneBotClient.hpp>
+#include <onebot/OneBotWebSocketClient.hpp>
 #include <spdlog/spdlog.h>
 
 using namespace insoulforge;
@@ -212,7 +213,7 @@ Task<> AdminController::getEmojis(HttpRequestPtr req, std::function<void(const H
 
 Task<> AdminController::updateEmojiDesc(
   HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const {
-    auto body = parseJsonBody(req);
+    const auto body = parseJsonBody(req);
     if (!body || !body->contains("res_id") || !body->contains("desc")) {
         callback(jsonResponse(AdminResponse::errorJson("缺少必要字段: res_id、desc")));
         co_return;
@@ -230,6 +231,20 @@ Task<> AdminController::updateEmojiDesc(
     spdlog::info("[Admin] 已修改表情描述: res_id={} desc={}", resId, desc);
 
     callback(jsonResponse(AdminResponse::okJson("描述已修改")));
+    co_return;
+}
+
+Task<> AdminController::getOneBotStatus(
+  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const {
+    const auto &config = Config::instance();
+    const bool usesWebSocket = config.oneBotTransport == "websocket";
+
+    json resp;
+    resp["transport"] = usesWebSocket ? "websocket" : "http";
+    resp["address"] = usesWebSocket ? config.qqWebSocketHost : config.qqHttpHost;
+    resp["configured"] = !resp["address"].get<std::string>().empty();
+    resp["websocketConnected"] = usesWebSocket && OneBotWebSocketClient::instance().isConnected();
+    callback(jsonResponse(resp));
     co_return;
 }
 
@@ -697,17 +712,27 @@ Task<> AdminController::saveQQConfig(HttpRequestPtr req, std::function<void(cons
         co_return;
     }
 
-    ConfigStore::saveQQConfig(*body);
-
     // 更新内存中的配置
     auto &config = Config::instance();
     config.accessToken = getStr(*body, "accessToken");
     config.selfQQNumber = getInt64(*body, "selfQQNumber");
+    config.oneBotTransport = getStr(*body, "oneBotTransport", "http");
     config.qqHttpHost = getStr(*body, "qqHttpHost");
+    config.qqWebSocketHost = getStr(*body, "qqWebSocketHost");
     config.botName = getStr(*body, "botName", "小喵");
+    if (config.oneBotTransport != "http" && config.oneBotTransport != "websocket") {
+        config.oneBotTransport = "http";
+    }
+    json normalizedConfig = *body;
+    normalizedConfig["oneBotTransport"] = config.oneBotTransport;
+    normalizedConfig["qqHttpHost"] = config.qqHttpHost;
+    normalizedConfig["qqWebSocketHost"] = config.qqWebSocketHost;
+
+    ConfigStore::saveQQConfig(normalizedConfig);
 
     // 更新机器人自己的自定义昵称
     QQNameDirectory::setCustomName(config.selfQQNumber, config.botName + "(我)");
+    OneBotWebSocketClient::instance().reconfigure();
 
     callback(jsonResponse(AdminResponse::okJson("QQ Bot 配置已保存")));
     co_return;

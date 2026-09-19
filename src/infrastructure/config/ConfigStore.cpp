@@ -10,8 +10,8 @@
 #include <infrastructure/storage/Statement.hpp>
 #include <spdlog/spdlog.h>
 
-namespace insoulforge {
-    namespace ConfigStore {
+
+    namespace insoulforge::ConfigStore {
         namespace {
             json loadConfigJson(const std::string &key, const json &defaults) {
                 const auto &db = Database::instance();
@@ -21,9 +21,8 @@ namespace insoulforge {
                 const Statement stmt(db.handle(), "SELECT value FROM settings WHERE key = ?");
                 stmt.bind(1, key);
                 if (stmt.step()) {
-                    json parsed;
                     const std::string payload = stmt.getText(0);
-                    if (tryParseJson(payload, parsed) && parsed.is_object()) {
+                    if (json parsed; tryParseJson(payload, parsed) && parsed.is_object()) {
                         // 以存储值覆盖默认值
                         for (const auto &name: defaults.items()) {
                             if (const auto it = parsed.find(name.key()); it != parsed.end()) {
@@ -115,7 +114,9 @@ namespace insoulforge {
             json defaults;
             defaults["accessToken"] = "";
             defaults["selfQQNumber"] = 0;
+            defaults["oneBotTransport"] = "http";
             defaults["qqHttpHost"] = "http://127.0.0.1:3000";
+            defaults["qqWebSocketHost"] = "ws://127.0.0.1:3001";
             defaults["botName"] = "小喵";
             return loadConfigJson("qq_config", defaults);
         }
@@ -241,5 +242,5 @@ namespace insoulforge {
             }
         }
 
-    } // namespace ConfigStore
-} // namespace insoulforge
+    } // namespace insoulforge::ConfigStore
+

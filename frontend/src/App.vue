@@ -81,7 +81,9 @@ const {toast, toastError, showToast} = useToast()
 const qqConfig = reactive<QQConfigType>({
   accessToken: '',
   selfQQNumber: 0,
+  oneBotTransport: 'http',
   qqHttpHost: '',
+  qqWebSocketHost: '',
   botName: '小喵'
 })
 

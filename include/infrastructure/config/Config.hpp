@@ -47,7 +47,9 @@ namespace insoulforge {
         // QQ Bot 配置
         std::string accessToken;
         std::uint64_t selfQQNumber = 0;
+        std::string oneBotTransport = "http";
         std::string qqHttpHost;
+        std::string qqWebSocketHost;
         std::string botName;
 
         static Config &instance();

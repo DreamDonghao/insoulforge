@@ -49,7 +49,7 @@ namespace insoulforge {
         loadLLMConfig("embedding", embedding);
 
         // 加载记忆配置
-        if (auto memCfg = ConfigStore::getMemoryConfig(); !memCfg.is_null()) {
+        if (const auto memCfg = ConfigStore::getMemoryConfig(); !memCfg.is_null()) {
             contextWindowLimit = getInt(memCfg, "contextWindowLimit");
             memorySummaryTriggerCount = getInt(memCfg, "memorySummaryTriggerCount");
             memorySummaryBatchSize = getInt(memCfg, "memorySummaryBatchSize");
@@ -84,9 +84,14 @@ namespace insoulforge {
         if (auto qqCfg = ConfigStore::getQQConfig(); !qqCfg.is_null()) {
             accessToken = trim(getStr(qqCfg, "accessToken"));
             selfQQNumber = getInt64(qqCfg, "selfQQNumber");
+            oneBotTransport = getStr(qqCfg, "oneBotTransport", "http");
             qqHttpHost = trim(getStr(qqCfg, "qqHttpHost"));
+            qqWebSocketHost = trim(getStr(qqCfg, "qqWebSocketHost"));
             if (qqCfg.contains("botName")) {
                 botName = getStr(qqCfg, "botName");
+            }
+            if (oneBotTransport != "http" && oneBotTransport != "websocket") {
+                oneBotTransport = "http";
             }
             spdlog::info("QQ Bot 配置已从数据库加载");
         }

@@ -8,12 +8,25 @@ import type {LLMConfig, QQConfig} from '../vite-env'
 import {useToast} from '../composables/useToast'
 
 const qqConfig = inject<QQConfig>('qqConfig')
-const wsConnected = inject<Ref<boolean>>('wsConnected') as Ref<boolean>
 const ws = inject<{ get: () => WebSocket | null }>('ws')
 const {showToast} = useToast()
 
 const botRunning = ref(true)
 const botStatusSaving = ref(false)
+
+interface OneBotStatus {
+  transport: 'http' | 'websocket'
+  address: string
+  configured: boolean
+  websocketConnected: boolean
+}
+
+const oneBotStatus: Ref<OneBotStatus> = ref({
+  transport: 'http',
+  address: '',
+  configured: false,
+  websocketConnected: false
+})
 
 const loadBotStatus = async (): Promise<void> => {
   try {
@@ -23,6 +36,23 @@ const loadBotStatus = async (): Promise<void> => {
     botRunning.value = data.running === true
   } catch {
     showToast('加载机器人状态失败', true)
+  }
+}
+
+const loadOneBotStatus = async (): Promise<void> => {
+  try {
+    const resp = await fetch('/admin/api/onebot-status')
+    if (!resp.ok) return
+    const data: Partial<OneBotStatus> = await resp.json()
+    if ((data.transport === 'http' || data.transport === 'websocket') && typeof data.address === 'string') {
+      oneBotStatus.value = {
+        transport: data.transport,
+        address: data.address,
+        configured: data.configured === true,
+        websocketConnected: data.websocketConnected === true
+      }
+    }
+  } catch { /* keep the last known OneBot status */
   }
 }
 
@@ -49,21 +79,21 @@ const toggleBotStatus = async (): Promise<void> => {
   }
 }
 
-// ---- LLM 模型（固定展示顺序）----
-const llmOrder = ['router', 'executor', 'executorThinking', 'image', 'memory'] as const
+// ---- LLM 模型（与运行时配置一一对应）----
+const llmOrder = ['router', 'executor', 'executorThinking', 'image', 'embedding'] as const
 const llmLabels: Record<string, string> = {
   router: 'Router',
-  executor: 'Executor',
-  executorThinking: 'Executor思考',
-  image: 'Image',
-  memory: 'Memory'
+  executor: '回复生成',
+  executorThinking: '深度思考',
+  image: '图片识别',
+  embedding: '向量化'
 }
 const roleColors: Record<string, string> = {
   router: 'var(--primary)',
   executor: 'var(--neon-cyan)',
   executorThinking: 'var(--neon-pink)',
   image: 'var(--success)',
-  memory: 'var(--warning)'
+  embedding: 'var(--warning)'
 }
 const llmModels: Ref<Record<string, string>> = ref({})
 const llmLoading: Ref<boolean> = ref(true)
@@ -74,6 +104,7 @@ const baseUptime: Ref<number> = ref(0)
 let loadMoment = Date.now()
 const nowTick: Ref<number> = ref(Date.now())
 let uptimeTimer: number | undefined
+let oneBotStatusTimer: number | undefined
 
 // ---- 每日用量 ----
 interface UsageItem {
@@ -104,7 +135,17 @@ const adminCount: Ref<number> = ref(0)
 const emojiCount: Ref<number> = ref(0)
 const toolCount: Ref<number> = ref(0)
 
-const botOnline = computed(() => !!qqConfig?.qqHttpHost)
+const transportLabel = computed(() => oneBotStatus.value.transport === 'websocket' ? 'WebSocket' : 'HTTP')
+const oneBotAddressLabel = computed(() => oneBotStatus.value.transport === 'websocket' ? 'WebSocket 地址' : 'HTTP 地址')
+const oneBotConnectionReady = computed(() => oneBotStatus.value.transport === 'http'
+  ? oneBotStatus.value.configured
+  : oneBotStatus.value.websocketConnected)
+const oneBotConnectionText = computed(() => {
+  if (oneBotStatus.value.transport === 'http') {
+    return oneBotStatus.value.configured ? 'OneBot HTTP 已配置' : 'OneBot HTTP 未配置'
+  }
+  return oneBotStatus.value.websocketConnected ? 'OneBot WebSocket 已连接' : 'OneBot WebSocket 未连接'
+})
 
 const fmtNum = (n: number): string => n.toLocaleString()
 
@@ -230,6 +271,7 @@ let wsMessageHandler: ((e: MessageEvent) => void) | null = null
 
 onMounted(() => {
   loadBotStatus()
+  loadOneBotStatus()
   loadLLMModels()
   loadSystemInfo()
   loadUsage()
@@ -241,6 +283,7 @@ onMounted(() => {
   uptimeTimer = window.setInterval(() => {
     nowTick.value = Date.now()
   }, 1000)
+  oneBotStatusTimer = window.setInterval(loadOneBotStatus, 5000)
 
   const wsConn = ws?.get()
   if (wsConn) {
@@ -257,6 +300,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (uptimeTimer) clearInterval(uptimeTimer)
+  if (oneBotStatusTimer) clearInterval(oneBotStatusTimer)
   if (wsMessageHandler) {
     ws?.get()?.removeEventListener('message', wsMessageHandler)
     wsMessageHandler = null
@@ -287,12 +331,9 @@ onUnmounted(() => {
         </button>
       </div>
       <div class="status-item">
-        <span :class="wsConnected ? 'dot-green' : 'dot-red'" class="status-dot"></span>
-        <span>{{ wsConnected ? 'WebSocket 已连接' : 'WebSocket 未连接' }}</span>
-      </div>
-      <div class="status-item">
-        <span :class="botOnline ? 'dot-green' : 'dot-gray'" class="status-dot"></span>
-        <span>{{ botOnline ? 'OneBot 已配置' : 'OneBot 未配置' }}</span>
+        <span :class="oneBotConnectionReady ? 'dot-green' : oneBotStatus.transport === 'websocket' ? 'dot-red' : 'dot-gray'"
+              class="status-dot"></span>
+        <span>{{ oneBotConnectionText }}</span>
       </div>
     </div>
 
@@ -332,8 +373,18 @@ onUnmounted(() => {
               <code class="kv-code">{{ qqConfig?.selfQQNumber || '—' }}</code>
             </div>
             <div class="kv-row">
-              <span class="kv-label">HTTP 地址</span>
-              <code class="kv-code kv-wrap">{{ qqConfig?.qqHttpHost || '—' }}</code>
+              <span class="kv-label">传输方式</span>
+              <span class="kv-value">{{ transportLabel }}</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-label">连接状态</span>
+              <span :class="oneBotConnectionReady ? 'connection-ready' : 'connection-offline'" class="connection-state">
+                {{ oneBotConnectionReady ? '已连接' : oneBotStatus.transport === 'http' ? '未配置' : '未连接' }}
+              </span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-label">{{ oneBotAddressLabel }}</span>
+              <code class="kv-code kv-wrap">{{ oneBotStatus.address || '—' }}</code>
             </div>
           </div>
         </div>
@@ -708,6 +759,19 @@ onUnmounted(() => {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.connection-state {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.connection-ready {
+  color: var(--success);
+}
+
+.connection-offline {
+  color: var(--text-secondary);
 }
 
 .kv-code {

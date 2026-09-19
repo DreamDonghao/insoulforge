@@ -4,14 +4,14 @@
 
 ## 环境要求
 
-| 依赖                             | 版本要求            | 说明                                                 |
-|----------------------------------|---------------------|------------------------------------------------------|
-| CMake                            | ≥ 3.20              | 构建系统                                             |
-| GCC / Clang                      | GCC 13+ / Clang 14+ | 代码使用 `<format>`，GCC 11/12 不支持                |
-| Node.js + npm                    | 任意较新版本        | 必需：CMake 配置阶段查找 npm，后端构建会连带构建前端 |
-| Drogon                           | 1.8+ 推荐           | 异步 Web 框架                                        |
-| spdlog / fmt / nlohmann-json / SQLite3 | 任意较新版本 | 日志、格式化、JSON 与存储                            |
-| libpng / giflib                  | 任意较新版本        | 图片与 GIF 解码                                      |
+| 依赖                                   | 版本要求            | 说明                                                 |
+|----------------------------------------|---------------------|------------------------------------------------------|
+| CMake                                  | ≥ 3.20              | 构建系统                                             |
+| GCC / Clang                            | GCC 13+ / Clang 14+ | 代码使用 `<format>`，GCC 11/12 不支持                |
+| Node.js + npm                          | 任意较新版本        | 必需：CMake 配置阶段查找 npm，后端构建会连带构建前端 |
+| Drogon                                 | 1.8+ 推荐           | 异步 Web 框架                                        |
+| spdlog / fmt / nlohmann-json / SQLite3 | 任意较新版本        | 日志、格式化、JSON 与存储                            |
+| libpng / giflib                        | 任意较新版本        | 图片与 GIF 解码                                      |
 
 **Ubuntu 24.04（推荐，apt 开箱即用）**：
 
@@ -137,11 +137,12 @@ insoulforge/
 ### 消息处理工作流
 
 ```
-OneBot HTTP POST /
+HTTP 模式：OneBot HTTP POST /
+WebSocket 模式：OneBotWebSocketClient 接收事件，并按 echo 匹配动作响应
     │
     ▼
-ProcessQQMessages::receiveOneBotEvent
-    │ 解析 JSON 并立即确认 HTTP 请求
+两种入口均投递已解析的 OneBot JSON（HTTP 入口会立即确认请求）
+    │
     ▼
 OneBotEventWorkflow::enqueueOneBotEvent
     │ 归一化 OneBot 消息、通知和机器人回显；Agent 不可用时立即结束

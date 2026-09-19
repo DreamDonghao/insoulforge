@@ -1,8 +1,8 @@
 /// @file OneBotClient.hpp
-/// @brief OneBot HTTP API 客户端 - 统一封装对 QQ 客户端(NapCat)的调用
+/// @brief OneBot API 客户端 - 统一封装对 QQ 客户端(NapCat)的调用
 /// @date 2026-08-31
 /// @details 所有与 QQ 客户端的交互统一走这里：
-///          - callApi() 通用调用：POST JSON、携带 accessToken、校验 HTTP 200 + status=ok、记录失败日志
+///          - callApi() 通用调用：按配置使用 HTTP 或 WebSocket、携带 accessToken、校验 status=ok、记录失败日志
 ///          - 按操作封装的类型化方法（发消息、禁言、戳一拍、表情管理等）
 
 #pragma once
@@ -13,6 +13,7 @@
 #include <infrastructure/JsonUtil.hpp>
 
 /// @brief OneBot API 客户端
+/// @details 根据 OneBot 配置，通过 HTTP 或 WebSocket 与 OneBot 实现通信。
 namespace insoulforge::OneBotClient {
     /// @brief 发送群消息（群号即会话 ID，无需单独传 sessionId）
     /// @note OneBot 11: send_group_msg

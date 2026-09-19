@@ -32,7 +32,7 @@ QQ交流群：1097487360
 
 本机器人需要配合 **OneBot** 协议实现使用，推荐使用 **napcat**
 
-选择一个 OneBot 实现，部署并启用 HTTP 服务。
+选择一个 OneBot 实现，并启用 HTTP 或正向 WebSocket 服务之一。
 
 消息接收端口：7778
 
@@ -70,8 +70,9 @@ docker run -d --name insoulforge \
 > docker network connect bot-net insoulforge
 > ```
 >
-> 然后在管理后台将 OneBot 的 HTTP 服务地址填为 `http://napcat:3000`（容器名 + napcat HTTP 端口），napcat
-> 的上报地址填 `http://insoulforge:7778/`。
+> 使用 HTTP 时，在管理后台将 OneBot 的 HTTP 服务地址填为 `http://napcat:3000`（容器名 + napcat HTTP 端口），
+> 并将 napcat 的上报地址填为 `http://insoulforge:7778/`。使用正向 WebSocket 时，将 WebSocket 地址填为
+> `ws://napcat:3001`；此方式不需要配置 HTTP 上报地址。
 
 然后访问管理后台：`http://localhost:7778/index.html`
 
@@ -82,7 +83,7 @@ docker run -d --name insoulforge \
 1. **OneBot 配置** - 填写连接参数
     - Access Token
     - Bot QQ 号
-    - HTTP 服务地址
+    - HTTP 或 WebSocket 传输方式及其服务地址
     - Bot 名称
 
 2. **LLM 配置** - 配置模型 API
@@ -120,12 +121,14 @@ docker run -d --name insoulforge \
 
 ### OneBot 配置
 
-| 参数          | 说明                 |
-|---------------|----------------------|
-| Access Token  | OneBot API 访问令牌  |
-| Bot QQ 号     | 机器人自身的 QQ 号   |
-| HTTP 服务地址 | OneBot HTTP 服务地址 |
-| Bot 名称      | 机器人在群聊中的名称 |
+| 参数              | 说明                                      |
+|-------------------|-------------------------------------------|
+| Access Token      | OneBot API 访问令牌                       |
+| Bot QQ 号         | 机器人自身的 QQ 号                        |
+| 传输方式          | HTTP 或正向 WebSocket，两者互斥            |
+| HTTP 服务地址     | HTTP 模式下的 OneBot HTTP 服务地址         |
+| WebSocket 服务地址 | WebSocket 模式下的 OneBot 正向连接地址     |
+| Bot 名称          | 机器人在群聊中的名称                      |
 
 ### LLM 配置
 

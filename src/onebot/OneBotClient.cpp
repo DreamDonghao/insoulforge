@@ -1,11 +1,12 @@
 /// @file OneBotClient.cpp
-/// @brief OneBot HTTP API 客户端 - 实现
+/// @brief OneBot API 客户端实现
 
 #include <infrastructure/config/Config.hpp>
-#include <onebot/OneBotClient.hpp>
-#include <spdlog/spdlog.h>
 #include <infrastructure/http/HttpUtil.hpp>
 #include <infrastructure/logging/Logger.hpp>
+#include <onebot/OneBotClient.hpp>
+#include <onebot/OneBotWebSocketClient.hpp>
+#include <spdlog/spdlog.h>
 
 namespace insoulforge::OneBotClient {
     namespace {
@@ -15,20 +16,33 @@ namespace insoulforge::OneBotClient {
         /// @param params 请求参数（JSON body）
         /// @param sessionId 会话 ID（用于会话日志，可空）
         /// @param timeout 超时秒数
-        /// @return 响应 JSON（含 status/retcode/data）；HTTP 非 200 或 status != ok 时返回 nullopt（已记日志）
+        /// @return 响应 JSON（含 status/retcode/data）；请求失败或 status != ok 时返回 nullopt（已记日志）
         [[nodiscard]] drogon::Task<std::optional<json>> callApi(std::string_view tag, std::string api, json params,
           std::optional<uint64_t> sessionId = std::nullopt, double timeout = 30.0) {
-            const auto &config = Config::instance();
-            const auto resp = co_await HttpUtil::send(tag, config.qqHttpHost, "/" + api, drogon::Post,
-              std::move(params), config.accessToken, timeout, sessionId);
-            if (!resp) {
-                co_return std::nullopt;
-            }
             json body;
-            if ((*resp)->getStatusCode() != drogon::k200OK || !tryParseJson((*resp)->body(), body)) {
-                Logger::session(sessionId.value_or(0))
-                  .error(
-                    "{} OneBot API {} 请求失败: http_status={}", tag, api, static_cast<int>((*resp)->getStatusCode()));
+            const auto &config = Config::instance();
+            if (config.oneBotTransport == "websocket") {
+                const auto response =
+                  co_await OneBotWebSocketClient::instance().callApi(api, std::move(params), timeout);
+                if (!response) {
+                    co_return std::nullopt;
+                }
+                body = std::move(*response);
+            } else {
+                const auto response = co_await HttpUtil::send(tag, config.qqHttpHost, "/" + api, drogon::Post,
+                  std::move(params), config.accessToken, timeout, sessionId);
+                if (!response) {
+                    co_return std::nullopt;
+                }
+                if ((*response)->getStatusCode() != drogon::k200OK || !tryParseJson((*response)->body(), body)) {
+                    Logger::session(sessionId.value_or(0))
+                      .error("{} OneBot API {} 请求失败: http_status={}", tag, api,
+                        static_cast<int>((*response)->getStatusCode()));
+                    co_return std::nullopt;
+                }
+            }
+            if (!body.is_object()) {
+                Logger::session(sessionId.value_or(0)).error("{} OneBot API {} 响应不是 JSON 对象", tag, api);
                 co_return std::nullopt;
             }
             if (getStr(body, "status", "failed") != "ok") {

@@ -7,8 +7,8 @@
 
 #include <drogon/HttpController.h>
 #include <drogon/utils/coroutine.h>
-#include <onebot/MessageService.hpp>
 #include <infrastructure/logging/LogBuffer.hpp>
+#include <onebot/MessageService.hpp>
 
 namespace insoulforge {
     /// @brief 管理后台 REST API 控制器
@@ -57,6 +57,9 @@ namespace insoulforge {
         ADD_METHOD_TO(AdminController::getBotStatus, "/admin/api/bot-status", drogon::Get);
 
         ADD_METHOD_TO(AdminController::setBotStatus, "/admin/api/bot-status", drogon::Post);
+
+        // OneBot 运行状态
+        ADD_METHOD_TO(AdminController::getOneBotStatus, "/admin/api/onebot-status", drogon::Get);
 
         // 管理员
         ADD_METHOD_TO(AdminController::getAdmins, "/admin/api/admins", drogon::Get);
@@ -217,6 +220,10 @@ namespace insoulforge {
 
         /// @brief 设置机器人运行状态
         drogon::Task<> setBotStatus(
+          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+
+        /// @brief 获取当前生效的 OneBot 传输方式及连接状态
+        drogon::Task<> getOneBotStatus(
           drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
 
         // ============== 管理员 ==============

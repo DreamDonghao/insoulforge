@@ -1,9 +1,18 @@
-#include <onebot/http/ProcessQQMessages.hpp>
-#include <infrastructure/logging/Logger.hpp>
 #include <conversation/workflow/OneBotEventWorkflow.hpp>
+#include <infrastructure/config/Config.hpp>
+#include <infrastructure/logging/Logger.hpp>
+#include <onebot/http/ProcessQQMessages.hpp>
 
 drogon::Task<> insoulforge::ProcessQQMessages::receiveOneBotEvent(
   const drogon::HttpRequestPtr req, const std::function<void(const drogon::HttpResponsePtr &)> callback) {
+    if (Config::instance().oneBotTransport != "http") {
+        // OneBot 实现可能在切换期间继续投递 HTTP 上报。成功确认但不处理，避免其将 4xx 识别为快速操作失败。
+        spdlog::debug("忽略 OneBot HTTP 上报：当前传输方式为 WebSocket");
+        json response;
+        response["status"] = "ok";
+        callback(jsonResponse(response));
+        co_return;
+    }
     auto body = parseJsonBody(req);
     if (!body) {
         spdlog::warn("OneBot 上报被拒绝：请求体不是 JSON 对象");

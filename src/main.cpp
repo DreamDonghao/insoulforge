@@ -10,19 +10,20 @@
 ///          - HTTP 服务启动：监听 7778 端口，提供管理界面和 API
 ///          支持通过输入 "quit" 命令优雅退出
 
+#include <admin/AdminStore.hpp>
 #include <agent/runtime/AgentSystem.hpp>
-#include <infrastructure/config/Config.hpp>
+#include <conversation/session/QQNameDirectory.hpp>
+#include <conversation/session/SessionStore.hpp>
+#include <conversation/workflow/OneBotEventWorkflow.hpp>
 #include <drogon/drogon.h>
 #include <include/agent/ability/TaskScheduler.hpp>
+#include <infrastructure/config/Config.hpp>
+#include <infrastructure/logging/Logger.hpp>
+#include <infrastructure/storage/Database.hpp>
 #include <iostream>
 #include <iterator>
-#include <conversation/session/QQNameDirectory.hpp>
+#include <onebot/OneBotWebSocketClient.hpp>
 #include <spdlog/spdlog.h>
-#include <admin/AdminStore.hpp>
-#include <infrastructure/storage/Database.hpp>
-#include <conversation/session/SessionStore.hpp>
-#include <infrastructure/logging/Logger.hpp>
-#include <conversation/workflow/OneBotEventWorkflow.hpp>
 
 int main() {
     using namespace insoulforge;
@@ -41,6 +42,7 @@ int main() {
         // 初始化 Agent 系统
         AgentSystem::instance().initialize();
         static_cast<void>(OneBotEventWorkflow::instance());
+        OneBotWebSocketClient::instance().start();
 
         // 启动定时任务调度器
         TaskScheduler::instance().start();
@@ -82,6 +84,7 @@ int main() {
 
         // 先停调度线程再关库，避免触发中的任务写已关闭的数据库
         TaskScheduler::instance().stop();
+        OneBotWebSocketClient::instance().stop();
         OneBotEventWorkflow::instance().flushMessageListsToStorage();
         database.close();
         spdlog::info("系统正常退出");
