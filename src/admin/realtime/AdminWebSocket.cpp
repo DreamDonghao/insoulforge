@@ -1,6 +1,4 @@
 #include <admin/realtime/AdminWebSocket.hpp>
-#include <spdlog/spdlog.h>
-#include <infrastructure/JsonUtil.hpp>
 
 using namespace insoulforge;
 using namespace drogon;

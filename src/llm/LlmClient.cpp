@@ -1,8 +1,6 @@
 /// @file LlmClient.cpp
 /// @brief API 客户端 - 实现
 
-#include <chrono>
-#include <drogon/HttpAppFramework.h>
 
 #include <admin/realtime/WebSocketManager.hpp>
 #include <infrastructure/config/Config.hpp>
@@ -10,7 +8,6 @@
 #include <infrastructure/logging/Logger.hpp>
 #include <llm/LlmClient.hpp>
 #include <llm/UsageStore.hpp>
-#include <spdlog/spdlog.h>
 
 namespace insoulforge {
     namespace {

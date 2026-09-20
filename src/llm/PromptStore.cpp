@@ -5,7 +5,6 @@
 
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
-#include <llm/PromptStore.hpp>
 
 namespace insoulforge {
     namespace PromptStore {

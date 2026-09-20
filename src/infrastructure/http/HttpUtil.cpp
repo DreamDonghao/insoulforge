@@ -3,9 +3,6 @@
 
 #include <infrastructure/http/HttpTrace.hpp>
 #include <infrastructure/http/HttpUtil.hpp>
-#include <spdlog/spdlog.h>
-#include <string>
-#include <utility>
 
 namespace insoulforge::HttpUtil {
     namespace {

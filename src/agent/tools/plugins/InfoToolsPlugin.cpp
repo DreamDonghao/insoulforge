@@ -6,9 +6,6 @@
 #include <agent/tools/ToolArgument.hpp>
 #include <agent/tools/ToolRuntime.hpp>
 #include <agent/tools/plugins/InfoToolsPlugin.hpp>
-#include <algorithm>
-#include <conversation/message/SessionId.hpp>
-#include <fmt/core.h>
 #include <include/agent/tools/ToolRegistry.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>

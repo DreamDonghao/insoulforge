@@ -3,17 +3,10 @@
 /// @author donghao
 /// @date 2026-08-27
 
-#include <agent/ability/TaskStore.hpp>
-#include <conversation/message/SessionId.hpp>
-#include <drogon/drogon.h>
 #include <include/agent/ability/TaskScheduler.hpp>
-#include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/http/HttpUtil.hpp>
 #include <infrastructure/logging/Logger.hpp>
-#include <iomanip>
-#include <spdlog/spdlog.h>
-#include <sstream>
 
 namespace insoulforge {
     namespace {

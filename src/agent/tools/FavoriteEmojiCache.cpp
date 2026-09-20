@@ -1,11 +1,6 @@
 /// @file FavoriteEmojiCache.cpp
 /// @brief QQ 收藏表情查询与缓存实现
 
-#include <chrono>
-#include <mutex>
-#include <utility>
-
-#include <fmt/format.h>
 
 #include <agent/tools/ToolRuntime.hpp>
 #include <onebot/OneBotClient.hpp>

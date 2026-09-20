@@ -7,13 +7,9 @@
 #include <infrastructure/logging/LogBuffer.hpp>
 #include <infrastructure/logging/LogSink.hpp>
 #include <infrastructure/logging/Logger.hpp>
-#include <memory>
 #include <spdlog/async.h>
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
-#include <spdlog/spdlog.h>
-#include <string_view>
-#include <vector>
 
 namespace insoulforge {
     namespace {

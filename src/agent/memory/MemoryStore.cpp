@@ -3,7 +3,6 @@
 /// @author donghao
 /// @date 2026-08-30
 
-#include <agent/memory/MemoryStore.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 

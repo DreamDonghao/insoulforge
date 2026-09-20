@@ -3,7 +3,6 @@
 /// @author donghao
 /// @date 2026-08-31
 
-#include <conversation/maintenance/affinity/AffinityStore.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 

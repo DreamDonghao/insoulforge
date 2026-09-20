@@ -2,8 +2,6 @@
 /// @brief WebSocket 连接管理器 - 实现
 
 #include <admin/realtime/WebSocketManager.hpp>
-#include <ranges>
-#include <spdlog/spdlog.h>
 
 namespace insoulforge {
     WebSocketManager &WebSocketManager::instance() {

@@ -6,7 +6,6 @@
 #include <conversation/session/SessionStore.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
-#include <spdlog/spdlog.h>
 
 namespace insoulforge {
     namespace SessionStore {

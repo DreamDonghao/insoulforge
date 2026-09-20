@@ -3,24 +3,14 @@
 
 #include <media/ImageDescriptionService.hpp>
 
-#include <algorithm>
-#include <array>
-#include <cstring>
 #include <gif_lib.h>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/http/HttpUtil.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <llm/LlmClient.hpp>
 #include <media/ImageDescriptionStore.hpp>
-#include <memory>
-#include <numeric>
 #include <openssl/sha.h>
 #include <png.h>
-#include <regex>
-#include <set>
-#include <spdlog/spdlog.h>
-#include <utility>
-#include <vector>
 
 namespace insoulforge::ImageDescriptionService {
     namespace {

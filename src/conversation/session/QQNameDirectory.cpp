@@ -3,9 +3,7 @@
 
 #include <conversation/session/QQNameDirectory.hpp>
 
-#include <mutex>
 #include <shared_mutex>
-#include <unordered_map>
 
 namespace insoulforge::QQNameDirectory {
     namespace {

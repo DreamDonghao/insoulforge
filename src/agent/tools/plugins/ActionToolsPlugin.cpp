@@ -1,27 +1,20 @@
 /// @file ActionToolsPlugin.cpp
 /// @brief 动作工具插件实现（ACTION，执行操作、产生副作用）
 
-#include <agent/ability/TaskStore.hpp>
 #include <agent/runtime/ExecutorAgent.hpp>
 #include <agent/tools/ToolArgument.hpp>
 #include <agent/tools/ToolRuntime.hpp>
 #include <agent/tools/plugins/ActionToolsPlugin.hpp>
-#include <chrono>
 #include <conversation/history/ChatRecordStore.hpp>
 #include <conversation/message/MessageRecord.hpp>
 #include <conversation/message/SessionId.hpp>
 #include <conversation/session/QQNameDirectory.hpp>
 #include <conversation/workflow/OneBotEventWorkflow.hpp>
-#include <fmt/core.h>
 #include <include/agent/ability/TaskScheduler.hpp>
 #include <include/agent/tools/ToolRegistry.hpp>
-#include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <onebot/MessageService.hpp>
 #include <onebot/OneBotClient.hpp>
-#include <optional>
-#include <set>
-#include <spdlog/spdlog.h>
 
 namespace insoulforge {
     std::string_view ActionToolsPlugin::id() const noexcept { return "builtin.action"; }

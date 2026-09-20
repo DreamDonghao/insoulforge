@@ -1,19 +1,12 @@
 /// @file AffinityMaintenanceService.cpp
 /// @brief 基于持久化消息批次的好感度维护实现
 
-#include <algorithm>
-#include <chrono>
 #include <conversation/maintenance/affinity/AffinityMaintenanceService.hpp>
 #include <conversation/maintenance/affinity/AffinityMaintenanceStore.hpp>
 #include <conversation/message/MessageRecord.hpp>
-#include <drogon/drogon.h>
-#include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <llm/LlmClient.hpp>
-#include <mutex>
-#include <optional>
-#include <unordered_set>
 namespace insoulforge {
     namespace {
         /// @brief 单次评估允许的最大好感度变化量

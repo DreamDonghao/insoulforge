@@ -1,8 +1,6 @@
 /// @file MessageList.cpp
 /// @brief 单会话完整消息列表实现
 
-#include <algorithm>
-#include <limits>
 
 #include <conversation/history/ChatRecordStore.hpp>
 #include <conversation/maintenance/ConversationMaintenanceService.hpp>

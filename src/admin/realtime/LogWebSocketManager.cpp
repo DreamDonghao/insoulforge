@@ -2,7 +2,6 @@
 /// @brief 运行日志 WebSocket 管理器 - 实现
 
 #include <admin/realtime/LogWebSocketManager.hpp>
-#include <utility>
 
 namespace insoulforge {
     LogWebSocketManager &LogWebSocketManager::instance() {

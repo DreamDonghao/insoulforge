@@ -2,27 +2,14 @@
 /// @brief Executor Agent - 实现
 
 #include <agent/runtime/ExecutorAgent.hpp>
-#include <conversation/history/ChatRecordManager.hpp>
 #include <conversation/maintenance/affinity/AffinityStore.hpp>
 #include <conversation/message/MessageRecord.hpp>
-#include <conversation/message/SessionId.hpp>
 #include <conversation/session/SessionStore.hpp>
-#include <fmt/core.h>
 #include <include/agent/tools/ToolRegistry.hpp>
-#include <infrastructure/CommonUtil.hpp>
-#include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <llm/LlmClient.hpp>
 #include <llm/PromptService.hpp>
-#include <ranges>
-#include <regex>
-#include <spdlog/spdlog.h>
-#include <string>
-#include <tuple>
-#include <unordered_map>
-#include <utility>
-#include <vector>
 
 namespace insoulforge::ExecutorAgent {
     namespace {

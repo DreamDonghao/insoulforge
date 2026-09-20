@@ -3,14 +3,8 @@
 
 #include <infrastructure/config/ConfigStore.hpp>
 
-#include <chrono>
-#include <filesystem>
 #include <fstream>
-#include <mutex>
-#include <stdexcept>
 
-#include <infrastructure/JsonUtil.hpp>
-#include <spdlog/spdlog.h>
 
 namespace insoulforge::ConfigStore {
     namespace {

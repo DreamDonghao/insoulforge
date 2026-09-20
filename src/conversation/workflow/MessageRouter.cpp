@@ -1,7 +1,6 @@
 /// @file MessageRouter.cpp
 /// @brief 基于完整消息快照的 Router 实现
 
-#include <algorithm>
 #include <conversation/message/MessageRecord.hpp>
 #include <conversation/message/SessionId.hpp>
 #include <conversation/workflow/MessageRouter.hpp>

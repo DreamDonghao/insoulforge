@@ -3,11 +3,9 @@
 /// @author donghao
 /// @date 2026-08-30
 
-#include <fmt/core.h>
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/storage/SchemaMigrator.hpp>
 #include <infrastructure/storage/Statement.hpp>
-#include <spdlog/spdlog.h>
 
 namespace insoulforge {
     namespace {

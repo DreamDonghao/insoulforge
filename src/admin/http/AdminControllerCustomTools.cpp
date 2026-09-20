@@ -7,16 +7,10 @@
 #include <admin/http/AdminResponse.hpp>
 #include <agent/tools/ToolRuntime.hpp>
 #include <agent/tools/ToolStore.hpp>
-#include <algorithm>
-#include <array>
 #include <include/agent/tools/ToolRegistry.hpp>
-#include <infrastructure/CommonUtil.hpp>
-#include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/config/ConfigStore.hpp>
 #include <llm/PromptStore.hpp>
-#include <ranges>
-#include <spdlog/spdlog.h>
 
 using namespace insoulforge;
 using namespace drogon;

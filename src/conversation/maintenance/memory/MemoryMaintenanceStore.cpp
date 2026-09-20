@@ -3,11 +3,8 @@
 
 #include <conversation/maintenance/memory/MemoryMaintenanceStore.hpp>
 
-#include <cstring>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
-#include <mutex>
-#include <unordered_set>
 
 namespace insoulforge::MemoryMaintenanceStore {
     namespace {

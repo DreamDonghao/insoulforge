@@ -3,8 +3,6 @@
 /// @author donghao
 /// @date 2026-09-01
 
-#include <algorithm>
-#include <cmath>
 
 #include <agent/memory/LongTermMemoryStore.hpp>
 #include <infrastructure/storage/Database.hpp>

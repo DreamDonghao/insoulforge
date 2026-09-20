@@ -10,21 +10,18 @@
 ///          - HTTP 服务启动：监听 7778 端口，提供管理界面和 API
 ///          支持通过输入 "quit" 命令优雅退出
 
+
 #include <admin/AdminStore.hpp>
+#include <agent/ability/TaskScheduler.hpp>
 #include <agent/runtime/AgentSystem.hpp>
 #include <conversation/session/QQNameDirectory.hpp>
 #include <conversation/session/SessionStore.hpp>
 #include <conversation/workflow/OneBotEventWorkflow.hpp>
-#include <drogon/drogon.h>
-#include <include/agent/ability/TaskScheduler.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/config/ConfigStore.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
-#include <iostream>
-#include <iterator>
 #include <onebot/OneBotWebSocketClient.hpp>
-#include <spdlog/spdlog.h>
 
 int main() {
     using namespace insoulforge;

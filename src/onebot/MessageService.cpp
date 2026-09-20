@@ -1,18 +1,14 @@
 /// @file MessageService.cpp
 /// @brief OneBot 消息服务 - 实现
 
-#include <algorithm>
 #include <conversation/message/MessageRecord.hpp>
-#include <conversation/message/SessionId.hpp>
 #include <conversation/session/QQNameDirectory.hpp>
 #include <conversation/session/SessionStore.hpp>
 #include <conversation/workflow/OneBotEventWorkflow.hpp>
-#include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <onebot/MessageService.hpp>
 #include <onebot/OneBotClient.hpp>
-#include <regex>
 
 namespace insoulforge {
     std::string MessageService::convertAtToCQCode(std::string text) {

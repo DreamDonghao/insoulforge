@@ -3,22 +3,12 @@
 
 #include <agent/memory/LongTermMemoryStore.hpp>
 #include <agent/memory/MemoryStore.hpp>
-#include <algorithm>
-#include <chrono>
 #include <conversation/maintenance/memory/MemoryMaintenanceService.hpp>
 #include <conversation/maintenance/memory/MemoryMaintenanceStore.hpp>
 #include <conversation/message/MessageRecord.hpp>
-#include <drogon/drogon.h>
-#include <infrastructure/CommonUtil.hpp>
-#include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <llm/LlmClient.hpp>
-#include <mutex>
-#include <ranges>
-#include <sstream>
-#include <unordered_map>
-#include <unordered_set>
 
 namespace insoulforge {
     namespace {

@@ -2,30 +2,21 @@
 /// @brief OneBot 入站事件处理工作流实现
 
 #include <admin/realtime/WebSocketManager.hpp>
-#include <agent/memory/MemoryManager.hpp>
 #include <agent/runtime/AgentSystem.hpp>
 #include <agent/runtime/ExecutorAgent.hpp>
-#include <conversation/history/ChatRecordManager.hpp>
 #include <conversation/history/ChatRecordStore.hpp>
 #include <conversation/maintenance/ConversationMaintenanceService.hpp>
 #include <conversation/message/MessageRecord.hpp>
-#include <conversation/message/SessionId.hpp>
 #include <conversation/session/SessionConfigManager.hpp>
-#include <conversation/session/SessionStore.hpp>
 #include <conversation/workflow/CommandProcessor.hpp>
 #include <conversation/workflow/MessageContentEnricher.hpp>
-#include <conversation/workflow/MessageList.hpp>
 #include <conversation/workflow/MessageRouter.hpp>
 #include <conversation/workflow/OneBotEventNormalizer.hpp>
 #include <conversation/workflow/OneBotEventWorkflow.hpp>
-#include <deque>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <onebot/MessageService.hpp>
-#include <ranges>
-#include <stdexcept>
-#include <vector>
 
 namespace insoulforge {
     namespace {

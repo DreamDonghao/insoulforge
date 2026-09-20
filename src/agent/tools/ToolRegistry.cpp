@@ -3,11 +3,7 @@
 /// @author donghao
 /// @date 2026-03-28
 
-#include <algorithm>
-#include <exception>
 #include <include/agent/tools/ToolRegistry.hpp>
-#include <spdlog/spdlog.h>
-#include <tuple>
 
 using insoulforge::json;
 

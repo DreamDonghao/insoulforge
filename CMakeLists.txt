@@ -41,6 +41,18 @@ target_include_directories(${PROJECT_NAME}_backend PRIVATE
         include
 )
 
+# 后端由大量翻译单元组成；仅预编译稳定的第三方头文件，项目自身头文件
+# 仍须在各自的 .cpp/.hpp 中显式包含，避免 PCH 掩盖依赖关系。
+option(INSOULFORGE_ENABLE_PCH "Enable precompiled headers for the backend target" ON)
+if (INSOULFORGE_ENABLE_PCH)
+    target_precompile_headers(${PROJECT_NAME}_backend PRIVATE
+            <drogon/drogon.h>
+            <nlohmann/json.hpp>
+            <spdlog/spdlog.h>
+            <fmt/format.h>
+    )
+endif ()
+
 add_executable(${PROJECT_NAME}
         src/main.cpp
         $<TARGET_OBJECTS:${PROJECT_NAME}_backend>

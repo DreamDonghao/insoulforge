@@ -1,11 +1,9 @@
 /// @file MessageContentEnricher.cpp
 /// @brief 统一消息的媒体与长期记忆富化实现
 
-#include <algorithm>
 
 #include <agent/memory/LongTermMemoryStore.hpp>
 #include <conversation/message/MessageRecord.hpp>
-#include <conversation/workflow/MessageContentEnricher.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <llm/LlmClient.hpp>
 #include <media/ImageDescriptionService.hpp>

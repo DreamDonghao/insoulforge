@@ -1,6 +1,5 @@
 #include <conversation/workflow/OneBotEventWorkflow.hpp>
 #include <infrastructure/config/Config.hpp>
-#include <infrastructure/logging/Logger.hpp>
 #include <onebot/http/ProcessQQMessages.hpp>
 
 drogon::Task<> insoulforge::ProcessQQMessages::receiveOneBotEvent(

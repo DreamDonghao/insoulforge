@@ -1,11 +1,8 @@
 /// @file Config.cpp
 /// @brief 全局配置管理 - 实现
 
-#include <infrastructure/CommonUtil.hpp>
-#include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/config/ConfigStore.hpp>
-#include <spdlog/spdlog.h>
 
 namespace insoulforge {
     namespace {

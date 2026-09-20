@@ -2,7 +2,6 @@
 /// @brief 群组配置管理器 - 实现
 
 #include <conversation/session/SessionConfigManager.hpp>
-#include <conversation/session/SessionStore.hpp>
 
 namespace insoulforge {
     SessionConfig SessionConfigManager::getConfig(const uint64_t sessionId) {

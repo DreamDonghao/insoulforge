@@ -1,14 +1,12 @@
 /// @file ConversationMaintenanceService.cpp
 /// @brief 会话派生状态维护的统一入口实现
 
-#include <conversation/maintenance/ConversationMaintenanceService.hpp>
 
 #include <conversation/maintenance/ConversationMaintenanceStore.hpp>
 #include <conversation/maintenance/affinity/AffinityMaintenanceService.hpp>
 #include <conversation/maintenance/affinity/AffinityMaintenanceStore.hpp>
 #include <conversation/maintenance/memory/MemoryMaintenanceService.hpp>
 #include <conversation/maintenance/memory/MemoryMaintenanceStore.hpp>
-#include <drogon/drogon.h>
 
 namespace insoulforge::ConversationMaintenanceService {
     void enqueue(const uint64_t sessionId, const json &messages, const json &contextMessages) {

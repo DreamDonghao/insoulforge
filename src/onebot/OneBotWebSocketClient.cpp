@@ -5,7 +5,6 @@
 
 #include <conversation/workflow/OneBotEventWorkflow.hpp>
 #include <infrastructure/config/Config.hpp>
-#include <spdlog/spdlog.h>
 
 namespace insoulforge {
     namespace {
