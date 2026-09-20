@@ -48,13 +48,10 @@ docker pull ghcr.io/dreamdonghao/insoulforge:latest
 docker run -d --name insoulforge \
   -p 7778:7778 \
   -v ./data:/app/data \
-  -v ./logs:/app/logs \
-  -v ./uploads:/app/uploads \
   dreamdonghao/insoulforge:latest
 ```
 
-> 全局配置文件 `data/config.json`、数据库、日志和表情包分别持久化在宿主机的 `./data`、`./logs`、`./uploads`
-> 目录（也可自定义目录），升级镜像时数据不会丢失。首次启动会自动创建包含默认值的 `data/config.json`。
+> 全局配置文件 `data/config.json`、数据库、日志和表情包分别持久化在宿主机的 `./data`目录（也可自定义目录），升级镜像时数据不会丢失。首次启动会自动创建包含默认值的 `data/config.json`。
 
 > 如果 napcat 也运行在 Docker 中，注意容器内的 `127.0.0.1` 指向容器自身。启动后让两个容器加入同一个 docker
 > 网络，然后用容器名互访（无需重建容器，connect 直接生效）：

@@ -54,7 +54,7 @@ const copyJoinUrl = async (): Promise<void> => {
     <div class="card about-hero">
       <div class="hero-head">
         <span class="hero-title">InSoulForge</span>
-        <span class="version-badge">v1.3.0</span>
+        <span class="version-badge">v1.4.0</span>
       </div>
       <p class="hero-desc">一个智能 QQ 群聊机器人，基于两层 Agent 架构，支持自定义角色、长期记忆、多工具调用。</p>
     </div>
@@ -67,7 +67,7 @@ const copyJoinUrl = async (): Promise<void> => {
       <div class="info-grid">
         <div class="info-item">
           <span class="info-label">版本</span>
-          <span>1.2.1</span>
+          <span>1.4.0</span>
         </div>
         <div class="info-item">
           <span class="info-label">作者</span>
