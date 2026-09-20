@@ -16,11 +16,11 @@ namespace insoulforge {
     ///          调用者不应跨协程等待持有内部锁。
     class SessionWorkflowState {
     public:
-        /// @brief 将回复快照加入队列后的调度结果
-        enum class ReplyEnqueueResult {
-            StartConsumer, ///< 队列此前空闲，调用者应启动回复消费者
-            Queued, ///< 已有回复消费者，消息已加入队列
-            Skipped, ///< 已有回复消费者，当前消息不应排队
+        /// @brief 请求回复处理后的调度结果
+        enum class ReplyRequestResult {
+            StartProcessor, ///< 当前没有回复任务，调用者应启动回复处理协程
+            Pending, ///< 当前回复任务结束后，需要基于最新上下文再处理一次
+            Skipped, ///< 当前已有回复任务，普通消息不触发额外回复
         };
 
         /// @brief 创建会话工作流状态
@@ -43,24 +43,25 @@ namespace insoulforge {
         /// @note 线程安全。仅应由该会话唯一的预处理消费者调用。
         [[nodiscard]] std::optional<json> takePreparationMessage();
 
-        /// @brief 按当前回复处理状态决定是否加入回复快照队列
-        /// @param snapshot 固定的消息列表快照
-        /// @param mayQueueWhileProcessing 当前已有回复任务时是否仍应排队
-        /// @return 入队或跳过结果
+        /// @brief 请求会话回复处理
+        /// @param mayWaitForCurrentReply 当前已有回复任务时是否仍应等待下一轮回复
+        /// @return 应立即启动、等待下一轮或跳过的结果
+        /// @details 不保存消息快照。回复处理协程开始每一轮时从 MessageList 获取最新上下文，
+        ///          以包含等待期间已发送的助手消息和新到的强制回复消息。
         /// @note 线程安全。
-        [[nodiscard]] ReplyEnqueueResult enqueueReplySnapshot(json snapshot, bool mayQueueWhileProcessing);
+        [[nodiscard]] ReplyRequestResult requestReplyProcessing(bool mayWaitForCurrentReply);
 
-        /// @brief 取出一份等待回复的消息快照
-        /// @return 队首快照；队列为空时返回空值并结束回复消费者状态
-        /// @note 线程安全。仅应由该会话唯一的回复消费者调用。
-        [[nodiscard]] std::optional<json> takeReplySnapshot();
+        /// @brief 完成当前一轮回复处理并决定是否开始下一轮
+        /// @return 等待期间是否收到了需要额外回复的消息
+        /// @note 线程安全。仅应由该会话唯一的回复处理协程调用。
+        [[nodiscard]] bool completeReplyProcessing();
 
     private:
         std::mutex m_mutex;
         std::shared_ptr<MessageList> m_messageList;
         std::queue<json> m_pendingPreparationMessages;
         bool m_isPreparationRunning{false};
-        std::queue<json> m_pendingReplySnapshots;
         bool m_isReplyProcessing{false};
+        bool m_hasPendingReply{false};
     };
 } // namespace insoulforge

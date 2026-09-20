@@ -134,9 +134,6 @@ namespace insoulforge::MessageRouter {
         if (MessageRecord::mentions(message, Config::instance().selfQQNumber)) {
             co_return applySessionType(makeDecision(RouterDecision::Action::REPLY, "用户@提及", 100, true), sessionId);
         }
-        if (MessageRecord::hasSegmentType(message, "face")) {
-            co_return applySessionType(makeDecision(RouterDecision::Action::REPLY, "用户发送原生表情"), sessionId);
-        }
         if (!SessionId::isPrivate(sessionId) && isSpam(message)) {
             co_return applySessionType(makeDecision(RouterDecision::Action::SKIP, "刷屏或短文本"), sessionId);
         }

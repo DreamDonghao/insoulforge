@@ -223,40 +223,43 @@ namespace insoulforge {
                 const auto queueWhileReplying = shouldQueueWhileReplying(currentMessage); // 是否可在以有回复任务时排队
                 currentMessage.erase("session_id");
 
+                // 插入消息列表
                 const auto update = sessionState->messageList()->append(std::move(currentMessage));
                 if (!update) { // 插入失败则退出
                     continue;
                 }
+
+                // 推送到管理后台
                 pushRecordedMessage(sessionId, update->messageSnapshot.back());
-                if (update->summaryBatch) {
+
+                if (update->summaryBatch) { // 达到触发消息持久化配置的情况则进行
                     scheduleConversationMaintenance(sessionId, sessionState->messageList(), *update->summaryBatch);
                 }
 
-                const auto replyEnqueueResult =
-                  sessionState->enqueueReplySnapshot(update->messageSnapshot, queueWhileReplying);
-                if (replyEnqueueResult == SessionWorkflowState::ReplyEnqueueResult::Queued) {
+                const auto replyRequest = sessionState->requestReplyProcessing(queueWhileReplying);
+                if (replyRequest == SessionWorkflowState::ReplyRequestResult::Pending) {
+                    // 强制回复消息会在当前回复结束后基于最新会话上下文合并处理。
+                    recordMessageProcessingStats(sessionId);
                     continue;
                 }
-                if (replyEnqueueResult == SessionWorkflowState::ReplyEnqueueResult::Skipped) {
+                if (replyRequest == SessionWorkflowState::ReplyRequestResult::Skipped) {
                     // 普通消息在同会话回复进行中仍会完成预处理，但不触发第二个 Agent 请求
                     recordMessageProcessingStats(sessionId);
                     continue;
                 }
-                drogon::async_run([this, sessionId]() -> drogon::Task<> { co_await processReplyQueue(sessionId); });
+                drogon::async_run([this, sessionId]() -> drogon::Task<> { co_await processReplyWorkflow(sessionId); });
             } catch (...) {
                 // 单条消息富化或收尾失败不能阻塞同会话后续消息。
             }
         }
     }
 
-    drogon::Task<> OneBotEventWorkflow::processReplyQueue(const uint64_t sessionId) {
+    drogon::Task<> OneBotEventWorkflow::processReplyWorkflow(const uint64_t sessionId) {
         const auto sessionState = getOrCreateSessionState(sessionId);
+        bool isInitialReply = true;
         while (true) {
-            auto nextSnapshot = sessionState->takeReplySnapshot();
-            if (!nextSnapshot) {
-                co_return;
-            }
-            auto messageSnapshot = json(std::move(*nextSnapshot));
+            // 每轮回复均读取最新快照，避免遗漏等待期间已发送的助手消息。
+            const auto messageSnapshot = sessionState->messageList()->snapshot();
 
             try {
                 if (!AgentSystem::instance().isReady()) {
@@ -286,7 +289,13 @@ namespace insoulforge {
             } catch (...) {
                 // Router、Executor 或发送失败不影响同会话后续回复任务。
             }
-            recordMessageProcessingStats(sessionId);
+            if (isInitialReply) {
+                recordMessageProcessingStats(sessionId);
+                isInitialReply = false;
+            }
+            if (!sessionState->completeReplyProcessing()) {
+                co_return;
+            }
         }
     }
 } // namespace insoulforge

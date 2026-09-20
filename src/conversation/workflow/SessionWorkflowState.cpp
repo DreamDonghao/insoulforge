@@ -30,29 +30,27 @@ namespace insoulforge {
         return message;
     }
 
-    SessionWorkflowState::ReplyEnqueueResult SessionWorkflowState::enqueueReplySnapshot(
-      json snapshot, const bool mayQueueWhileProcessing) {
+    SessionWorkflowState::ReplyRequestResult SessionWorkflowState::requestReplyProcessing(
+      const bool mayWaitForCurrentReply) {
         std::lock_guard lock(m_mutex);
         if (m_isReplyProcessing) {
-            if (!mayQueueWhileProcessing) {
-                return ReplyEnqueueResult::Skipped;
+            if (!mayWaitForCurrentReply) {
+                return ReplyRequestResult::Skipped;
             }
-            m_pendingReplySnapshots.push(std::move(snapshot));
-            return ReplyEnqueueResult::Queued;
+            m_hasPendingReply = true;
+            return ReplyRequestResult::Pending;
         }
-        m_pendingReplySnapshots.push(std::move(snapshot));
         m_isReplyProcessing = true;
-        return ReplyEnqueueResult::StartConsumer;
+        return ReplyRequestResult::StartProcessor;
     }
 
-    std::optional<json> SessionWorkflowState::takeReplySnapshot() {
+    bool SessionWorkflowState::completeReplyProcessing() {
         std::lock_guard lock(m_mutex);
-        if (m_pendingReplySnapshots.empty()) {
-            m_isReplyProcessing = false;
-            return std::nullopt;
+        if (m_hasPendingReply) {
+            m_hasPendingReply = false;
+            return true;
         }
-        json snapshot = std::move(m_pendingReplySnapshots.front());
-        m_pendingReplySnapshots.pop();
-        return snapshot;
+        m_isReplyProcessing = false;
+        return false;
     }
 } // namespace insoulforge
