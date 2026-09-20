@@ -4,8 +4,8 @@
 /// @date 2026-08-30
 
 #include <infrastructure/storage/Database.hpp>
-#include <llm/PromptStore.hpp>
 #include <infrastructure/storage/Statement.hpp>
+#include <llm/PromptStore.hpp>
 
 namespace insoulforge {
     namespace PromptStore {

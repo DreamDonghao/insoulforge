@@ -10,9 +10,9 @@
 
 #pragma once
 #include <drogon/utils/coroutine.h>
+#include <infrastructure/JsonUtil.hpp>
 #include <optional>
 #include <string>
-#include <infrastructure/JsonUtil.hpp>
 #include <vector>
 
 namespace insoulforge {
@@ -22,6 +22,9 @@ namespace insoulforge {
 
 /// @brief API 客户端 - 封装 LLM API 请求与用量统计
 namespace insoulforge::LlmClient {
+    /// @brief 判断 API 配置是否具备发起请求所需的地址、路径和模型名。
+    [[nodiscard]] bool isConfigured(const LLMApiConfig &api);
+
     /// @brief 构建 OpenAI 兼容 chat 请求体（model/messages/采样参数；reasoningEffort 非空才附带）
     /// @param tools 工具定义；非 null 时附带 tools 字段
     json buildChatRequestBody(const LLMApiConfig &api, const LLMModelParams &params, json messages, json tools = {});

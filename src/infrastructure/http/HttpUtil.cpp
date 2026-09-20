@@ -1,10 +1,10 @@
 /// @file HttpUtil.cpp
 /// @brief HTTP 请求工具 - 实现
 
-#include <spdlog/spdlog.h>
-#include <string>
 #include <infrastructure/http/HttpTrace.hpp>
 #include <infrastructure/http/HttpUtil.hpp>
+#include <spdlog/spdlog.h>
+#include <string>
 #include <utility>
 
 namespace insoulforge::HttpUtil {
@@ -46,12 +46,39 @@ namespace insoulforge::HttpUtil {
                 return std::string(token.size(), '*');
             return std::string(token.substr(0, 4)) + "****" + std::string(token.substr(token.size() - 4));
         }
+
+        /// @brief 将带路径前缀的 Base URL 拆为 Drogon 所需的主机地址和完整请求路径。
+        /// @details HttpClient::newHttpClient() 不接受路径；例如将
+        ///          https://api.example.com/v1 与 /chat/completions 转为
+        ///          https://api.example.com 和 /v1/chat/completions。
+        void normalizeTarget(std::string &baseUrl, std::string &path) {
+            const size_t schemeEnd = baseUrl.find("://");
+            if (schemeEnd == std::string::npos)
+                return;
+
+            const size_t prefixStart = baseUrl.find('/', schemeEnd + 3);
+            if (prefixStart == std::string::npos)
+                return;
+
+            std::string prefix = baseUrl.substr(prefixStart);
+            baseUrl.erase(prefixStart);
+            if (path.empty()) {
+                path = std::move(prefix);
+                return;
+            }
+            if (path.front() != '/')
+                path.insert(path.begin(), '/');
+            while (prefix.size() > 1 && prefix.back() == '/')
+                prefix.pop_back();
+            path = prefix == "/" ? std::move(path) : std::move(prefix) + path;
+        }
     } // namespace
 
     drogon::Task<std::optional<drogon::HttpResponsePtr>> send(const std::string_view tag, std::string baseUrl,
       std::string path, const drogon::HttpMethod method, json body, std::string bearerToken, const double timeout,
       std::optional<uint64_t> sessionId) {
         const auto prefix = sessionId.has_value() ? fmt::format("[group_id={}] {}", *sessionId, tag) : std::string(tag);
+        normalizeTarget(baseUrl, path);
         // 请求体完整序列化一次：请求、HttpTrace（全量）、日志（截断）共用
         auto bodyText = body.is_null() ? std::string{} : dumpJson(body);
         const auto bodyLog = truncate(bodyText, kBodyLogMax);

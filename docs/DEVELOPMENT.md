@@ -90,10 +90,10 @@ cd frontend && npm run type-check
 ```
 
 - HTTP 服务监听 **7778** 端口，管理后台：`http://localhost:7778/index.html`
-- 数据目录 `data/` 与日志 `logs/bot.log` 在工作目录下生成
+- 数据目录 `data/` 与日志 `logs/bot.log` 在工作目录下生成；首次启动会自动创建全局配置文件 `data/config.json`
 - 控制台输入 `exit` 优雅退出
 
-注意：CMake 缓存位于 `cmake-build-*`，部署产物固定输出到仓库根目录的 `build/insoulforge/`。数据库、日志和上传目录相对进程工作目录创建：
+注意：CMake 缓存位于 `cmake-build-*`，部署产物固定输出到仓库根目录的 `build/insoulforge/`。配置文件、数据库、日志和上传目录相对进程工作目录创建：
 从仓库根目录运行时使用根目录的 `data/`、`logs/`、`uploads/`；在 `build/insoulforge/` 中运行时则使用该目录下的同名目录。
 
 契约测试默认不参与常规构建。执行测试时先显式构建测试目标，再运行 CTest：
@@ -183,12 +183,14 @@ MessageService → OneBot API
   解码后最多提交 16 帧，超出时按播放时长均匀抽样并保留首尾帧。成功描述长期缓存，失败结果只缓存 10
   分钟；缓存和记录仅保存哈希、媒体类型、抽帧数与描述，不保存 Base64 内容。
 - 同一会话的消息预处理阶段严格 FIFO：图片识别与向量召回完成后才写入消息列表和创建快照，因此后到消息不能改变已启动任务的上下文。
-- 回复阶段与消息预处理阶段解耦。已有回复任务时，@机器人和系统任务进入回复队列，普通消息仅完成预处理、记录 `AgentBusy`，不会打断正在生成的回复。
+- 回复阶段与消息预处理阶段解耦。已有回复任务时，@机器人和系统任务进入回复队列，普通消息仅完成预处理、记录 `AgentBusy`
+  ，不会打断正在生成的回复。
 - `MessageList` 是 Router、Executor 和工具的唯一运行时消息源。它保存完整消息，但快照始终最多暴露
   `contextWindowLimit` 条近期消息。达到 `memorySummaryTriggerCount` 时，它选取最旧的
   `memorySummaryBatchSize` 条创建总结任务；任务完成后才删除这批消息。启动时从数据库恢复，正常退出时调用
   `flushToStorage()` 覆盖持久化恢复副本。
-- 拍一拍、入群、退群均归一化为类型化消息段：`poke`、`member_event`。拍一拍不再按参与者区分，所有拍一拍通知均与普通消息一样交由 Router 决策。
+- 拍一拍、入群、退群均归一化为类型化消息段：`poke`、`member_event`。拍一拍不再按参与者区分，所有拍一拍通知均与普通消息一样交由
+  Router 决策。
 - 预处理、路由、执行或发送的异常均限制在当前消息或当前回复任务内，不能使同会话队列停滞。工作流不使用轮询或忙等待。
 
 新增主处理步骤时，先确定其属于消息预处理阶段还是回复阶段，再在 `OneBotEventWorkflow` 的对应队列处理函数中调用一个职责单一的组件。
@@ -227,28 +229,38 @@ MessageService → OneBot API
 
 - **短期记忆**：`MemoryManager` 按统一会话 ID 从 SQLite 读取当前短期记忆，供 Executor 构建提示词。
 - **长期记忆**：`LongTermMemory` 封装 `long_term_memory` 表的读取与向量检索；embedding 以 float 数组存入 BLOB。
-- **维护批次**：`MessageList` 到达 `memorySummaryTriggerCount` 后，选取最旧的 `memorySummaryBatchSize` 条消息作为待总结内容，并复制随后最多 `memorySummaryContextCount` 条只读上下文。待总结消息在任务成功前继续保留在列表中。
+- **维护批次**：`MessageList` 到达 `memorySummaryTriggerCount` 后，选取最旧的 `memorySummaryBatchSize` 条消息作为待总结内容，并复制随后最多
+  `memorySummaryContextCount` 条只读上下文。待总结消息在任务成功前继续保留在列表中。
 - **任务持久化与恢复**：`ConversationMaintenanceService` 通过 `ConversationMaintenanceStore` 在同一 SQLite 事务中创建
-  `memory_maintenance_jobs` 与 `affinity_maintenance_jobs`，随后分别异步调度消费者。两类任务各自按会话串行、退避重试，并在启动时由 `resumePending()` 恢复；它们互不依赖。
-- **记忆维护**：`MemoryMaintenanceService` 提取并归类短期/长期记忆；它会按 `longTermRecallThreshold` 召回相似长期记忆，用于合并、去重和替换。embedding 完成后，在同一事务中更新短期记忆、写入长期记忆、删除被取代条目并确认任务完成。只有该任务成功并确认后，`MessageList` 才删除对应的最旧前缀。
+  `memory_maintenance_jobs` 与 `affinity_maintenance_jobs`，随后分别异步调度消费者。两类任务各自按会话串行、退避重试，并在启动时由
+  `resumePending()` 恢复；它们互不依赖。
+- **记忆维护**：`MemoryMaintenanceService` 提取并归类短期/长期记忆；它会按 `longTermRecallThreshold`
+  召回相似长期记忆，用于合并、去重和替换。embedding 完成后，在同一事务中更新短期记忆、写入长期记忆、删除被取代条目并确认任务完成。只有该任务成功并确认后，
+  `MessageList` 才删除对应的最旧前缀。
 - **好感度维护**：`AffinityMaintenanceService` 消费同一待总结批次，但独立评估、重试和恢复；任务完成时以事务应用分数并删除任务，避免重试重复叠加。
-- 记忆提取与合并复用 executor 模型（`LlmClient::requestLLM`）；向量化使用独立 embedding 配置（`LlmClient::requestEmbedding`）。`recall_memory` 工具按余弦相似度（阈值 0.3）检索长期记忆，Router 另有 `routerWindowTriggerCount` / `routerWindowKeepCount` 子窗口参数。
-- **被动召回**：消息预处理阶段从文本段和成功图片描述构建查询，命中结果直接写入当前完整消息的 `memories` 字段；该字段随快照进入 Executor
+- 记忆提取与合并复用 executor 模型（`LlmClient::requestLLM`）；向量化使用独立 embedding 配置（
+  `LlmClient::requestEmbedding`）。`recall_memory` 工具按余弦相似度（阈值 0.3）检索长期记忆，Router 另有
+  `routerWindowTriggerCount` / `routerWindowKeepCount` 子窗口参数。
+- **被动召回**：消息预处理阶段从文本段和成功图片描述构建查询，命中结果直接写入当前完整消息的 `memories` 字段；该字段随快照进入
+  Executor
   上下文，不依赖独立缓存或聊天记录读取时的二次注入。
 
 ### 配置系统
 
-`Config` 单例从 SQLite 加载 LLM API 配置（router / executor / executorThinking / image / embedding，每组独立配置 model /
-endpoint 等参数，可选 `reasoningEffort`）、QQ Bot 配置、记忆参数。管理后台另有 `memory`
-LLM 配置项存储于数据库，但当前记忆提取复用 executor 模型。提示词由 `PromptService` 管理（`executor_system` /
+`ConfigStore` 将 LLM API 配置（router / executor / executorThinking / image / embedding，每组独立配置 model /
+endpoint 等参数，可选 `reasoningEffort`）、QQ Bot 配置和记忆参数统一写入 `data/config.json`。启动时若文件不存在则创建默认配置；若
+JSON 损坏则备份为 `config.json.broken.<时间戳>` 后重建；缺失或类型不匹配的字段会补默认值并回写。管理后台保存时先写入临时文件，再原子替换原文件。
+
+`Config` 单例在启动期从该文件加载运行时副本。提示词由 `PromptService` 管理（`executor_system` /
 `router_system`），支持 `{botName}` 占位符，修改后写回数据库。
 
 **用量统计**：每次 LLM 调用通过 `LlmClient::logUsage` 记录模型与 token 用量，后台"用量统计"页读取 `/admin/api/usage` 展示。
 
 ### 数据库
 
-SQLite 文件位于 `data/insoulforge.db`（`Database` 单例，以读写锁保护）。存储包括完整消息恢复副本、短期/长期记忆、记忆与好感度维护任务、LLM
-配置、提示词、会话配置、管理员、表情与自定义工具。
+SQLite 文件位于 `data/insoulforge.db`（`Database`
+单例，以读写锁保护）。存储包括完整消息恢复副本、短期/长期记忆、记忆与好感度维护任务、提示词、会话配置、管理员、表情与自定义工具。全局运行配置不属于数据库，位于同目录的
+`config.json`。
 
 调试时可用任意 SQLite 客户端查看：
 
@@ -352,7 +364,8 @@ Schema 中写清楚触发条件与边界。需要调整同类别展示位置时�
   Router 决策与 Executor 输出。管理后台读取 `LogBuffer` 的内存缓冲，启动时按 `bot.log`、`bot.1.log`、`bot.2.log` 从新到旧补足最近
   5000 条记录，避免全量解析滚动日志拖慢启动
 - **协程**：所有异步 I/O 使用 `drogon::Task<T>` / `co_await`，注意 `co_await` 后对象生命周期（捕获 `shared_ptr` 而非裸指针）
-- **会话并发**：`OneBotEventWorkflow` 为每个会话分别维护消息预处理队列、回复队列和 `MessageList`。不要在外部直接并发修改 `MessageList`，也不要跨 `co_await` 持有其内部或工作流内部锁。
+- **会话并发**：`OneBotEventWorkflow` 为每个会话分别维护消息预处理队列、回复队列和 `MessageList`。不要在外部直接并发修改
+  `MessageList`，也不要跨 `co_await` 持有其内部或工作流内部锁。
 - **前端**：`npm run dev` + 浏览器 DevTools；后端日志会打印收到的 OneBot 原始 JSON
 
 ## 代码规范

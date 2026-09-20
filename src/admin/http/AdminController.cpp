@@ -719,7 +719,7 @@ Task<> AdminController::saveQQConfig(HttpRequestPtr req, std::function<void(cons
     config.oneBotTransport = getStr(*body, "oneBotTransport", "http");
     config.qqHttpHost = getStr(*body, "qqHttpHost");
     config.qqWebSocketHost = getStr(*body, "qqWebSocketHost");
-    config.botName = getStr(*body, "botName", "小喵");
+    config.botName = getStr(*body, "botName", "机器人");
     if (config.oneBotTransport != "http" && config.oneBotTransport != "websocket") {
         config.oneBotTransport = "http";
     }

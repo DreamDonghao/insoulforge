@@ -9,7 +9,7 @@
 
 namespace insoulforge {
     namespace {
-        /// @brief 从数据库加载单个 LLM 配置
+        /// @brief 从配置文件加载单个 LLM 配置
         /// @param name 配置名（router/executor/executorThinking/image）
         /// @param apiConfig 输出的 API 配置
         /// @param modelParams 模型参数（可为 nullptr，表示不加载）
@@ -30,7 +30,7 @@ namespace insoulforge {
             if (modelParams) {
                 modelParams->maxTokens = getInt(cfg, "maxTokens");
                 modelParams->temperature = getDouble(cfg, "temperature");
-                modelParams->topP = getDouble(cfg, "topP");
+                modelParams->topP = getDouble(cfg, "topP", getDouble(cfg, "top_P"));
             }
         }
     } // namespace
@@ -41,7 +41,7 @@ namespace insoulforge {
     }
 
 
-    void Config::loadFromDatabase() {
+    void Config::loadFromStorage() {
         loadLLMConfig("router", router, &routerParams);
         loadLLMConfig("executor", executor, &executorParams);
         loadLLMConfig("executorThinking", executorThinking, &executorThinkingParams);
@@ -77,7 +77,7 @@ namespace insoulforge {
                 longTermRecallThreshold = 0.65;
             if (longTermInjectThreshold <= 0.0 || longTermInjectThreshold >= 1.0)
                 longTermInjectThreshold = 0.45;
-            spdlog::info("记忆配置已从数据库加载");
+            spdlog::info("记忆配置已从配置文件加载");
         }
 
         // 加载 QQ Bot 配置
@@ -93,9 +93,9 @@ namespace insoulforge {
             if (oneBotTransport != "http" && oneBotTransport != "websocket") {
                 oneBotTransport = "http";
             }
-            spdlog::info("QQ Bot 配置已从数据库加载");
+            spdlog::info("QQ Bot 配置已从配置文件加载");
         }
 
-        spdlog::info("所有配置已从数据库加载");
+        spdlog::info("所有配置已从配置文件加载");
     }
 } // namespace insoulforge

@@ -1,18 +1,18 @@
 /// @file InfoToolsPlugin.cpp
 /// @brief 信息工具插件实现（INFORMATION，查询数据、获取答案，不产生副作用）
 
-#include <include/agent/tools/ToolRegistry.hpp>
+#include <agent/ability/TaskStore.hpp>
+#include <agent/memory/LongTermMemory.hpp>
 #include <agent/tools/ToolArgument.hpp>
 #include <agent/tools/ToolRuntime.hpp>
 #include <agent/tools/plugins/InfoToolsPlugin.hpp>
 #include <algorithm>
-#include <infrastructure/config/Config.hpp>
-#include <fmt/core.h>
 #include <conversation/message/SessionId.hpp>
-#include <llm/LlmClient.hpp>
-#include <agent/memory/LongTermMemory.hpp>
-#include <agent/ability/TaskStore.hpp>
+#include <fmt/core.h>
+#include <include/agent/tools/ToolRegistry.hpp>
+#include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
+#include <llm/LlmClient.hpp>
 
 namespace insoulforge {
     namespace {

@@ -3,10 +3,10 @@
 
 #include <chrono>
 #include <ctime>
+#include <infrastructure/http/HttpTrace.hpp>
 #include <iomanip>
 #include <ranges>
 #include <sstream>
-#include <infrastructure/http/HttpTrace.hpp>
 
 namespace insoulforge {
     namespace {

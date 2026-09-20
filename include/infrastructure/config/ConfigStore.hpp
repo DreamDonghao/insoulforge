@@ -1,40 +1,39 @@
 /// @file ConfigStore.hpp
-/// @brief 配置存储
+/// @brief 全局配置文件存储
 /// @author donghao
 /// @date 2026-08-30
-/// @details 表：llm_config（多行 LLM 配置）、settings（QQ/记忆配置以 JSON 键值存储）
+/// @details 配置统一保存在运行目录的 data/config.json。文件缺失时自动创建，
+///          缺失或类型不匹配的字段会按默认值修复后写回。
 
 #pragma once
 #include <string>
 
 #include <infrastructure/JsonUtil.hpp>
 
-namespace insoulforge {
-    /// @brief 配置存储
-    namespace ConfigStore {
-        // ============================================================
-        //                      LLM 配置
-        // ============================================================
 
-        [[nodiscard]] json getLLMConfig(const std::string &name);
+/// @brief 全局配置文件读写接口
+namespace insoulforge::ConfigStore {
+    /// @brief 初始化配置文件。
+    /// @param path 配置文件路径，默认使用 data/config.json。
+    /// @throws std::runtime_error 目录创建、读取或原子写入失败时抛出。
+    void initialize(const std::string &path = "data/config.json");
 
-        void saveLLMConfig(const std::string &name, const json &config);
+    // ==================== LLM 配置 ====================
 
-        [[nodiscard]] json getAllLLMConfigs();
+    [[nodiscard]] json getLLMConfig(const std::string &name);
 
-        // ============================================================
-        //              QQ Bot / 记忆 配置（settings 存储）
-        // ============================================================
+    void saveLLMConfig(const std::string &name, const json &config);
 
-        [[nodiscard]] json getQQConfig();
+    [[nodiscard]] json getAllLLMConfigs();
 
-        void saveQQConfig(const json &config);
+    // ==================== QQ Bot / 记忆配置 ====================
 
-        [[nodiscard]] json getMemoryConfig();
+    [[nodiscard]] json getQQConfig();
 
-        void saveMemoryConfig(const json &config);
+    void saveQQConfig(const json &config);
 
-        /// @brief 首次启动时初始化默认 LLM 配置（已存在则跳过）
-        void initDefaults();
-    } // namespace ConfigStore
-} // namespace insoulforge
+    [[nodiscard]] json getMemoryConfig();
+
+    void saveMemoryConfig(const json &config);
+
+} // namespace insoulforge::ConfigStore

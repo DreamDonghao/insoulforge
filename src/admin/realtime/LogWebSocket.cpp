@@ -3,8 +3,8 @@
 
 #include <admin/realtime/LogWebSocket.hpp>
 #include <admin/realtime/LogWebSocketManager.hpp>
-#include <spdlog/spdlog.h>
 #include <infrastructure/JsonUtil.hpp>
+#include <spdlog/spdlog.h>
 
 namespace insoulforge {
     void LogWebSocket::handleNewConnection(

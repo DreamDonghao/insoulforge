@@ -9,6 +9,7 @@
 ///          - 每日任务（isDaily）触发后不结束，自动推进到次日同一时刻重新入堆，直到被取消
 ///          - 重启时从数据库恢复全部 pending 任务；已过期的任务照常触发并标注延时
 #pragma once
+#include <agent/ability/TaskStore.hpp>
 #include <atomic>
 #include <condition_variable>
 #include <drogon/utils/coroutine.h>
@@ -16,7 +17,6 @@
 #include <optional>
 #include <queue>
 #include <set>
-#include <agent/ability/TaskStore.hpp>
 #include <thread>
 
 namespace insoulforge {

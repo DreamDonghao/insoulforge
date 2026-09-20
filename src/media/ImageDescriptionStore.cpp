@@ -2,8 +2,8 @@
 /// @brief 图片视觉描述缓存存储实现
 
 #include <infrastructure/storage/Database.hpp>
-#include <media/ImageDescriptionStore.hpp>
 #include <infrastructure/storage/Statement.hpp>
+#include <media/ImageDescriptionStore.hpp>
 
 namespace insoulforge::ImageDescriptionStore {
     std::optional<CachedImageDescription> find(

@@ -21,8 +21,8 @@
 namespace insoulforge::HttpUtil {
     /// @brief 发送 HTTP 请求，记录请求内容与异常
     /// @param tag 日志前缀，如 "[Router]"、"[Executor]"
-    /// @param baseUrl 服务器地址（含协议与端口，如 http://127.0.0.1:3001）
-    /// @param path 请求路径，如 /v1/chat/completions
+    /// @param baseUrl 服务 Base URL，可包含路径前缀，如 https://api.example.com/v1
+    /// @param path 请求路径，如 /chat/completions；会与 Base URL 中的路径前缀合并
     /// @param method HTTP 方法
     /// @param body JSON 请求体（null 表示无 body，例如 GET；按值接管，协程帧持有）
     /// @param bearerToken Bearer 认证 token（空串则不添加 Authorization 头）

@@ -5,11 +5,11 @@
 #include <tuple>
 #include <utility>
 
-#include <spdlog/spdlog.h>
-#include <include/agent/tools/ToolRegistry.hpp>
 #include <agent/tools/ToolPluginCatalog.hpp>
 #include <agent/tools/ToolRuntime.hpp>
 #include <agent/tools/ToolStore.hpp>
+#include <include/agent/tools/ToolRegistry.hpp>
+#include <spdlog/spdlog.h>
 
 namespace insoulforge {
     namespace {

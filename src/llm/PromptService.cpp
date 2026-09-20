@@ -3,8 +3,8 @@
 
 #include <infrastructure/config/Config.hpp>
 #include <llm/PromptService.hpp>
-#include <spdlog/spdlog.h>
 #include <llm/PromptStore.hpp>
+#include <spdlog/spdlog.h>
 
 namespace insoulforge {
     void PromptService::initialize() {

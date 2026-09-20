@@ -68,7 +68,8 @@ Executor（`ExecutorAgent`）在单个 Agent 循环中通过工具调用生成�
 | `recall_message` | `message_id`      | 撤回消息：撤引用的消息用 `reply_to` 字段值，撤某条消息本身用 `message_id` 字段值                                                                                                          |
 
 拍一拍的接收：OneBot notice 事件（`notice_type=notify, sub_type=poke`）先由 `OneBotEventNormalizer` 归一化，再进入
-`OneBotEventWorkflow` 的会话消息预处理队列。禁用会话会提前跳过；已启用会话中，拍一拍保存为独立 `poke` 段，所有拍一拍通知均与普通消息一样由 Router
+`OneBotEventWorkflow` 的会话消息预处理队列。禁用会话会提前跳过；已启用会话中，拍一拍保存为独立 `poke` 段，所有拍一拍通知均与普通消息一样由
+Router
 决策是否回应。群成员入群、退群以 `member_event` 段走同一工作流。
 
 ### 定时任务

@@ -84,7 +84,7 @@ const qqConfig = reactive<QQConfigType>({
   oneBotTransport: 'http',
   qqHttpHost: '',
   qqWebSocketHost: '',
-  botName: '小喵'
+  botName: '机器人'
 })
 
 // Bot 头像（QQ 公开头像 CDN，失败时回退为线条图标）

@@ -138,8 +138,8 @@ const toolCount: Ref<number> = ref(0)
 const transportLabel = computed(() => oneBotStatus.value.transport === 'websocket' ? 'WebSocket' : 'HTTP')
 const oneBotAddressLabel = computed(() => oneBotStatus.value.transport === 'websocket' ? 'WebSocket 地址' : 'HTTP 地址')
 const oneBotConnectionReady = computed(() => oneBotStatus.value.transport === 'http'
-  ? oneBotStatus.value.configured
-  : oneBotStatus.value.websocketConnected)
+    ? oneBotStatus.value.configured
+    : oneBotStatus.value.websocketConnected)
 const oneBotConnectionText = computed(() => {
   if (oneBotStatus.value.transport === 'http') {
     return oneBotStatus.value.configured ? 'OneBot HTTP 已配置' : 'OneBot HTTP 未配置'
@@ -331,8 +331,9 @@ onUnmounted(() => {
         </button>
       </div>
       <div class="status-item">
-        <span :class="oneBotConnectionReady ? 'dot-green' : oneBotStatus.transport === 'websocket' ? 'dot-red' : 'dot-gray'"
-              class="status-dot"></span>
+        <span
+            :class="oneBotConnectionReady ? 'dot-green' : oneBotStatus.transport === 'websocket' ? 'dot-red' : 'dot-gray'"
+            class="status-dot"></span>
         <span>{{ oneBotConnectionText }}</span>
       </div>
     </div>

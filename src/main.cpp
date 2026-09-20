@@ -18,6 +18,7 @@
 #include <drogon/drogon.h>
 #include <include/agent/ability/TaskScheduler.hpp>
 #include <infrastructure/config/Config.hpp>
+#include <infrastructure/config/ConfigStore.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <iostream>
@@ -30,11 +31,12 @@ int main() {
     try {
         // 系统初始化
         Logger::init();
+        ConfigStore::initialize();
         auto &database = Database::instance();
         database.initialize("data/insoulforge.db");
 
         auto &config = Config::instance();
-        config.loadFromDatabase();
+        config.loadFromStorage();
 
         // 初始化 QQ 昵称
         QQNameDirectory::setCustomName(config.selfQQNumber, config.botName + "(我)");

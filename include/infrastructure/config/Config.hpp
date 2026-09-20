@@ -50,11 +50,12 @@ namespace insoulforge {
         std::string oneBotTransport = "http";
         std::string qqHttpHost;
         std::string qqWebSocketHost;
-        std::string botName;
+        std::string botName{"机器人"};
 
         static Config &instance();
 
-        void loadFromDatabase();
+        /// @brief 从全局配置文件加载运行时配置。
+        void loadFromStorage();
 
     private:
         Config() = default;

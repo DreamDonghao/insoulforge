@@ -2,9 +2,9 @@
 /// @brief 图片与动图的视觉描述服务
 
 #pragma once
+#include <drogon/utils/coroutine.h>
 #include <optional>
 #include <string>
-#include <drogon/utils/coroutine.h>
 
 namespace insoulforge {
     /// @brief 图片视觉描述结果

@@ -4,13 +4,13 @@
 #include <chrono>
 #include <drogon/HttpAppFramework.h>
 
-#include <infrastructure/config/Config.hpp>
-#include <llm/LlmClient.hpp>
 #include <admin/realtime/WebSocketManager.hpp>
-#include <spdlog/spdlog.h>
-#include <llm/UsageStore.hpp>
+#include <infrastructure/config/Config.hpp>
 #include <infrastructure/http/HttpUtil.hpp>
 #include <infrastructure/logging/Logger.hpp>
+#include <llm/LlmClient.hpp>
+#include <llm/UsageStore.hpp>
+#include <spdlog/spdlog.h>
 
 namespace insoulforge {
     namespace {
@@ -34,6 +34,14 @@ namespace insoulforge {
           std::string api_key, std::string model, const double temperature, const double top_p, const int max_tokens,
           std::string role, const std::optional<uint64_t> sessionId, const double timeoutSeconds) {
             const LLMApiConfig api{.apiKey = api_key, .baseUrl = base_url, .path = path, .model = model};
+            if (!LlmClient::isConfigured(api)) {
+                if (sessionId) {
+                    Logger::session(*sessionId).warn("[LLM] 未配置服务地址、请求路径或模型名，跳过请求");
+                } else {
+                    spdlog::warn("[LLM] 未配置服务地址、请求路径或模型名，跳过请求");
+                }
+                co_return std::nullopt;
+            }
             const LLMModelParams params{.maxTokens = max_tokens, .temperature = temperature, .topP = top_p};
             json body = LlmClient::buildChatRequestBody(api, params, std::move(messages));
             const auto resp = co_await HttpUtil::send("[LLM]", std::move(base_url), std::move(path), drogon::Post,
@@ -62,6 +70,10 @@ namespace insoulforge {
     } // namespace
 
     namespace LlmClient {
+        bool isConfigured(const LLMApiConfig &api) {
+            return !api.baseUrl.empty() && !api.path.empty() && !api.model.empty();
+        }
+
         json buildChatRequestBody(const LLMApiConfig &api, const LLMModelParams &params, json messages, json tools) {
             json body;
             body["model"] = api.model;
@@ -93,6 +105,10 @@ namespace insoulforge {
           const LLMApiConfig &apiConfig, const LLMModelParams &params, json messages, json tools,
           const uint64_t sessionId) {
             const std::string tag = "[" + label + "]";
+            if (!isConfigured(apiConfig)) {
+                Logger::session(sessionId).warn("{} 未配置服务地址、请求路径或模型名，跳过请求", tag);
+                co_return std::nullopt;
+            }
             Logger::session(sessionId).debug("{} model={}", tag, apiConfig.model);
 
             const json body = buildChatRequestBody(apiConfig, params, std::move(messages), std::move(tools));
@@ -137,7 +153,7 @@ namespace insoulforge {
     drogon::Task<std::optional<std::vector<float>>> LlmClient::requestEmbedding(
       std::string text, const std::optional<uint64_t> sessionId) {
         const auto &config = Config::instance().embedding;
-        if (config.baseUrl.empty() || config.model.empty()) {
+        if (!isConfigured(config)) {
             spdlog::debug("Embedding 未配置，跳过向量化");
             co_return std::nullopt;
         }

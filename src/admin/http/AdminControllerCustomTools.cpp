@@ -3,20 +3,20 @@
 /// @author donghao
 /// @date 2026-09-01
 
-#include <include/agent/tools/ToolRegistry.hpp>
-#include <agent/tools/ToolRuntime.hpp>
-#include <algorithm>
-#include <array>
-#include <infrastructure/config/Config.hpp>
 #include <admin/http/AdminController.hpp>
 #include <admin/http/AdminResponse.hpp>
-#include <ranges>
-#include <spdlog/spdlog.h>
-#include <infrastructure/config/ConfigStore.hpp>
-#include <llm/PromptStore.hpp>
+#include <agent/tools/ToolRuntime.hpp>
 #include <agent/tools/ToolStore.hpp>
+#include <algorithm>
+#include <array>
+#include <include/agent/tools/ToolRegistry.hpp>
 #include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/config/Config.hpp>
+#include <infrastructure/config/ConfigStore.hpp>
+#include <llm/PromptStore.hpp>
+#include <ranges>
+#include <spdlog/spdlog.h>
 
 using namespace insoulforge;
 using namespace drogon;
@@ -57,6 +57,7 @@ Task<> AdminController::saveLLMConfig(
         .params = &config.executorThinkingParams,
         .defaultMaxTokens = 512},
       ConfigTarget{.name = "image", .api = &config.image, .params = &config.imageParams, .defaultMaxTokens = 1024},
+      ConfigTarget{.name = "embedding", .api = &config.embedding, .params = nullptr, .defaultMaxTokens = 0},
     };
 
     if (const auto it = std::ranges::find(targets, name, &ConfigTarget::name); it != targets.end()) {
@@ -69,7 +70,7 @@ Task<> AdminController::saveLLMConfig(
         if (it->params) {
             it->params->maxTokens = getInt(*body, "maxTokens", it->defaultMaxTokens);
             it->params->temperature = getDouble(*body, "temperature", 0.7);
-            it->params->topP = getDouble(*body, "topP", 0.9);
+            it->params->topP = getDouble(*body, "topP", getDouble(*body, "top_P", 0.9));
         }
     }
 

@@ -5,9 +5,9 @@
 
 #pragma once
 
+#include <conversation/message/SessionId.hpp>
 #include <cstdint>
 #include <fmt/format.h>
-#include <conversation/message/SessionId.hpp>
 #include <spdlog/spdlog.h>
 #include <string_view>
 #include <utility>

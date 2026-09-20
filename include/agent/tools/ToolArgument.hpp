@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include <string>
 #include <infrastructure/JsonUtil.hpp>
+#include <string>
 
 namespace insoulforge {
     /// @brief 从工具调用参数中读取字符串

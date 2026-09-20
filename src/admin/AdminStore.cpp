@@ -3,10 +3,10 @@
 /// @author donghao
 /// @date 2026-08-30
 
-#include <spdlog/spdlog.h>
 #include <admin/AdminStore.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
+#include <spdlog/spdlog.h>
 
 namespace insoulforge {
     namespace AdminStore {

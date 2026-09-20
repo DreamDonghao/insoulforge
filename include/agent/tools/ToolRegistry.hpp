@@ -10,9 +10,9 @@
 #pragma once
 #include <drogon/utils/coroutine.h>
 #include <functional>
+#include <infrastructure/JsonUtil.hpp>
 #include <map>
 #include <string>
-#include <infrastructure/JsonUtil.hpp>
 #include <vector>
 
 namespace insoulforge {

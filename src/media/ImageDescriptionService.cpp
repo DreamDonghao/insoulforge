@@ -5,20 +5,20 @@
 
 #include <algorithm>
 #include <array>
-#include <infrastructure/config/Config.hpp>
 #include <cstring>
 #include <gif_lib.h>
+#include <infrastructure/config/Config.hpp>
+#include <infrastructure/http/HttpUtil.hpp>
+#include <infrastructure/logging/Logger.hpp>
+#include <llm/LlmClient.hpp>
+#include <media/ImageDescriptionStore.hpp>
 #include <memory>
 #include <numeric>
 #include <openssl/sha.h>
 #include <png.h>
 #include <regex>
-#include <llm/LlmClient.hpp>
 #include <set>
 #include <spdlog/spdlog.h>
-#include <media/ImageDescriptionStore.hpp>
-#include <infrastructure/http/HttpUtil.hpp>
-#include <infrastructure/logging/Logger.hpp>
 #include <utility>
 #include <vector>
 
@@ -306,6 +306,10 @@ namespace insoulforge::ImageDescriptionService {
         drogon::Task<std::optional<std::string>> requestVision(
           std::vector<std::string> images, const bool isGif, const uint64_t sessionId) {
             const auto &config = Config::instance();
+            if (!LlmClient::isConfigured(config.image)) {
+                Logger::session(sessionId).debug("图片识别模型未配置，跳过识别");
+                co_return std::nullopt;
+            }
             json content = json::array();
             for (const auto &image: images)
                 content.push_back({{"type", "image_url"}, {"image_url", {{"url", image}}}});
@@ -330,11 +334,15 @@ namespace insoulforge::ImageDescriptionService {
     } // namespace
 
     drogon::Task<std::optional<ImageDescriptionResult>> describe(std::string sourceUrl, const uint64_t sessionId) {
+        const auto &config = Config::instance();
+        if (!LlmClient::isConfigured(config.image)) {
+            Logger::session(sessionId).debug("图片识别模型未配置，跳过识别");
+            co_return std::nullopt;
+        }
         const auto media = co_await download(std::move(sourceUrl), sessionId);
         if (!media) {
             co_return std::nullopt;
         }
-        const auto &config = Config::instance();
         const std::string hash = sha256(media->bytes);
         const std::string mediaType = media->isGif ? "gif" : "image";
         if (const auto cached = ImageDescriptionStore::find(hash, config.image.model, kPromptVersion)) {

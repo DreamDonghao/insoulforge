@@ -1,14 +1,16 @@
 /// @file MessageContractTests.cpp
 /// @brief 消息链路的契约测试
 
+#include <agent/memory/LongTermMemoryStore.hpp>
+#include <agent/memory/MemoryStore.hpp>
 #include <conversation/history/ChatRecordStore.hpp>
-#include <conversation/session/QQNameDirectory.hpp>
 #include <conversation/maintenance/ConversationMaintenanceStore.hpp>
 #include <conversation/maintenance/affinity/AffinityMaintenanceStore.hpp>
 #include <conversation/maintenance/affinity/AffinityStore.hpp>
 #include <conversation/maintenance/memory/MemoryMaintenanceStore.hpp>
 #include <conversation/message/MessageRecord.hpp>
 #include <conversation/message/SessionId.hpp>
+#include <conversation/session/QQNameDirectory.hpp>
 #include <conversation/workflow/CommandProcessor.hpp>
 #include <conversation/workflow/MessageList.hpp>
 #include <conversation/workflow/MessageRouter.hpp>
@@ -23,8 +25,6 @@
 #include <iostream>
 #include <llm/UsageStore.hpp>
 #include <media/ImageDescriptionStore.hpp>
-#include <agent/memory/LongTermMemoryStore.hpp>
-#include <agent/memory/MemoryStore.hpp>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -321,6 +321,7 @@ namespace {
         constexpr std::string_view kTestName = "image description cache store";
         auto &database = insoulforge::Database::instance();
         database.initialize(":memory:");
+        insoulforge::ConfigStore::initialize("data/message-contract-test-config.json");
 
         insoulforge::ImageDescriptionStore::upsert("hash", "vision-model", 1, "gif", true, "角色挥手", 16);
         const auto succeeded = insoulforge::ImageDescriptionStore::find("hash", "vision-model", 1);
@@ -339,7 +340,7 @@ namespace {
           "image", {{"apiKey", "key"}, {"baseUrl", "https://example.com"}, {"path", "/v1/chat/completions"},
                      {"model", "vision-model"}, {"maxTokens", 1536}, {"temperature", 0.4}, {"topP", 0.8},
                      {"reasoningEffort", ""}});
-        insoulforge::Config::instance().loadFromDatabase();
+        insoulforge::Config::instance().loadFromStorage();
         check(insoulforge::Config::instance().imageParams.maxTokens == 1536, "loads configured image max tokens",
           kTestName);
         database.close();
@@ -391,22 +392,23 @@ namespace {
         const auto third = messages.append(makeMessage(3));
         const auto fourth = messages.append(makeMessage(4));
 
-        check(first.messageSnapshot.size() == 1, "first snapshot stays immutable after later appends", kTestName);
-        check(third.summaryBatch.has_value(), "reaches trigger by reserving a summary batch", kTestName);
-        check(third.summaryBatch->messages.size() == 2, "summary batch has configured size", kTestName);
+        check(first->messageSnapshot.size() == 1, "first snapshot stays immutable after later appends", kTestName);
+        check(third->summaryBatch.has_value(), "reaches trigger by reserving a summary batch", kTestName);
+        check(third->summaryBatch->messages.size() == 2, "summary batch has configured size", kTestName);
         check(
-          third.summaryBatch->messages[0]["message_id"] == "1", "summary batch keeps chronological order", kTestName);
-        check(third.summaryBatch->contextMessages.size() == 1, "summary batch includes configured context", kTestName);
-        check(!fourth.summaryBatch, "does not create another summary while one is pending", kTestName);
-        check(fourth.messageSnapshot.size() == 2, "snapshot retains configured recent window", kTestName);
-        check(fourth.messageSnapshot[0]["message_id"] == "3", "snapshot starts at configured context limit", kTestName);
-        check(fourth.messageSnapshot[1]["assets"]["images"][0]["source"]["url"] == "https://example.com/image.jpg",
+          third->summaryBatch->messages[0]["message_id"] == "1", "summary batch keeps chronological order", kTestName);
+        check(third->summaryBatch->contextMessages.size() == 1, "summary batch includes configured context", kTestName);
+        check(!fourth->summaryBatch, "does not create another summary while one is pending", kTestName);
+        check(fourth->messageSnapshot.size() == 2, "snapshot retains configured recent window", kTestName);
+        check(
+          fourth->messageSnapshot[0]["message_id"] == "3", "snapshot starts at configured context limit", kTestName);
+        check(fourth->messageSnapshot[1]["assets"]["images"][0]["source"]["url"] == "https://example.com/image.jpg",
           "complete image source remains available to tools", kTestName);
         check(insoulforge::ChatRecordStore::getChatRecords(100).empty(), "runtime append does not write database",
           kTestName);
 
-        insoulforge::MemoryMaintenanceStore::enqueue(
-          100, third.summaryBatch->messages, third.summaryBatch->contextMessages, third.summaryBatch->messages.size());
+        insoulforge::MemoryMaintenanceStore::enqueue(100, third->summaryBatch->messages,
+          third->summaryBatch->contextMessages, third->summaryBatch->messages.size());
         const auto job = insoulforge::MemoryMaintenanceStore::next(100);
         check(job.has_value(), "reserved summary batch is persistable", kTestName);
         insoulforge::MemoryMaintenanceStore::complete(job->id, 100, std::nullopt, {});
@@ -419,7 +421,7 @@ namespace {
         check(restoredRecords.size() == 2, "flush persists only retained messages", kTestName);
         insoulforge::MessageList restored(100);
         check(
-          restored.snapshot() == fourth.messageSnapshot, "startup restoration rebuilds retained snapshot", kTestName);
+          restored.snapshot() == fourth->messageSnapshot, "startup restoration rebuilds retained snapshot", kTestName);
 
         config.contextWindowLimit = originalContextLimit;
         config.memorySummaryTriggerCount = originalTriggerCount;

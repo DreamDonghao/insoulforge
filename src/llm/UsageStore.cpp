@@ -3,10 +3,10 @@
 /// @author donghao
 /// @date 2026-08-30
 
+#include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 #include <llm/UsageStore.hpp>
-#include <infrastructure/JsonUtil.hpp>
 
 namespace insoulforge::UsageStore {
     void addUsageRecord(const std::string &role, const std::string &model, const int promptTokens,

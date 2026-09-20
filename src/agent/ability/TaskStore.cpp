@@ -3,9 +3,9 @@
 /// @author donghao
 /// @date 2026-08-30
 
+#include <agent/ability/TaskStore.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
-#include <agent/ability/TaskStore.hpp>
 
 namespace insoulforge {
     namespace TaskStore {

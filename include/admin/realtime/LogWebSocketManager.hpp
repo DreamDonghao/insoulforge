@@ -3,12 +3,12 @@
 
 #pragma once
 #include <drogon/WebSocketConnection.h>
+#include <infrastructure/JsonUtil.hpp>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
-#include <infrastructure/JsonUtil.hpp>
 
 namespace insoulforge {
     struct LogSubscription {

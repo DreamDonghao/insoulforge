@@ -1,246 +1,241 @@
 /// @file ConfigStore.cpp
-/// @brief 配置存储 - 实现
-/// @author donghao
-/// @date 2026-08-30
+/// @brief 全局配置文件存储 - 实现
 
-#include <algorithm>
-#include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/config/ConfigStore.hpp>
-#include <infrastructure/storage/Database.hpp>
-#include <infrastructure/storage/Statement.hpp>
+
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <mutex>
+#include <stdexcept>
+
+#include <infrastructure/JsonUtil.hpp>
 #include <spdlog/spdlog.h>
 
+namespace insoulforge::ConfigStore {
+    namespace {
+        struct ConfigFileState {
+            std::filesystem::path path;
+            json content;
+            std::mutex mutex;
+            bool initialized = false;
+        };
 
-    namespace insoulforge::ConfigStore {
-        namespace {
-            json loadConfigJson(const std::string &key, const json &defaults) {
-                const auto &db = Database::instance();
-                std::shared_lock lock(db.mutex());
+        ConfigFileState &state() {
+            static ConfigFileState instance;
+            return instance;
+        }
 
-                json config = defaults;
-                const Statement stmt(db.handle(), "SELECT value FROM settings WHERE key = ?");
-                stmt.bind(1, key);
-                if (stmt.step()) {
-                    const std::string payload = stmt.getText(0);
-                    if (json parsed; tryParseJson(payload, parsed) && parsed.is_object()) {
-                        // 以存储值覆盖默认值
-                        for (const auto &name: defaults.items()) {
-                            if (const auto it = parsed.find(name.key()); it != parsed.end()) {
-                                config[name.key()] = *it;
-                            }
-                        }
-                    } else {
-                        spdlog::error("settings 配置 {} 解析失败，使用默认值", key);
+        json defaultChatConfig(const int maxTokens, const double temperature, const double topP) {
+            return {{"apiKey", ""}, {"baseUrl", ""}, {"path", "/chat/completions"}, {"model", ""},
+              {"maxTokens", maxTokens}, {"temperature", temperature}, {"topP", topP}, {"reasoningEffort", ""}};
+        }
+
+        json defaultEmbeddingConfig() {
+            return {{"apiKey", ""}, {"baseUrl", ""}, {"path", "/embeddings"}, {"model", ""}};
+        }
+
+        json defaultConfig() {
+            return {
+              {"llm", {{"router", defaultChatConfig(100, 0.3, 0.9)}, {"executor", defaultChatConfig(150, 0.7, 0.9)},
+                        {"executorThinking", defaultChatConfig(512, 0.7, 0.9)},
+                        {"image", defaultChatConfig(1024, 0.7, 0.9)}, {"embedding", defaultEmbeddingConfig()}}},
+              {"qq", {{"accessToken", ""}, {"selfQQNumber", 0}, {"oneBotTransport", "websocket"},
+                       {"qqHttpHost", "http://127.0.0.1:3000"}, {"qqWebSocketHost", "ws://127.0.0.1:3001"},
+                       {"botName", "机器人"}}},
+              {"memory",
+                {{"contextWindowLimit", 100}, {"memorySummaryTriggerCount", 100}, {"memorySummaryBatchSize", 50},
+                  {"memorySummaryContextCount", 10}, {"memoryExtractMaxTokens", 4000}, {"routerWindowTriggerCount", 20},
+                  {"routerWindowKeepCount", 10}, {"shortTermMemoryMax", 15}, {"longTermRecallThreshold", 0.65},
+                  {"longTermInjectThreshold", 0.45}}}};
+        }
+
+        bool compatibleType(const json &value, const json &defaultValue) {
+            if (defaultValue.is_number())
+                return value.is_number();
+            return value.type() == defaultValue.type();
+        }
+
+        /// @brief 用默认结构修复缺失或类型不兼容的字段，保留未知字段以兼容后续版本。
+        bool applyDefaults(json &config, const json &defaults) {
+            bool changed = false;
+            for (const auto &[key, defaultValue]: defaults.items()) {
+                auto value = config.find(key);
+                if (value == config.end() || !compatibleType(*value, defaultValue)) {
+                    config[key] = defaultValue;
+                    changed = true;
+                    continue;
+                }
+                if (defaultValue.is_object()) {
+                    changed = applyDefaults(*value, defaultValue) || changed;
+                }
+            }
+            return changed;
+        }
+
+        /// @brief 将早期配置文件字段迁移为当前命名与结构。
+        bool migrateLegacyFields(json &config) {
+            bool changed = false;
+            changed = config.erase("version") > 0;
+            const auto llm = config.find("llm");
+            if (llm == config.end() || !llm->is_object())
+                return false;
+
+            for (auto &entry: llm->items()) {
+                auto &modelConfig = entry.value();
+                if (!modelConfig.is_object())
+                    continue;
+                if (modelConfig.contains("top_P")) {
+                    if (!modelConfig.contains("topP")) {
+                        modelConfig["topP"] = modelConfig["top_P"];
                     }
+                    modelConfig.erase("top_P");
+                    changed = true;
                 }
-                return config;
-            }
-
-            void saveConfigJson(const std::string &key, const json &config) {
-                const auto &db = Database::instance();
-                std::unique_lock lock(db.mutex());
-
-                const Statement stmt(db.handle(), "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
-                stmt.bind(1, key);
-                stmt.bind(2, dumpJson(config));
-                stmt.exec();
-            }
-        } // namespace
-
-        json getLLMConfig(const std::string &name) {
-            const auto &db = Database::instance();
-            std::shared_lock lock(db.mutex());
-            json config;
-
-            const Statement stmt(db.handle(), "SELECT api_key, base_url, path, model, max_tokens, temperature, top_p, "
-                                              "reasoning_effort FROM llm_config WHERE name = ?");
-            stmt.bind(1, name);
-
-            if (stmt.step()) {
-                config["apiKey"] = stmt.getText(0);
-                config["baseUrl"] = stmt.getText(1);
-                config["path"] = stmt.getText(2);
-                config["model"] = stmt.getText(3);
-                config["maxTokens"] = stmt.getInt(4);
-                config["temperature"] = stmt.getDouble(5);
-                config["topP"] = stmt.getDouble(6);
-                config["reasoningEffort"] = stmt.getText(7);
-            }
-            return config;
-        }
-
-        void saveLLMConfig(const std::string &name, const json &config) {
-            const auto &db = Database::instance();
-            std::unique_lock lock(db.mutex());
-
-            const Statement stmt(db.handle(),
-              "INSERT OR REPLACE INTO llm_config (name, api_key, base_url, path, model, max_tokens, "
-              "temperature, top_p, reasoning_effort) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
-            stmt.bind(1, name);
-            stmt.bind(2, getStr(config, "apiKey"));
-            stmt.bind(3, getStr(config, "baseUrl"));
-            stmt.bind(4, getStr(config, "path"));
-            stmt.bind(5, getStr(config, "model"));
-            stmt.bind(6, getInt(config, "maxTokens"));
-            stmt.bind(7, getDouble(config, "temperature"));
-            stmt.bind(8, getDouble(config, "topP"));
-            stmt.bind(9, getStr(config, "reasoningEffort"));
-            stmt.exec();
-        }
-
-        json getAllLLMConfigs() {
-            const auto &db = Database::instance();
-            std::shared_lock lock(db.mutex());
-            json configs;
-
-            const Statement stmt(db.handle(), "SELECT name, api_key, base_url, path, model, max_tokens, temperature, "
-                                              "top_p, reasoning_effort FROM llm_config");
-            while (stmt.step()) {
-                json cfg;
-                cfg["apiKey"] = stmt.getText(1);
-                cfg["baseUrl"] = stmt.getText(2);
-                cfg["path"] = stmt.getText(3);
-                cfg["model"] = stmt.getText(4);
-                cfg["maxTokens"] = stmt.getInt(5);
-                cfg["temperature"] = stmt.getDouble(6);
-                cfg["topP"] = stmt.getDouble(7);
-                cfg["reasoningEffort"] = stmt.getText(8);
-                configs[stmt.getText(0)] = cfg;
-            }
-            return configs;
-        }
-
-        json getQQConfig() {
-            json defaults;
-            defaults["accessToken"] = "";
-            defaults["selfQQNumber"] = 0;
-            defaults["oneBotTransport"] = "http";
-            defaults["qqHttpHost"] = "http://127.0.0.1:3000";
-            defaults["qqWebSocketHost"] = "ws://127.0.0.1:3001";
-            defaults["botName"] = "小喵";
-            return loadConfigJson("qq_config", defaults);
-        }
-
-        void saveQQConfig(const json &config) {
-            saveConfigJson("qq_config", config);
-            spdlog::info("QQ Bot 配置已保存");
-        }
-
-        json getMemoryConfig() {
-            json defaults;
-            defaults["contextWindowLimit"] = 100;
-            defaults["memorySummaryTriggerCount"] = 100;
-            defaults["memorySummaryBatchSize"] = 50;
-            defaults["memorySummaryContextCount"] = 10;
-            defaults["memoryExtractMaxTokens"] = 4000;
-            defaults["routerWindowTriggerCount"] = 20;
-            defaults["routerWindowKeepCount"] = 10;
-            defaults["shortTermMemoryMax"] = 15;
-            defaults["longTermRecallThreshold"] = 0.65;
-            defaults["longTermInjectThreshold"] = 0.45;
-            json config = loadConfigJson("memory_config", defaults);
-
-            // 兼容 v9 前的窗口配置，避免升级后丢失用户已设定的阈值与保留数量。
-            const auto &db = Database::instance();
-            std::shared_lock lock(db.mutex());
-            const Statement statement(db.handle(), "SELECT value FROM settings WHERE key = 'memory_config'");
-            if (!statement.step()) {
-                return config;
-            }
-            json legacy;
-            if (!tryParseJson(statement.getText(0), legacy) || !legacy.is_object()) {
-                return config;
-            }
-            if (!legacy.contains("contextWindowLimit")) {
-                config["contextWindowLimit"] = std::max(getInt(legacy, "windowTriggerCount"), 1);
-            }
-            if (!legacy.contains("memorySummaryTriggerCount")) {
-                config["memorySummaryTriggerCount"] = std::max(getInt(legacy, "windowTriggerCount"), 1);
-            }
-            if (!legacy.contains("memorySummaryBatchSize")) {
-                config["memorySummaryBatchSize"] =
-                  std::max(getInt(legacy, "windowTriggerCount") - getInt(legacy, "windowKeepCount"), 1);
-            }
-            return config;
-        }
-
-        void saveMemoryConfig(const json &config) {
-            saveConfigJson("memory_config", config);
-            spdlog::info("记忆配置已保存");
-        }
-
-        void initDefaults() {
-            struct DefaultConfig {
-                const char *name, *apiKey, *baseUrl, *path, *model;
-                int maxTokens;
-                double temperature, topP;
-            };
-
-            constexpr DefaultConfig defaults[] = {{.name = "router",
-                                                    .apiKey = "",
-                                                    .baseUrl = "http://127.0.0.1:3001",
-                                                    .path = "/v1/chat/completions",
-                                                    .model = "deepseek-chat",
-                                                    .maxTokens = 100,
-                                                    .temperature = 0.3,
-                                                    .topP = 0.9},
-              {.name = "executor",
-                .apiKey = "",
-                .baseUrl = "http://127.0.0.1:3001",
-                .path = "/v1/chat/completions",
-                .model = "deepseek-chat",
-                .maxTokens = 150,
-                .temperature = 0.7,
-                .topP = 0.9},
-              {.name = "executorThinking",
-                .apiKey = "",
-                .baseUrl = "http://127.0.0.1:3001",
-                .path = "/v1/chat/completions",
-                .model = "deepseek-reasoner",
-                .maxTokens = 512,
-                .temperature = 0.7,
-                .topP = 0.9},
-              {.name = "image",
-                .apiKey = "",
-                .baseUrl = "https://dashscope.aliyuncs.com",
-                .path = "/compatible-mode/v1/chat/completions",
-                .model = "qwen-vl-plus",
-                .maxTokens = 1024,
-                .temperature = 0.7,
-                .topP = 0.9},
-              {.name = "embedding",
-                .apiKey = "",
-                .baseUrl = "http://127.0.0.1:3001",
-                .path = "/v1/embeddings",
-                .model = "bge-m3",
-                .maxTokens = 0,
-                .temperature = 0,
-                .topP = 0}};
-
-            const auto &db = Database::instance();
-            std::unique_lock lock(db.mutex());
-
-            for (const auto &[name, apiKey, baseUrl, path, model, maxTokens, temperature, topP]: defaults) {
-                Statement checkStmt(db.handle(), "SELECT COUNT(*) FROM llm_config WHERE name = ?");
-                checkStmt.bind(1, name);
-                if (checkStmt.step() && checkStmt.getInt(0) > 0) {
-                    continue; // 已存在，跳过
+                if (entry.key() == "embedding") {
+                    changed = modelConfig.erase("maxTokens") > 0 || changed;
+                    changed = modelConfig.erase("temperature") > 0 || changed;
+                    changed = modelConfig.erase("topP") > 0 || changed;
+                    changed = modelConfig.erase("reasoningEffort") > 0 || changed;
                 }
+            }
+            return changed;
+        }
 
-                const Statement stmt(db.handle(), "INSERT INTO llm_config (name, api_key, base_url, path, model, "
-                                                  "max_tokens, temperature, top_p) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-                stmt.bind(1, name);
-                stmt.bind(2, apiKey);
-                stmt.bind(3, baseUrl);
-                stmt.bind(4, path);
-                stmt.bind(5, model);
-                stmt.bind(6, maxTokens);
-                stmt.bind(7, temperature);
-                stmt.bind(8, topP);
-                stmt.exec();
-                spdlog::info("已初始化默认 LLM 配置: {}", name);
+        void writeConfigFile(const std::filesystem::path &path, const json &config) {
+            const std::filesystem::path temporaryPath = path.string() + ".tmp";
+            {
+                std::ofstream output(temporaryPath, std::ios::trunc);
+                if (!output) {
+                    throw std::runtime_error("无法写入配置临时文件: " + temporaryPath.string());
+                }
+                output << dumpJson(config, true, 2) << '\n';
+                output.flush();
+                if (!output) {
+                    throw std::runtime_error("配置临时文件写入失败: " + temporaryPath.string());
+                }
+            }
+
+            std::error_code error;
+            std::filesystem::rename(temporaryPath, path, error);
+            if (error) {
+                throw std::runtime_error("无法原子替换配置文件: " + error.message());
             }
         }
 
-    } // namespace insoulforge::ConfigStore
+        void ensureInitialized() {
+            auto &fileState = state();
+            {
+                std::scoped_lock lock(fileState.mutex);
+                if (fileState.initialized)
+                    return;
+            }
+            initialize();
+        }
 
+        json getSection(const std::string_view section) {
+            ensureInitialized();
+            auto &fileState = state();
+            std::scoped_lock lock(fileState.mutex);
+            return fileState.content[std::string(section)];
+        }
+
+        void saveSection(const std::string_view section, json content) {
+            ensureInitialized();
+            auto &fileState = state();
+            std::scoped_lock lock(fileState.mutex);
+            fileState.content[std::string(section)] = std::move(content);
+            migrateLegacyFields(fileState.content);
+            applyDefaults(fileState.content, defaultConfig());
+            writeConfigFile(fileState.path, fileState.content);
+        }
+    } // namespace
+
+    void initialize(const std::string &path) {
+        auto &fileState = state();
+        std::scoped_lock lock(fileState.mutex);
+
+        const std::filesystem::path configPath(path);
+        if (configPath.has_parent_path()) {
+            std::error_code error;
+            std::filesystem::create_directories(configPath.parent_path(), error);
+            if (error) {
+                throw std::runtime_error("无法创建配置目录: " + error.message());
+            }
+        }
+
+        json config = defaultConfig();
+        bool needsWrite = !std::filesystem::exists(configPath);
+        if (!needsWrite) {
+            std::ifstream input(configPath);
+            const std::string payload{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+            json parsed;
+            if (!input || !tryParseJson(payload, parsed) || !parsed.is_object()) {
+                const auto timestamp =
+                  std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch())
+                    .count();
+                const std::filesystem::path backupPath = configPath.string() + ".broken." + std::to_string(timestamp);
+                std::error_code error;
+                std::filesystem::rename(configPath, backupPath, error);
+                if (error) {
+                    throw std::runtime_error("无法备份损坏的配置文件: " + error.message());
+                }
+                spdlog::error("配置文件格式无效，已备份为 {} 并重建默认配置", backupPath.string());
+                needsWrite = true;
+            } else {
+                config = std::move(parsed);
+                needsWrite = migrateLegacyFields(config);
+                needsWrite = applyDefaults(config, defaultConfig()) || needsWrite;
+            }
+        }
+
+        fileState.path = configPath;
+        fileState.content = std::move(config);
+        fileState.initialized = true;
+        if (needsWrite) {
+            writeConfigFile(fileState.path, fileState.content);
+            spdlog::info("全局配置文件已初始化: {}", fileState.path.string());
+        } else {
+            spdlog::info("全局配置文件已加载: {}", fileState.path.string());
+        }
+    }
+
+    json getLLMConfig(const std::string &name) {
+        const json llm = getSection("llm");
+        const auto it = llm.find(name);
+        return it == llm.end() ? json{} : *it;
+    }
+
+    void saveLLMConfig(const std::string &name, const json &config) {
+        json llm = getSection("llm");
+        json persistedConfig = config;
+        persistedConfig.erase("name");
+        persistedConfig["topP"] = getDouble(config, "topP", getDouble(config, "top_P", 0.9));
+        persistedConfig.erase("top_P");
+        if (name == "embedding") {
+            persistedConfig.erase("maxTokens");
+            persistedConfig.erase("temperature");
+            persistedConfig.erase("topP");
+            persistedConfig.erase("reasoningEffort");
+        }
+        llm[name] = std::move(persistedConfig);
+        saveSection("llm", std::move(llm));
+        spdlog::info("LLM 配置已保存: {}", name);
+    }
+
+    json getAllLLMConfigs() { return getSection("llm"); }
+
+    json getQQConfig() { return getSection("qq"); }
+
+    void saveQQConfig(const json &config) {
+        saveSection("qq", config);
+        spdlog::info("QQ Bot 配置已保存");
+    }
+
+    json getMemoryConfig() { return getSection("memory"); }
+
+    void saveMemoryConfig(const json &config) {
+        saveSection("memory", config);
+        spdlog::info("记忆配置已保存");
+    }
+} // namespace insoulforge::ConfigStore

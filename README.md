@@ -59,7 +59,8 @@ docker run -d --name insoulforge \
   dreamdonghao/insoulforge:latest
 ```
 
-> 数据库、日志和表情包分别挂载到宿主机的 `./data`、`./logs`、`./uploads` 目录（也可自定义目录），升级镜像时数据不会丢失。
+> 全局配置文件 `data/config.json`、数据库、日志和表情包分别持久化在宿主机的 `./data`、`./logs`、`./uploads`
+> 目录（也可自定义目录），升级镜像时数据不会丢失。首次启动会自动创建包含默认值的 `data/config.json`。
 
 > 如果 napcat 也运行在 Docker 中，注意容器内的 `127.0.0.1` 指向容器自身。启动后让两个容器加入同一个 docker
 > 网络，然后用容器名互访（无需重建容器，connect 直接生效）：
@@ -87,7 +88,7 @@ docker run -d --name insoulforge \
     - Bot 名称
 
 2. **LLM 配置** - 配置模型 API
-    - 支持 Router / Executor / Memory / Image 分别配置不同模型
+    - 支持 Router、Executor、Executor 思考、Image 与 Embedding 分别配置
     - 兼容 OpenAI API 格式
 
 3. **启用群聊** - 添加要启用的 QQ 群或用户
@@ -113,7 +114,7 @@ docker run -d --name insoulforge \
 | `/deladmin <QQ号>`  | 移除管理员                             | 管理员 |
 | `/listemoji`        | 查看QQ收藏表情列表                     | 管理员 |
 | `/delemoji <名称>`  | 从QQ收藏表情中删除                     | 管理员 |
-| `/clearimagecache` | 清除图片和 GIF 描述缓存                | 管理员 |
+| `/clearimagecache`  | 清除图片和 GIF 描述缓存                | 管理员 |
 
 命令支持中文别名，如 `/帮助`、`/状态`、`/启用`。
 
@@ -121,14 +122,14 @@ docker run -d --name insoulforge \
 
 ### OneBot 配置
 
-| 参数              | 说明                                      |
-|-------------------|-------------------------------------------|
-| Access Token      | OneBot API 访问令牌                       |
-| Bot QQ 号         | 机器人自身的 QQ 号                        |
-| 传输方式          | HTTP 或正向 WebSocket，两者互斥            |
-| HTTP 服务地址     | HTTP 模式下的 OneBot HTTP 服务地址         |
-| WebSocket 服务地址 | WebSocket 模式下的 OneBot 正向连接地址     |
-| Bot 名称          | 机器人在群聊中的名称                      |
+| 参数               | 说明                                   |
+|--------------------|----------------------------------------|
+| Access Token       | OneBot API 访问令牌                    |
+| Bot QQ 号          | 机器人自身的 QQ 号                     |
+| 传输方式           | HTTP 或正向 WebSocket，两者互斥        |
+| HTTP 服务地址      | HTTP 模式下的 OneBot HTTP 服务地址     |
+| WebSocket 服务地址 | WebSocket 模式下的 OneBot 正向连接地址 |
+| Bot 名称           | 机器人在群聊中的名称                   |
 
 ### LLM 配置
 
@@ -139,8 +140,11 @@ docker run -d --name insoulforge \
 | Router       | 快速路由决策                                | 轻量模型，低温度      |
 | Executor     | 生成回复                                    | 主力模型，较高温度    |
 | Executor思考 | `deep_think` 工具使用的深度思考模型（可选） | 推理模型，如 DeepSeek |
-| Memory       | 记忆提取与合并                              | 轻量模型              |
 | Image        | 图片内容识别                                | 多模态模型            |
+| Embedding    | 长期记忆向量化与检索（可选）                | 向量模型              |
+
+全局运行配置保存在 `data/config.json`，包括 LLM、OneBot 与记忆参数。文件不存在时程序会写入默认内容；缺失或类型错误的字段会在启动时自动修复。配置文件已被
+Git 忽略，Docker 部署时通过 `./data:/app/data` 挂载即可持久化。
 
 **深度思考**：`Executor思考` 不是全局思考模式开关，而是 `deep_think` 工具使用的模型配置。Executor
 只有在遇到数学计算、多步推理、技术分析等复杂问题时才会按需调用，日常闲聊不会固定走推理模型。

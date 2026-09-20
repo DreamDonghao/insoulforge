@@ -3,11 +3,11 @@
 /// @author donghao
 /// @date 2026-08-30
 
+#include <agent/tools/ToolStore.hpp>
 #include <fmt/core.h>
-#include <spdlog/spdlog.h>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
-#include <agent/tools/ToolStore.hpp>
+#include <spdlog/spdlog.h>
 
 namespace insoulforge {
     namespace ToolStore {
