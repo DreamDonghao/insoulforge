@@ -75,7 +75,7 @@ const copyJoinUrl = async (): Promise<void> => {
         </div>
         <div class="info-item">
           <span class="info-label">许可证</span>
-          <a href="https://github.com/DreamDonghao/insoulforge/blob/main/LICENSE" target="_blank">AGPL v3</a>
+          <a href="https://github.com/DreamDonghao/insoulforge/blob/main/LICENSE" target="_blank">AGPL-3.0-only</a>
         </div>
         <div class="info-item">
           <span class="info-label">Github仓库</span>
@@ -84,16 +84,15 @@ const copyJoinUrl = async (): Promise<void> => {
       </div>
     </div>
 
-    <!-- 使用约束 -->
+    <!-- 开源协议 -->
     <div class="card">
       <div class="card-header">
-        <h3 class="card-title">使用约束</h3>
+        <h3 class="card-title">开源协议</h3>
       </div>
       <ul class="constraint-list">
-        <li>个人和非商业组织免费使用</li>
-        <li>禁止商业使用</li>
-        <li>禁止收费代挂 QQ 机器人服务</li>
-        <li>商业授权联系：<a href="mailto:dreamdonghao@outlook.com">dreamdonghao@outlook.com</a></li>
+        <li>本项目采用 GNU Affero General Public License v3.0。</li>
+        <li>修改并通过网络向用户提供服务时，须依照协议提供对应源代码。</li>
+        <li>完整条款以仓库根目录的 LICENSE 文件为准。</li>
       </ul>
     </div>
 

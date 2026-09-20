@@ -2,13 +2,7 @@
 
 一个基于 Agent 架构的智能 QQ 群聊机器人后端。
 
-QQ交流群：1097487360
-
-
-> - ✅ 个人和非商业组织免费使用
-> - ❌ **禁止商业使用**
-> - ❌ **禁止收费代挂 QQ 机器人服务**
-> - 📧 商业授权联系：dreamdonghao@outlook.com
+QQ 交流群：1097487360
 
 ## ✨ 特性
 
@@ -228,7 +222,7 @@ Git 忽略，Docker 部署时通过 `./data:/app/data` 挂载即可持久化。
 
 ## 📄 许可证
 
-AGPL-3.0 with Additional Terms
+本项目采用标准 [GNU Affero General Public License v3.0](https://www.gnu.org/licenses/agpl-3.0.html)（`AGPL-3.0-only`）开源。
 
 详见 [LICENSE](LICENSE)。
 
