@@ -6,7 +6,7 @@ RUN ln -fs /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential cmake ninja-build git ca-certificates \
         libsqlite3-dev libspdlog-dev libfmt-dev libjsoncpp-dev \
-        zlib1g-dev libssl-dev uuid-dev \
+        zlib1g-dev libssl-dev uuid-dev libgif-dev \
         nodejs npm \
     && rm -rf /var/lib/apt/lists/*
 
