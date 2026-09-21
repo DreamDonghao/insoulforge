@@ -34,11 +34,14 @@ QQ 交流群：1097487360
 
 镜像已发布至 Docker Hub 和 GitHub Container Registry，支持 **amd64 / arm64** 架构：
 
+ Docker Hub （推荐，可配置国内镜像加速）
 ```bash
-# Docker Hub
 docker pull dreamdonghao/insoulforge:latest
+```
 
-# 或 GitHub Container Registry
+
+GitHub Container Registry （备用）
+```bash
 docker pull ghcr.io/dreamdonghao/insoulforge:latest
 ```
 
@@ -66,7 +69,15 @@ docker run -d --name insoulforge \
 > 并将 napcat 的上报地址填为 `http://insoulforge:7778/`。使用正向 WebSocket 时，将 WebSocket 地址填为
 > `ws://napcat:3001`；此方式不需要配置 HTTP 上报地址。
 
-然后访问管理后台：`http://localhost:7778/index.html`
+然后访问管理后台：`http://localhost:7778/index.html`。
+
+首次进入需要输入服务启动日志中输出的管理后台访问令牌，例如：
+
+```text
+管理后台访问令牌（重启后失效）: <token>
+```
+
+令牌仅保存在运行中的进程内，不会写入配置文件或数据库；每次重启服务都会生成新的令牌并使已有登录会话失效。
 
 ### 首次配置
 
@@ -136,6 +147,8 @@ docker run -d --name insoulforge \
 
 全局运行配置保存在 `data/config.json`，包括 LLM、OneBot 与记忆参数。文件不存在时程序会写入默认内容；缺失或类型错误的字段会在启动时自动修复。配置文件已被
 Git 忽略，Docker 部署时通过 `./data:/app/data` 挂载即可持久化。
+
+> `config.json` 不保存管理后台访问令牌。请通过服务启动日志获取当前令牌，不要将其提交到仓库或发送给无关人员。
 
 **深度思考**：`Executor思考` 不是全局思考模式开关，而是 `deep_think` 工具使用的模型配置。Executor
 只有在遇到数学计算、多步推理、技术分析等复杂问题时才会按需调用，日常闲聊不会固定走推理模型。

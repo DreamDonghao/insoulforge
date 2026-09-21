@@ -114,7 +114,9 @@ insoulforge/
 │   │   ├── memory/           # Agent 记忆的查询、召回与存储
 │   │   ├── runtime/          # AgentSystem / ExecutorAgent / AgentTypes
 │   │   └── tools/            # 工具运行时、插件与工具存储
-│   ├── admin/                # 后台 HTTP、实时 WebSocket 与后台数据
+│   ├── admin/                # 后台认证、HTTP、实时 WebSocket 与后台数据
+│   │   ├── auth/             # 管理后台访问令牌与会话 Cookie
+│   │   └── http/             # 管理 API 控制器与响应工具
 │   ├── conversation/
 │   │   ├── history/          # 聊天记录及其存储
 │   │   ├── maintenance/      # 派生状态维护任务协调、记忆维护与好感度维护
@@ -346,6 +348,17 @@ Schema 中写清楚触发条件与边界。需要调整同类别展示位置时�
 3. 数据访问统一通过 `Database` 单例
 
 现有路由以 `/admin/api/` 为前缀（聊天记录、LLM 配置、提示词、表情、群、管理员、自定义工具、记忆、QQ 配置、用量统计），新路由建议沿用该前缀。
+
+### 管理后台认证
+
+程序启动时由 `AdminAccessToken` 使用安全随机数生成当前进程有效的访问令牌，并通过启动日志输出。令牌不写入配置文件、数据库或浏览器存储；重启后旧令牌和登录会话都会失效。
+
+- `POST /admin/api/auth/login`：提交 `{"token":"..."}`，验证成功后写入 `HttpOnly`、`SameSite=Strict` 会话 Cookie。
+- `POST /admin/api/auth/logout`：清除当前会话 Cookie。
+- `GET /admin/api/auth/status`：返回当前请求是否已认证。
+- 除上述认证接口外，`/admin/api/*`、`/admin/ws` 和 `/admin/logs/ws` 均由服务端鉴权；未经认证的请求返回 `401`。
+
+新增后台接口时无需在 Controller 中重复校验 Cookie，但必须使用受保护的 `/admin/api/` 路径。若确实需要公开接口，应在 `main.cpp` 的认证白名单中显式声明，并审查其是否会泄露配置或运行数据。
 
 ### 添加前端页面
 

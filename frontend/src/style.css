@@ -302,7 +302,12 @@ a {
     transition: border-color 0.25s ease;
 }
 
-.theme-toggle {
+.sidebar-actions {
+    display: grid;
+    gap: 2px;
+}
+
+.sidebar-action {
     display: flex;
     align-items: center;
     gap: 10px;
@@ -319,12 +324,17 @@ a {
     transition: background-color 0.15s ease, color 0.15s ease;
 }
 
-.theme-toggle:hover {
+.sidebar-action:hover {
     background: var(--primary-softer);
     color: var(--text-primary);
 }
 
-.theme-toggle svg {
+.sidebar-action-danger:hover {
+    background: var(--danger-soft);
+    color: var(--danger);
+}
+
+.sidebar-action svg {
     width: 18px;
     height: 18px;
     flex-shrink: 0;

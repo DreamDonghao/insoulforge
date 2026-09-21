@@ -1,4 +1,5 @@
 #include <admin/AdminStore.hpp>
+#include <admin/auth/AdminAccessToken.hpp>
 #include <admin/http/AdminController.hpp>
 #include <admin/http/AdminResponse.hpp>
 #include <agent/memory/LongTermMemoryStore.hpp>
@@ -45,6 +46,36 @@ namespace {
         return item;
     }
 } // namespace
+
+// ==================== 管理后台认证 ====================
+
+Task<> AdminController::getAuthStatus(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const {
+    callback(jsonResponse({{"authenticated", AdminAccessToken::isAuthorized(req)}}));
+    co_return;
+}
+
+Task<> AdminController::login(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const {
+    const auto body = parseJsonBody(req);
+    if (!body || !body->contains("token") || !(*body)["token"].is_string() ||
+        !AdminAccessToken::matches((*body)["token"].get<std::string>())) {
+        auto response = jsonResponse(AdminResponse::failJson("访问令牌无效"));
+        response->setStatusCode(k401Unauthorized);
+        callback(response);
+        co_return;
+    }
+
+    auto response = jsonResponse(AdminResponse::okJson());
+    AdminAccessToken::grantSession(response);
+    callback(response);
+    co_return;
+}
+
+Task<> AdminController::logout(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const {
+    auto response = jsonResponse(AdminResponse::okJson());
+    AdminAccessToken::revokeSession(response);
+    callback(response);
+    co_return;
+}
 
 // ==================== 运行日志 ====================
 

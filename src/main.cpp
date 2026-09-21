@@ -12,6 +12,8 @@
 
 
 #include <admin/AdminStore.hpp>
+#include <admin/auth/AdminAccessToken.hpp>
+#include <admin/http/AdminResponse.hpp>
 #include <agent/ability/TaskScheduler.hpp>
 #include <agent/runtime/AgentSystem.hpp>
 #include <conversation/session/QQNameDirectory.hpp>
@@ -28,6 +30,7 @@ int main() {
     try {
         // 系统初始化
         Logger::init();
+        AdminAccessToken::initialize();
         ConfigStore::initialize();
         auto &database = Database::instance();
         database.initialize("data/insoulforge.db");
@@ -72,6 +75,23 @@ int main() {
                 }
                 spdlog::warn("未知命令: {}", command);
             }
+        });
+
+        drogon::app().registerPreRoutingAdvice([](const drogon::HttpRequestPtr &request,
+                                                 drogon::AdviceCallback &&callback,
+                                                 drogon::AdviceChainCallback &&next) {
+            const std::string &path = request->path();
+            const bool isAdminApi = path.starts_with("/admin/api/");
+            const bool isAdminWebSocket = path == "/admin/ws" || path == "/admin/logs/ws";
+            const bool isPublicAuthEndpoint = path == "/admin/api/auth/login" || path == "/admin/api/auth/status";
+            if ((!isAdminApi && !isAdminWebSocket) || isPublicAuthEndpoint || AdminAccessToken::isAuthorized(request)) {
+                next();
+                return;
+            }
+
+            auto response = jsonResponse(AdminResponse::failJson("未登录或登录已失效"));
+            response->setStatusCode(drogon::k401Unauthorized);
+            callback(response);
         });
 
         drogon::app().addListener("0.0.0.0", 7778);

@@ -24,6 +24,13 @@ namespace insoulforge {
     class AdminController : public drogon::HttpController<AdminController> {
     public:
         METHOD_LIST_BEGIN
+        // 管理后台认证
+        ADD_METHOD_TO(AdminController::getAuthStatus, "/admin/api/auth/status", drogon::Get);
+
+        ADD_METHOD_TO(AdminController::login, "/admin/api/auth/login", drogon::Post);
+
+        ADD_METHOD_TO(AdminController::logout, "/admin/api/auth/logout", drogon::Post);
+
         // LLM 配置
         ADD_METHOD_TO(AdminController::getLLMConfigs, "/admin/api/llm-configs", drogon::Get);
 
@@ -148,6 +155,18 @@ namespace insoulforge {
         ADD_METHOD_TO(AdminController::saveCustomToolConfig, "/admin/api/custom-tool-config", drogon::Post);
 
         METHOD_LIST_END
+
+        /// @brief 获取当前浏览器的管理后台登录状态。
+        drogon::Task<> getAuthStatus(
+          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+
+        /// @brief 使用本次启动生成的令牌创建管理后台会话。
+        drogon::Task<> login(
+          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+
+        /// @brief 清除当前浏览器的管理后台会话。
+        drogon::Task<> logout(
+          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
 
         // ============== LLM 配置 ==============
 
