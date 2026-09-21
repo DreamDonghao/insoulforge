@@ -22,6 +22,7 @@
 #include <infrastructure/config/ConfigStore.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
+#include <media/ImageDescriptionStore.hpp>
 #include <onebot/OneBotWebSocketClient.hpp>
 #include <poll.h>
 #include <unistd.h>
@@ -35,6 +36,7 @@ int main() {
         ConfigStore::initialize();
         auto &database = Database::instance();
         database.initialize("data/insoulforge.db");
+        static_cast<void>(ImageDescriptionStore::purgeExpired());
 
         auto &config = Config::instance();
         config.loadFromStorage();

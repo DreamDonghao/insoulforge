@@ -15,7 +15,8 @@ namespace insoulforge {
 
     namespace ImageDescriptionStore {
         /// @brief 查询与当前视觉模型及提示词匹配的缓存
-        /// @details 成功结果长期复用；失败结果仅在十分钟内复用，避免持续重试失效媒体。
+        /// @details 成功结果最多复用十天；命中时刷新最后使用时间。失败结果仅在十分钟内复用，
+        ///          避免持续重试失效媒体。
         [[nodiscard]] std::optional<CachedImageDescription> find(
           const std::string &contentHash, const std::string &model, int promptVersion);
 
@@ -26,5 +27,10 @@ namespace insoulforge {
         /// @brief 清除全部图片视觉描述缓存
         /// @return 已删除的缓存条数
         [[nodiscard]] size_t clearAll();
+
+        /// @brief 删除超过十天未使用的图片视觉描述缓存
+        /// @return 已删除的缓存条数
+        /// @note 线程安全。程序启动及每次缓存访问时自动调用。
+        [[nodiscard]] size_t purgeExpired();
     } // namespace ImageDescriptionStore
 } // namespace insoulforge

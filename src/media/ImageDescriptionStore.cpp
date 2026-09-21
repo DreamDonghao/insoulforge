@@ -6,28 +6,56 @@
 #include <media/ImageDescriptionStore.hpp>
 
 namespace insoulforge::ImageDescriptionStore {
+    namespace {
+        /// @brief 删除超过十天未命中的缓存；调用方必须持有数据库写锁
+        size_t purgeExpiredLocked(sqlite3 *database) {
+            const Statement stmt(
+              database, "DELETE FROM image_description_cache WHERE updated_at < datetime('now', '-10 days')");
+            stmt.exec();
+            return static_cast<size_t>(sqlite3_changes(database));
+        }
+    } // namespace
+
     std::optional<CachedImageDescription> find(
       const std::string &contentHash, const std::string &model, const int promptVersion) {
         const auto &db = Database::instance();
-        std::shared_lock lock(db.mutex());
-        const Statement stmt(db.handle(),
-          "SELECT status, description, sampled_frame_count FROM image_description_cache WHERE content_hash = ? AND "
-          "model = ? "
-          "AND prompt_version = ? AND (status = 'succeeded' OR updated_at >= datetime('now', '-10 minutes'))");
-        stmt.bind(1, contentHash);
-        stmt.bind(2, model);
-        stmt.bind(3, promptVersion);
-        if (!stmt.step())
+        std::unique_lock lock(db.mutex());
+        purgeExpiredLocked(db.handle());
+
+        std::optional<CachedImageDescription> cached;
+        {
+            const Statement stmt(db.handle(),
+              "SELECT status, description, sampled_frame_count FROM image_description_cache WHERE content_hash = ? "
+              "AND model = ? AND prompt_version = ? AND "
+              "((status = 'succeeded' AND updated_at >= datetime('now', '-10 days')) "
+              "OR (status = 'failed' AND updated_at >= datetime('now', '-10 minutes')))");
+            stmt.bind(1, contentHash);
+            stmt.bind(2, model);
+            stmt.bind(3, promptVersion);
+            if (stmt.step()) {
+                cached = CachedImageDescription{.succeeded = stmt.getText(0) == "succeeded",
+                  .description = stmt.getText(1),
+                  .sampledFrameCount = stmt.getInt(2)};
+            }
+        }
+        if (!cached) {
             return std::nullopt;
-        return CachedImageDescription{.succeeded = stmt.getText(0) == "succeeded",
-          .description = stmt.getText(1),
-          .sampledFrameCount = stmt.getInt(2)};
+        }
+
+        const Statement touch(db.handle(), "UPDATE image_description_cache SET updated_at = CURRENT_TIMESTAMP "
+                                           "WHERE content_hash = ? AND model = ? AND prompt_version = ?");
+        touch.bind(1, contentHash);
+        touch.bind(2, model);
+        touch.bind(3, promptVersion);
+        touch.exec();
+        return cached;
     }
 
     void upsert(const std::string &contentHash, const std::string &model, const int promptVersion,
       const std::string &mediaType, const bool succeeded, const std::string &description, const int sampledFrameCount) {
         const auto &db = Database::instance();
         std::unique_lock lock(db.mutex());
+        purgeExpiredLocked(db.handle());
         const Statement stmt(db.handle(),
           "INSERT INTO image_description_cache (content_hash, model, prompt_version, media_type, status, description, "
           "sampled_frame_count) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(content_hash, model, prompt_version) "
@@ -42,6 +70,12 @@ namespace insoulforge::ImageDescriptionStore {
         stmt.bind(6, description);
         stmt.bind(7, sampledFrameCount);
         stmt.exec();
+    }
+
+    size_t purgeExpired() {
+        const auto &db = Database::instance();
+        std::unique_lock lock(db.mutex());
+        return purgeExpiredLocked(db.handle());
     }
 
     size_t clearAll() {
