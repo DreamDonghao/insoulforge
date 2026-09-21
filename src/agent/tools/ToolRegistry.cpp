@@ -75,9 +75,6 @@ namespace insoulforge {
             return false;
         }
 
-        const auto registered = m_pluginTools.find(registeredPluginId);
-        const size_t count = registered == m_pluginTools.end() ? 0 : registered->second.size();
-        Logger::info(0, "Tool", fmt::format("工具插件 '{}' 注册完成（{} 个工具）", registeredPluginId, count));
         return true;
     }
 
@@ -88,7 +85,6 @@ namespace insoulforge {
         for (const auto &name: it->second)
             m_tools.erase(name);
         m_pluginTools.erase(it);
-        Logger::info(0, "Tool", fmt::format("工具插件已卸载: {}", pluginId));
     }
 
     bool ToolRegistry::registerTool(const Tool &tool, const ToolCategory category) {
@@ -113,8 +109,6 @@ namespace insoulforge {
         auto &names = m_pluginTools[pluginId];
         if (!std::ranges::contains(names, tool.name))
             names.push_back(tool.name);
-        Logger::info(0, "Tool",
-          fmt::format("工具注册成功: {} (插件: {}, 分类: {})", tool.name, pluginId, categoryToString(category)));
         return true;
     }
 
@@ -160,20 +154,6 @@ namespace insoulforge {
             } else {
                 ++iterator;
             }
-        }
-        Logger::info(0, "Tool", fmt::format("工具已注销: {}", name));
-    }
-
-    std::string ToolRegistry::categoryToString(const ToolCategory category) {
-        switch (category) {
-            case ToolCategory::REPLY:
-                return "REPLY";
-            case ToolCategory::INFORMATION:
-                return "INFORMATION";
-            case ToolCategory::ACTION:
-                return "ACTION";
-            default:
-                return "UNKNOWN";
         }
     }
 

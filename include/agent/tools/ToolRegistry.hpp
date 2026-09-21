@@ -107,7 +107,6 @@ namespace insoulforge {
         std::string m_activePluginId;
         bool m_pluginRegistrationFailed = false;
 
-        static std::string categoryToString(ToolCategory category);
         static int categoryOrder(ToolCategory category);
     };
 } // namespace insoulforge

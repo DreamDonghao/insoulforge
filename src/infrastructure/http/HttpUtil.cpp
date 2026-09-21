@@ -36,15 +36,6 @@ namespace insoulforge::HttpUtil {
             return s.substr(0, max) + "…(截断)";
         }
 
-        // 脱敏：只保留头尾各 4 位，避免 token 明文进日志
-        std::string maskToken(const std::string_view token) {
-            if (token.empty())
-                return "(空)";
-            if (token.size() <= 8)
-                return std::string(token.size(), '*');
-            return std::string(token.substr(0, 4)) + "****" + std::string(token.substr(token.size() - 4));
-        }
-
         /// @brief 将带路径前缀的 Base URL 拆为 Drogon 所需的主机地址和完整请求路径。
         /// @details HttpClient::newHttpClient() 不接受路径；例如将
         ///          https://api.example.com/v1 与 /chat/completions 转为
@@ -75,20 +66,10 @@ namespace insoulforge::HttpUtil {
     drogon::Task<std::optional<drogon::HttpResponsePtr>> send(const std::string_view tag, std::string baseUrl,
       std::string path, const drogon::HttpMethod method, json body, std::string bearerToken, const double timeout,
       std::optional<uint64_t> sessionId) {
-        const auto prefix = sessionId.has_value() ? fmt::format("[group_id={}] {}", *sessionId, tag) : std::string(tag);
         normalizeTarget(baseUrl, path);
-        // 请求体完整序列化一次：请求、HttpTrace（全量）、日志（截断）共用
+        // 请求体完整序列化一次，供请求调试记录和实际请求共用；运行日志不记录正常请求细节。
         auto bodyText = body.is_null() ? std::string{} : dumpJson(body);
         const auto bodyLog = truncate(bodyText, kBodyLogMax);
-
-        Logger::debug(sessionId.value_or(0), prefix, fmt::format("HTTP {} {}{}", methodName(method), baseUrl, path));
-        if (!bodyLog.empty()) {
-            Logger::debug(sessionId.value_or(0), prefix, fmt::format("HTTP body={}", bodyLog));
-        }
-        if (!bearerToken.empty()) {
-            Logger::debug(
-              sessionId.value_or(0), prefix, fmt::format("HTTP Authorization: Bearer {}", maskToken(bearerToken)));
-        }
 
         HttpTraceEntry trace;
         trace.tag = std::string(tag);
@@ -100,7 +81,7 @@ namespace insoulforge::HttpUtil {
         try {
             client = drogon::HttpClient::newHttpClient(baseUrl);
         } catch (const std::exception &e) {
-            Logger::error(sessionId.value_or(0), prefix,
+            Logger::error(sessionId.value_or(0), tag,
               fmt::format(
                 "HTTP 创建客户端失败: {} ({} {}{}) body={}", e.what(), methodName(method), baseUrl, path, bodyLog));
             trace.status = 0;
@@ -131,7 +112,7 @@ namespace insoulforge::HttpUtil {
         try {
             resp = co_await client->sendRequestCoro(req, timeout);
         } catch (const std::exception &e) {
-            Logger::error(sessionId.value_or(0), prefix,
+            Logger::error(sessionId.value_or(0), tag,
               fmt::format("HTTP 请求异常: {} ({} {}{}) body={}", e.what(), methodName(method), baseUrl, path, bodyLog));
             finishTrace(0, e.what());
             co_return std::nullopt;
@@ -144,7 +125,7 @@ namespace insoulforge::HttpUtil {
 
         // 非 2xx（如 DNS 解析失败、连接被拒等）同样把地址打出来，方便定位
         if (resp->getStatusCode() >= drogon::k400BadRequest) {
-            Logger::warn(sessionId.value_or(0), prefix,
+            Logger::warn(sessionId.value_or(0), tag,
               fmt::format("HTTP 响应异常: status={} ({} {}{})", static_cast<int>(resp->getStatusCode()),
                 methodName(method), baseUrl, path));
         }

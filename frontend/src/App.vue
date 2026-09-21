@@ -146,26 +146,50 @@ const checkAuthentication = async (): Promise<void> => {
   }
 }
 
+const loginWithToken = async (token: string): Promise<boolean> => {
+  const response = await fetch('/admin/api/auth/login', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({token})
+  })
+  if (!response.ok) {
+    return false
+  }
+  authenticated.value = true
+  return true
+}
+
 const login = async (): Promise<void> => {
   loginError.value = ''
   loginSubmitting.value = true
   try {
-    const response = await fetch('/admin/api/auth/login', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({token: accessToken.value})
-    })
-    if (!response.ok) {
+    if (!await loginWithToken(accessToken.value)) {
       loginError.value = '访问令牌无效'
       return
     }
-    authenticated.value = true
     accessToken.value = ''
     await initializeAdmin()
   } catch {
     loginError.value = '无法连接管理服务'
   } finally {
     loginSubmitting.value = false
+  }
+}
+
+const loginFromUrlFragment = async (): Promise<void> => {
+  const token = new URLSearchParams(location.hash.slice(1)).get('token')
+  if (!token) {
+    return
+  }
+
+  // URL 片段不会发送给服务端，仍需在请求前清除，避免令牌留在浏览器历史记录中。
+  history.replaceState(null, '', `${location.pathname}${location.search}`)
+  try {
+    if (!await loginWithToken(token)) {
+      loginError.value = '自动登录链接已失效'
+    }
+  } catch {
+    loginError.value = '无法连接管理服务'
   }
 }
 
@@ -184,6 +208,9 @@ provide('ws', {get: () => ws})
 
 onMounted(async () => {
   await checkAuthentication()
+  if (!authenticated.value) {
+    await loginFromUrlFragment()
+  }
   if (authenticated.value) {
     await initializeAdmin()
   }
@@ -258,7 +285,8 @@ onMounted(async () => {
         <p>请输入服务启动日志中生成的访问令牌。</p>
         <label class="login-label" for="access-token">访问令牌</label>
         <div class="login-input-wrap">
-          <input id="access-token" v-model="accessToken" :disabled="loginSubmitting" :type="showAccessToken ? 'text' : 'password'" autocomplete="current-password"
+          <input id="access-token" v-model="accessToken" :disabled="loginSubmitting"
+                 :type="showAccessToken ? 'text' : 'password'" autocomplete="current-password"
                  autofocus class="login-input" spellcheck="false">
           <button :aria-label="showAccessToken ? '隐藏访问令牌' : '显示访问令牌'"
                   :title="showAccessToken ? '隐藏访问令牌' : '显示访问令牌'" class="input-icon-button" type="button"

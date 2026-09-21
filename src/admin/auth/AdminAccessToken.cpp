@@ -2,15 +2,19 @@
 /// @brief 管理后台启动令牌与会话认证实现
 
 #include <admin/auth/AdminAccessToken.hpp>
-#include <infrastructure/logging/Logger.hpp>
 
+#include <fmt/format.h>
 #include <openssl/crypto.h>
 #include <openssl/rand.h>
-#include <spdlog/spdlog.h>
 
+#include <arpa/inet.h>
 #include <array>
+#include <ifaddrs.h>
 #include <mutex>
+#include <net/if.h>
 #include <stdexcept>
+#include <string>
+#include <unordered_set>
 #include <utility>
 
 namespace insoulforge {
@@ -26,10 +30,10 @@ namespace insoulforge {
         }
 
         std::string encodeHex(const std::array<unsigned char, 32> &bytes) {
-            constexpr char hexadecimal[] = "0123456789abcdef";
             std::string value;
             value.reserve(bytes.size() * 2);
             for (const unsigned char byte: bytes) {
+                constexpr char hexadecimal[] = "0123456789abcdef";
                 value.push_back(hexadecimal[byte >> 4]);
                 value.push_back(hexadecimal[byte & 0x0f]);
             }
@@ -40,6 +44,34 @@ namespace insoulforge {
             return candidate.size() == expected.size() &&
                    CRYPTO_memcmp(candidate.data(), expected.data(), expected.size()) == 0;
         }
+
+        std::vector<std::string> localIpv4Addresses() {
+            std::vector<std::string> addresses{"127.0.0.1"};
+            std::unordered_set<std::string> knownAddresses{addresses.begin(), addresses.end()};
+
+            ifaddrs *interfaces = nullptr;
+            if (getifaddrs(&interfaces) != 0) {
+                return addresses;
+            }
+
+            for (const ifaddrs *interface = interfaces; interface; interface = interface->ifa_next) {
+                if (!interface->ifa_addr || interface->ifa_addr->sa_family != AF_INET ||
+                    !(interface->ifa_flags & IFF_UP) || (interface->ifa_flags & IFF_LOOPBACK)) {
+                    continue;
+                }
+
+                char host[INET_ADDRSTRLEN]{};
+                const auto *address = reinterpret_cast<const sockaddr_in *>(interface->ifa_addr);
+                if (!inet_ntop(AF_INET, &address->sin_addr, host, sizeof(host))) {
+                    continue;
+                }
+                if (knownAddresses.insert(host).second) {
+                    addresses.emplace_back(host);
+                }
+            }
+            freeifaddrs(interfaces);
+            return addresses;
+        }
     } // namespace
 
     void AdminAccessToken::initialize() {
@@ -48,10 +80,23 @@ namespace insoulforge {
             throw std::runtime_error("无法生成管理后台访问令牌");
         }
 
-        auto &tokenState = state();
-        std::scoped_lock lock(tokenState.mutex);
-        tokenState.value = encodeHex(bytes);
-        Logger::info(0, "Admin", fmt::format("管理后台访问令牌（重启后失效）: {}", tokenState.value));
+        auto &[value, mutex] = state();
+        std::scoped_lock lock(mutex);
+        value = encodeHex(bytes);
+    }
+
+    std::vector<std::string> AdminAccessToken::loginUrls(const uint16_t port) {
+        std::vector<std::string> urls;
+        for (const auto &address: localIpv4Addresses()) {
+            urls.push_back(fmt::format("http://{}:{}/index.html#token={}", address, port, token()));
+        }
+        return urls;
+    }
+
+    std::string AdminAccessToken::token() {
+        auto &[value, mutex] = state();
+        std::scoped_lock lock(mutex);
+        return value;
     }
 
     bool AdminAccessToken::isAuthorized(const drogon::HttpRequestPtr &request) {
@@ -59,9 +104,9 @@ namespace insoulforge {
     }
 
     bool AdminAccessToken::matches(const std::string_view token) {
-        auto &tokenState = state();
-        std::scoped_lock lock(tokenState.mutex);
-        return !tokenState.value.empty() && equalsToken(token, tokenState.value);
+        auto &[value, mutex] = state();
+        std::scoped_lock lock(mutex);
+        return !value.empty() && equalsToken(token, value);
     }
 
     void AdminAccessToken::grantSession(const drogon::HttpResponsePtr &response) {

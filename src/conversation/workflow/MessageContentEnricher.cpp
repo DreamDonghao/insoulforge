@@ -4,7 +4,9 @@
 
 #include <agent/memory/LongTermMemoryStore.hpp>
 #include <conversation/message/MessageRecord.hpp>
+#include <fmt/format.h>
 #include <infrastructure/config/Config.hpp>
+#include <infrastructure/logging/Logger.hpp>
 #include <llm/LlmClient.hpp>
 #include <media/ImageDescriptionService.hpp>
 
@@ -31,6 +33,7 @@ namespace insoulforge::MessageContentEnricher {
         if (images == assets->end() || !images->is_array())
             co_return message;
 
+        size_t succeededCount = 0;
         for (json &image: *images) {
             const std::string sourceUrl = getStr(atOrNull(image, "source"), "url");
             if (sourceUrl.empty()) {
@@ -47,6 +50,11 @@ namespace insoulforge::MessageContentEnricher {
             image["content_hash"] = description->contentHash;
             image["media"] = {
               {"type", description->mediaType}, {"sampled_frame_count", description->sampledFrameCount}};
+            ++succeededCount;
+        }
+        if (!images->empty()) {
+            Logger::info(
+              sessionId, "Media", fmt::format("图片识别完成 | succeeded={}/{}", succeededCount, images->size()));
         }
         co_return message;
     }
@@ -71,6 +79,7 @@ namespace insoulforge::MessageContentEnricher {
             }
         }
         if (!memories.empty()) {
+            Logger::info(sessionId, "Memory", fmt::format("召回长期记忆: {} 条", memories.size()));
             message["memories"] = std::move(memories);
         }
         co_return message;

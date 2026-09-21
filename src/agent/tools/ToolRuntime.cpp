@@ -49,11 +49,7 @@ namespace insoulforge {
         }
     } // namespace
 
-    void ToolRuntime::registerBuiltinTools() {
-        ToolPluginCatalog::registerBuiltinPlugins();
-        Logger::info(0, "Tool",
-          fmt::format("ToolRuntime: 内置工具注册完成，当前工具总数 {}", ToolRegistry::instance().getAllTools().size()));
-    }
+    void ToolRuntime::registerBuiltinTools() { ToolPluginCatalog::registerBuiltinPlugins(); }
 
     void ToolRuntime::reloadCustomTools() {
         auto &registry = ToolRegistry::instance();

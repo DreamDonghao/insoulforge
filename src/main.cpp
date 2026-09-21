@@ -102,7 +102,7 @@ int main() {
                   return;
               }
 
-              auto response = jsonResponse(AdminResponse::failJson("未登录或登录已失效"));
+              const auto response = jsonResponse(AdminResponse::failJson("未登录或登录已失效"));
               response->setStatusCode(drogon::k401Unauthorized);
               callback(response);
           });
@@ -110,7 +110,12 @@ int main() {
         drogon::app().addListener("0.0.0.0", 7778);
         drogon::app().setDocumentRoot("public");
         Logger::info(0, "Main", "HTTP 服务启动 | port=7778");
-        Logger::info(0, "Main", "管理后台: http://localhost:7778/index.html");
+
+        Logger::info(0, "Admin", std::format("管理后台访问令牌（重启后失效）: {}", AdminAccessToken::token()));
+        Logger::info(0, "Admin", "也可尝试一下链接访问");
+        for (const auto &url: AdminAccessToken::loginUrls(7778)) {
+            Logger::info(0, "Admin", " " + url + " ");
+        }
 
         drogon::app().run();
 

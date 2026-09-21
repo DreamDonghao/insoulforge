@@ -184,7 +184,6 @@ namespace insoulforge {
         if (!sessionState->enqueuePreparation(std::move(*normalizedMessage))) {
             return;
         }
-        Logger::debug(sessionId, "Workflow", fmt::format("消息预处理队列已唤醒"));
         drogon::async_run([this, sessionId]() -> drogon::Task<> { co_await processPreparationQueue(sessionId); });
     }
 
@@ -193,7 +192,6 @@ namespace insoulforge {
         while (true) {
             auto nextMessage = sessionState->takePreparationMessage();
             if (!nextMessage) {
-                Logger::debug(sessionId, "Workflow", fmt::format("消息预处理队列已清空"));
                 co_return;
             }
             auto currentMessage = json(std::move(*nextMessage));
@@ -203,12 +201,17 @@ namespace insoulforge {
                     SessionConfigManager::addConfig(sessionId);
                 }
                 if (CommandProcessor::isCommand(currentMessage)) { // 命令消息进入命令分支
+                    Logger::info(
+                      sessionId, "Command", fmt::format("执行: {}", MessageRecord::extractText(currentMessage)));
                     co_await executeCommand(currentMessage);
                     continue;
                 }
                 if (!SessionStore::isSessionEnabled(sessionId)) { // 未启用该群聊则退出
                     continue;
                 }
+
+                Logger::info(sessionId, "Message",
+                  fmt::format("收到: {}", dumpJson(MessageRecord::projectForAgent(currentMessage))));
 
                 currentMessage = co_await MessageContentEnricher::enrichImages(std::move(currentMessage), sessionId);
                 currentMessage = co_await MessageContentEnricher::injectMemories(std::move(currentMessage), sessionId);
@@ -240,8 +243,11 @@ namespace insoulforge {
                     continue;
                 }
                 drogon::async_run([this, sessionId]() -> drogon::Task<> { co_await processReplyWorkflow(sessionId); });
-            } catch (...) {
+            } catch (const std::exception &error) {
                 // 单条消息富化或收尾失败不能阻塞同会话后续消息。
+                Logger::error(sessionId, "Workflow", fmt::format("消息处理失败: {}", error.what()));
+            } catch (...) {
+                Logger::error(sessionId, "Workflow", "消息处理失败: 未知异常");
             }
         }
     }
@@ -255,11 +261,14 @@ namespace insoulforge {
 
             try {
                 if (!AgentSystem::instance().isReady()) {
-                    Logger::debug(sessionId, "Workflow", fmt::format("回复任务跳过：Agent 不可用"));
+                    Logger::warn(sessionId, "Workflow", "回复任务跳过：Agent 不可用");
                 } else {
-                    if (auto routerDecision = co_await MessageRouter::route(sessionId, messageSnapshot);
-                      routerDecision.shouldReply) {
-                        Logger::info(sessionId, "Workflow", fmt::format("Router 判断需要回复"));
+                    auto routerDecision = co_await MessageRouter::route(sessionId, messageSnapshot);
+                    Logger::info(sessionId, "Router",
+                      fmt::format("决策={} | reason={} | priority={} | maxLength={}",
+                        routerDecision.shouldReply ? "reply" : "skip", routerDecision.reason, routerDecision.isPriority,
+                        routerDecision.maxLength));
+                    if (routerDecision.shouldReply) {
                         auto recordSnapshot = std::deque<json>{};
                         for (const auto &message: messageSnapshot) {
                             recordSnapshot.push_back({{"content", dumpJson(message)}});
@@ -275,11 +284,16 @@ namespace insoulforge {
                             } else {
                                 co_await MessageService::sendGroupMsg(sessionId, replyDecision->content);
                             }
+                        } else {
+                            Logger::info(sessionId, "Executor", "未生成可发送的回复");
                         }
                     }
                 }
-            } catch (...) {
+            } catch (const std::exception &error) {
                 // Router、Executor 或发送失败不影响同会话后续回复任务。
+                Logger::error(sessionId, "Workflow", fmt::format("回复处理失败: {}", error.what()));
+            } catch (...) {
+                Logger::error(sessionId, "Workflow", "回复处理失败: 未知异常");
             }
             if (isInitialReply) {
                 recordMessageProcessingStats(sessionId);

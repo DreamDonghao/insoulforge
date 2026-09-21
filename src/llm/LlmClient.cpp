@@ -41,7 +41,7 @@ namespace insoulforge {
             }
             const LLMModelParams params{.maxTokens = max_tokens, .temperature = temperature, .topP = top_p};
             json body = LlmClient::buildChatRequestBody(api, params, std::move(messages));
-            const auto resp = co_await HttpUtil::send("[LLM]", std::move(base_url), std::move(path), drogon::Post,
+            const auto resp = co_await HttpUtil::send("LLM", std::move(base_url), std::move(path), drogon::Post,
               std::move(body), std::move(api_key), timeoutSeconds, sessionId);
             if (!resp) {
                 co_return std::nullopt;
@@ -102,38 +102,36 @@ namespace insoulforge {
         drogon::Task<std::optional<json>> requestChat(std::string label, std::string usageRole,
           const LLMApiConfig &apiConfig, const LLMModelParams &params, json messages, json tools,
           const uint64_t sessionId) {
-            const std::string tag = "[" + label + "]";
             if (!isConfigured(apiConfig)) {
-                Logger::warn(sessionId, "LLM", fmt::format("{} 未配置服务地址、请求路径或模型名，跳过请求", tag));
+                Logger::warn(sessionId, label, "未配置服务地址、请求路径或模型名，跳过请求");
                 co_return std::nullopt;
             }
-            Logger::debug(sessionId, "LLM", fmt::format("{} model={}", tag, apiConfig.model));
 
             const json body = buildChatRequestBody(apiConfig, params, std::move(messages), std::move(tools));
 
             for (int attempt = 0;; ++attempt) {
-                const auto resp = co_await HttpUtil::send(tag, apiConfig.baseUrl, apiConfig.path, drogon::Post, body,
+                const auto resp = co_await HttpUtil::send(label, apiConfig.baseUrl, apiConfig.path, drogon::Post, body,
                   apiConfig.apiKey, kLlmTimeoutSeconds, sessionId);
 
                 if (!resp) {
-                    Logger::warn(sessionId, "LLM", fmt::format("{}网络异常", tag));
+                    Logger::warn(sessionId, label, "网络异常");
                 } else if (const auto respJson = validChatJson(*resp)) {
                     logUsage(*respJson, apiConfig.model, usageRole, sessionId);
                     co_return respJson;
                 } else {
                     const int status = static_cast<int>((*resp)->getStatusCode());
                     const std::string respBody = std::string((*resp)->getBody()).substr(0, kErrorBodyMaxChars);
-                    Logger::error(sessionId, "LLM", fmt::format("{}失败: status={} body={}", tag, status, respBody));
+                    Logger::error(sessionId, label, fmt::format("请求失败: status={} body={}", status, respBody));
                     if (!isRetryableStatus(status)) {
                         co_return std::nullopt; // 不可恢复的错误（鉴权、参数等）
                     }
-                    Logger::warn(sessionId, "LLM", fmt::format("{}临时性错误", tag));
+                    Logger::warn(sessionId, label, "临时性错误");
                 }
 
                 if (attempt >= kMaxRetries) {
                     co_return std::nullopt; // 重试耗尽
                 }
-                Logger::warn(sessionId, "LLM", fmt::format("{}第 {}/{} 次重试", tag, attempt + 1, kMaxRetries));
+                Logger::warn(sessionId, label, fmt::format("第 {}/{} 次重试", attempt + 1, kMaxRetries));
                 co_await drogon::sleepCoro(drogon::app().getLoop(), kRetryDelay);
             }
         }
@@ -161,7 +159,7 @@ namespace insoulforge {
         body["input"].push_back(std::move(text));
 
         const auto resp = co_await HttpUtil::send(
-          "[Embedding]", config.baseUrl, config.path, drogon::Post, std::move(body), config.apiKey, 30.0, sessionId);
+          "Embedding", config.baseUrl, config.path, drogon::Post, std::move(body), config.apiKey, 30.0, sessionId);
         if (!resp) {
             co_return std::nullopt;
         }
