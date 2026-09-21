@@ -5,14 +5,13 @@
 /// @details LLM 通过 create_scheduled_task 工具创建任务后的完整链路：
 ///          - 任务先落库（用户请求的原始时间为准），再入堆参与调度
 ///          - 到点前提前 kFireLead 触发（补偿一次回复的生成耗时），把任务包装成
-///            OneBot 格式消息 POST 回消息接收接口，走正常 Router/Executor 管线生成回复
+///            OneBot 格式系统消息，直接交给正常 Router/Executor 管线生成回复
 ///          - 每日任务（isDaily）触发后不结束，自动推进到次日同一时刻重新入堆，直到被取消
 ///          - 重启时从数据库恢复全部 pending 任务；已过期的任务照常触发并标注延时
 #pragma once
 #include <agent/ability/TaskStore.hpp>
 #include <atomic>
 #include <condition_variable>
-#include <drogon/utils/coroutine.h>
 #include <mutex>
 #include <optional>
 #include <queue>
@@ -67,8 +66,9 @@ namespace insoulforge {
         /// @brief 加载数据库中全部 pending 任务入堆
         void restorePendingTasks();
 
-        /// @brief 把任务合成 OneBot 消息注入接收接口；一次性任务标记完成，每日任务重排到次日（在 drogon 循环上执行）
-        static drogon::Task<> trigger(TaskStore::ScheduledTask task);
+        /// @brief 将到点任务合成为系统消息并交给消息工作流处理
+        /// @details 一次性任务标记完成；每日任务重排至下一次触发。调用期间不会持有调度器锁。
+        static void trigger(TaskStore::ScheduledTask task);
 
         std::priority_queue<Entry, std::vector<Entry>, std::greater<>> m_heap;
         mutable std::mutex m_mutex;

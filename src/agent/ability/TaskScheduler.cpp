@@ -4,9 +4,9 @@
 /// @date 2026-08-27
 
 #include <conversation/message/SessionId.hpp>
+#include <conversation/workflow/OneBotEventWorkflow.hpp>
 #include <include/agent/ability/TaskScheduler.hpp>
 #include <infrastructure/config/Config.hpp>
-#include <infrastructure/http/HttpUtil.hpp>
 #include <infrastructure/logging/Logger.hpp>
 
 namespace insoulforge {
@@ -15,8 +15,9 @@ namespace insoulforge {
         /// 不宜过大，否则提醒会比用户指定时刻明显提前
         constexpr std::chrono::seconds kFireLead{5};
 
-        /// @brief 注入事件使用的本机接收接口地址（与 main.cpp 监听端口一致）
-        constexpr auto kSelfBaseUrl = "http://127.0.0.1:7778";
+        /// @brief 单次等待的最大时长。
+        /// @details 定期重新读取系统时钟，避免宿主机或容器校时后仍按旧绝对时刻等待数小时。
+        constexpr std::chrono::minutes kMaximumWait{1};
 
         /// @brief 合成系统消息的发送者昵称与正文前缀
         constexpr std::string_view kSystemTaskLabel = "系统定时任务";
@@ -183,14 +184,20 @@ namespace insoulforge {
                 m_cv.wait(lock, [this] { return !m_heap.empty() || !m_running.load(); });
                 continue;
             }
-            m_cv.wait_until(lock, Clock::from_time_t(m_heap.top().fireTime));
+
+            const auto now = Clock::now();
+            const auto fireTime = Clock::from_time_t(m_heap.top().fireTime);
+            if (fireTime > now) {
+                // 不直接等待到数小时后的绝对时刻。系统时间被校正后，至多一分钟便会重新计算剩余时间。
+                const auto maximumWait = std::chrono::duration_cast<Clock::duration>(kMaximumWait);
+                m_cv.wait_for(lock, std::min(fireTime - now, maximumWait));
+                continue;
+            }
             if (!m_running.load()) {
                 break;
             }
 
             // 到期任务全部弹出再逐个触发；触发期间锁短暂放开，新创建的任务可同时入堆。
-            // async_run 在本线程启动协程，首个真正的挂起点（HTTP 发送）之后续转到主循环执行，
-            // 不会阻塞调度线程
             while (!m_heap.empty() && m_heap.top().fireTime <= Clock::to_time_t(Clock::now())) {
                 TaskStore::ScheduledTask task = std::move(const_cast<Entry &>(m_heap.top()).task);
                 m_heap.pop();
@@ -198,41 +205,42 @@ namespace insoulforge {
                     continue;
                 }
                 lock.unlock();
-                drogon::async_run([task = std::move(task)]() -> drogon::Task<> { co_await trigger(task); });
+                trigger(std::move(task));
                 lock.lock();
             }
         }
     }
 
-    drogon::Task<> TaskScheduler::trigger(TaskStore::ScheduledTask task) {
+    void TaskScheduler::trigger(TaskStore::ScheduledTask task) {
         const uint64_t logSessionId =
           task.sessionType == "private" ? SessionId::fromPrivateUser(task.targetId) : task.targetId;
 
-        const bool delayed = std::time(nullptr) > task.remindTime;
+        const std::time_t now = std::time(nullptr);
+        const bool delayed = now > task.remindTime;
         Logger::info(logSessionId, "Scheduler",
-          fmt::format("触发{}定时任务 #{} ({}{})", task.isDaily ? "每日" : "", task.id, delayed ? "延时，" : "",
-            task.content.substr(0, 50)));
+          fmt::format("触发{}定时任务 #{} ({}{} | 计划={} | 实际={})", task.isDaily ? "每日" : "", task.id,
+            delayed ? "延时，" : "", task.content.substr(0, 50), formatUnixTime(task.remindTime), formatUnixTime(now)));
 
-        const auto body = buildSystemEvent(task, delayed);
-        const auto resp =
-          co_await HttpUtil::send("[Scheduler]", kSelfBaseUrl, "/", drogon::Post, body, "", 10.0, logSessionId);
-        if (!resp || (*resp)->getStatusCode() != drogon::k200OK) {
-            // HTTP 异常细节由 HttpUtil 记录；一次性任务无论成败都标记完成防止反复重发，每日任务次日自然重试
-            Logger::error(logSessionId, "Scheduler", fmt::format("定时任务 #{} 注入失败", task.id));
-        } else {
-            Logger::info(logSessionId, "Scheduler", fmt::format("定时任务 #{} 已注入消息接口", task.id));
+        try {
+            OneBotEventWorkflow::instance().enqueueOneBotEvent(buildSystemEvent(task, delayed));
+            Logger::info(logSessionId, "Scheduler", fmt::format("定时任务 #{} 已加入消息工作流", task.id));
+        } catch (const std::exception &error) {
+            Logger::error(
+              logSessionId, "Scheduler", fmt::format("定时任务 #{} 加入消息工作流失败: {}", task.id, error.what()));
+        } catch (...) {
+            Logger::error(logSessionId, "Scheduler", fmt::format("定时任务 #{} 加入消息工作流失败: 未知错误", task.id));
         }
 
         if (!task.isDaily) {
             TaskStore::finishScheduledTask(task.id);
-            co_return;
+            return;
         }
 
         // 每日任务推进到下次触发重新入堆；更新以 pending 为条件，
         // 触发途中被取消（cancelledIds 已登记）则不再重排
         const std::time_t nextFire = nextDailyFire(task.remindTime);
         if (!TaskStore::rescheduleDailyTask(task.id, nextFire)) {
-            co_return;
+            return;
         }
         Entry entry;
         entry.task = std::move(task);
