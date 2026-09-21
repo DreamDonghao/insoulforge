@@ -4,6 +4,7 @@
 #include <agent/runtime/ExecutorAgent.hpp>
 #include <conversation/maintenance/affinity/AffinityStore.hpp>
 #include <conversation/message/MessageRecord.hpp>
+#include <conversation/message/SessionId.hpp>
 #include <conversation/session/SessionStore.hpp>
 #include <include/agent/tools/ToolRegistry.hpp>
 #include <infrastructure/config/Config.hpp>
@@ -383,7 +384,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
 
             for (const auto &toolCall: message["tool_calls"]) {
                 const std::string name = jsonToString(atOrNull(atOrNull(toolCall, "function"), "name"));
-                Logger::session(sessionId).info("[Executor] 工具: {}", name);
+                Logger::info(sessionId, "Executor", fmt::format("工具: {}", name));
 
                 const json args = parseToolArguments(toolCall);
 
@@ -398,7 +399,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
                         const std::string fallback =
                           finalizeContent(jsonToString(atOrNull(message, "content")), accumulatedCQCodes);
                         if (!fallback.empty()) {
-                            Logger::session(sessionId).warn("[Executor] reply 参数为空，使用 assistant content 兜底");
+                            Logger::warn(sessionId, "Executor", "reply 参数为空，使用 assistant content 兜底");
                             decision.shouldReply = true;
                             decision.content = fallback;
                             hasDecision = true;
@@ -408,7 +409,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
                     const std::string error = name == "reply_with_quote"
                                                 ? "reply_with_quote 需要非空 content 和 message_id，请重新调用。"
                                                 : "reply 需要非空 content，请重新调用。";
-                    Logger::session(sessionId).warn("[Executor] 回复工具参数无效: {}", name);
+                    Logger::warn(sessionId, "Executor", fmt::format("回复工具参数无效: {}", name));
                     appendToolResult(messages, toolCall, error);
                     continue;
                 }
@@ -426,7 +427,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
                 }
 
                 const std::string result = co_await ToolRegistry::instance().executeTool(name, args, std::move(ctx));
-                Logger::session(sessionId).debug("[Executor] 工具结果: {}", result);
+                Logger::debug(sessionId, "Executor", fmt::format("工具结果: {}", result));
                 if (isCqCodeTool(name)) {
                     accumulatedCQCodes += result;
                 }
@@ -446,7 +447,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
             const auto &config = Config::instance();
             const json tools = ToolRegistry::instance().getTools({.isPrivateSession = SessionId::isPrivate(sessionId)});
             if (tools.empty()) {
-                Logger::session(sessionId).error("[Executor] 未注册工具");
+                Logger::error(sessionId, "Executor", "未注册工具");
                 co_return std::nullopt;
             }
 
@@ -483,7 +484,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
                 accumulatedCQCodes = std::move(nextAccumulatedCQCodes);
             }
 
-            Logger::session(sessionId).error("[Executor] 达到最大迭代次数");
+            Logger::error(sessionId, "Executor", "达到最大迭代次数");
             co_return std::nullopt;
         }
 
@@ -522,8 +523,8 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
     drogon::Task<std::optional<ReplyDecision>> execute(const ChatRecordManager &chatRecords,
       const MemoryManager &memory, RouterDecision decision, const json messageSnapshot) {
         const uint64_t sessionId = chatRecords.getSessionId();
-        Logger::session(sessionId).info(
-          "[Executor] 开始执行 | priority={} | maxLength={}", decision.isPriority, decision.maxLength);
+        Logger::info(sessionId, "Executor",
+          fmt::format("开始执行 | priority={} | maxLength={}", decision.isPriority, decision.maxLength));
 
         json messages = buildPrompt(chatRecords, memory, decision);
 

@@ -4,6 +4,7 @@
 #pragma once
 #include <drogon/WebSocketConnection.h>
 #include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/logging/LogBuffer.hpp>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -12,8 +13,6 @@
 
 namespace insoulforge {
     struct LogSubscription {
-        bool all = true;
-        bool systemOnly = false;
         std::optional<uint64_t> sessionId;
         std::optional<std::string> level;
         std::string keyword;
@@ -29,14 +28,15 @@ namespace insoulforge {
 
         void updateSubscription(const drogon::WebSocketConnectionPtr &conn, LogSubscription subscription);
 
-        void pushLog(const json &log);
+        /// @brief 向符合订阅条件的后台连接推送日志条目
+        void pushLog(const LogEntry &entry);
 
         void broadcastStatus(const json &status);
 
     private:
         LogWebSocketManager() = default;
 
-        [[nodiscard]] static bool matches(const LogSubscription &subscription, const json &log);
+        [[nodiscard]] static bool matches(const LogSubscription &subscription, const LogEntry &entry);
 
         std::mutex m_mutex;
         std::unordered_set<drogon::WebSocketConnectionPtr> m_connections;

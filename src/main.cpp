@@ -49,8 +49,9 @@ int main() {
         // 启动定时任务调度器
         TaskScheduler::instance().start();
 
-        spdlog::info("系统初始化完成 - 启用群: {}, 管理员: {}", std::ssize(SessionStore::getEnabledGroups()),
-          std::ssize(AdminStore::getAdmins()));
+        Logger::info(0, "Main",
+          fmt::format("系统初始化完成 | enabled_sessions={} | admins={}", std::ssize(SessionStore::getEnabledGroups()),
+            std::ssize(AdminStore::getAdmins())));
 
         // 启动服务
         // 启动控制台命令线程
@@ -67,13 +68,13 @@ int main() {
                         return;
                     }
                     if (Logger::setLevel(level)) {
-                        spdlog::info("日志等级已切换为 {}", level);
+                        Logger::info(0, "Logger", fmt::format("日志等级已切换为 {}", level));
                     } else {
-                        spdlog::warn("无效的日志等级: {}", level);
+                        Logger::warn(0, "Logger", fmt::format("无效的日志等级: {}", level));
                     }
                     continue;
                 }
-                spdlog::warn("未知命令: {}", command);
+                Logger::warn(0, "Main", fmt::format("未知命令: {}", command));
             }
         });
 
@@ -96,8 +97,8 @@ int main() {
 
         drogon::app().addListener("0.0.0.0", 7778);
         drogon::app().setDocumentRoot("public");
-        spdlog::info("HTTP服务启动，端口: 7778");
-        spdlog::info("管理后台: http://localhost:7778/index.html");
+        Logger::info(0, "Main", "HTTP 服务启动 | port=7778");
+        Logger::info(0, "Main", "管理后台: http://localhost:7778/index.html");
 
         drogon::app().run();
 
@@ -106,13 +107,13 @@ int main() {
         OneBotWebSocketClient::instance().stop();
         OneBotEventWorkflow::instance().flushMessageListsToStorage();
         database.close();
-        spdlog::info("系统正常退出");
+        Logger::info(0, "Main", "系统正常退出");
     } catch (const std::exception &e) {
-        spdlog::critical("程序崩溃: {}", e.what());
+        Logger::critical(0, "Main", fmt::format("程序崩溃: {}", e.what()));
         Logger::shutdown();
         return 1;
     } catch (...) {
-        spdlog::critical("程序崩溃: 未知错误");
+        Logger::critical(0, "Main", "程序崩溃: 未知错误");
         Logger::shutdown();
         return 1;
     }

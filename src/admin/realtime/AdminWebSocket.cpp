@@ -1,4 +1,5 @@
 #include <admin/realtime/AdminWebSocket.hpp>
+#include <infrastructure/logging/Logger.hpp>
 
 using namespace insoulforge;
 using namespace drogon;
@@ -22,7 +23,7 @@ void AdminWebSocket::handleNewMessage(
     // 解析客户端消息
     json msg;
     if (!tryParseJson(message, msg)) {
-        spdlog::warn("WebSocket消息解析失败");
+        Logger::warn(0, "Admin", fmt::format("WebSocket消息解析失败"));
         return;
     }
 

@@ -3,6 +3,7 @@
 /// @author donghao
 /// @date 2026-08-27
 
+#include <conversation/message/SessionId.hpp>
 #include <include/agent/ability/TaskScheduler.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/http/HttpUtil.hpp>
@@ -117,9 +118,10 @@ namespace insoulforge {
         entry.task.id = id;
         entry.fireTime = entry.task.remindTime - kFireLead.count();
 
-        spdlog::info("[Scheduler] 已创建{}定时任务 #{}: {}({}) 于 {}", entry.task.isDaily ? "每日" : "", id,
-          entry.task.sessionType == "private" ? "私聊" : "群聊", entry.task.targetId,
-          formatUnixTime(entry.task.remindTime));
+        Logger::info(0, "Scheduler",
+          fmt::format("已创建{}定时任务 #{}: {}({}) 于 {}", entry.task.isDaily ? "每日" : "", id,
+            entry.task.sessionType == "private" ? "私聊" : "群聊", entry.task.targetId,
+            formatUnixTime(entry.task.remindTime)));
 
         pushEntry(std::move(entry));
         return id;
@@ -166,7 +168,8 @@ namespace insoulforge {
                 m_heap.push(std::move(entry));
             }
         }
-        spdlog::info("[Scheduler] 恢复待触发定时任务 {} 条（其中已过期 {} 条）", tasks.size(), overdue);
+        Logger::info(
+          0, "Scheduler", fmt::format("恢复待触发定时任务 {} 条（其中已过期 {} 条）", tasks.size(), overdue));
         if (!tasks.empty()) {
             m_cv.notify_all();
         }
@@ -206,18 +209,18 @@ namespace insoulforge {
           task.sessionType == "private" ? SessionId::fromPrivateUser(task.targetId) : task.targetId;
 
         const bool delayed = std::time(nullptr) > task.remindTime;
-        Logger::session(logSessionId)
-          .info("[Scheduler] 触发{}定时任务 #{} ({}{})", task.isDaily ? "每日" : "", task.id, delayed ? "延时，" : "",
-            task.content.substr(0, 50));
+        Logger::info(logSessionId, "Scheduler",
+          fmt::format("触发{}定时任务 #{} ({}{})", task.isDaily ? "每日" : "", task.id, delayed ? "延时，" : "",
+            task.content.substr(0, 50)));
 
         const auto body = buildSystemEvent(task, delayed);
         const auto resp =
           co_await HttpUtil::send("[Scheduler]", kSelfBaseUrl, "/", drogon::Post, body, "", 10.0, logSessionId);
         if (!resp || (*resp)->getStatusCode() != drogon::k200OK) {
             // HTTP 异常细节由 HttpUtil 记录；一次性任务无论成败都标记完成防止反复重发，每日任务次日自然重试
-            spdlog::error("[Scheduler] 定时任务 #{} 注入失败", task.id);
+            Logger::error(logSessionId, "Scheduler", fmt::format("定时任务 #{} 注入失败", task.id));
         } else {
-            Logger::session(logSessionId).info("[Scheduler] 定时任务 #{} 已注入消息接口", task.id);
+            Logger::info(logSessionId, "Scheduler", fmt::format("定时任务 #{} 已注入消息接口", task.id));
         }
 
         if (!task.isDaily) {
@@ -235,8 +238,8 @@ namespace insoulforge {
         entry.task = std::move(task);
         entry.task.remindTime = nextFire;
         entry.fireTime = nextFire - kFireLead.count();
-        Logger::session(logSessionId)
-          .info("[Scheduler] 每日任务 #{} 已重排至下次触发：{}", entry.task.id, formatUnixTime(nextFire));
+        Logger::info(logSessionId, "Scheduler",
+          fmt::format("每日任务 #{} 已重排至下次触发：{}", entry.task.id, formatUnixTime(nextFire)));
         instance().pushEntry(std::move(entry));
     }
 

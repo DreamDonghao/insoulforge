@@ -10,6 +10,7 @@
 #include <include/agent/tools/ToolRegistry.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/config/ConfigStore.hpp>
+#include <infrastructure/logging/Logger.hpp>
 #include <llm/PromptStore.hpp>
 
 using namespace insoulforge;
@@ -105,7 +106,7 @@ Task<> AdminController::savePrompt(HttpRequestPtr req, std::function<void(const 
     }
 
     PromptStore::setPrompt(key, content, description);
-    spdlog::warn("管理后台更新提示词: key={}, 长度={}", key, content.size());
+    Logger::warn(0, "Admin", fmt::format("管理后台更新提示词: key={}, 长度={}", key, content.size()));
 
     callback(jsonResponse(AdminResponse::okJson("提示词已保存")));
     co_return;
@@ -402,7 +403,7 @@ Task<> AdminController::importCustomTool(
     int newId = ToolStore::addCustomTool(tool);
     ToolRuntime::reloadCustomTools();
 
-    spdlog::info("导入自定义工具: {} (ID: {})", tool.name, newId);
+    Logger::info(0, "Admin", fmt::format("导入自定义工具: {} (ID: {})", tool.name, newId));
 
     json resp = AdminResponse::okJson("工具已导入");
     resp["id"] = newId;

@@ -33,20 +33,20 @@ namespace insoulforge::OneBotClient {
                     co_return std::nullopt;
                 }
                 if ((*response)->getStatusCode() != drogon::k200OK || !tryParseJson((*response)->body(), body)) {
-                    Logger::session(sessionId.value_or(0))
-                      .error("{} OneBot API {} 请求失败: http_status={}", tag, api,
-                        static_cast<int>((*response)->getStatusCode()));
+                    Logger::error(sessionId.value_or(0), "OneBot",
+                      fmt::format("{} API {} 请求失败: http_status={}", tag, api,
+                        static_cast<int>((*response)->getStatusCode())));
                     co_return std::nullopt;
                 }
             }
             if (!body.is_object()) {
-                Logger::session(sessionId.value_or(0)).error("{} OneBot API {} 响应不是 JSON 对象", tag, api);
+                Logger::error(sessionId.value_or(0), "OneBot", fmt::format("{} API {} 响应不是 JSON 对象", tag, api));
                 co_return std::nullopt;
             }
             if (getStr(body, "status", "failed") != "ok") {
-                Logger::session(sessionId.value_or(0))
-                  .error("{} OneBot API {} 失败: status={}, retcode={}", tag, api, getStr(body, "status"),
-                    getInt(body, "retcode", -1));
+                Logger::error(sessionId.value_or(0), "OneBot",
+                  fmt::format("{} API {} 失败: status={}, retcode={}", tag, api, getStr(body, "status"),
+                    getInt(body, "retcode", -1)));
                 co_return std::nullopt;
             }
             co_return body;
@@ -62,8 +62,8 @@ namespace insoulforge::OneBotClient {
 
             const auto resp = co_await callApi("[Msg]", std::move(api), std::move(params), sessionId);
             if (!resp) {
-                Logger::session(sessionId.value_or(0))
-                  .error("发送消息错误: msgLen={}, preview={}", message.size(), message.substr(0, 200));
+                Logger::error(sessionId.value_or(0), "OneBot",
+                  fmt::format("发送消息错误: msgLen={}, preview={}", message.size(), message.substr(0, 200)));
                 co_return std::nullopt;
             }
             co_return jsonToUInt64(atOrNull(atOrNull(*resp, "data"), "message_id"));
@@ -89,7 +89,7 @@ namespace insoulforge::OneBotClient {
         if (!resp) {
             co_return false;
         }
-        Logger::session(groupId).info("禁言成功: 用户{} 时长{}秒", userId, duration);
+        Logger::info(groupId, "OneBot", fmt::format("禁言成功: 用户{} 时长{}秒", userId, duration));
         co_return true;
     }
 
@@ -118,7 +118,7 @@ namespace insoulforge::OneBotClient {
         if (!resp) {
             co_return false;
         }
-        Logger::session(groupId).info("拍一拍成功: 用户{}", userId);
+        Logger::info(groupId, "OneBot", fmt::format("拍一拍成功: 用户{}", userId));
         co_return true;
     }
 
@@ -130,7 +130,7 @@ namespace insoulforge::OneBotClient {
         if (!resp) {
             co_return false;
         }
-        Logger::session(sessionId.value_or(0)).info("撤回消息成功: message_id={}", messageId);
+        Logger::info(sessionId.value_or(0), "OneBot", fmt::format("撤回消息成功: message_id={}", messageId));
         co_return true;
     }
 
@@ -162,7 +162,7 @@ namespace insoulforge::OneBotClient {
 
         const auto resp = co_await callApi("[Sticker]", "add_custom_face", params, sessionId);
         if (!resp) {
-            spdlog::error("[Sticker] 保存收藏表情失败: {}", file);
+            Logger::error(0, "Sticker", fmt::format("保存收藏表情失败: {}", file));
             co_return false;
         }
         co_return true;

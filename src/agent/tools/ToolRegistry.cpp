@@ -4,6 +4,7 @@
 /// @date 2026-03-28
 
 #include <include/agent/tools/ToolRegistry.hpp>
+#include <infrastructure/logging/Logger.hpp>
 
 using insoulforge::json;
 
@@ -35,7 +36,7 @@ namespace insoulforge {
 
     bool ToolRegistry::registerPlugin(std::string pluginId, const PluginRegistrar &registrar) {
         if (pluginId.empty() || !registrar || !m_activePluginId.empty()) {
-            spdlog::error("工具插件注册失败：插件 ID、注册函数无效或发生嵌套注册");
+            Logger::error(0, "Tool", fmt::format("工具插件注册失败：插件 ID、注册函数无效或发生嵌套注册"));
             return false;
         }
 
@@ -54,10 +55,10 @@ namespace insoulforge {
         try {
             registrar(*this);
         } catch (const std::exception &e) {
-            spdlog::error("工具插件 '{}' 注册异常: {}", m_activePluginId, e.what());
+            Logger::error(0, "Tool", fmt::format("工具插件 '{}' 注册异常: {}", m_activePluginId, e.what()));
             m_pluginRegistrationFailed = true;
         } catch (...) {
-            spdlog::error("工具插件 '{}' 注册发生未知异常", m_activePluginId);
+            Logger::error(0, "Tool", fmt::format("工具插件 '{}' 注册发生未知异常", m_activePluginId));
             m_pluginRegistrationFailed = true;
         }
 
@@ -68,14 +69,15 @@ namespace insoulforge {
                 m_tools.insert_or_assign(tool.tool.name, tool);
                 m_pluginTools[registeredPluginId].push_back(tool.tool.name);
             }
-            spdlog::warn("工具插件 '{}' 注册失败，已恢复此前 {} 个工具", registeredPluginId, previousTools.size());
+            Logger::warn(0, "Tool",
+              fmt::format("工具插件 '{}' 注册失败，已恢复此前 {} 个工具", registeredPluginId, previousTools.size()));
             m_pluginRegistrationFailed = false;
             return false;
         }
 
         const auto registered = m_pluginTools.find(registeredPluginId);
         const size_t count = registered == m_pluginTools.end() ? 0 : registered->second.size();
-        spdlog::info("工具插件 '{}' 注册完成（{} 个工具）", registeredPluginId, count);
+        Logger::info(0, "Tool", fmt::format("工具插件 '{}' 注册完成（{} 个工具）", registeredPluginId, count));
         return true;
     }
 
@@ -86,12 +88,12 @@ namespace insoulforge {
         for (const auto &name: it->second)
             m_tools.erase(name);
         m_pluginTools.erase(it);
-        spdlog::info("工具插件已卸载: {}", pluginId);
+        Logger::info(0, "Tool", fmt::format("工具插件已卸载: {}", pluginId));
     }
 
     bool ToolRegistry::registerTool(const Tool &tool, const ToolCategory category) {
         if (tool.name.empty() || !tool.handler) {
-            spdlog::error("工具注册失败：工具名称或处理器为空");
+            Logger::error(0, "Tool", fmt::format("工具注册失败：工具名称或处理器为空"));
             if (!m_activePluginId.empty())
                 m_pluginRegistrationFailed = true;
             return false;
@@ -99,8 +101,9 @@ namespace insoulforge {
 
         const std::string pluginId = m_activePluginId.empty() ? "application" : m_activePluginId;
         if (const auto it = m_tools.find(tool.name); it != m_tools.end() && it->second.pluginId != pluginId) {
-            spdlog::error(
-              "工具注册冲突: '{}' 已由插件 '{}' 注册，插件 '{}' 不能覆盖", tool.name, it->second.pluginId, pluginId);
+            Logger::error(0, "Tool",
+              fmt::format(
+                "工具注册冲突: '{}' 已由插件 '{}' 注册，插件 '{}' 不能覆盖", tool.name, it->second.pluginId, pluginId));
             if (!m_activePluginId.empty())
                 m_pluginRegistrationFailed = true;
             return false;
@@ -110,7 +113,8 @@ namespace insoulforge {
         auto &names = m_pluginTools[pluginId];
         if (!std::ranges::contains(names, tool.name))
             names.push_back(tool.name);
-        spdlog::info("工具注册成功: {} (插件: {}, 分类: {})", tool.name, pluginId, categoryToString(category));
+        Logger::info(0, "Tool",
+          fmt::format("工具注册成功: {} (插件: {}, 分类: {})", tool.name, pluginId, categoryToString(category)));
         return true;
     }
 
@@ -157,7 +161,7 @@ namespace insoulforge {
                 ++iterator;
             }
         }
-        spdlog::info("工具已注销: {}", name);
+        Logger::info(0, "Tool", fmt::format("工具已注销: {}", name));
     }
 
     std::string ToolRegistry::categoryToString(const ToolCategory category) {

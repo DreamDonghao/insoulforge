@@ -3,6 +3,7 @@
 
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/config/ConfigStore.hpp>
+#include <infrastructure/logging/Logger.hpp>
 
 namespace insoulforge {
     namespace {
@@ -74,7 +75,7 @@ namespace insoulforge {
                 longTermRecallThreshold = 0.65;
             if (longTermInjectThreshold <= 0.0 || longTermInjectThreshold >= 1.0)
                 longTermInjectThreshold = 0.45;
-            spdlog::info("记忆配置已从配置文件加载");
+            Logger::info(0, "Config", fmt::format("记忆配置已从配置文件加载"));
         }
 
         // 加载 QQ Bot 配置
@@ -90,9 +91,9 @@ namespace insoulforge {
             if (oneBotTransport != "http" && oneBotTransport != "websocket") {
                 oneBotTransport = "http";
             }
-            spdlog::info("QQ Bot 配置已从配置文件加载");
+            Logger::info(0, "Config", fmt::format("QQ Bot 配置已从配置文件加载"));
         }
 
-        spdlog::info("所有配置已从配置文件加载");
+        Logger::info(0, "Config", fmt::format("所有配置已从配置文件加载"));
     }
 } // namespace insoulforge

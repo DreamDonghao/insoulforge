@@ -4,6 +4,7 @@
 /// @date 2026-08-30
 
 #include <agent/tools/ToolStore.hpp>
+#include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 
@@ -55,7 +56,7 @@ namespace insoulforge {
             stmt.bind(7, tool.readme);
             stmt.bind(8, tool.enabled ? 1 : 0);
             stmt.exec();
-            spdlog::info("已添加自定义工具: {}", tool.name);
+            Logger::info(0, "Tool", fmt::format("已添加自定义工具: {}", tool.name));
             return static_cast<int>(Statement::lastInsertRowId(db.handle()));
         }
 
@@ -76,7 +77,7 @@ namespace insoulforge {
             stmt.bind(8, tool.enabled ? 1 : 0);
             stmt.bind(9, tool.id);
             stmt.exec();
-            spdlog::info("已更新自定义工具: {}", tool.name);
+            Logger::info(0, "Tool", fmt::format("已更新自定义工具: {}", tool.name));
         }
 
         void deleteCustomTool(const int id) {
@@ -85,7 +86,7 @@ namespace insoulforge {
             const Statement stmt(db.handle(), "DELETE FROM custom_tools WHERE id=?");
             stmt.bind(1, id);
             stmt.exec();
-            spdlog::info("已删除自定义工具 ID: {}", id);
+            Logger::info(0, "Tool", fmt::format("已删除自定义工具 ID: {}", id));
         }
 
         void toggleCustomTool(const int id) {
@@ -121,7 +122,7 @@ namespace insoulforge {
               db.handle(), "INSERT OR REPLACE INTO settings (key, value) VALUES ('custom_tool_python', ?)");
             stmt.bind(1, pythonPath);
             stmt.exec();
-            spdlog::info("自定义工具Python路径已设置: {}", pythonPath);
+            Logger::info(0, "Tool", fmt::format("自定义工具Python路径已设置: {}", pythonPath));
         }
     } // namespace ToolStore
 } // namespace insoulforge

@@ -6,6 +6,7 @@
 #include <agent/tools/ToolArgument.hpp>
 #include <agent/tools/ToolRuntime.hpp>
 #include <agent/tools/plugins/InfoToolsPlugin.hpp>
+#include <conversation/message/SessionId.hpp>
 #include <include/agent/tools/ToolRegistry.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
@@ -150,8 +151,8 @@ namespace insoulforge {
                     co_return std::string("深度思考暂时不可用，请直接根据已有信息回复");
                 }
 
-                Logger::session(sessionId).debug(
-                  "[深度思考] 结果: {}...", content.substr(0, std::min(kThinkingPreviewChars, content.length())));
+                Logger::debug(sessionId, "DeepThink",
+                  fmt::format("结果: {}...", content.substr(0, std::min(kThinkingPreviewChars, content.length()))));
                 co_return "【深度思考结果】\n" + content;
             },
           },

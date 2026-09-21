@@ -13,6 +13,7 @@
 #include <include/agent/ability/TaskScheduler.hpp>
 #include <include/agent/tools/ToolRegistry.hpp>
 #include <infrastructure/config/Config.hpp>
+#include <infrastructure/logging/Logger.hpp>
 #include <onebot/MessageService.hpp>
 #include <onebot/OneBotClient.hpp>
 
@@ -236,8 +237,8 @@ namespace insoulforge {
                 const std::string &file = source->file;
                 const std::string &url = source->url;
 
-                spdlog::info(
-                  "[Sticker] save_sticker: message_id={} image_index={} file={}", messageId, imageIndex, file);
+                Logger::info(sessionId, "Sticker",
+                  fmt::format("save_sticker: message_id={} image_index={} file={}", messageId, imageIndex, file));
 
                 // Step 1: 尝试 get_image 拿容器内路径（商城表情会失败/超时）
                 std::string containerPath;
@@ -288,11 +289,12 @@ namespace insoulforge {
                         emojiId, getStr(newItem, "res_id"), getStr(newItem, "md5"), name, sessionId)) {
                         ToolRuntime::invalidateFavoriteEmojiCache();
                     } else {
-                        spdlog::warn("[Sticker] 设置表情描述失败: {}", getStr(newItem, "res_id"));
+                        Logger::warn(
+                          sessionId, "Sticker", fmt::format("设置表情描述失败: {}", getStr(newItem, "res_id")));
                     }
                 }
 
-                spdlog::info("[Sticker] 已保存收藏表情: {} ({})", containerPath, name);
+                Logger::info(sessionId, "Sticker", fmt::format("已保存收藏表情: {} ({})", containerPath, name));
                 co_return fmt::format("已保存为收藏表情，名称: {}", name);
             },
           },
@@ -341,7 +343,7 @@ namespace insoulforge {
                 }
 
                 ToolRuntime::invalidateFavoriteEmojiCache();
-                spdlog::info("[Sticker] 表情改名: {} -> {}", name, newName);
+                Logger::info(sessionId, "Sticker", fmt::format("表情改名: {} -> {}", name, newName));
                 co_return fmt::format("已改名为: {}", newName);
             },
           },
@@ -380,7 +382,7 @@ namespace insoulforge {
                 }
 
                 ToolRuntime::invalidateFavoriteEmojiCache();
-                spdlog::info("[Sticker] 已删除收藏表情: {}", name);
+                Logger::info(sessionId, "Sticker", fmt::format("已删除收藏表情: {}", name));
                 co_return fmt::format("已删除表情: {}", name);
             },
           },
@@ -619,7 +621,7 @@ namespace insoulforge {
                     co_return fmt::format("定时任务 #{} 已创建，将于 {} 在{}触发提醒", id, formatUnixTime(*remindTime),
                       isPrivateSession ? "私聊" : "本群");
                 } catch (const std::exception &e) {
-                    spdlog::error("[Scheduler] 创建定时任务入库失败: {}", e.what());
+                    Logger::error(sessionId, "Scheduler", fmt::format("创建定时任务入库失败: {}", e.what()));
                     co_return std::string("创建定时任务失败，请稍后重试");
                 }
             },

@@ -4,6 +4,7 @@
 /// @date 2026-08-30
 
 #include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/SchemaMigrator.hpp>
 #include <infrastructure/storage/Statement.hpp>
 
@@ -14,7 +15,7 @@ namespace insoulforge {
             if (sqlite3_exec(db, std::string(sql).c_str(), nullptr, nullptr, &errMsg) != SQLITE_OK) {
                 std::string err = errMsg ? errMsg : sqlite3_errmsg(db);
                 sqlite3_free(errMsg);
-                spdlog::error("迁移 SQL 执行失败: {} - {}", sql, err);
+                Logger::error(0, "Storage", fmt::format("迁移 SQL 执行失败: {} - {}", sql, err));
                 throw DbError(err);
             }
         }
@@ -43,14 +44,14 @@ namespace insoulforge {
         void ensureColumn(sqlite3 *db, std::string_view table, std::string_view column, std::string_view ddl) {
             if (columnExists(db, table, column))
                 return;
-            spdlog::info("数据库迁移: 新增 {}.{}", table, column);
+            Logger::info(0, "Storage", fmt::format("数据库迁移: 新增 {}.{}", table, column));
             execSQL(db, fmt::format("ALTER TABLE {} ADD COLUMN {}", table, ddl));
         }
 
         void dropColumnIfExists(sqlite3 *db, std::string_view table, std::string_view column) {
             if (!columnExists(db, table, column))
                 return;
-            spdlog::info("数据库迁移: 移除废弃的 {}.{}", table, column);
+            Logger::info(0, "Storage", fmt::format("数据库迁移: 移除废弃的 {}.{}", table, column));
             execSQL(db, fmt::format("ALTER TABLE {} DROP COLUMN {}", table, column));
         }
 
@@ -244,7 +245,7 @@ namespace insoulforge {
         }
 
         void migrateV0ToV1(sqlite3 *db) {
-            spdlog::info("执行基线迁移: 历史遗留 Schema 调整");
+            Logger::info(0, "Storage", fmt::format("执行基线迁移: 历史遗留 Schema 调整"));
 
             // 兜底补齐所有表（正常情况下旧库已全部存在）
             execAll(db, v2Tables);
@@ -267,10 +268,11 @@ namespace insoulforge {
                     if (tableExists(db, "short_term_memory")) {
                         execSQL(db, "DROP TABLE short_term_memory");
                     }
-                    spdlog::info("数据库迁移: 重命名 long_term_memory → short_term_memory ({} 条数据)", oldCount);
+                    Logger::info(0, "Storage",
+                      fmt::format("数据库迁移: 重命名 long_term_memory → short_term_memory ({} 条数据)", oldCount));
                     execSQL(db, "ALTER TABLE long_term_memory RENAME TO short_term_memory");
                 } else {
-                    spdlog::info("数据库迁移: 删除空的 long_term_memory 表");
+                    Logger::info(0, "Storage", fmt::format("数据库迁移: 删除空的 long_term_memory 表"));
                     execSQL(db, "DROP TABLE long_term_memory");
                 }
             }
@@ -302,13 +304,13 @@ namespace insoulforge {
 
             // emojis 表已废弃（表情包改为直接使用 QQ 收藏表情，不再存库）
             if (tableExists(db, "emojis")) {
-                spdlog::info("数据库迁移: 删除废弃的 emojis 表");
+                Logger::info(0, "Storage", fmt::format("数据库迁移: 删除废弃的 emojis 表"));
                 execSQL(db, "DROP TABLE emojis");
             }
         }
 
         void migrateV1ToV2(sqlite3 *db) {
-            spdlog::info("执行迁移: kb_config/memory_config/qq_config 并入 settings");
+            Logger::info(0, "Storage", fmt::format("执行迁移: kb_config/memory_config/qq_config 并入 settings"));
 
             json kb;
             {
@@ -382,12 +384,12 @@ namespace insoulforge {
         }
 
         void migrateV2ToV3(sqlite3 *db) {
-            spdlog::info("执行迁移: 新增 group_affinity 好感度表");
+            Logger::info(0, "Storage", fmt::format("执行迁移: 新增 group_affinity 好感度表"));
             execAll(db, v3Tables);
         }
 
         void migrateV3ToV4(sqlite3 *db) {
-            spdlog::info("执行迁移: scheduled_tasks 状态扩展（新增 cancelled）");
+            Logger::info(0, "Storage", fmt::format("执行迁移: scheduled_tasks 状态扩展（新增 cancelled）"));
             // SQLite 无法直接修改 CHECK 约束，需重建表
             execSQL(db, R"(CREATE TABLE scheduled_tasks_new (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -408,34 +410,34 @@ namespace insoulforge {
         }
 
         void migrateV4ToV5(sqlite3 *db) {
-            spdlog::info("执行迁移: scheduled_tasks 新增 is_daily（每日重复任务）");
+            Logger::info(0, "Storage", fmt::format("执行迁移: scheduled_tasks 新增 is_daily（每日重复任务）"));
             // 只加一列，ALTER TABLE 即可，无需像 v4 那样重建表
             ensureColumn(
               db, "scheduled_tasks", "is_daily", "is_daily INTEGER NOT NULL DEFAULT 0 CHECK(is_daily IN (0, 1))");
         }
 
         void migrateV5ToV6(sqlite3 *db) {
-            spdlog::info("执行迁移: 新增 long_term_memory 长期记忆表");
+            Logger::info(0, "Storage", fmt::format("执行迁移: 新增 long_term_memory 长期记忆表"));
             execAll(db, v6Tables);
             // RAGFlow 已移除，settings 中的知识库配置一并清理
             execSQL(db, "DELETE FROM settings WHERE key = 'kb_config'");
         }
 
         void migrateV6ToV7(sqlite3 *db) {
-            spdlog::info("执行迁移: 新增图片描述缓存表");
+            Logger::info(0, "Storage", fmt::format("执行迁移: 新增图片描述缓存表"));
             execAll(db, v7Tables);
             ensureColumn(
               db, "image_description_cache", "sampled_frame_count", "sampled_frame_count INTEGER NOT NULL DEFAULT 1");
         }
 
         void migrateV7ToV8(sqlite3 *db) {
-            spdlog::info("执行迁移: 新增持久化记忆维护任务队列并移除旧记忆水位线");
+            Logger::info(0, "Storage", fmt::format("执行迁移: 新增持久化记忆维护任务队列并移除旧记忆水位线"));
             execAll(db, v8Tables);
             dropColumnIfExists(db, "short_term_memory", "watermark_id");
         }
 
         void migrateV8ToV9(sqlite3 *db) {
-            spdlog::info("执行迁移: 记忆任务保留总结上下文与完成删除状态");
+            Logger::info(0, "Storage", fmt::format("执行迁移: 记忆任务保留总结上下文与完成删除状态"));
             ensureColumn(
               db, "memory_maintenance_jobs", "context_messages", "context_messages TEXT NOT NULL DEFAULT '[]'");
             ensureColumn(db, "memory_maintenance_jobs", "remove_count", "remove_count INTEGER NOT NULL DEFAULT 0");
@@ -444,7 +446,7 @@ namespace insoulforge {
         }
 
         void migrateV9ToV10(sqlite3 *db) {
-            spdlog::info("执行迁移: 新增独立的好感度维护任务队列");
+            Logger::info(0, "Storage", fmt::format("执行迁移: 新增独立的好感度维护任务队列"));
             execAll(db, v10Tables);
             execSQL(db, "INSERT INTO affinity_maintenance_jobs (session_id, messages) "
                         "SELECT session_id, messages FROM memory_maintenance_jobs WHERE status = 'pending'");
@@ -456,7 +458,7 @@ namespace insoulforge {
             const int version = getUserVersion(db);
 
             if (version == 0 && !hasUserTables(db)) {
-                spdlog::info("检测到全新数据库，直接创建最新 Schema (v{})", kLatestVersion);
+                Logger::info(0, "Storage", fmt::format("检测到全新数据库，直接创建最新 Schema (v{})", kLatestVersion));
                 createFreshSchema(db);
                 return;
             }
@@ -464,7 +466,7 @@ namespace insoulforge {
             if (version >= kLatestVersion)
                 return;
 
-            spdlog::info("数据库版本 v{}，开始迁移到 v{}", version, kLatestVersion);
+            Logger::info(0, "Storage", fmt::format("数据库版本 v{}，开始迁移到 v{}", version, kLatestVersion));
 
             // 迁移步骤表：steps[i] 将版本 i 升级到版本 i+1
             constexpr std::array steps = {
@@ -497,10 +499,10 @@ namespace insoulforge {
                     }
                 } catch (...) {
                     sqlite3_exec(db, "ROLLBACK", nullptr, nullptr, nullptr);
-                    spdlog::error("数据库迁移 v{} -> v{} 失败，已回滚", v, v + 1);
+                    Logger::error(0, "Storage", fmt::format("数据库迁移 v{} -> v{} 失败，已回滚", v, v + 1));
                     throw;
                 }
-                spdlog::info("数据库迁移完成: v{} -> v{}", v, v + 1);
+                Logger::info(0, "Storage", fmt::format("数据库迁移完成: v{} -> v{}", v, v + 1));
             }
         }
 

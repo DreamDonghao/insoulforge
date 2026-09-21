@@ -6,7 +6,6 @@
 #include <cstdint>
 #include <mutex>
 #include <optional>
-#include <spdlog/details/log_msg.h>
 #include <string>
 #include <vector>
 
@@ -15,13 +14,13 @@ namespace insoulforge {
         uint64_t id = 0;
         std::string timestamp;
         std::string level;
-        std::string message;
-        std::optional<uint64_t> sessionId;
+        uint64_t sessionId = 0;
+        std::string source;
+        std::string content;
     };
 
     struct LogQuery {
         std::optional<uint64_t> sessionId;
-        bool systemOnly = false;
         std::optional<std::string> level;
         std::string keyword;
         uint64_t afterId = 0;
@@ -44,7 +43,9 @@ namespace insoulforge {
 
         void loadFromDirectory(const std::string &directory);
 
-        void append(const spdlog::details::log_msg &message);
+        /// @brief 追加由 Logger 创建的日志条目
+        /// @return 带内存序列 ID 的最终条目
+        [[nodiscard]] LogEntry append(LogEntry entry);
 
         [[nodiscard]] LogQueryResult query(const LogQuery &query) const;
 
@@ -55,14 +56,10 @@ namespace insoulforge {
 
         static std::optional<LogEntry> parseLine(const std::string &line);
 
-        static std::optional<uint64_t> extractSessionId(const std::string &message);
-
-        static std::string formatTimestamp(const spdlog::log_clock::time_point &timestamp);
-
         static bool matches(const LogEntry &entry, const LogQuery &query);
 
         mutable std::mutex m_mutex;
         std::vector<LogEntry> m_entries;
         uint64_t m_nextId = 1;
     };
-}
+} // namespace insoulforge

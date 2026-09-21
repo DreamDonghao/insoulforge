@@ -4,6 +4,7 @@
 /// @date 2026-04-02
 
 #include <filesystem>
+#include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/SchemaMigrator.hpp>
 #include <spdlog/spdlog.h>
@@ -26,13 +27,13 @@ namespace insoulforge {
         // 打开数据库（仅启动期单线程调用，不加全局锁：
         // 迁移在自身事务中执行）
         if (sqlite3_open(dbPath.c_str(), &m_db) != SQLITE_OK) {
-            spdlog::error("无法打开数据库: {}", sqlite3_errmsg(m_db));
+            Logger::error(0, "Storage", fmt::format("无法打开数据库: {}", sqlite3_errmsg(m_db)));
             return;
         }
 
-        spdlog::info("数据库已打开: {}", dbPath);
+        Logger::info(0, "Storage", fmt::format("数据库已打开: {}", dbPath));
         SchemaMigrator::migrate(m_db);
-        spdlog::info("数据库初始化完成");
+        Logger::info(0, "Storage", fmt::format("数据库初始化完成"));
     }
 
     void Database::close() {
@@ -40,7 +41,7 @@ namespace insoulforge {
         if (m_db) {
             sqlite3_close(m_db);
             m_db = nullptr;
-            spdlog::info("数据库已关闭");
+            Logger::info(0, "Storage", fmt::format("数据库已关闭"));
         }
     }
 } // namespace insoulforge

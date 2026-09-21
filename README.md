@@ -34,13 +34,14 @@ QQ 交流群：1097487360
 
 镜像已发布至 Docker Hub 和 GitHub Container Registry，支持 **amd64 / arm64** 架构：
 
- Docker Hub （推荐，可配置国内镜像加速）
+Docker Hub （推荐，可配置国内镜像加速）
+
 ```bash
 docker pull dreamdonghao/insoulforge:latest
 ```
 
-
 GitHub Container Registry （备用）
+
 ```bash
 docker pull ghcr.io/dreamdonghao/insoulforge:latest
 ```
@@ -54,7 +55,8 @@ docker run -d --name insoulforge \
   dreamdonghao/insoulforge:latest
 ```
 
-> 全局配置文件 `data/config.json`、数据库、日志和表情包分别持久化在宿主机的 `./data`目录（也可自定义目录），升级镜像时数据不会丢失。首次启动会自动创建包含默认值的 `data/config.json`。
+> 全局配置文件 `data/config.json`、数据库、日志和表情包分别持久化在宿主机的 `./data`
+> 目录（也可自定义目录），升级镜像时数据不会丢失。首次启动会自动创建包含默认值的 `data/config.json`。
 
 > 如果 napcat 也运行在 Docker 中，注意容器内的 `127.0.0.1` 指向容器自身。启动后让两个容器加入同一个 docker
 > 网络，然后用容器名互访（无需重建容器，connect 直接生效）：

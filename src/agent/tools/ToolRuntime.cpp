@@ -6,6 +6,7 @@
 #include <agent/tools/ToolRuntime.hpp>
 #include <agent/tools/ToolStore.hpp>
 #include <include/agent/tools/ToolRegistry.hpp>
+#include <infrastructure/logging/Logger.hpp>
 
 namespace insoulforge {
     namespace {
@@ -50,7 +51,8 @@ namespace insoulforge {
 
     void ToolRuntime::registerBuiltinTools() {
         ToolPluginCatalog::registerBuiltinPlugins();
-        spdlog::info("ToolRuntime: 内置工具注册完成，当前工具总数 {}", ToolRegistry::instance().getAllTools().size());
+        Logger::info(0, "Tool",
+          fmt::format("ToolRuntime: 内置工具注册完成，当前工具总数 {}", ToolRegistry::instance().getAllTools().size()));
     }
 
     void ToolRuntime::reloadCustomTools() {
@@ -64,20 +66,22 @@ namespace insoulforge {
               for (const auto &tool: tools) {
                   auto definition = makeCustomTool(tool, parseCustomToolParameters(tool));
                   if (!definition) {
-                      spdlog::warn("ToolRuntime: 跳过不支持的自定义工具 '{}' ({})", tool.name, tool.executorType);
+                      Logger::warn(0, "Tool",
+                        fmt::format("ToolRuntime: 跳过不支持的自定义工具 '{}' ({})", tool.name, tool.executorType));
                       continue;
                   }
                   if (pluginRegistry.registerTool(*definition, ToolCategory::INFORMATION)) {
                       ++registeredCount;
-                      spdlog::info("ToolRuntime: 注册自定义工具 '{}' ({})", tool.name, tool.executorType);
+                      Logger::info(
+                        0, "Tool", fmt::format("ToolRuntime: 注册自定义工具 '{}' ({})", tool.name, tool.executorType));
                   }
               }
           });
 
         if (!registered) {
-            spdlog::error("ToolRuntime: 自定义工具重载失败，已保留此前注册结果");
+            Logger::error(0, "Tool", fmt::format("ToolRuntime: 自定义工具重载失败，已保留此前注册结果"));
             return;
         }
-        spdlog::info("ToolRuntime: 自定义工具重载完成（共{}个）", registeredCount);
+        Logger::info(0, "Tool", fmt::format("ToolRuntime: 自定义工具重载完成（共{}个）", registeredCount));
     }
 } // namespace insoulforge

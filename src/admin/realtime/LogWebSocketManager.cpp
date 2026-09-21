@@ -2,6 +2,8 @@
 /// @brief 运行日志 WebSocket 管理器 - 实现
 
 #include <admin/realtime/LogWebSocketManager.hpp>
+#include <infrastructure/JsonUtil.hpp>
+#include <vector>
 
 namespace insoulforge {
     LogWebSocketManager &LogWebSocketManager::instance() {
@@ -26,47 +28,60 @@ namespace insoulforge {
         m_subscriptions[conn] = std::move(subscription);
     }
 
-    void LogWebSocketManager::pushLog(const json &log) {
-        std::lock_guard lock(m_mutex);
-        for (const auto &conn: m_connections) {
-            auto it = m_subscriptions.find(conn);
-            if (it != m_subscriptions.end() && matches(it->second, log)) {
-                json msg;
-                msg["type"] = "log";
-                msg["data"] = log;
-                conn->send(dumpJson(msg));
+    void LogWebSocketManager::pushLog(const LogEntry &entry) {
+        json data;
+        data["id"] = entry.id;
+        data["timestamp"] = entry.timestamp;
+        data["level"] = entry.level;
+        data["sessionId"] = std::to_string(entry.sessionId);
+        data["source"] = entry.source;
+        data["content"] = entry.content;
+
+        json message;
+        message["type"] = "log";
+        message["data"] = data;
+        const std::string payload = dumpJson(message);
+
+        std::vector<drogon::WebSocketConnectionPtr> recipients;
+        {
+            std::lock_guard lock(m_mutex);
+            for (const auto &conn: m_connections) {
+                const auto subscription = m_subscriptions.find(conn);
+                if (subscription != m_subscriptions.end() && matches(subscription->second, entry)) {
+                    recipients.push_back(conn);
+                }
             }
+        }
+        for (const auto &conn: recipients) {
+            conn->send(payload);
         }
     }
 
     void LogWebSocketManager::broadcastStatus(const json &status) {
-        std::lock_guard lock(m_mutex);
         json msg;
         msg["type"] = "status";
         msg["data"] = status;
         const auto jsonStr = dumpJson(msg);
-        for (const auto &conn: m_connections) {
+
+        std::vector<drogon::WebSocketConnectionPtr> connections;
+        {
+            std::lock_guard lock(m_mutex);
+            connections.assign(m_connections.begin(), m_connections.end());
+        }
+        for (const auto &conn: connections) {
             conn->send(jsonStr);
         }
     }
 
-    bool LogWebSocketManager::matches(const LogSubscription &subscription, const json &log) {
-        // 日志条目的会话字段线上名为 "groupId"（字符串，可能带私聊标志位超出 int64）
-        const json &groupIdVal = atOrNull(log, "groupId");
-        const bool hasSession = !groupIdVal.is_null();
-        if (subscription.systemOnly) {
-            if (hasSession) {
-                return false;
-            }
-        } else if (subscription.sessionId.has_value()) {
-            if (!hasSession || parseUInt64(jsonToString(groupIdVal)) != *subscription.sessionId) {
-                return false;
-            }
-        }
-        if (subscription.level.has_value() && getStr(log, "level") != *subscription.level) {
+    bool LogWebSocketManager::matches(const LogSubscription &subscription, const LogEntry &entry) {
+        if (subscription.sessionId.has_value() && entry.sessionId != *subscription.sessionId) {
             return false;
         }
-        if (!subscription.keyword.empty() && getStr(log, "message").find(subscription.keyword) == std::string::npos) {
+        if (subscription.level.has_value() && entry.level != *subscription.level) {
+            return false;
+        }
+        if (!subscription.keyword.empty() && entry.source.find(subscription.keyword) == std::string::npos &&
+            entry.content.find(subscription.keyword) == std::string::npos) {
             return false;
         }
         return true;

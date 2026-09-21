@@ -195,7 +195,8 @@ onMounted(async () => {
     <button :aria-label="themeToggleLabel" :title="themeToggleLabel" class="login-theme-toggle" type="button"
             @click="toggleTheme">
       <svg v-if="theme === 'dark'" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-        <path d="M12 3v2m0 14v2M3 12h2m14 0h2M5.64 5.64l1.42 1.42m9.88 9.88 1.42 1.42m0-12.72-1.42 1.42m-9.88 9.88-1.42 1.42"/>
+        <path
+            d="M12 3v2m0 14v2M3 12h2m14 0h2M5.64 5.64l1.42 1.42m9.88 9.88 1.42 1.42m0-12.72-1.42 1.42m-9.88 9.88-1.42 1.42"/>
         <circle cx="12" cy="12" r="4"/>
       </svg>
       <svg v-else fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -205,7 +206,7 @@ onMounted(async () => {
     </button>
     <div class="login-shell">
       <div class="login-identity">
-        <div class="login-logo" aria-hidden="true">
+        <div aria-hidden="true" class="login-logo">
           <svg fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                viewBox="0 0 24 24">
             <path d="M12 2 2 7l10 5 10-5-10-5Z"/>
@@ -217,8 +218,8 @@ onMounted(async () => {
           <div class="login-product-type">管理后台</div>
         </div>
       </div>
-      <div class="login-panel login-status" aria-live="polite">
-        <span class="loading-indicator" aria-hidden="true"></span>
+      <div aria-live="polite" class="login-panel login-status">
+        <span aria-hidden="true" class="loading-indicator"></span>
         正在验证登录状态...
       </div>
     </div>
@@ -228,7 +229,8 @@ onMounted(async () => {
     <button :aria-label="themeToggleLabel" :title="themeToggleLabel" class="login-theme-toggle" type="button"
             @click="toggleTheme">
       <svg v-if="theme === 'dark'" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-        <path d="M12 3v2m0 14v2M3 12h2m14 0h2M5.64 5.64l1.42 1.42m9.88 9.88 1.42 1.42m0-12.72-1.42 1.42m-9.88 9.88-1.42 1.42"/>
+        <path
+            d="M12 3v2m0 14v2M3 12h2m14 0h2M5.64 5.64l1.42 1.42m9.88 9.88 1.42 1.42m0-12.72-1.42 1.42m-9.88 9.88-1.42 1.42"/>
         <circle cx="12" cy="12" r="4"/>
       </svg>
       <svg v-else fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -238,7 +240,7 @@ onMounted(async () => {
     </button>
     <div class="login-shell">
       <div class="login-identity">
-        <div class="login-logo" aria-hidden="true">
+        <div aria-hidden="true" class="login-logo">
           <svg fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                viewBox="0 0 24 24">
             <path d="M12 2 2 7l10 5 10-5-10-5Z"/>
@@ -256,13 +258,14 @@ onMounted(async () => {
         <p>请输入服务启动日志中生成的访问令牌。</p>
         <label class="login-label" for="access-token">访问令牌</label>
         <div class="login-input-wrap">
-          <input id="access-token" v-model="accessToken" autocomplete="current-password" autofocus class="login-input"
-                 :disabled="loginSubmitting" spellcheck="false" :type="showAccessToken ? 'text' : 'password'">
+          <input id="access-token" v-model="accessToken" :disabled="loginSubmitting" :type="showAccessToken ? 'text' : 'password'" autocomplete="current-password"
+                 autofocus class="login-input" spellcheck="false">
           <button :aria-label="showAccessToken ? '隐藏访问令牌' : '显示访问令牌'"
                   :title="showAccessToken ? '隐藏访问令牌' : '显示访问令牌'" class="input-icon-button" type="button"
                   @click="showAccessToken = !showAccessToken">
             <svg v-if="showAccessToken" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-              <path d="m3 3 18 18M10.58 10.58a2 2 0 0 0 2.83 2.83M9.88 4.24A10.94 10.94 0 0 1 12 4c5 0 9.27 3.11 11 7.5a11.82 11.82 0 0 1-2.08 3.19M6.61 6.61A11.87 11.87 0 0 0 1 11.5C2.73 15.89 7 19 12 19c1.61 0 3.14-.32 4.53-.9"/>
+              <path
+                  d="m3 3 18 18M10.58 10.58a2 2 0 0 0 2.83 2.83M9.88 4.24A10.94 10.94 0 0 1 12 4c5 0 9.27 3.11 11 7.5a11.82 11.82 0 0 1-2.08 3.19M6.61 6.61A11.87 11.87 0 0 0 1 11.5C2.73 15.89 7 19 12 19c1.61 0 3.14-.32 4.53-.9"/>
             </svg>
             <svg v-else fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
               <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/>
@@ -345,20 +348,20 @@ onMounted(async () => {
         <div class="sidebar-actions">
           <button :aria-label="themeToggleLabel" :title="themeToggleLabel" class="sidebar-action" type="button"
                   @click="toggleTheme">
-          <svg v-if="theme === 'dark'" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-          </svg>
-          <svg v-else fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <circle cx="12" cy="12" r="5"/>
-            <line x1="12" x2="12" y1="1" y2="3"/>
-            <line x1="12" x2="12" y1="21" y2="23"/>
-            <line x1="4.22" x2="5.64" y1="4.22" y2="5.64"/>
-            <line x1="18.36" x2="19.78" y1="18.36" y2="19.78"/>
-            <line x1="1" x2="3" y1="12" y2="12"/>
-            <line x1="21" x2="23" y1="12" y2="12"/>
-            <line x1="4.22" x2="5.64" y1="19.78" y2="18.36"/>
-            <line x1="18.36" x2="19.78" y1="5.64" y2="4.22"/>
-          </svg>
+            <svg v-if="theme === 'dark'" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+            </svg>
+            <svg v-else fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="5"/>
+              <line x1="12" x2="12" y1="1" y2="3"/>
+              <line x1="12" x2="12" y1="21" y2="23"/>
+              <line x1="4.22" x2="5.64" y1="4.22" y2="5.64"/>
+              <line x1="18.36" x2="19.78" y1="18.36" y2="19.78"/>
+              <line x1="1" x2="3" y1="12" y2="12"/>
+              <line x1="21" x2="23" y1="12" y2="12"/>
+              <line x1="4.22" x2="5.64" y1="19.78" y2="18.36"/>
+              <line x1="18.36" x2="19.78" y1="5.64" y2="4.22"/>
+            </svg>
             <span>{{ theme === 'dark' ? '深色模式' : '浅色模式' }}</span>
           </button>
           <button class="sidebar-action sidebar-action-danger" type="button" @click="logout">

@@ -4,6 +4,7 @@
 /// @date 2026-08-30
 
 #include <conversation/history/ChatRecordStore.hpp>
+#include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 
@@ -110,7 +111,7 @@ namespace insoulforge {
             const Statement stmt(db.handle(), "DELETE FROM chat_records WHERE group_id = ?");
             stmt.bind(1, sessionId);
             stmt.exec();
-            spdlog::info("已清空群 {} 的聊天记录", sessionId);
+            Logger::info(sessionId, "History", "聊天记录已清空");
         }
     } // namespace ChatRecordStore
 } // namespace insoulforge

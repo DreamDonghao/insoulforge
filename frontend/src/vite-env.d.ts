@@ -106,9 +106,12 @@ export interface LogEntry {
     id: number
     timestamp: string
     level: string
-    message: string
     /** 会话 ID 的字符串形式（私聊会话 ID 带标志位） */
-    groupId?: string | null
+    sessionId: string
+    /** 日志来源，例如 Executor、OneBot 或 Config */
+    source: string
+    /** 由业务模块提供的完整日志内容 */
+    content: string
 }
 
 export interface LogQueryResult {

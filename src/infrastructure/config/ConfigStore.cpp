@@ -2,6 +2,7 @@
 /// @brief 全局配置文件存储 - 实现
 
 #include <infrastructure/config/ConfigStore.hpp>
+#include <infrastructure/logging/Logger.hpp>
 
 #include <fstream>
 
@@ -174,7 +175,8 @@ namespace insoulforge::ConfigStore {
                 if (error) {
                     throw std::runtime_error("无法备份损坏的配置文件: " + error.message());
                 }
-                spdlog::error("配置文件格式无效，已备份为 {} 并重建默认配置", backupPath.string());
+                Logger::error(
+                  0, "Config", fmt::format("配置文件格式无效，已备份为 {} 并重建默认配置", backupPath.string()));
                 needsWrite = true;
             } else {
                 config = std::move(parsed);
@@ -188,9 +190,9 @@ namespace insoulforge::ConfigStore {
         fileState.initialized = true;
         if (needsWrite) {
             writeConfigFile(fileState.path, fileState.content);
-            spdlog::info("全局配置文件已初始化: {}", fileState.path.string());
+            Logger::info(0, "Config", fmt::format("全局配置文件已初始化: {}", fileState.path.string()));
         } else {
-            spdlog::info("全局配置文件已加载: {}", fileState.path.string());
+            Logger::info(0, "Config", fmt::format("全局配置文件已加载: {}", fileState.path.string()));
         }
     }
 
@@ -214,7 +216,7 @@ namespace insoulforge::ConfigStore {
         }
         llm[name] = std::move(persistedConfig);
         saveSection("llm", std::move(llm));
-        spdlog::info("LLM 配置已保存: {}", name);
+        Logger::info(0, "Config", fmt::format("LLM 配置已保存: {}", name));
     }
 
     json getAllLLMConfigs() { return getSection("llm"); }
@@ -223,13 +225,13 @@ namespace insoulforge::ConfigStore {
 
     void saveQQConfig(const json &config) {
         saveSection("qq", config);
-        spdlog::info("QQ Bot 配置已保存");
+        Logger::info(0, "Config", fmt::format("QQ Bot 配置已保存"));
     }
 
     json getMemoryConfig() { return getSection("memory"); }
 
     void saveMemoryConfig(const json &config) {
         saveSection("memory", config);
-        spdlog::info("记忆配置已保存");
+        Logger::info(0, "Config", fmt::format("记忆配置已保存"));
     }
 } // namespace insoulforge::ConfigStore

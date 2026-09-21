@@ -9,6 +9,7 @@
 #include <conversation/history/ChatRecordStore.hpp>
 #include <conversation/maintenance/affinity/AffinityStore.hpp>
 #include <conversation/message/MessageRecord.hpp>
+#include <conversation/message/SessionId.hpp>
 #include <conversation/session/QQNameDirectory.hpp>
 #include <conversation/session/SessionStore.hpp>
 #include <conversation/workflow/OneBotEventWorkflow.hpp>
@@ -85,7 +86,7 @@ Task<> AdminController::getLogs(HttpRequestPtr req, std::function<void(const Htt
     // 线上参数沿用 "groupId"（内部语义为 sessionId）
     if (const std::string groupIdParam = req->getParameter("groupId"); !groupIdParam.empty()) {
         if (groupIdParam == "system") {
-            query.systemOnly = true;
+            query.sessionId = 0;
         } else {
             query.sessionId = parseUInt64(groupIdParam);
         }
@@ -109,13 +110,10 @@ Task<> AdminController::getLogs(HttpRequestPtr req, std::function<void(const Htt
         item["id"] = entry.id;
         item["timestamp"] = entry.timestamp;
         item["level"] = entry.level;
-        item["message"] = entry.message;
-        if (entry.sessionId.has_value()) {
-            // 字符串形式：会话 ID 可能带私聊标志位，超过 JS 安全整数范围
-            item["groupId"] = std::to_string(*entry.sessionId);
-        } else {
-            item["groupId"] = nullptr;
-        }
+        // 字符串形式：会话 ID 可能带私聊标志位，超过 JS 安全整数范围。
+        item["sessionId"] = std::to_string(entry.sessionId);
+        item["source"] = entry.source;
+        item["content"] = entry.content;
         resp["entries"].push_back(item);
     }
     resp["hasMore"] = result.hasMore;
@@ -218,7 +216,7 @@ Task<> AdminController::setBotStatus(HttpRequestPtr req, std::function<void(cons
 
     const bool running = (*body)["running"].get<bool>();
     AgentSystem::instance().setRunning(running);
-    spdlog::warn("管理后台{}机器人", running ? "打开" : "暂停");
+    Logger::warn(0, "Admin", fmt::format("管理后台{}机器人", running ? "打开" : "暂停"));
 
     json resp = AdminResponse::okJson(running ? "机器人已打开" : "机器人已暂停");
     resp["running"] = running;
@@ -250,7 +248,7 @@ Task<> AdminController::updateEmojiDesc(
     }
 
     ToolRuntime::invalidateFavoriteEmojiCache();
-    spdlog::info("[Admin] 已修改表情描述: res_id={} desc={}", resId, desc);
+    Logger::info(0, "Admin", fmt::format("已修改表情描述: res_id={} desc={}", resId, desc));
 
     callback(jsonResponse(AdminResponse::okJson("描述已修改")));
     co_return;
@@ -641,7 +639,7 @@ Task<> AdminController::cancelScheduledTask(
 
     if (TaskScheduler::instance().cancel(static_cast<int64_t>(taskId))) {
         json resp = AdminResponse::okJson(fmt::format("定时任务 #{} 已取消", taskId));
-        spdlog::info("[Admin] 已取消定时任务 #{}", taskId);
+        Logger::info(0, "Admin", fmt::format("已取消定时任务 #{}", taskId));
         callback(jsonResponse(resp));
     } else {
         callback(jsonResponse(AdminResponse::failJson("任务不存在或已触发/已取消")));

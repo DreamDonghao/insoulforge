@@ -25,10 +25,9 @@
 
 #include <drogon/HttpRequest.h>
 #include <drogon/HttpResponse.h>
-#include <nlohmann/json.hpp>
-#include <spdlog/spdlog.h>
-
 #include <infrastructure/CommonUtil.hpp>
+#include <infrastructure/logging/Logger.hpp>
+#include <nlohmann/json.hpp>
 
 namespace insoulforge {
     /// @brief 项目统一 JSON 类型：ordered_json 按插入顺序保存键（nlohmann::json 默认按字典序排序）
@@ -38,7 +37,7 @@ namespace insoulforge {
     [[nodiscard]] inline json parseJson(const std::string &jsonStr) {
         json parsed = json::parse(jsonStr, nullptr, false);
         if (parsed.is_discarded()) {
-            spdlog::warn("JSON解析失败: {}", jsonStr.substr(0, 100));
+            Logger::warn(0, "Json", fmt::format("解析失败: {}", jsonStr.substr(0, 100)));
             return {};
         }
         return parsed;

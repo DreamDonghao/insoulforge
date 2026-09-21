@@ -7,6 +7,7 @@
 #include <conversation/history/ChatRecordStore.hpp>
 #include <conversation/maintenance/ConversationMaintenanceService.hpp>
 #include <conversation/message/MessageRecord.hpp>
+#include <conversation/message/SessionId.hpp>
 #include <conversation/session/SessionConfigManager.hpp>
 #include <conversation/workflow/CommandProcessor.hpp>
 #include <conversation/workflow/MessageContentEnricher.hpp>
@@ -33,9 +34,9 @@ namespace insoulforge {
             try {
                 SessionConfigManager::incrementMessageCount(sessionId);
             } catch (const std::exception &error) {
-                Logger::session(sessionId).error("会话统计更新失败: {}", error.what());
+                Logger::error(sessionId, "Workflow", fmt::format("会话统计更新失败: {}", error.what()));
             } catch (...) {
-                Logger::session(sessionId).error("会话统计更新失败: 未知异常");
+                Logger::error(sessionId, "Workflow", fmt::format("会话统计更新失败: 未知异常"));
             }
         }
 
@@ -47,9 +48,9 @@ namespace insoulforge {
                 const auto role = MessageRecord::isAssistant(message) ? "assistant" : "user";
                 WebSocketManager::instance().pushMessage(sessionId, role, dumpJson(message));
             } catch (const std::exception &error) {
-                Logger::session(sessionId).error("管理后台消息推送失败: {}", error.what());
+                Logger::error(sessionId, "Workflow", fmt::format("管理后台消息推送失败: {}", error.what()));
             } catch (...) {
-                Logger::session(sessionId).error("管理后台消息推送失败: 未知异常");
+                Logger::error(sessionId, "Workflow", fmt::format("管理后台消息推送失败: 未知异常"));
             }
         }
 
@@ -60,10 +61,10 @@ namespace insoulforge {
                 ConversationMaintenanceService::enqueue(sessionId, batch.messages, batch.contextMessages);
             } catch (const std::exception &error) {
                 messageList->cancelSummaryBatch();
-                Logger::session(sessionId).error("会话派生状态维护任务持久化失败: {}", error.what());
+                Logger::error(sessionId, "Workflow", fmt::format("会话派生状态维护任务持久化失败: {}", error.what()));
             } catch (...) {
                 messageList->cancelSummaryBatch();
-                Logger::session(sessionId).error("会话派生状态维护任务持久化失败: 未知异常");
+                Logger::error(sessionId, "Workflow", fmt::format("会话派生状态维护任务持久化失败: 未知异常"));
             }
         }
     } // namespace
@@ -161,9 +162,9 @@ namespace insoulforge {
                 co_await MessageService::sendGroupMsg(sessionId, response);
             }
         } catch (const std::exception &error) {
-            Logger::session(sessionId).error("命令执行或回复失败: {}", error.what());
+            Logger::error(sessionId, "Workflow", fmt::format("命令执行或回复失败: {}", error.what()));
         } catch (...) {
-            Logger::session(sessionId).error("命令执行或回复失败: 未知错误");
+            Logger::error(sessionId, "Workflow", fmt::format("命令执行或回复失败: 未知错误"));
         }
         if (update->summaryBatch) {
             scheduleConversationMaintenance(sessionId, sessionState->messageList(), *update->summaryBatch);
@@ -183,7 +184,7 @@ namespace insoulforge {
         if (!sessionState->enqueuePreparation(std::move(*normalizedMessage))) {
             return;
         }
-        Logger::session(sessionId).debug("消息预处理队列已唤醒");
+        Logger::debug(sessionId, "Workflow", fmt::format("消息预处理队列已唤醒"));
         drogon::async_run([this, sessionId]() -> drogon::Task<> { co_await processPreparationQueue(sessionId); });
     }
 
@@ -192,7 +193,7 @@ namespace insoulforge {
         while (true) {
             auto nextMessage = sessionState->takePreparationMessage();
             if (!nextMessage) {
-                Logger::session(sessionId).debug("消息预处理队列已清空");
+                Logger::debug(sessionId, "Workflow", fmt::format("消息预处理队列已清空"));
                 co_return;
             }
             auto currentMessage = json(std::move(*nextMessage));
@@ -254,11 +255,11 @@ namespace insoulforge {
 
             try {
                 if (!AgentSystem::instance().isReady()) {
-                    Logger::session(sessionId).debug("回复任务跳过：Agent 不可用");
+                    Logger::debug(sessionId, "Workflow", fmt::format("回复任务跳过：Agent 不可用"));
                 } else {
                     if (auto routerDecision = co_await MessageRouter::route(sessionId, messageSnapshot);
                       routerDecision.shouldReply) {
-                        Logger::session(sessionId).info("Router 判断需要回复");
+                        Logger::info(sessionId, "Workflow", fmt::format("Router 判断需要回复"));
                         auto recordSnapshot = std::deque<json>{};
                         for (const auto &message: messageSnapshot) {
                             recordSnapshot.push_back({{"content", dumpJson(message)}});

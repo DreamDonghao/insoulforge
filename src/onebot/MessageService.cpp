@@ -2,6 +2,7 @@
 /// @brief OneBot 消息服务 - 实现
 
 #include <conversation/message/MessageRecord.hpp>
+#include <conversation/message/SessionId.hpp>
 #include <conversation/session/QQNameDirectory.hpp>
 #include <conversation/session/SessionStore.hpp>
 #include <conversation/workflow/OneBotEventWorkflow.hpp>
@@ -72,8 +73,8 @@ namespace insoulforge {
             // 发送成功后写入所属会话的内存消息列表；列表在正常退出时统一持久化。
             OneBotEventWorkflow::instance().appendDeliveredAssistantMessage(sessionId, record);
 
-            Logger::session(sessionId).info(
-              "成功发送{}: {} (message_id={})", channelName, processedMessage, *messageId);
+            Logger::info(sessionId, "OneBot",
+              fmt::format("成功发送{}: {} (message_id={})", channelName, processedMessage, *messageId));
             co_return *messageId;
         }
     } // namespace

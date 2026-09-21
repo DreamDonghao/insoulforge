@@ -2,6 +2,7 @@
 /// @brief 管理后台启动令牌与会话认证实现
 
 #include <admin/auth/AdminAccessToken.hpp>
+#include <infrastructure/logging/Logger.hpp>
 
 #include <openssl/crypto.h>
 #include <openssl/rand.h>
@@ -50,7 +51,7 @@ namespace insoulforge {
         auto &tokenState = state();
         std::scoped_lock lock(tokenState.mutex);
         tokenState.value = encodeHex(bytes);
-        spdlog::info("管理后台访问令牌（重启后失效）: {}", tokenState.value);
+        Logger::info(0, "Admin", fmt::format("管理后台访问令牌（重启后失效）: {}", tokenState.value));
     }
 
     bool AdminAccessToken::isAuthorized(const drogon::HttpRequestPtr &request) {

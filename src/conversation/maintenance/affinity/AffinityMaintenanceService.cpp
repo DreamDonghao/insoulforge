@@ -4,6 +4,7 @@
 #include <conversation/maintenance/affinity/AffinityMaintenanceService.hpp>
 #include <conversation/maintenance/affinity/AffinityMaintenanceStore.hpp>
 #include <conversation/message/MessageRecord.hpp>
+#include <conversation/message/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <llm/LlmClient.hpp>
@@ -42,19 +43,20 @@ namespace insoulforge {
         [[nodiscard]] std::optional<json> parseAffinityDeltas(
           const std::optional<std::string> &result, const uint64_t sessionId) {
             if (!result) {
-                Logger::session(sessionId).error("好感度评分: API 请求失败");
+                Logger::error(sessionId, "Affinity", fmt::format("好感度评分: API 请求失败"));
                 return std::nullopt;
             }
 
             std::string payload;
             if (!tryExtractJsonObject(*result, payload)) {
-                Logger::session(sessionId).warn("好感度评分: 响应中无 JSON: {}", result->substr(0, 100));
+                Logger::warn(
+                  sessionId, "Affinity", fmt::format("好感度评分: 响应中无 JSON: {}", result->substr(0, 100)));
                 return std::nullopt;
             }
 
             json deltas;
             if (!tryParseJson(payload, deltas) || !deltas.is_object()) {
-                Logger::session(sessionId).warn("好感度评分: JSON 解析失败");
+                Logger::warn(sessionId, "Affinity", fmt::format("好感度评分: JSON 解析失败"));
                 return std::nullopt;
             }
             return deltas;
@@ -116,7 +118,8 @@ namespace insoulforge {
                 }
             }
             AffinityMaintenanceStore::complete(job.id, job.sessionId, appliedDeltas);
-            Logger::session(job.sessionId).info("好感度评分完成: {} 条记录，更新 {} 人", limit, appliedDeltas.size());
+            Logger::info(job.sessionId, "Affinity",
+              fmt::format("好感度评分完成: {} 条记录，更新 {} 人", limit, appliedDeltas.size()));
             co_return true;
         }
 
@@ -145,22 +148,24 @@ namespace insoulforge {
                     try {
                         completed = co_await maintainJob(*job);
                     } catch (const std::exception &error) {
-                        Logger::session(sessionId).error("好感度任务 #{} 异常: {}", job->id, error.what());
+                        Logger::error(
+                          sessionId, "Affinity", fmt::format("好感度任务 #{} 异常: {}", job->id, error.what()));
                     } catch (...) {
-                        Logger::session(sessionId).error("好感度任务 #{} 异常: 未知异常", job->id);
+                        Logger::error(sessionId, "Affinity", fmt::format("好感度任务 #{} 异常: 未知异常", job->id));
                     }
                     if (completed) {
                         continue;
                     }
                     AffinityMaintenanceStore::incrementAttempt(job->id);
                     const auto delay = retryDelay(job->attemptCount);
-                    Logger::session(sessionId).warn("好感度任务 #{} 将在 {} 秒后重试", job->id, delay.count());
+                    Logger::warn(
+                      sessionId, "Affinity", fmt::format("好感度任务 #{} 将在 {} 秒后重试", job->id, delay.count()));
                     co_await drogon::sleepCoro(drogon::app().getLoop(), delay);
                 }
             } catch (const std::exception &error) {
-                Logger::session(sessionId).error("好感度任务消费者异常退出: {}", error.what());
+                Logger::error(sessionId, "Affinity", fmt::format("好感度任务消费者异常退出: {}", error.what()));
             } catch (...) {
-                Logger::session(sessionId).error("好感度任务消费者异常退出: 未知异常");
+                Logger::error(sessionId, "Affinity", fmt::format("好感度任务消费者异常退出: 未知异常"));
             }
 
             co_return;
@@ -178,7 +183,7 @@ namespace insoulforge {
                 co_await processPending(sessionId);
             }
         } catch (const std::exception &error) {
-            Logger::session(sessionId).error("检查待处理好感度任务失败: {}", error.what());
+            Logger::error(sessionId, "Affinity", fmt::format("检查待处理好感度任务失败: {}", error.what()));
         }
         co_return;
     }

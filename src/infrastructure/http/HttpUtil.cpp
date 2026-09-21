@@ -3,6 +3,7 @@
 
 #include <infrastructure/http/HttpTrace.hpp>
 #include <infrastructure/http/HttpUtil.hpp>
+#include <infrastructure/logging/Logger.hpp>
 
 namespace insoulforge::HttpUtil {
     namespace {
@@ -80,12 +81,13 @@ namespace insoulforge::HttpUtil {
         auto bodyText = body.is_null() ? std::string{} : dumpJson(body);
         const auto bodyLog = truncate(bodyText, kBodyLogMax);
 
-        spdlog::debug("{} [HTTP] {} {}{}", prefix, methodName(method), baseUrl, path);
+        Logger::debug(sessionId.value_or(0), prefix, fmt::format("HTTP {} {}{}", methodName(method), baseUrl, path));
         if (!bodyLog.empty()) {
-            spdlog::debug("{} [HTTP] body={}", prefix, bodyLog);
+            Logger::debug(sessionId.value_or(0), prefix, fmt::format("HTTP body={}", bodyLog));
         }
         if (!bearerToken.empty()) {
-            spdlog::debug("{} [HTTP] Authorization: Bearer {}", prefix, maskToken(bearerToken));
+            Logger::debug(
+              sessionId.value_or(0), prefix, fmt::format("HTTP Authorization: Bearer {}", maskToken(bearerToken)));
         }
 
         HttpTraceEntry trace;
@@ -98,8 +100,9 @@ namespace insoulforge::HttpUtil {
         try {
             client = drogon::HttpClient::newHttpClient(baseUrl);
         } catch (const std::exception &e) {
-            spdlog::error("{} [HTTP] 创建客户端失败: {} ({} {}{}) body={}", prefix, e.what(), methodName(method),
-              baseUrl, path, bodyLog);
+            Logger::error(sessionId.value_or(0), prefix,
+              fmt::format(
+                "HTTP 创建客户端失败: {} ({} {}{}) body={}", e.what(), methodName(method), baseUrl, path, bodyLog));
             trace.status = 0;
             trace.responseBody = e.what();
             HttpTrace::instance().append(std::move(trace));
@@ -128,8 +131,8 @@ namespace insoulforge::HttpUtil {
         try {
             resp = co_await client->sendRequestCoro(req, timeout);
         } catch (const std::exception &e) {
-            spdlog::error(
-              "{} [HTTP] 请求异常: {} ({} {}{}) body={}", prefix, e.what(), methodName(method), baseUrl, path, bodyLog);
+            Logger::error(sessionId.value_or(0), prefix,
+              fmt::format("HTTP 请求异常: {} ({} {}{}) body={}", e.what(), methodName(method), baseUrl, path, bodyLog));
             finishTrace(0, e.what());
             co_return std::nullopt;
         }
@@ -141,8 +144,9 @@ namespace insoulforge::HttpUtil {
 
         // 非 2xx（如 DNS 解析失败、连接被拒等）同样把地址打出来，方便定位
         if (resp->getStatusCode() >= drogon::k400BadRequest) {
-            spdlog::warn("{} [HTTP] 响应异常: status={} ({} {}{})", prefix, static_cast<int>(resp->getStatusCode()),
-              methodName(method), baseUrl, path);
+            Logger::warn(sessionId.value_or(0), prefix,
+              fmt::format("HTTP 响应异常: status={} ({} {}{})", static_cast<int>(resp->getStatusCode()),
+                methodName(method), baseUrl, path));
         }
 
         finishTrace(static_cast<int>(resp->getStatusCode()), std::string{resp->body()});

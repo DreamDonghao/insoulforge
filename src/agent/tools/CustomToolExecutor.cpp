@@ -2,6 +2,7 @@
 /// @brief 自定义 Python 与 HTTP 工具执行实现
 
 #include <fstream>
+#include <infrastructure/logging/Logger.hpp>
 #include <random>
 
 
@@ -75,8 +76,8 @@ namespace insoulforge {
 
         const std::string command =
           ToolStore::getCustomToolPython() + " " + scriptFile.path() + " " + inputFile.path() + " 2>&1";
-        spdlog::debug("Python脚本内容:\n{}", script);
-        spdlog::debug("执行Python工具: {}", command);
+        Logger::debug(0, "Tool", fmt::format("Python脚本内容:\n{}", script));
+        Logger::debug(0, "Tool", fmt::format("执行Python工具: {}", command));
 
         struct PipeCloser {
             void operator()(FILE *pipe) const noexcept {
@@ -96,7 +97,7 @@ namespace insoulforge {
             result += buffer.data();
         }
         if (const int exitCode = closePipe(pipe.release()); exitCode != 0) {
-            spdlog::warn("Python工具执行返回非零: {}, 输出: {}", exitCode, result);
+            Logger::warn(0, "Tool", fmt::format("Python工具执行返回非零: {}, 输出: {}", exitCode, result));
         }
 
         while (!result.empty() && (result.back() == '\n' || result.back() == '\r')) {
@@ -108,7 +109,7 @@ namespace insoulforge {
     drogon::Task<std::string> ToolRuntime::executeHttpTool(std::string config, json args, const uint64_t sessionId) {
         json configJson;
         if (!tryParseJson(config, configJson)) {
-            spdlog::error("HTTP工具配置解析失败");
+            Logger::error(0, "Tool", fmt::format("HTTP工具配置解析失败"));
             co_return std::string("工具配置错误");
         }
 

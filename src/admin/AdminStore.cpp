@@ -3,6 +3,7 @@
 /// @author donghao
 /// @date 2026-08-30
 
+#include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 
@@ -22,7 +23,7 @@ namespace insoulforge {
             const Statement stmt(db.handle(), "INSERT OR IGNORE INTO admins (qq_number) VALUES (?)");
             stmt.bind(1, qqNumber);
             stmt.exec();
-            spdlog::info("已添加管理员: {}", qqNumber);
+            Logger::info(0, "Admin", fmt::format("已添加管理员: {}", qqNumber));
         }
 
         void removeAdmin(const uint64_t qqNumber) {
@@ -31,7 +32,7 @@ namespace insoulforge {
             const Statement stmt(db.handle(), "DELETE FROM admins WHERE qq_number = ?");
             stmt.bind(1, qqNumber);
             stmt.exec();
-            spdlog::info("已移除管理员: {}", qqNumber);
+            Logger::info(0, "Admin", fmt::format("已移除管理员: {}", qqNumber));
         }
 
         std::vector<uint64_t> getAdmins() {

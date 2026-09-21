@@ -102,7 +102,7 @@ namespace insoulforge::ImageDescriptionService {
             static const std::regex urlPattern(R"(^(https?://[^/]+)(/.*)?$)", std::regex::icase);
             std::smatch match;
             if (!std::regex_match(sourceUrl, match, urlPattern)) {
-                Logger::session(sessionId).warn("[Image] 拒绝非 HTTP 图片地址");
+                Logger::warn(sessionId, "Media", fmt::format("拒绝非 HTTP 图片地址"));
                 co_return std::nullopt;
             }
             try {
@@ -113,24 +113,24 @@ namespace insoulforge::ImageDescriptionService {
                 const auto response = co_await client->sendRequestCoro(request, 30.0);
                 if (!response || response->getStatusCode() < drogon::k200OK ||
                     response->getStatusCode() >= drogon::k300MultipleChoices) {
-                    Logger::session(sessionId).warn(
-                      "[Image] 下载失败: status={}", response ? static_cast<int>(response->getStatusCode()) : 0);
+                    Logger::warn(sessionId, "Media",
+                      fmt::format("下载失败: status={}", response ? static_cast<int>(response->getStatusCode()) : 0));
                     co_return std::nullopt;
                 }
                 std::string bytes(response->body());
                 if (bytes.empty() || bytes.size() > kMaxDownloadBytes) {
-                    Logger::session(sessionId).warn("[Image] 下载媒体大小无效: {} bytes", bytes.size());
+                    Logger::warn(sessionId, "Media", fmt::format("下载媒体大小无效: {} bytes", bytes.size()));
                     co_return std::nullopt;
                 }
                 const auto format = detectMedia(bytes);
                 if (!format) {
-                    Logger::session(sessionId).warn("[Image] 不支持的媒体格式");
+                    Logger::warn(sessionId, "Media", fmt::format("不支持的媒体格式"));
                     co_return std::nullopt;
                 }
                 co_return DownloadedMedia{
                   .bytes = std::move(bytes), .mimeType = format->first, .isGif = format->second};
             } catch (const std::exception &error) {
-                Logger::session(sessionId).warn("[Image] 下载异常: {}", error.what());
+                Logger::warn(sessionId, "Media", fmt::format("下载异常: {}", error.what()));
                 co_return std::nullopt;
             }
         }
@@ -232,7 +232,7 @@ namespace insoulforge::ImageDescriptionService {
             if (!gif || gif->SWidth <= 0 || gif->SHeight <= 0 || gif->SWidth > kMaxGifDimension ||
                 gif->SHeight > kMaxGifDimension || DGifSlurp(gif.get()) != GIF_OK || gif->ImageCount <= 0 ||
                 gif->ImageCount > kMaxGifDecodedFrames) {
-                Logger::session(sessionId).warn("[Image] GIF 解码失败或超过资源限制");
+                Logger::warn(sessionId, "Media", fmt::format("GIF 解码失败或超过资源限制"));
                 return {};
             }
             const int width = gif->SWidth;
@@ -297,7 +297,7 @@ namespace insoulforge::ImageDescriptionService {
           std::vector<std::string> images, const bool isGif, const uint64_t sessionId) {
             const auto &config = Config::instance();
             if (!LlmClient::isConfigured(config.image)) {
-                Logger::session(sessionId).debug("图片识别模型未配置，跳过识别");
+                Logger::debug(sessionId, "Media", fmt::format("图片识别模型未配置，跳过识别"));
                 co_return std::nullopt;
             }
             json content = json::array();
@@ -326,7 +326,7 @@ namespace insoulforge::ImageDescriptionService {
     drogon::Task<std::optional<ImageDescriptionResult>> describe(std::string sourceUrl, const uint64_t sessionId) {
         const auto &config = Config::instance();
         if (!LlmClient::isConfigured(config.image)) {
-            Logger::session(sessionId).debug("图片识别模型未配置，跳过识别");
+            Logger::debug(sessionId, "Media", fmt::format("图片识别模型未配置，跳过识别"));
             co_return std::nullopt;
         }
         const auto media = co_await download(std::move(sourceUrl), sessionId);

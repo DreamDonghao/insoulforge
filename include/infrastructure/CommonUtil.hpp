@@ -14,7 +14,6 @@
 #include <ctime>
 #include <drogon/drogon.h>
 #include <optional>
-#include <spdlog/spdlog.h>
 #include <string_view>
 
 /// @brief 去除字符串首尾空白（isspace 语义）

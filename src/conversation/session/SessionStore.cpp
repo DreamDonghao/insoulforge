@@ -4,6 +4,7 @@
 /// @date 2026-08-30
 
 #include <conversation/session/SessionStore.hpp>
+#include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 
@@ -73,7 +74,7 @@ namespace insoulforge {
               db.handle(), "INSERT OR REPLACE INTO enabled_groups (group_id, enabled) VALUES (?, 1)");
             stmt.bind(1, sessionId);
             stmt.exec();
-            spdlog::info("已启用群: {}", sessionId);
+            Logger::info(sessionId, "Session", "已启用");
         }
 
         void disableSession(const uint64_t sessionId) {
@@ -82,7 +83,7 @@ namespace insoulforge {
             const Statement stmt(db.handle(), "DELETE FROM enabled_groups WHERE group_id = ?");
             stmt.bind(1, sessionId);
             stmt.exec();
-            spdlog::info("已禁用群: {}", sessionId);
+            Logger::info(sessionId, "Session", "已禁用");
         }
 
         std::vector<uint64_t> getEnabledGroups() {
@@ -140,7 +141,7 @@ namespace insoulforge {
             stmt.bind(1, name);
             stmt.bind(2, sessionId);
             stmt.exec();
-            spdlog::info("更新群名称: {} -> {}", sessionId, name);
+            Logger::info(sessionId, "Session", fmt::format("名称已更新: {}", name));
         }
 
         std::string getSessionName(const uint64_t sessionId) {

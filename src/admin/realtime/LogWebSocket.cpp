@@ -3,6 +3,7 @@
 
 #include <admin/realtime/LogWebSocket.hpp>
 #include <admin/realtime/LogWebSocketManager.hpp>
+#include <infrastructure/logging/Logger.hpp>
 
 namespace insoulforge {
     void LogWebSocket::handleNewConnection(
@@ -21,19 +22,17 @@ namespace insoulforge {
         }
         json msg;
         if (!tryParseJson(message, msg)) {
-            spdlog::warn("日志WebSocket消息解析失败");
+            Logger::warn(0, "LogWebSocket", "消息解析失败");
             return;
         }
 
         if (getStr(msg, "action") == "subscribe") {
-            // 线上 JSON 字段沿用 "groupId"（内部语义为 sessionId）
+            // 线上字段沿用 groupId，以兼容既有前端请求。
             LogSubscription sub;
             const json &groupIdVal = atOrNull(msg, "groupId");
-            sub.all = groupIdVal.is_null() || (groupIdVal.is_string() && groupIdVal.get<std::string>() == "all");
             if (groupIdVal.is_string() && groupIdVal.get<std::string>() == "system") {
-                sub.all = false;
-                sub.systemOnly = true;
-            } else if (!sub.all) {
+                sub.sessionId = 0;
+            } else if (!groupIdVal.is_null() && !(groupIdVal.is_string() && groupIdVal.get<std::string>() == "all")) {
                 // sessionId 由前端以字符串形式发送（群号可能超过 JS 安全整数范围），需安全解析
                 sub.sessionId = jsonToUInt64(groupIdVal);
             }

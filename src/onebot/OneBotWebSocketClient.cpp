@@ -1,6 +1,7 @@
 /// @file OneBotWebSocketClient.cpp
 /// @brief OneBot 正向 WebSocket 连接管理器实现
 
+#include <infrastructure/logging/Logger.hpp>
 #include <onebot/OneBotWebSocketClient.hpp>
 
 #include <conversation/workflow/OneBotEventWorkflow.hpp>
@@ -88,7 +89,7 @@ namespace insoulforge {
             }
         }
         if (!splitWebSocketUrl(config.qqWebSocketHost, origin, path)) {
-            spdlog::error("OneBot WebSocket 地址无效: {}", config.qqWebSocketHost);
+            Logger::error(0, "OneBot", fmt::format("OneBot WebSocket 地址无效: {}", config.qqWebSocketHost));
             return;
         }
 
@@ -122,7 +123,8 @@ namespace insoulforge {
           request, [this, generation](const drogon::ReqResult result, const drogon::HttpResponsePtr &,
                      const drogon::WebSocketClientPtr &connectedClient) {
               if (result != drogon::ReqResult::Ok) {
-                  spdlog::warn("OneBot WebSocket 连接失败: result={}", static_cast<int>(result));
+                  Logger::warn(
+                    0, "OneBot", fmt::format("OneBot WebSocket 连接失败: result={}", static_cast<int>(result)));
                   handleConnectionClosed(connectedClient);
                   return;
               }
@@ -134,7 +136,7 @@ namespace insoulforge {
                   }
                   m_connection = connectedClient->getConnection();
               }
-              spdlog::info("OneBot WebSocket 已连接: {}", Config::instance().qqWebSocketHost);
+              Logger::info(0, "OneBot", fmt::format("OneBot WebSocket 已连接: {}", Config::instance().qqWebSocketHost));
           });
     }
 
@@ -149,7 +151,7 @@ namespace insoulforge {
         {
             std::scoped_lock lock(m_mutex);
             if (!m_running || !m_connection || !m_connection->connected()) {
-                spdlog::warn("OneBot WebSocket 未连接，无法调用动作: {}", action);
+                Logger::warn(0, "OneBot", fmt::format("OneBot WebSocket 未连接，无法调用动作: {}", action));
                 return false;
             }
             echo = "insoulforge-" + std::to_string(++m_nextEcho);
@@ -164,7 +166,7 @@ namespace insoulforge {
         try {
             connection->send(dumpJson(request));
         } catch (const std::exception &error) {
-            spdlog::warn("OneBot WebSocket 动作发送失败: {}", error.what());
+            Logger::warn(0, "OneBot", fmt::format("OneBot WebSocket 动作发送失败: {}", error.what()));
             std::scoped_lock lock(m_mutex);
             m_pendingRequests.erase(echo);
             return false;
@@ -178,19 +180,20 @@ namespace insoulforge {
             const auto *data = reinterpret_cast<const unsigned char *>(message.data());
             const uint16_t closeCode = message.size() >= 2 ? static_cast<uint16_t>((data[0] << 8U) | data[1]) : 0;
             const std::string reason = message.size() > 2 ? message.substr(2) : "";
-            spdlog::warn("OneBot WebSocket 收到关闭帧: code={}, reason={}", closeCode, reason);
+            Logger::warn(
+              0, "OneBot", fmt::format("OneBot WebSocket 收到关闭帧: code={}, reason={}", closeCode, reason));
             return;
         }
         if (type == drogon::WebSocketMessageType::Ping || type == drogon::WebSocketMessageType::Pong) {
             return;
         }
         if (type != drogon::WebSocketMessageType::Text) {
-            spdlog::warn("忽略 OneBot WebSocket 非文本消息");
+            Logger::warn(0, "OneBot", fmt::format("忽略 OneBot WebSocket 非文本消息"));
             return;
         }
         json body;
         if (!tryParseJson(message, body) || !body.is_object()) {
-            spdlog::warn("忽略 OneBot WebSocket 非法 JSON 消息");
+            Logger::warn(0, "OneBot", fmt::format("忽略 OneBot WebSocket 非法 JSON 消息"));
             return;
         }
         if (const std::string echo = jsonToString(atOrNull(body, "echo")); !echo.empty()) {
@@ -221,7 +224,7 @@ namespace insoulforge {
         }
         failRequests(callbacks);
         if (shouldReconnect) {
-            spdlog::warn("OneBot WebSocket 已断开，将在 {} 秒后重连", kReconnectDelaySeconds);
+            Logger::warn(0, "OneBot", fmt::format("OneBot WebSocket 已断开，将在 {} 秒后重连", kReconnectDelaySeconds));
             scheduleReconnect(generation);
         }
     }

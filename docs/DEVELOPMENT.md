@@ -358,7 +358,8 @@ Schema 中写清楚触发条件与边界。需要调整同类别展示位置时�
 - `GET /admin/api/auth/status`：返回当前请求是否已认证。
 - 除上述认证接口外，`/admin/api/*`、`/admin/ws` 和 `/admin/logs/ws` 均由服务端鉴权；未经认证的请求返回 `401`。
 
-新增后台接口时无需在 Controller 中重复校验 Cookie，但必须使用受保护的 `/admin/api/` 路径。若确实需要公开接口，应在 `main.cpp` 的认证白名单中显式声明，并审查其是否会泄露配置或运行数据。
+新增后台接口时无需在 Controller 中重复校验 Cookie，但必须使用受保护的 `/admin/api/` 路径。若确实需要公开接口，应在
+`main.cpp` 的认证白名单中显式声明，并审查其是否会泄露配置或运行数据。
 
 ### 添加前端页面
 
@@ -373,9 +374,11 @@ Schema 中写清楚触发条件与边界。需要调整同类别展示位置时�
 
 ## 调试
 
-- **日志**：`spdlog` 输出到控制台与 `logs/bot.log`，模块间通过 `infrastructure/logging/Logger.hpp` 封装。排查消息流水线问题时先看日志中
-  Router 决策与 Executor 输出。管理后台读取 `LogBuffer` 的内存缓冲，启动时按 `bot.log`、`bot.1.log`、`bot.2.log` 从新到旧补足最近
-  5000 条记录，避免全量解析滚动日志拖慢启动
+- **日志**：业务代码只能调用 `Logger`，每条记录显式传入 `sessionId`、来源字符串和内容：
+  `Logger::info(sessionId, "Executor", content)`。系统日志的 `sessionId` 固定为 `0`。日志系统统一生成
+  `[level][session_id][source][content]`，并同时输出到控制台、`logs/bot.log`、`LogBuffer` 和后台日志 WebSocket。
+  `LogBuffer` 启动时从滚动文件恢复最近 5000 条；旧格式日志以 `Legacy` 来源保留可查看性。排查消息流水线问题时优先按会话和
+  `Router`、`Executor` 来源筛选。
 - **协程**：所有异步 I/O 使用 `drogon::Task<T>` / `co_await`，注意 `co_await` 后对象生命周期（捕获 `shared_ptr` 而非裸指针）
 - **会话并发**：`OneBotEventWorkflow` 为每个会话分别维护消息预处理队列、回复队列和 `MessageList`。不要在外部直接并发修改
   `MessageList`，也不要跨 `co_await` 持有其内部或工作流内部锁。

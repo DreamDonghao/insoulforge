@@ -157,7 +157,7 @@ const resetFilters = async (): Promise<void> => {
 
 const handleWsMessage = (event: MessageEvent<string>): void => {
   const payload = JSON.parse(event.data) as { type?: string; data?: LogEntry | LogQueryResult }
-  if (payload.type === 'log' && payload.data && 'message' in payload.data) {
+  if (payload.type === 'log' && payload.data && 'content' in payload.data) {
     const entry = payload.data as LogEntry
     const lastEntry = entries.value.length > 0 ? entries.value[entries.value.length - 1] : undefined
     if (entry.id > (lastEntry?.id || 0)) {
@@ -240,11 +240,11 @@ onUnmounted(() => disconnectWebSocket())
         <div v-for="entry in entries" :key="entry.id" :class="['log-line', levelClass(entry.level)]">
           <span class="log-time">{{ entry.timestamp }}</span>
           <span class="log-level">{{ entry.level }}</span>
-          <span :title="entry.groupId ? groupTag(entry.groupId) : '系统'"
-                class="log-group">{{
-              entry.groupId ? groupTag(entry.groupId) : '系统'
+          <span :title="entry.sessionId === '0' ? '系统' : groupTag(entry.sessionId)" class="log-group">{{
+              entry.sessionId === '0' ? '系统' : groupTag(entry.sessionId)
             }}</span>
-          <span class="log-message">{{ entry.message }}</span>
+          <span class="log-source">{{ entry.source }}</span>
+          <span class="log-message">{{ entry.content }}</span>
         </div>
       </div>
 

@@ -6,7 +6,7 @@
 #pragma once
 #include <concepts>
 #include <cstdint>
-#include <spdlog/spdlog.h>
+#include <infrastructure/logging/Logger.hpp>
 #include <sqlite3.h>
 #include <stdexcept>
 #include <string>
@@ -27,7 +27,7 @@ namespace insoulforge {
         Statement(sqlite3 *db, std::string_view sql) : m_db(db) {
             if (sqlite3_prepare_v2(db, sql.data(), static_cast<int>(sql.size()), &m_stmt, nullptr) != SQLITE_OK) {
                 std::string err = sqlite3_errmsg(db);
-                spdlog::error("SQL 准备失败: {} - {}", sql, err);
+                Logger::error(0, "Storage", fmt::format("SQL 准备失败: {} - {}", sql, err));
                 throw DbError(err);
             }
         }
@@ -89,7 +89,7 @@ namespace insoulforge {
                 return true;
             if (rc == SQLITE_DONE)
                 return false;
-            spdlog::error("SQL 执行失败: {}", sqlite3_errmsg(m_db));
+            Logger::error(0, "Storage", fmt::format("SQL 执行失败: {}", sqlite3_errmsg(m_db)));
             return false;
         }
 

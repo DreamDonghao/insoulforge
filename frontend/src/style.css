@@ -430,7 +430,7 @@ a {
 
 .log-line {
     display: grid;
-    grid-template-columns: 190px 70px 140px minmax(0, 1fr);
+    grid-template-columns: 190px 70px 140px 110px minmax(0, 1fr);
     gap: 12px;
     padding: 8px 16px;
     border-bottom: 1px solid var(--border);
@@ -447,7 +447,8 @@ a {
     white-space: nowrap;
 }
 
-.log-group {
+.log-group,
+.log-source {
     color: var(--text-secondary);
     white-space: nowrap;
     overflow: hidden;

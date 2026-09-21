@@ -33,9 +33,9 @@ namespace insoulforge {
             const LLMApiConfig api{.apiKey = api_key, .baseUrl = base_url, .path = path, .model = model};
             if (!LlmClient::isConfigured(api)) {
                 if (sessionId) {
-                    Logger::session(*sessionId).warn("[LLM] 未配置服务地址、请求路径或模型名，跳过请求");
+                    Logger::warn(*sessionId, "LLM", fmt::format("未配置服务地址、请求路径或模型名，跳过请求"));
                 } else {
-                    spdlog::warn("[LLM] 未配置服务地址、请求路径或模型名，跳过请求");
+                    Logger::warn(0, "LLM", fmt::format("未配置服务地址、请求路径或模型名，跳过请求"));
                 }
                 co_return std::nullopt;
             }
@@ -50,10 +50,11 @@ namespace insoulforge {
             const auto respJson = LlmClient::validChatJson(*resp);
             if (!respJson) {
                 if (sessionId) {
-                    Logger::session(*sessionId)
-                      .error("[LLM] 请求出错: status={}", static_cast<int>((*resp)->getStatusCode()));
+                    Logger::error(*sessionId, "LLM",
+                      fmt::format("请求出错: status={}", static_cast<int>((*resp)->getStatusCode())));
                 } else {
-                    spdlog::error("[LLM] 请求出错: status={}", static_cast<int>((*resp)->getStatusCode()));
+                    Logger::error(
+                      0, "LLM", fmt::format("请求出错: status={}", static_cast<int>((*resp)->getStatusCode())));
                 }
                 co_return std::nullopt;
             }
@@ -103,10 +104,10 @@ namespace insoulforge {
           const uint64_t sessionId) {
             const std::string tag = "[" + label + "]";
             if (!isConfigured(apiConfig)) {
-                Logger::session(sessionId).warn("{} 未配置服务地址、请求路径或模型名，跳过请求", tag);
+                Logger::warn(sessionId, "LLM", fmt::format("{} 未配置服务地址、请求路径或模型名，跳过请求", tag));
                 co_return std::nullopt;
             }
-            Logger::session(sessionId).debug("{} model={}", tag, apiConfig.model);
+            Logger::debug(sessionId, "LLM", fmt::format("{} model={}", tag, apiConfig.model));
 
             const json body = buildChatRequestBody(apiConfig, params, std::move(messages), std::move(tools));
 
@@ -115,24 +116,24 @@ namespace insoulforge {
                   apiConfig.apiKey, kLlmTimeoutSeconds, sessionId);
 
                 if (!resp) {
-                    Logger::session(sessionId).warn("{}网络异常", tag);
+                    Logger::warn(sessionId, "LLM", fmt::format("{}网络异常", tag));
                 } else if (const auto respJson = validChatJson(*resp)) {
                     logUsage(*respJson, apiConfig.model, usageRole, sessionId);
                     co_return respJson;
                 } else {
                     const int status = static_cast<int>((*resp)->getStatusCode());
                     const std::string respBody = std::string((*resp)->getBody()).substr(0, kErrorBodyMaxChars);
-                    Logger::session(sessionId).error("{}失败: status={} body={}", tag, status, respBody);
+                    Logger::error(sessionId, "LLM", fmt::format("{}失败: status={} body={}", tag, status, respBody));
                     if (!isRetryableStatus(status)) {
                         co_return std::nullopt; // 不可恢复的错误（鉴权、参数等）
                     }
-                    Logger::session(sessionId).warn("{}临时性错误", tag);
+                    Logger::warn(sessionId, "LLM", fmt::format("{}临时性错误", tag));
                 }
 
                 if (attempt >= kMaxRetries) {
                     co_return std::nullopt; // 重试耗尽
                 }
-                Logger::session(sessionId).warn("{}第 {}/{} 次重试", tag, attempt + 1, kMaxRetries);
+                Logger::warn(sessionId, "LLM", fmt::format("{}第 {}/{} 次重试", tag, attempt + 1, kMaxRetries));
                 co_await drogon::sleepCoro(drogon::app().getLoop(), kRetryDelay);
             }
         }
@@ -151,7 +152,7 @@ namespace insoulforge {
       std::string text, const std::optional<uint64_t> sessionId) {
         const auto &config = Config::instance().embedding;
         if (!isConfigured(config)) {
-            spdlog::debug("Embedding 未配置，跳过向量化");
+            Logger::debug(0, "LLM", fmt::format("Embedding 未配置，跳过向量化"));
             co_return std::nullopt;
         }
 
@@ -170,10 +171,11 @@ namespace insoulforge {
         const json &data = atOrNull(respJson, "data");
         if (!requestOk || !data.is_array() || data.empty()) {
             if (sessionId) {
-                Logger::session(*sessionId)
-                  .error("[Embedding] 请求出错: status={}", static_cast<int>((*resp)->getStatusCode()));
+                Logger::error(*sessionId, "Embedding",
+                  fmt::format("请求出错: status={}", static_cast<int>((*resp)->getStatusCode())));
             } else {
-                spdlog::error("[Embedding] 请求出错: status={}", static_cast<int>((*resp)->getStatusCode()));
+                Logger::error(
+                  0, "Embedding", fmt::format("请求出错: status={}", static_cast<int>((*resp)->getStatusCode())));
             }
             co_return std::nullopt;
         }
@@ -214,31 +216,20 @@ namespace insoulforge {
             }
         }
 
-        const auto log = sessionId.has_value() ? std::optional(Logger::session(*sessionId)) : std::nullopt;
+        const uint64_t logSessionId = sessionId.value_or(0);
         if (promptTokens > 0) {
             float hitRate = static_cast<float>(cachedTokens) / static_cast<float>(promptTokens) * 100.0f;
-            if (log) {
-                log->info("[Cache] role={} | model={} | prompt={} | completion={} | total={} | cached={} | "
-                          "hit_rate={:.1f}%",
-                  role, model, promptTokens, completionTokens, totalTokens, cachedTokens, hitRate);
-            } else {
-                spdlog::info("[Cache] role={} | model={} | prompt={} | completion={} | total={} | cached={} | "
-                             "hit_rate={:.1f}%",
-                  role, model, promptTokens, completionTokens, totalTokens, cachedTokens, hitRate);
-            }
+            Logger::info(logSessionId, "Usage",
+              fmt::format("role={} | model={} | prompt={} | completion={} | total={} | cached={} | hit_rate={:.1f}%",
+                role, model, promptTokens, completionTokens, totalTokens, cachedTokens, hitRate));
         } else if (totalTokens > 0) {
             // 网关偶尔不返回 prompt 分解，用 total - completion 兜底，避免用量统计缺 prompt 数据
             promptTokens = std::max(0, totalTokens - completionTokens);
             const auto usageText = dumpJson(usage, false);
-            if (log) {
-                log->info("[Cache] role={} | model={} | prompt={} (no breakdown) | completion={} | total={} | "
-                          "cached=N/A | hit_rate=N/A | usage={}",
-                  role, model, promptTokens, completionTokens, totalTokens, usageText);
-            } else {
-                spdlog::info("[Cache] role={} | model={} | prompt={} (no breakdown) | completion={} | total={} | "
-                             "cached=N/A | hit_rate=N/A | usage={}",
-                  role, model, promptTokens, completionTokens, totalTokens, usageText);
-            }
+            Logger::info(logSessionId, "Usage",
+              fmt::format("role={} | model={} | prompt={} (no breakdown) | completion={} | total={} | cached=N/A | "
+                          "hit_rate=N/A | usage={}",
+                role, model, promptTokens, completionTokens, totalTokens, usageText));
         }
 
         UsageStore::addUsageRecord(role, model, promptTokens, completionTokens, totalTokens, cachedTokens);

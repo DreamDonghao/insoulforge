@@ -41,9 +41,9 @@ namespace insoulforge {
             try {
                 callback(sessionId);
             } catch (const std::exception &error) {
-                Logger::session(sessionId).error("应用已完成记忆总结失败: {}", error.what());
+                Logger::error(sessionId, "Memory", fmt::format("应用已完成记忆总结失败: {}", error.what()));
             } catch (...) {
-                Logger::session(sessionId).error("应用已完成记忆总结失败: 未知异常");
+                Logger::error(sessionId, "Memory", fmt::format("应用已完成记忆总结失败: 未知异常"));
             }
         }
 
@@ -78,17 +78,17 @@ namespace insoulforge {
         [[nodiscard]] std::optional<json> parseLlmJson(
           const std::optional<std::string> &result, const std::string_view tag, const uint64_t sessionId) {
             if (!result) {
-                Logger::session(sessionId).error("{}: API 请求失败", tag);
+                Logger::error(sessionId, "Memory", fmt::format("{}: API 请求失败", tag));
                 return std::nullopt;
             }
             std::string payload;
             if (!tryExtractJsonObject(*result, payload)) {
-                Logger::session(sessionId).warn("{}: 响应中无 JSON: {}", tag, result->substr(0, 100));
+                Logger::warn(sessionId, "Memory", fmt::format("{}: 响应中无 JSON: {}", tag, result->substr(0, 100)));
                 return std::nullopt;
             }
             json parsed;
             if (!tryParseJson(payload, parsed) || !parsed.is_object()) {
-                Logger::session(sessionId).warn("{}: JSON 解析失败", tag);
+                Logger::warn(sessionId, "Memory", fmt::format("{}: JSON 解析失败", tag));
                 return std::nullopt;
             }
             return parsed;
@@ -116,7 +116,7 @@ namespace insoulforge {
             }
             const json &values = atOrNull(*parsed, "memories");
             if (!values.is_array()) {
-                Logger::session(sessionId).warn("记忆提取: 输出缺少 memories 数组");
+                Logger::warn(sessionId, "Memory", fmt::format("记忆提取: 输出缺少 memories 数组"));
                 co_return std::nullopt;
             }
             std::vector<std::string> memories;
@@ -135,7 +135,7 @@ namespace insoulforge {
             for (const std::string &memory: memories) {
                 const auto embedding = co_await LlmClient::requestEmbedding(memory, sessionId);
                 if (!embedding) {
-                    Logger::session(sessionId).warn("记忆召回: 向量化失败，跳过该条查询");
+                    Logger::warn(sessionId, "Memory", fmt::format("记忆召回: 向量化失败，跳过该条查询"));
                     continue;
                 }
                 for (const SimilarMemory &hit:
@@ -207,7 +207,7 @@ namespace insoulforge {
               co_await LlmClient::requestLLM(messages, 0.3f, 0.9f, config.memoryExtractMaxTokens, "memory", sessionId),
               "记忆整理", sessionId);
             if (!parsed || !atOrNull(*parsed, "shortTerm").is_array()) {
-                Logger::session(sessionId).warn("记忆整理: 输出缺少 shortTerm 数组");
+                Logger::warn(sessionId, "Memory", fmt::format("记忆整理: 输出缺少 shortTerm 数组"));
                 co_return std::nullopt;
             }
 
@@ -320,7 +320,8 @@ namespace insoulforge {
                 }
                 const auto embedding = co_await LlmClient::requestEmbedding(item.content, job.sessionId);
                 if (!embedding) {
-                    Logger::session(job.sessionId).warn("长期记忆向量化失败，跳过本条: {}", item.content);
+                    Logger::warn(
+                      job.sessionId, "Memory", fmt::format("长期记忆向量化失败，跳过本条: {}", item.content));
                     continue;
                 }
                 item.embedding = *embedding;
@@ -329,9 +330,9 @@ namespace insoulforge {
             }
 
             MemoryMaintenanceStore::complete(job.id, job.sessionId, joinLines(reconciled->shortTerm), prepared);
-            Logger::session(job.sessionId)
-              .info("记忆任务已完成: #{}，短期记忆 {} 条，长期记忆 +{}", job.id, reconciled->shortTerm.size(),
-                prepared.size());
+            Logger::info(job.sessionId, "Memory",
+              fmt::format("记忆任务已完成: #{}，短期记忆 {} 条，长期记忆 +{}", job.id, reconciled->shortTerm.size(),
+                prepared.size()));
             co_return true;
         }
 
@@ -360,9 +361,9 @@ namespace insoulforge {
                     try {
                         completed = co_await maintainJob(*job);
                     } catch (const std::exception &error) {
-                        Logger::session(sessionId).error("记忆任务 #{} 异常: {}", job->id, error.what());
+                        Logger::error(sessionId, "Memory", fmt::format("记忆任务 #{} 异常: {}", job->id, error.what()));
                     } catch (...) {
-                        Logger::session(sessionId).error("记忆任务 #{} 异常: 未知错误", job->id);
+                        Logger::error(sessionId, "Memory", fmt::format("记忆任务 #{} 异常: 未知错误", job->id));
                     }
                     if (completed) {
                         notifySummaryCompleted(sessionId);
@@ -370,13 +371,14 @@ namespace insoulforge {
                     }
                     MemoryMaintenanceStore::incrementAttempt(job->id);
                     const auto delay = retryDelay(job->attemptCount);
-                    Logger::session(sessionId).warn("记忆任务 #{} 将在 {} 秒后重试", job->id, delay.count());
+                    Logger::warn(
+                      sessionId, "Memory", fmt::format("记忆任务 #{} 将在 {} 秒后重试", job->id, delay.count()));
                     co_await drogon::sleepCoro(drogon::app().getLoop(), delay);
                 }
             } catch (const std::exception &error) {
-                Logger::session(sessionId).error("记忆任务消费者异常退出: {}", error.what());
+                Logger::error(sessionId, "Memory", fmt::format("记忆任务消费者异常退出: {}", error.what()));
             } catch (...) {
-                Logger::session(sessionId).error("记忆任务消费者异常退出: 未知错误");
+                Logger::error(sessionId, "Memory", fmt::format("记忆任务消费者异常退出: 未知错误"));
             }
         }
     } // namespace
@@ -392,7 +394,7 @@ namespace insoulforge {
                 co_await processPending(sessionId);
             }
         } catch (const std::exception &error) {
-            Logger::session(sessionId).error("检查待处理记忆任务失败: {}", error.what());
+            Logger::error(sessionId, "Memory", fmt::format("检查待处理记忆任务失败: {}", error.what()));
         }
         co_return;
     }
