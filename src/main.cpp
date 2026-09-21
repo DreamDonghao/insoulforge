@@ -10,7 +10,6 @@
 ///          - HTTP 服务启动：监听 7778 端口，提供管理界面和 API
 ///          支持通过输入 "quit" 命令优雅退出
 
-
 #include <admin/AdminStore.hpp>
 #include <admin/auth/AdminAccessToken.hpp>
 #include <admin/http/AdminResponse.hpp>
@@ -24,6 +23,8 @@
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <onebot/OneBotWebSocketClient.hpp>
+#include <poll.h>
+#include <unistd.h>
 
 int main() {
     using namespace insoulforge;
@@ -55,9 +56,20 @@ int main() {
 
         // 启动服务
         // 启动控制台命令线程
-        std::jthread commandThread([]() {
+        std::jthread commandThread([](const std::stop_token &stopToken) {
             std::string command;
-            while (std::cin >> command) {
+            while (!stopToken.stop_requested()) {
+                pollfd input{.fd = STDIN_FILENO, .events = POLLIN, .revents = 0};
+                const int result = poll(&input, 1, 200);
+                if (result == 0) {
+                    continue;
+                }
+                if (result < 0 || (input.revents & (POLLERR | POLLHUP | POLLNVAL))) {
+                    return;
+                }
+                if (!(input.revents & POLLIN) || !(std::cin >> command)) {
+                    return;
+                }
                 if (command == "exit") {
                     drogon::app().quit();
                     return;
@@ -78,22 +90,22 @@ int main() {
             }
         });
 
-        drogon::app().registerPreRoutingAdvice([](const drogon::HttpRequestPtr &request,
-                                                 drogon::AdviceCallback &&callback,
-                                                 drogon::AdviceChainCallback &&next) {
-            const std::string &path = request->path();
-            const bool isAdminApi = path.starts_with("/admin/api/");
-            const bool isAdminWebSocket = path == "/admin/ws" || path == "/admin/logs/ws";
-            const bool isPublicAuthEndpoint = path == "/admin/api/auth/login" || path == "/admin/api/auth/status";
-            if ((!isAdminApi && !isAdminWebSocket) || isPublicAuthEndpoint || AdminAccessToken::isAuthorized(request)) {
-                next();
-                return;
-            }
+        drogon::app().registerPreRoutingAdvice(
+          [](const drogon::HttpRequestPtr &request, drogon::AdviceCallback &&callback,
+            drogon::AdviceChainCallback &&next) {
+              const std::string &path = request->path();
+              const bool isAdminApi = path.starts_with("/admin/api/");
+              const bool isAdminWebSocket = path == "/admin/ws" || path == "/admin/logs/ws";
+              if (const bool isPublicAuthEndpoint = path == "/admin/api/auth/login" || path == "/admin/api/auth/status";
+                (!isAdminApi && !isAdminWebSocket) || isPublicAuthEndpoint || AdminAccessToken::isAuthorized(request)) {
+                  next();
+                  return;
+              }
 
-            auto response = jsonResponse(AdminResponse::failJson("未登录或登录已失效"));
-            response->setStatusCode(drogon::k401Unauthorized);
-            callback(response);
-        });
+              auto response = jsonResponse(AdminResponse::failJson("未登录或登录已失效"));
+              response->setStatusCode(drogon::k401Unauthorized);
+              callback(response);
+          });
 
         drogon::app().addListener("0.0.0.0", 7778);
         drogon::app().setDocumentRoot("public");
@@ -101,6 +113,10 @@ int main() {
         Logger::info(0, "Main", "管理后台: http://localhost:7778/index.html");
 
         drogon::app().run();
+
+        // stdin 读取不能依赖 SIGINT 自动返回；先结束命令线程，避免 jthread 析构时阻塞退出。
+        commandThread.request_stop();
+        commandThread.join();
 
         // 先停调度线程再关库，避免触发中的任务写已关闭的数据库
         TaskScheduler::instance().stop();
