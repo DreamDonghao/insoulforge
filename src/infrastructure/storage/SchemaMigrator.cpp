@@ -218,6 +218,13 @@ namespace insoulforge {
     ))",
           "CREATE INDEX IF NOT EXISTS idx_affinity_maintenance_jobs_session ON affinity_maintenance_jobs(session_id, "
           "id)"};
+
+        /// @brief v11 新增表：blacklisted_users（全局忽略的 QQ 用户）
+        constexpr std::array v11Tables = {
+          R"(CREATE TABLE IF NOT EXISTS blacklisted_users (
+        qq_number INTEGER PRIMARY KEY,
+        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ))"};
         int getUserVersion(sqlite3 *db) {
             const Statement stmt(db, "PRAGMA user_version");
             return stmt.step() ? stmt.getInt(0) : 0;
@@ -240,6 +247,7 @@ namespace insoulforge {
             execAll(db, v7Tables);
             execAll(db, v8Tables);
             execAll(db, v10Tables);
+            execAll(db, v11Tables);
             execAll(db, indexes);
             setUserVersion(db, SchemaMigrator::kLatestVersion);
         }
@@ -451,6 +459,11 @@ namespace insoulforge {
             execSQL(db, "INSERT INTO affinity_maintenance_jobs (session_id, messages) "
                         "SELECT session_id, messages FROM memory_maintenance_jobs WHERE status = 'pending'");
         }
+
+        void migrateV10ToV11(sqlite3 *db) {
+            Logger::info(0, "Storage", "执行迁移: 新增全局 QQ 黑名单");
+            execAll(db, v11Tables);
+        }
     } // namespace
 
     namespace SchemaMigrator {
@@ -480,6 +493,7 @@ namespace insoulforge {
               &migrateV7ToV8, // 新增持久化记忆维护任务队列
               &migrateV8ToV9, // 记忆任务完成后再删除消息列表前缀
               &migrateV9ToV10, // 好感度维护任务与记忆维护任务解耦
+              &migrateV10ToV11, // 新增全局 QQ 黑名单
             };
 
             for (int v = version; v < kLatestVersion; ++v) {

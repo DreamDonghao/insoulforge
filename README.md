@@ -115,6 +115,9 @@ Docker 默认桥接网络中，容器无法枚举宿主机局域网地址；可�
 | `/groups`           | 查看已启用的会话列表                   | 管理员 |
 | `/addadmin <QQ号>`  | 添加管理员                             | 管理员 |
 | `/deladmin <QQ号>`  | 移除管理员                             | 管理员 |
+| `/blacklist`        | 查看全局 QQ 黑名单                     | 管理员 |
+| `/addblacklist <QQ号>` | 将用户加入全局 QQ 黑名单            | 管理员 |
+| `/delblacklist <QQ号>` | 将用户移出全局 QQ 黑名单            | 管理员 |
 | `/listemoji`        | 查看QQ收藏表情列表                     | 管理员 |
 | `/delemoji <名称>`  | 从QQ收藏表情中删除                     | 管理员 |
 | `/clearimagecache`  | 清除图片和 GIF 描述缓存                | 管理员 |

@@ -1,4 +1,5 @@
 #include <admin/AdminStore.hpp>
+#include <admin/BlacklistStore.hpp>
 #include <admin/auth/AdminAccessToken.hpp>
 #include <admin/http/AdminController.hpp>
 #include <admin/http/AdminResponse.hpp>
@@ -303,6 +304,42 @@ Task<> AdminController::removeAdmin(
     AdminStore::removeAdmin(qqNum);
 
     callback(jsonResponse(AdminResponse::okJson("管理员已删除")));
+    co_return;
+}
+
+Task<> AdminController::getBlacklist(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const {
+    json result = json::array();
+    for (const uint64_t qq: BlacklistStore::getAll()) {
+        result.push_back({{"qq", qq}});
+    }
+    callback(jsonResponse(result));
+    co_return;
+}
+
+Task<> AdminController::addBlacklistEntry(
+  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const {
+    const auto body = parseJsonBody(req);
+    const uint64_t qq = body && body->contains("qq") ? jsonToUInt64((*body)["qq"]) : 0;
+    if (qq == 0) {
+        callback(jsonResponse(AdminResponse::errorJson("缺少有效的 qq 字段")));
+        co_return;
+    }
+
+    BlacklistStore::add(qq);
+    callback(jsonResponse(AdminResponse::okJson("黑名单已添加")));
+    co_return;
+}
+
+Task<> AdminController::removeBlacklistEntry(
+  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &qq) const {
+    const auto parsedQq = tryParseUInt64(qq);
+    if (!parsedQq || *parsedQq == 0) {
+        callback(jsonResponse(AdminResponse::errorJson("无效的 QQ 号")));
+        co_return;
+    }
+
+    BlacklistStore::remove(*parsedQq);
+    callback(jsonResponse(AdminResponse::okJson("黑名单已移除")));
     co_return;
 }
 

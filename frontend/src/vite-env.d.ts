@@ -62,6 +62,10 @@ export interface Admin {
     qq: number
 }
 
+export interface BlacklistEntry {
+    qq: number
+}
+
 export interface Group {
     groupId: number
     /** 会话 ID 的字符串形式（私聊会话 ID 带标志位，超过 Number 安全范围） */

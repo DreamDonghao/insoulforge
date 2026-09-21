@@ -1,6 +1,7 @@
 /// @file OneBotEventWorkflow.cpp
 /// @brief OneBot 入站事件处理工作流实现
 
+#include <admin/BlacklistStore.hpp>
 #include <admin/realtime/WebSocketManager.hpp>
 #include <agent/runtime/AgentSystem.hpp>
 #include <agent/runtime/ExecutorAgent.hpp>
@@ -177,6 +178,9 @@ namespace insoulforge {
         auto normalizedMessage = OneBotEventNormalizer::normalize(std::move(body));
         // 格式化失败或机器人没有启动则终止
         if (!normalizedMessage || !AgentSystem::instance().isReady()) {
+            return;
+        }
+        if (BlacklistStore::contains(getUInt(atOrNull(*normalizedMessage, "sender"), "qq"))) {
             return;
         }
         const auto sessionId = MessageRecord::getSessionId(*normalizedMessage);

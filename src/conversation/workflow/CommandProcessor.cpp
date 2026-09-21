@@ -2,6 +2,7 @@
 /// @brief 消息工作流的管理命令处理实现
 
 #include <admin/AdminStore.hpp>
+#include <admin/BlacklistStore.hpp>
 #include <agent/tools/ToolRuntime.hpp>
 #include <conversation/message/MessageRecord.hpp>
 #include <conversation/message/SessionId.hpp>
@@ -58,6 +59,9 @@ namespace insoulforge::CommandProcessor {
                       "/admins - 查看管理员列表\n"
                       "/addadmin <QQ号> - 添加管理员\n"
                       "/deladmin <QQ号> - 移除管理员\n"
+                      "/blacklist - 查看黑名单\n"
+                      "/addblacklist <QQ号> - 添加黑名单\n"
+                      "/delblacklist <QQ号> - 移除黑名单\n"
                       "/clearimagecache - 清除全部图片识别缓存\n"
                       "【表情管理】\n"
                       "/delemoji <名称> - 删除表情包\n"
@@ -148,6 +152,39 @@ namespace insoulforge::CommandProcessor {
             if (const auto qq = tryParseUInt64(argument)) {
                 AdminStore::removeAdmin(*qq);
                 co_return fmt::format("已移除管理员: {}", *qq);
+            }
+            co_return "无效的QQ号格式";
+        }
+        if (command == "/blacklist" || command == "/黑名单") {
+            const auto users = BlacklistStore::getAll();
+            if (users.empty()) {
+                co_return "黑名单为空";
+            }
+            std::string response = "黑名单:\n";
+            for (const uint64_t qq: users) {
+                response += fmt::format("- {}\n", qq);
+            }
+            co_return response;
+        }
+        if (command == "/addblacklist" || command == "/添加黑名单") {
+            std::string argument;
+            if (!(input >> argument)) {
+                co_return "用法: /addblacklist <QQ号>";
+            }
+            if (const auto qq = tryParseUInt64(argument); qq && *qq != 0) {
+                BlacklistStore::add(*qq);
+                co_return fmt::format("已添加黑名单: {}", *qq);
+            }
+            co_return "无效的QQ号格式";
+        }
+        if (command == "/delblacklist" || command == "/移除黑名单") {
+            std::string argument;
+            if (!(input >> argument)) {
+                co_return "用法: /delblacklist <QQ号>";
+            }
+            if (const auto qq = tryParseUInt64(argument); qq && *qq != 0) {
+                BlacklistStore::remove(*qq);
+                co_return fmt::format("已移除黑名单: {}", *qq);
             }
             co_return "无效的QQ号格式";
         }

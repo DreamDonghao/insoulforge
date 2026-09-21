@@ -75,6 +75,13 @@ namespace insoulforge {
 
         ADD_METHOD_TO(AdminController::removeAdmin, "/admin/api/admin/{qq}", drogon::Delete);
 
+        // 黑名单
+        ADD_METHOD_TO(AdminController::getBlacklist, "/admin/api/blacklist", drogon::Get);
+
+        ADD_METHOD_TO(AdminController::addBlacklistEntry, "/admin/api/blacklist", drogon::Post);
+
+        ADD_METHOD_TO(AdminController::removeBlacklistEntry, "/admin/api/blacklist/{qq}", drogon::Delete);
+
         // 启用群
         ADD_METHOD_TO(AdminController::getGroups, "/admin/api/groups", drogon::Get);
 
@@ -264,6 +271,20 @@ namespace insoulforge {
         /// @param callback HTTP 响应回调
         /// @param qq 管理员 QQ 号
         drogon::Task<> removeAdmin(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &qq) const;
+
+        /// @brief 获取全局 QQ 黑名单。
+        drogon::Task<> getBlacklist(
+          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+
+        /// @brief 添加全局 QQ 黑名单项。
+        /// @param req HTTP 请求，body 包含 qq。
+        drogon::Task<> addBlacklistEntry(
+          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+
+        /// @brief 移除全局 QQ 黑名单项。
+        /// @param qq 要移除的 QQ 号。
+        drogon::Task<> removeBlacklistEntry(drogon::HttpRequestPtr req,
           std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &qq) const;
 
         // ============== 启用群 ==============
