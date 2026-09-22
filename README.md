@@ -230,7 +230,7 @@ Git 忽略，Docker 部署时通过 `./data:/app/data` 挂载即可持久化。
 
 本项目使用 **C++ **实现，Web页面使用**Vue3**
 
-详细内容请转至[开发文档](./docs/DEVELOPMENT.md)
+本地构建、架构和调试见[开发文档](./docs/DEVELOPMENT.md)；提交 Issue 或 Pull Request 前请阅读[参与贡献指南](./CONTRIBUTING.md)。
 
 ---
 
