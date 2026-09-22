@@ -4,49 +4,61 @@
 
 ## 环境要求
 
-| 依赖                                   | 版本要求            | 说明                                                 |
-|----------------------------------------|---------------------|------------------------------------------------------|
-| CMake                                  | ≥ 3.20              | 构建系统                                             |
-| GCC / Clang                            | GCC 13+ / Clang 14+ | 代码使用 `<format>`，GCC 11/12 不支持                |
-| Node.js + npm                          | 任意较新版本        | 必需：CMake 配置阶段查找 npm，后端构建会连带构建前端 |
-| Drogon                                 | 1.8+ 推荐           | 异步 Web 框架                                        |
-| spdlog / fmt / nlohmann-json / SQLite3 | 任意较新版本        | 日志、格式化、JSON 与存储                            |
-| libpng / giflib                        | 任意较新版本        | 图片与 GIF 解码                                      |
+以 [Dockerfile](../Dockerfile) 的 `builder` 阶段为准：它是发布镜像实际使用的、可复现的构建环境。CMake 配置阶段会查找下列依赖；缺失任一必需项会直接失败。
 
-**Ubuntu 24.04（推荐，apt 开箱即用）**：
+| 依赖 | 要求 | CMake / 构建用途 |
+| --- | --- | --- |
+| CMake | 3.20 或更高 | 项目构建系统 |
+| C++ 编译器 | 支持 C++23，推荐 GCC 13+ 或同等 Clang + 标准库 | 后端代码使用 C++23 与 `<format>` |
+| npm | Node.js 18+ | CMake 配置阶段查找 npm，`insoulforge` 目标自动构建前端 |
+| Drogon | 1.9.10 | `find_package(Drogon CONFIG REQUIRED)` |
+| SQLite3、spdlog、fmt、OpenSSL | 开发包 | 存储、日志、格式化、加密 |
+| nlohmann-json | 头文件或 CMake 包 | JSON；CMake 找不到包时会直接查找头文件 |
+| libpng、giflib | 开发包 | 图片与 GIF 解码 |
+
+`ninja` 不是必需依赖，但与 Dockerfile 一致，推荐作为 CMake 生成器使用。
+
+### Ubuntu 24.04
+
+先安装与 Dockerfile `builder` 阶段相同的系统依赖：
 
 ```bash
 sudo apt update && sudo apt install -y \
-    cmake g++ \
-    libdrogon-dev \
-    libspdlog-dev \
-    libfmt-dev \
-    libsqlite3-dev \
-    nlohmann-json3-dev \
-    libpng-dev \
-    libgif-dev \
-    libssl-dev \
-    libbrotli-dev \
-    zlib1g-dev \
-    libuuid1
+    build-essential cmake ninja-build git ca-certificates \
+    libsqlite3-dev libspdlog-dev libfmt-dev libjsoncpp-dev nlohmann-json3-dev \
+    zlib1g-dev libssl-dev uuid-dev libgif-dev libpng-dev \
+    nodejs npm
 ```
 
-**Ubuntu 22.04** 默认 g++ 11 不支持 `<format>`，需额外安装 GCC 13：
+Ubuntu 官方仓库不保证提供可供本项目使用的 Drogon CMake 包，因此按 Dockerfile 固定构建 Drogon 1.9.10：
 
 ```bash
-sudo add-apt-repository ppa:ubuntu-toolchain-r/test
-sudo apt update && sudo apt install -y g++-13
-# 构建时指定编译器
-cmake -DCMAKE_CXX_COMPILER=g++-13 ..
+git clone --depth 1 --branch v1.9.10 --recurse-submodules --shallow-submodules \
+    https://github.com/drogonframework/drogon.git /tmp/drogon
+cmake -S /tmp/drogon -B /tmp/drogon/build -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DBUILD_SHARED_LIBS=OFF \
+    -DOPENSSL_USE_STATIC_LIBS=ON \
+    -DBUILD_EXAMPLES=OFF \
+    -DBUILD_CTL=OFF \
+    -DBUILD_ORM=OFF \
+    -DMYSQL_SUPPORT=OFF \
+    -DLIBPQ_SUPPORT=OFF
+cmake --build /tmp/drogon/build
+sudo cmake --install /tmp/drogon/build
 ```
 
-**macOS（Homebrew）**：
+Ubuntu 22.04 默认编译器不满足本项目的 C++23 / `<format>` 要求。请升级到 GCC 13+ 后，在首次 CMake 配置时指定 `-DCMAKE_CXX_COMPILER=g++-13`。
+
+### macOS（Homebrew）
 
 ```bash
 brew install cmake drogon spdlog fmt nlohmann-json sqlite3 openssl brotli libpng giflib node
 ```
 
-用 CLion 打开项目直接构建（`cmake-build-debug/`），无需额外配置。
+Homebrew 的 `drogon` 会提供 CMake 包。若 CMake 找不到 OpenSSL、SQLite3 等 Homebrew 前缀下的依赖，请在配置时传入对应的 `CMAKE_PREFIX_PATH`。
+
+用 CLion 打开项目后，选择或创建 `cmake-build-debug/` 构建目录即可；CMake 配置和 `insoulforge` 构建会自动安装前端依赖并生成管理后台静态文件。
 
 ## 构建
 
