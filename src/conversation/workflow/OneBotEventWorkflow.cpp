@@ -24,10 +24,8 @@ namespace insoulforge {
     namespace {
         /// @brief 判断消息是否可在已有回复任务时继续排队
         [[nodiscard]] bool shouldQueueWhileReplying(const json &message) {
-            if (MessageRecord::isSystem(message)) {
-                return true;
-            }
-            return MessageRecord::mentions(message, Config::instance().selfQQNumber);
+            return MessageRecord::isSystem(message) ||
+                   MessageRecord::mentions(message, Config::instance().selfQQNumber);
         }
 
         /// @brief 记录已完成主处理消息的会话统计
@@ -177,7 +175,8 @@ namespace insoulforge {
         // 格式化 OneBot 上报原始内容
         auto normalizedMessage = OneBotEventNormalizer::normalize(std::move(body));
         // 格式化失败或机器人没有启动则终止
-        if (!normalizedMessage || !AgentSystem::instance().isReady()) {
+        if (!normalizedMessage || MessageRecord::isAssistant(*normalizedMessage) ||
+            !AgentSystem::instance().isReady()) {
             return;
         }
         if (BlacklistStore::contains(getUInt(atOrNull(*normalizedMessage, "sender"), "qq"))) {
@@ -219,7 +218,6 @@ namespace insoulforge {
 
                 currentMessage = co_await MessageContentEnricher::enrichImages(std::move(currentMessage), sessionId);
                 currentMessage = co_await MessageContentEnricher::injectMemories(std::move(currentMessage), sessionId);
-                const auto queueWhileReplying = shouldQueueWhileReplying(currentMessage); // 是否可在以有回复任务时排队
                 currentMessage.erase("session_id");
 
                 // 插入消息列表
@@ -235,18 +233,16 @@ namespace insoulforge {
                     scheduleConversationMaintenance(sessionId, sessionState->messageList(), *update->summaryBatch);
                 }
 
-                const auto replyRequest = sessionState->requestReplyProcessing(queueWhileReplying);
-                if (replyRequest == SessionWorkflowState::ReplyRequestResult::Pending) {
-                    // 强制回复消息会在当前回复结束后基于最新会话上下文合并处理。
+                const auto triggerMessageId = getStr(update->messageSnapshot.back(), "message_id");
+                if (const auto replyTrigger = sessionState->requestReplyProcessing(
+                      triggerMessageId, shouldQueueWhileReplying(update->messageSnapshot.back()));
+                  replyTrigger) {
+                    drogon::async_run([this, sessionId, triggerMessageId = *replyTrigger]() -> drogon::Task<> {
+                        co_await processReplyWorkflow(sessionId, triggerMessageId);
+                    });
+                } else {
                     recordMessageProcessingStats(sessionId);
-                    continue;
                 }
-                if (replyRequest == SessionWorkflowState::ReplyRequestResult::Skipped) {
-                    // 普通消息在同会话回复进行中仍会完成预处理，但不触发第二个 Agent 请求
-                    recordMessageProcessingStats(sessionId);
-                    continue;
-                }
-                drogon::async_run([this, sessionId]() -> drogon::Task<> { co_await processReplyWorkflow(sessionId); });
             } catch (const std::exception &error) {
                 // 单条消息富化或收尾失败不能阻塞同会话后续消息。
                 Logger::error(sessionId, "Workflow", fmt::format("消息处理失败: {}", error.what()));
@@ -256,7 +252,7 @@ namespace insoulforge {
         }
     }
 
-    drogon::Task<> OneBotEventWorkflow::processReplyWorkflow(const uint64_t sessionId) {
+    drogon::Task<> OneBotEventWorkflow::processReplyWorkflow(uint64_t sessionId, std::string triggerMessageId) {
         const auto sessionState = getOrCreateSessionState(sessionId);
         bool isInitialReply = true;
         while (true) {
@@ -267,11 +263,13 @@ namespace insoulforge {
                 if (!AgentSystem::instance().isReady()) {
                     Logger::warn(sessionId, "Workflow", "回复任务跳过：Agent 不可用");
                 } else {
-                    auto routerDecision = co_await MessageRouter::route(sessionId, messageSnapshot);
+                    auto routerDecision = co_await MessageRouter::route(sessionId, triggerMessageId, messageSnapshot);
+
                     Logger::info(sessionId, "Router",
                       fmt::format("决策={} | reason={} | priority={} | maxLength={}",
                         routerDecision.shouldReply ? "reply" : "skip", routerDecision.reason, routerDecision.isPriority,
                         routerDecision.maxLength));
+
                     if (routerDecision.shouldReply) {
                         auto recordSnapshot = std::deque<json>{};
                         for (const auto &message: messageSnapshot) {
@@ -303,9 +301,11 @@ namespace insoulforge {
                 recordMessageProcessingStats(sessionId);
                 isInitialReply = false;
             }
-            if (!sessionState->completeReplyProcessing()) {
+            const auto nextTriggerMessageId = sessionState->completeReplyProcessing();
+            if (!nextTriggerMessageId) {
                 co_return;
             }
+            triggerMessageId = *nextTriggerMessageId;
         }
     }
 } // namespace insoulforge

@@ -45,6 +45,7 @@ namespace insoulforge::MessageRouter {
         [[nodiscard]] json compactMessage(const json &message) {
             const json projected = MessageRecord::projectForAgent(message);
             json compact;
+            compact["message_id"] = getStr(message, "message_id");
             if (const std::string name = getStr(atOrNull(projected, "sender"), "name"); !name.empty()) {
                 compact["sender"] = name;
             }
@@ -56,7 +57,8 @@ namespace insoulforge::MessageRouter {
             return compact;
         }
 
-        [[nodiscard]] json buildPrompt(const uint64_t sessionId, const json &snapshot) {
+        [[nodiscard]] json buildPrompt(
+          const uint64_t sessionId, const std::string_view triggerMessageId, const json &snapshot) {
             const auto &config = Config::instance();
             const size_t keep = static_cast<size_t>(config.routerWindowKeepCount);
             const size_t slide = std::max<size_t>(1, static_cast<size_t>(config.routerWindowTriggerCount) - keep);
@@ -73,13 +75,15 @@ namespace insoulforge::MessageRouter {
                 } else {
                     ++silentCount;
                 }
-                records.push_back(compactMessage(message));
-            }
-            if (!records.empty()) {
-                records.back()["is_current"] = true;
+                json record = compactMessage(message);
+                if (getStr(message, "message_id") == triggerMessageId) {
+                    record["is_current"] = true;
+                }
+                records.push_back(std::move(record));
             }
 
             json context;
+            context["trigger_message_id"] = triggerMessageId;
             context["chat_records"] = std::move(records);
             context["bot_silence"] = {{"spoke_in_window", spokeInWindow},
               {"messages_since_last_speak", spokeInWindow ? silentCount : snapshot.size() - startIndex}};
@@ -88,6 +92,10 @@ namespace insoulforge::MessageRouter {
             prompt.push_back({{"role", "system"},
               {"content", SessionId::isPrivate(sessionId) ? PromptService::getRouterPrivateSystemPrompt()
                                                           : PromptService::getRouterSystemPrompt()}});
+            prompt.push_back({{"role", "system"},
+              {"content",
+                "本轮只判断 trigger_message_id 指定的触发消息；chat_records 中 is_current 为 true 的记录就是该消息。"
+                "其后的记录仅用于理解上下文，不应改变本轮判断对象。"}});
             prompt.push_back({{"role", "user"}, {"content", dumpJson(context)}});
             return prompt;
         }
@@ -117,29 +125,31 @@ namespace insoulforge::MessageRouter {
         }
     } // namespace
 
-    drogon::Task<RouterDecision> route(const uint64_t sessionId, const json &snapshot) {
+    drogon::Task<RouterDecision> route(
+      const uint64_t sessionId, const std::string_view triggerMessageId, const json &snapshot) {
         if (!snapshot.is_array() || snapshot.empty()) {
             co_return applySessionType(makeDecision(RouterDecision::Action::SKIP, "消息快照为空"), sessionId);
         }
 
-        const json &message = snapshot.back();
-        if (MessageRecord::isSystem(message)) {
+        const auto trigger = std::ranges::find_if(snapshot,
+          [triggerMessageId](const json &message) { return getStr(message, "message_id") == triggerMessageId; });
+        if (trigger == snapshot.end()) {
+            co_return applySessionType(makeDecision(RouterDecision::Action::SKIP, "找不到触发消息"), sessionId);
+        }
+        if (MessageRecord::isSystem(*trigger)) {
             co_return applySessionType(
               makeDecision(RouterDecision::Action::REPLY, "系统定时任务触发", 100, true), sessionId);
         }
-        if (MessageRecord::isAssistant(message)) {
-            co_return applySessionType(makeDecision(RouterDecision::Action::SKIP, "机器人自身消息"), sessionId);
-        }
-        if (MessageRecord::mentions(message, Config::instance().selfQQNumber)) {
+        if (MessageRecord::mentions(*trigger, Config::instance().selfQQNumber)) {
             co_return applySessionType(makeDecision(RouterDecision::Action::REPLY, "用户@提及", 100, true), sessionId);
         }
-        if (!SessionId::isPrivate(sessionId) && isSpam(message)) {
+        if (!SessionId::isPrivate(sessionId) && isSpam(*trigger)) {
             co_return applySessionType(makeDecision(RouterDecision::Action::SKIP, "刷屏或短文本"), sessionId);
         }
 
         const auto &config = Config::instance();
-        const auto response = co_await LlmClient::requestChat(
-          "Router", "router", config.router, config.routerParams, buildPrompt(sessionId, snapshot), {}, sessionId);
+        const auto response = std::optional{co_await LlmClient::requestChat("Router", "router", config.router,
+          config.routerParams, buildPrompt(sessionId, triggerMessageId, snapshot), {}, sessionId)};
         if (!response) {
             co_return applySessionType(makeDecision(RouterDecision::Action::REPLY, "Router 请求失败"), sessionId);
         }
