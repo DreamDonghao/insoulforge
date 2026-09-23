@@ -1,10 +1,12 @@
 /// @file SessionWorkflowState.cpp
 /// @brief 单个会话的消息工作流并发状态实现
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <conversation/workflow/SessionWorkflowState.hpp>
 
 namespace insoulforge {
-    SessionWorkflowState::SessionWorkflowState(const uint64_t sessionId) :
+    SessionWorkflowState::SessionWorkflowState(const u64 sessionId) :
         m_messageList(std::make_shared<MessageList>(sessionId)) {}
 
     const std::shared_ptr<MessageList> &SessionWorkflowState::messageList() const noexcept { return m_messageList; }

@@ -5,8 +5,10 @@
 /// @details 聚合内置/自定义工具加载，以及自定义工具执行与 QQ 收藏表情支持。
 
 #pragma once
+
 #include <drogon/utils/coroutine.h>
 #include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/NumericTypes.hpp>
 #include <optional>
 #include <string>
 
@@ -25,14 +27,14 @@ namespace insoulforge::ToolRuntime {
     drogon::Task<std::string> executePythonTool(std::string scriptContent, json args);
 
     /// @brief 执行 HTTP 工具（sessionId 来自工具调用上下文）
-    drogon::Task<std::string> executeHttpTool(std::string config, json args, uint64_t sessionId);
+    drogon::Task<std::string> executeHttpTool(std::string config, json args, u64 sessionId);
 
     /// @brief 获取 QQ 收藏表情列表（调用 NapCat fetch_custom_face_detail，带60秒缓存）
     /// @return 归一化后的表情数组，失败时返回空数组
-    drogon::Task<json> fetchFavoriteEmojis(std::optional<uint64_t> sessionId = std::nullopt);
+    drogon::Task<json> fetchFavoriteEmojis(std::optional<u64> sessionId = std::nullopt);
 
     /// @brief 在收藏表情列表中按名称查找表情（名称 = desc 或 "表情N"）
-    drogon::Task<json> findFavoriteEmoji(std::string name, std::optional<uint64_t> sessionId = std::nullopt);
+    drogon::Task<json> findFavoriteEmoji(std::string name, std::optional<u64> sessionId = std::nullopt);
 
     /// @brief 使收藏表情缓存失效（修改/删除后调用）
     void invalidateFavoriteEmojiCache();

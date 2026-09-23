@@ -3,6 +3,8 @@
 /// @author donghao
 /// @date 2026-09-01
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <admin/http/AdminController.hpp>
 #include <admin/http/AdminResponse.hpp>
 #include <agent/tools/ToolRuntime.hpp>
@@ -40,7 +42,7 @@ Task<> AdminController::saveLLMConfig(
         std::string_view name;
         LLMApiConfig *api;
         LLMModelParams *params; // nullptr 表示该配置没有模型参数
-        int defaultMaxTokens;
+        i32 defaultMaxTokens;
     };
     auto &config = Config::instance();
     const std::array targets{
@@ -162,7 +164,7 @@ Task<> AdminController::addCustomTool(HttpRequestPtr req, std::function<void(con
     tool.readme = getStr(*body, "readme");
     tool.enabled = getBool(*body, "enabled", true);
 
-    const int id = ToolStore::addCustomTool(tool);
+    const i32 id = ToolStore::addCustomTool(tool);
 
     // 立即注册到 ToolRegistry
     ToolRuntime::reloadCustomTools();
@@ -203,7 +205,7 @@ Task<> AdminController::updateCustomTool(
 
 Task<> AdminController::deleteCustomTool(
   HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &id) const {
-    const int toolId = std::stoi(id);
+    const i32 toolId = std::stoi(id);
     ToolStore::deleteCustomTool(toolId);
 
     // 重新注册工具（移除已删除的）
@@ -215,7 +217,7 @@ Task<> AdminController::deleteCustomTool(
 
 Task<> AdminController::toggleCustomTool(
   HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &id) const {
-    const int toolId = std::stoi(id);
+    const i32 toolId = std::stoi(id);
     ToolStore::toggleCustomTool(toolId);
 
     // 重新注册工具
@@ -251,7 +253,7 @@ Task<> AdminController::testCustomTool(
 
     if (body->contains("toolId")) {
         // 从数据库加载工具
-        const int toolId = getInt(*body, "toolId");
+        const i32 toolId = getInt(*body, "toolId");
         auto tools = ToolStore::getCustomTools();
         auto it = std::ranges::find_if(tools, [toolId](const auto &t) { return t.id == toolId; });
         if (it == tools.end()) {
@@ -314,7 +316,7 @@ Task<> AdminController::saveCustomToolConfig(
 
 Task<> AdminController::exportCustomTool(
   HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &id) const {
-    int toolId = std::stoi(id);
+    i32 toolId = std::stoi(id);
     auto tools = ToolStore::getCustomTools();
 
     auto it = std::ranges::find_if(tools, [toolId](const ToolStore::CustomTool &t) { return t.id == toolId; });
@@ -400,7 +402,7 @@ Task<> AdminController::importCustomTool(
     tool.enabled = true;
 
     // 添加到数据库
-    int newId = ToolStore::addCustomTool(tool);
+    i32 newId = ToolStore::addCustomTool(tool);
     ToolRuntime::reloadCustomTools();
 
     Logger::info(0, "Admin", fmt::format("导入自定义工具: {} (ID: {})", tool.name, newId));

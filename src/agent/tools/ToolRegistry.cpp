@@ -3,6 +3,8 @@
 /// @author donghao
 /// @date 2026-03-28
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <include/agent/tools/ToolRegistry.hpp>
 #include <infrastructure/logging/Logger.hpp>
 
@@ -157,7 +159,7 @@ namespace insoulforge {
         }
     }
 
-    int ToolRegistry::categoryOrder(const ToolCategory category) {
+    i32 ToolRegistry::categoryOrder(const ToolCategory category) {
         switch (category) {
             case ToolCategory::REPLY:
                 return 0;

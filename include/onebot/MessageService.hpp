@@ -6,8 +6,10 @@
 ///          - 会话名称获取：fetchAndUpdateSessionName()
 
 #pragma once
+
 #include <cstdint>
 #include <drogon/utils/coroutine.h>
+#include <infrastructure/NumericTypes.hpp>
 #include <optional>
 #include <string>
 
@@ -22,16 +24,16 @@ namespace insoulforge::MessageService {
     /// @param groupId 群号
     /// @param message 消息内容
     /// @return 发送成功返回 message_id，失败返回 nullopt（已记日志）
-    drogon::Task<std::optional<uint64_t>> sendGroupMsg(uint64_t groupId, std::string message);
+    drogon::Task<std::optional<u64>> sendGroupMsg(u64 groupId, std::string message);
 
     /// @brief 发送私聊消息
     /// @param userId 用户QQ号
     /// @param message 消息内容
     /// @return 发送成功返回 message_id，失败返回 nullopt（已记日志）
-    drogon::Task<std::optional<uint64_t>> sendPrivateMsg(uint64_t userId, std::string message);
+    drogon::Task<std::optional<u64>> sendPrivateMsg(u64 userId, std::string message);
 
     /// @brief 获取并更新会话名称（群聊为群名，私聊为 QQ 昵称）
     /// @param sessionId 会话 ID（私聊带标志位）
     /// @return 会话名称
-    [[nodiscard]] drogon::Task<std::string> fetchAndUpdateSessionName(uint64_t sessionId);
+    [[nodiscard]] drogon::Task<std::string> fetchAndUpdateSessionName(u64 sessionId);
 } // namespace insoulforge::MessageService

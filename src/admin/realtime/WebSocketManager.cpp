@@ -1,6 +1,8 @@
 /// @file WebSocketManager.cpp
 /// @brief WebSocket 连接管理器 - 实现
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <admin/realtime/WebSocketManager.hpp>
 #include <infrastructure/logging/Logger.hpp>
 
@@ -26,20 +28,20 @@ namespace insoulforge {
         Logger::info(0, "Admin", fmt::format("WebSocket连接已断开，当前连接数: {}", m_connections.size()));
     }
 
-    void WebSocketManager::subscribeSession(const drogon::WebSocketConnectionPtr &conn, uint64_t sessionId) {
+    void WebSocketManager::subscribeSession(const drogon::WebSocketConnectionPtr &conn, u64 sessionId) {
         std::lock_guard lock(m_mutex);
         m_subscriptions[sessionId].insert(conn);
         Logger::info(0, "Admin", fmt::format("WebSocket订阅会话: {}", sessionId));
     }
 
-    void WebSocketManager::unsubscribeSession(const drogon::WebSocketConnectionPtr &conn, const uint64_t sessionId) {
+    void WebSocketManager::unsubscribeSession(const drogon::WebSocketConnectionPtr &conn, const u64 sessionId) {
         std::lock_guard lock(m_mutex);
         if (m_subscriptions.contains(sessionId)) {
             m_subscriptions[sessionId].erase(conn);
         }
     }
 
-    void WebSocketManager::pushMessage(const uint64_t sessionId, const std::string &role, const std::string &content) {
+    void WebSocketManager::pushMessage(const u64 sessionId, const std::string &role, const std::string &content) {
         std::lock_guard lock(m_mutex);
 
         json msg;

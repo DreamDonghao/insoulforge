@@ -1,6 +1,8 @@
 /// @file LogBuffer.cpp
 /// @brief 运行日志内存缓冲区与查询服务 - 实现
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <filesystem>
 #include <fmt/format.h>
 #include <fstream>
@@ -19,7 +21,7 @@ namespace insoulforge {
 
     void LogBuffer::loadFromDirectory(const std::string &directory) {
         std::vector<LogEntry> loaded;
-        for (int index = 0; index <= 5 && loaded.size() < kMaxEntries; ++index) {
+        for (i32 index = 0; index <= 5 && loaded.size() < kMaxEntries; ++index) {
             const auto path =
               std::filesystem::path(directory) / (index == 0 ? "bot.log" : fmt::format("bot.{}.log", index));
             std::ifstream file(path);

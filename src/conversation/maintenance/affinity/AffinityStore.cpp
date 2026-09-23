@@ -3,24 +3,26 @@
 /// @author donghao
 /// @date 2026-08-31
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 
 
 namespace insoulforge::AffinityStore {
-    std::unordered_map<uint64_t, int> getAffinityMap(const uint64_t sessionId) {
+    std::unordered_map<u64, i32> getAffinityMap(const u64 sessionId) {
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
         const Statement stmt(db.handle(), "SELECT qq_number, affinity FROM group_affinity WHERE group_id = ?");
         stmt.bind(1, sessionId);
-        std::unordered_map<uint64_t, int> affinityMap;
+        std::unordered_map<u64, i32> affinityMap;
         while (stmt.step()) {
-            affinityMap.emplace(static_cast<uint64_t>(stmt.getInt64(0)), stmt.getInt(1));
+            affinityMap.emplace(static_cast<u64>(stmt.getInt64(0)), stmt.getInt(1));
         }
         return affinityMap;
     }
 
-    void adjustAffinity(const uint64_t sessionId, const uint64_t qqNumber, const int delta) {
+    void adjustAffinity(const u64 sessionId, const u64 qqNumber, const i32 delta) {
         const auto &db = Database::instance();
         std::unique_lock lock(db.mutex());
         // max/min 标量函数在 SQL 层夹紧，并发叠加也不会越界

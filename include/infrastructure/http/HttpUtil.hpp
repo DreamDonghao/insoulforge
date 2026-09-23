@@ -9,6 +9,8 @@
 
 #pragma once
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <cstdint>
 #include <drogon/HttpClient.h>
 #include <drogon/utils/coroutine.h>
@@ -29,6 +31,6 @@ namespace insoulforge::HttpUtil {
     /// @param timeout 超时秒数
     /// @return 响应；网络异常（含地址解析失败、超时）返回 std::nullopt
     drogon::Task<std::optional<drogon::HttpResponsePtr>> send(std::string_view tag, std::string baseUrl,
-      std::string path, drogon::HttpMethod method, json body, std::string bearerToken, double timeout,
-      std::optional<uint64_t> sessionId = std::nullopt);
+      std::string path, drogon::HttpMethod method, json body, std::string bearerToken, f64 timeout,
+      std::optional<u64> sessionId = std::nullopt);
 } // namespace insoulforge::HttpUtil

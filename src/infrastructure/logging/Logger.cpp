@@ -1,6 +1,8 @@
 /// @file Logger.cpp
 /// @brief 统一运行日志入口 - 实现
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <admin/realtime/LogWebSocketManager.hpp>
 #include <algorithm>
 #include <filesystem>
@@ -96,27 +98,27 @@ namespace insoulforge {
         info(0, "Logger", fmt::format("日志系统初始化完成 | file={}", sinks.size() > 1));
     }
 
-    void Logger::trace(const uint64_t sessionId, const std::string_view source, std::string content) {
+    void Logger::trace(const u64 sessionId, const std::string_view source, std::string content) {
         write(Level::Trace, sessionId, source, std::move(content));
     }
 
-    void Logger::debug(const uint64_t sessionId, const std::string_view source, std::string content) {
+    void Logger::debug(const u64 sessionId, const std::string_view source, std::string content) {
         write(Level::Debug, sessionId, source, std::move(content));
     }
 
-    void Logger::info(const uint64_t sessionId, const std::string_view source, std::string content) {
+    void Logger::info(const u64 sessionId, const std::string_view source, std::string content) {
         write(Level::Info, sessionId, source, std::move(content));
     }
 
-    void Logger::warn(const uint64_t sessionId, const std::string_view source, std::string content) {
+    void Logger::warn(const u64 sessionId, const std::string_view source, std::string content) {
         write(Level::Warn, sessionId, source, std::move(content));
     }
 
-    void Logger::error(const uint64_t sessionId, const std::string_view source, std::string content) {
+    void Logger::error(const u64 sessionId, const std::string_view source, std::string content) {
         write(Level::Error, sessionId, source, std::move(content));
     }
 
-    void Logger::critical(const uint64_t sessionId, const std::string_view source, std::string content) {
+    void Logger::critical(const u64 sessionId, const std::string_view source, std::string content) {
         write(Level::Critical, sessionId, source, std::move(content));
     }
 
@@ -134,8 +136,7 @@ namespace insoulforge {
         return {level.data(), level.size()};
     }
 
-    void Logger::write(
-      const Level level, const uint64_t sessionId, const std::string_view source, std::string content) {
+    void Logger::write(const Level level, const u64 sessionId, const std::string_view source, std::string content) {
         const auto spdlogLevel = toSpdlogLevel(level);
         if (!spdlog::default_logger()->should_log(spdlogLevel)) {
             return;

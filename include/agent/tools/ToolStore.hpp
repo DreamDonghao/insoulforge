@@ -5,6 +5,8 @@
 /// @details 表：custom_tools（工具定义与脚本）、settings（Python 解释器路径）
 
 #pragma once
+
+#include <infrastructure/NumericTypes.hpp>
 #include <string>
 #include <vector>
 
@@ -13,7 +15,7 @@ namespace insoulforge {
     namespace ToolStore {
         /// @brief 自定义工具结构
         struct CustomTool {
-            int id = 0;
+            i32 id = 0;
             std::string name; // 工具名，如 "search_web"
             std::string description; // 给LLM看的描述
             std::string parameters; // JSON Schema (字符串形式)
@@ -31,16 +33,16 @@ namespace insoulforge {
         [[nodiscard]] std::vector<CustomTool> getEnabledCustomTools();
 
         /// @brief 添加自定义工具
-        [[nodiscard]] int addCustomTool(const CustomTool &tool);
+        [[nodiscard]] i32 addCustomTool(const CustomTool &tool);
 
         /// @brief 更新自定义工具
         void updateCustomTool(const CustomTool &tool);
 
         /// @brief 删除自定义工具
-        void deleteCustomTool(int id);
+        void deleteCustomTool(i32 id);
 
         /// @brief 切换自定义工具启用状态
-        void toggleCustomTool(int id);
+        void toggleCustomTool(i32 id);
 
         /// @brief 检查工具名是否已存在
         [[nodiscard]] bool hasCustomTool(const std::string &name);

@@ -1,3 +1,5 @@
+#include <infrastructure/NumericTypes.hpp>
+
 #include <admin/AdminStore.hpp>
 #include <admin/BlacklistStore.hpp>
 #include <admin/auth/AdminAccessToken.hpp>
@@ -30,13 +32,13 @@ namespace {
     // 进程启动时间（文件作用域 static，程序启动时初始化）
     const auto g_processStartTime = std::chrono::system_clock::now();
 
-    uint64_t parseQueryUInt64(const HttpRequestPtr &req, const std::string &name, uint64_t fallback = 0) {
+    u64 parseQueryUInt64(const HttpRequestPtr &req, const std::string &name, u64 fallback = 0) {
         const auto value = req->getParameter(name);
         return value.empty() ? fallback : parseUInt64(value, fallback);
     }
 
     /// @brief 会话列表项的公共头部字段（会话 ID 数值+字符串形式，私聊附带类型与 QQ 号）
-    json sessionItemHeader(const uint64_t sessionId) {
+    json sessionItemHeader(const u64 sessionId) {
         json item;
         // 会话 ID 可能带私聊标志位（超过 JS Number 安全范围），同步提供字符串形式
         item["groupId"] = sessionId;
@@ -100,7 +102,7 @@ Task<> AdminController::getLogs(HttpRequestPtr req, std::function<void(const Htt
     query.keyword = req->getParameter("keyword");
     query.afterId = parseQueryUInt64(req, "afterId");
     query.beforeId = tryParseUInt64(req->getParameter("beforeId"));
-    query.limit = static_cast<int>(std::clamp<uint64_t>(parseQueryUInt64(req, "limit", 200), 1, 1000));
+    query.limit = static_cast<i32>(std::clamp<u64>(parseQueryUInt64(req, "limit", 200), 1, 1000));
 
     const auto result = LogBuffer::instance().query(query);
 
@@ -169,7 +171,7 @@ Task<> AdminController::clearHttpTraces(
 // ==================== 用量统计 ====================
 
 Task<> AdminController::getUsage(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const {
-    int days = 30;
+    i32 days = 30;
     if (const std::string p = req->getParameter("days"); !p.empty()) {
         // 与 stoi 行为一致：跳过前导空白，解析失败时保留默认值
         const auto *begin = p.data();
@@ -275,7 +277,7 @@ Task<> AdminController::getAdmins(HttpRequestPtr req, std::function<void(const H
     const auto admins = AdminStore::getAdmins();
 
     json result(json::array());
-    for (const uint64_t qq: admins) {
+    for (const u64 qq: admins) {
         json admin;
         admin["qq"] = qq;
         result.push_back(admin);
@@ -291,7 +293,7 @@ Task<> AdminController::addAdmin(HttpRequestPtr req, std::function<void(const Ht
         co_return;
     }
 
-    const uint64_t qq = jsonToUInt64((*body)["qq"]);
+    const u64 qq = jsonToUInt64((*body)["qq"]);
     AdminStore::addAdmin(qq);
 
     callback(jsonResponse(AdminResponse::okJson("管理员已添加")));
@@ -300,7 +302,7 @@ Task<> AdminController::addAdmin(HttpRequestPtr req, std::function<void(const Ht
 
 Task<> AdminController::removeAdmin(
   HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &qq) const {
-    const uint64_t qqNum = std::stoull(qq);
+    const u64 qqNum = std::stoull(qq);
     AdminStore::removeAdmin(qqNum);
 
     callback(jsonResponse(AdminResponse::okJson("管理员已删除")));
@@ -309,7 +311,7 @@ Task<> AdminController::removeAdmin(
 
 Task<> AdminController::getBlacklist(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const {
     json result = json::array();
-    for (const uint64_t qq: BlacklistStore::getAll()) {
+    for (const u64 qq: BlacklistStore::getAll()) {
         result.push_back({{"qq", qq}});
     }
     callback(jsonResponse(result));
@@ -319,7 +321,7 @@ Task<> AdminController::getBlacklist(HttpRequestPtr req, std::function<void(cons
 Task<> AdminController::addBlacklistEntry(
   HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const {
     const auto body = parseJsonBody(req);
-    const uint64_t qq = body && body->contains("qq") ? jsonToUInt64((*body)["qq"]) : 0;
+    const u64 qq = body && body->contains("qq") ? jsonToUInt64((*body)["qq"]) : 0;
     if (qq == 0) {
         callback(jsonResponse(AdminResponse::errorJson("缺少有效的 qq 字段")));
         co_return;
@@ -367,10 +369,10 @@ Task<> AdminController::enableSession(HttpRequestPtr req, std::function<void(con
         co_return;
     }
 
-    uint64_t sessionId = 0;
+    u64 sessionId = 0;
     if (getStr(*body, "sessionType") == "private") {
         // 私聊会话 ID 带标志位，由后端按 QQ 号构造（前端无法安全表示超出 JS 精度的大数）
-        const uint64_t userId = jsonToUInt64(atOrNull(*body, "userId"));
+        const u64 userId = jsonToUInt64(atOrNull(*body, "userId"));
         if (userId == 0) {
             callback(jsonResponse(AdminResponse::errorJson("QQ号无效")));
             co_return;
@@ -397,7 +399,7 @@ Task<> AdminController::enableSession(HttpRequestPtr req, std::function<void(con
 
 Task<> AdminController::toggleSession(
   HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &sessionId) const {
-    const uint64_t gid = std::stoull(sessionId);
+    const u64 gid = std::stoull(sessionId);
     SessionStore::toggleSessionStatus(gid);
 
     callback(jsonResponse(AdminResponse::okJson("群状态已切换")));
@@ -406,7 +408,7 @@ Task<> AdminController::toggleSession(
 
 Task<> AdminController::removeSession(
   HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &sessionId) const {
-    const uint64_t gid = std::stoull(sessionId);
+    const u64 gid = std::stoull(sessionId);
     SessionStore::disableSession(gid);
 
     callback(jsonResponse(AdminResponse::okJson("群已删除")));
@@ -415,7 +417,7 @@ Task<> AdminController::removeSession(
 
 Task<> AdminController::refreshSessionName(
   HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &sessionId) const {
-    const uint64_t gid = std::stoull(sessionId);
+    const u64 gid = std::stoull(sessionId);
     const auto groupName = co_await MessageService::fetchAndUpdateSessionName(gid);
 
     json resp = AdminResponse::okJson();
@@ -455,10 +457,10 @@ Task<> AdminController::getChatSessions(
 
 Task<> AdminController::getChatRecords(
   HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &sessionId) const {
-    const uint64_t gid = std::stoull(sessionId);
+    const u64 gid = std::stoull(sessionId);
 
     // 支持limit参数
-    int limit = 50;
+    i32 limit = 50;
     if (const std::string limitParam = req->getParameter("limit"); !limitParam.empty()) {
         limit = std::stoi(limitParam);
     }
@@ -497,7 +499,7 @@ Task<> AdminController::updateChatRecord(
         co_return;
     }
 
-    const int id = std::stoi(recordId);
+    const i32 id = std::stoi(recordId);
     const std::string content = getStr(*body, "content");
     ChatRecordStore::updateChatRecord(id, content);
 
@@ -507,7 +509,7 @@ Task<> AdminController::updateChatRecord(
 
 Task<> AdminController::deleteChatRecord(
   HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &recordId) const {
-    const int id = std::stoi(recordId);
+    const i32 id = std::stoi(recordId);
     ChatRecordStore::deleteChatRecord(id);
 
     callback(jsonResponse(AdminResponse::okJson("聊天记录已删除")));
@@ -516,7 +518,7 @@ Task<> AdminController::deleteChatRecord(
 
 Task<> AdminController::clearSessionChatRecords(
   HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &sessionId) const {
-    const uint64_t gid = std::stoull(sessionId);
+    const u64 gid = std::stoull(sessionId);
     ChatRecordStore::clearSessionChatRecords(gid);
 
     callback(jsonResponse(AdminResponse::okJson("聊天记录已清空")));
@@ -527,17 +529,17 @@ Task<> AdminController::clearSessionChatRecords(
 
 Task<> AdminController::getLongTermMemories(
   HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const {
-    uint64_t sessionId = 0;
+    u64 sessionId = 0;
     if (const std::string sessionParam = req->getParameter("sessionId"); !sessionParam.empty()) {
         sessionId = std::stoull(sessionParam);
     }
 
-    int limit = 20;
+    i32 limit = 20;
     if (const std::string limitParam = req->getParameter("limit"); !limitParam.empty()) {
         limit = std::clamp(std::stoi(limitParam), 1, 100);
     }
 
-    int offset = 0;
+    i32 offset = 0;
     if (const std::string offsetParam = req->getParameter("offset"); !offsetParam.empty()) {
         offset = std::max(0, std::stoi(offsetParam));
     }
@@ -576,7 +578,7 @@ Task<> AdminController::deleteLongTermMemory(
 
 Task<> AdminController::getSessionMemory(
   HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &sessionId) const {
-    const uint64_t gid = std::stoull(sessionId);
+    const u64 gid = std::stoull(sessionId);
     const std::string memory = MemoryStore::getShortTermMemory(gid);
 
     json resp;
@@ -594,7 +596,7 @@ Task<> AdminController::updateSessionMemory(
         co_return;
     }
 
-    const uint64_t gid = std::stoull(sessionId);
+    const u64 gid = std::stoull(sessionId);
     const std::string memory = getStr(*body, "memory");
     MemoryStore::updateShortTermMemory(gid, memory);
 
@@ -606,10 +608,10 @@ Task<> AdminController::updateSessionMemory(
 
 Task<> AdminController::getSessionAffinity(
   HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &sessionId) const {
-    const uint64_t gid = std::stoull(sessionId);
+    const u64 gid = std::stoull(sessionId);
     auto affinityMap = AffinityStore::getAffinityMap(gid);
 
-    std::vector<std::pair<uint64_t, int>> entries(affinityMap.begin(), affinityMap.end());
+    std::vector<std::pair<u64, i32>> entries(affinityMap.begin(), affinityMap.end());
     std::ranges::sort(entries, [](const auto &a, const auto &b) { return a.second > b.second; });
 
     json list(json::array());
@@ -643,7 +645,7 @@ Task<> AdminController::getSessionAffinity(
 
 Task<> AdminController::getScheduledTasks(
   HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &sessionId) const {
-    const uint64_t sid = parseUInt64(sessionId);
+    const u64 sid = parseUInt64(sessionId);
     if (sid == 0) {
         callback(jsonResponse(AdminResponse::errorJson("无效的会话 ID")));
         co_return;
@@ -668,13 +670,13 @@ Task<> AdminController::getScheduledTasks(
 
 Task<> AdminController::cancelScheduledTask(
   HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &id) const {
-    const uint64_t taskId = parseUInt64(id);
+    const u64 taskId = parseUInt64(id);
     if (taskId == 0) {
         callback(jsonResponse(AdminResponse::failJson("无效的任务 ID")));
         co_return;
     }
 
-    if (TaskScheduler::instance().cancel(static_cast<int64_t>(taskId))) {
+    if (TaskScheduler::instance().cancel(static_cast<i64>(taskId))) {
         json resp = AdminResponse::okJson(fmt::format("定时任务 #{} 已取消", taskId));
         Logger::info(0, "Admin", fmt::format("已取消定时任务 #{}", taskId));
         callback(jsonResponse(resp));

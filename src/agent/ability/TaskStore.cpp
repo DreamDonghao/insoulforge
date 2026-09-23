@@ -3,13 +3,15 @@
 /// @author donghao
 /// @date 2026-08-30
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <agent/ability/TaskStore.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 
 namespace insoulforge {
     namespace TaskStore {
-        int64_t addScheduledTask(const ScheduledTask &task) {
+        i64 addScheduledTask(const ScheduledTask &task) {
             const auto &db = Database::instance();
             std::unique_lock lock(db.mutex());
             const Statement stmt(db.handle(),
@@ -45,7 +47,7 @@ namespace insoulforge {
         }
 
         std::vector<ScheduledTask> getPendingScheduledTasksByTarget(
-          const std::string &sessionType, const uint64_t targetId) {
+          const std::string &sessionType, const u64 targetId) {
             const auto &db = Database::instance();
             std::shared_lock lock(db.mutex());
             std::vector<ScheduledTask> tasks;
@@ -67,7 +69,7 @@ namespace insoulforge {
             return tasks;
         }
 
-        bool cancelScheduledTask(const int64_t id) {
+        bool cancelScheduledTask(const i64 id) {
             const auto &db = Database::instance();
             std::unique_lock lock(db.mutex());
             const Statement stmt(
@@ -77,7 +79,7 @@ namespace insoulforge {
             return Statement::changes(db.handle()) > 0;
         }
 
-        bool rescheduleDailyTask(const int64_t id, const int64_t nextTime) {
+        bool rescheduleDailyTask(const i64 id, const i64 nextTime) {
             const auto &db = Database::instance();
             std::unique_lock lock(db.mutex());
             // 条件限定 pending：触发途中被取消时不复活任务
@@ -89,7 +91,7 @@ namespace insoulforge {
             return Statement::changes(db.handle()) > 0;
         }
 
-        void finishScheduledTask(const int64_t id) {
+        void finishScheduledTask(const i64 id) {
             const auto &db = Database::instance();
             std::unique_lock lock(db.mutex());
             // 条件限定 pending：触发途中被取消时不覆盖 cancelled 状态

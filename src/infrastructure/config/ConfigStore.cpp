@@ -1,6 +1,8 @@
 /// @file ConfigStore.cpp
 /// @brief 全局配置文件存储 - 实现
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <infrastructure/config/ConfigStore.hpp>
 #include <infrastructure/logging/Logger.hpp>
 
@@ -21,7 +23,7 @@ namespace insoulforge::ConfigStore {
             return instance;
         }
 
-        json defaultChatConfig(const int maxTokens, const double temperature, const double topP) {
+        json defaultChatConfig(const i32 maxTokens, const f64 temperature, const f64 topP) {
             return {{"apiKey", ""}, {"baseUrl", ""}, {"path", "/chat/completions"}, {"model", ""},
               {"maxTokens", maxTokens}, {"temperature", temperature}, {"topP", topP}, {"reasoningEffort", ""}};
         }

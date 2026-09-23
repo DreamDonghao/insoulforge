@@ -9,9 +9,11 @@
 ///          - 每日任务（isDaily）触发后不结束，自动推进到次日同一时刻重新入堆，直到被取消
 ///          - 重启时从数据库恢复全部 pending 任务；已过期的任务照常触发并标注延时
 #pragma once
+
 #include <agent/ability/TaskStore.hpp>
 #include <atomic>
 #include <condition_variable>
+#include <infrastructure/NumericTypes.hpp>
 #include <mutex>
 #include <optional>
 #include <queue>
@@ -33,11 +35,11 @@ namespace insoulforge {
         /// @brief 创建定时任务（先落库再入堆）
         /// @param task 任务内容（sessionType/targetId/remindTime/content/isDaily 需已填充）
         /// @return 任务 ID；数据库写入失败抛出异常
-        int64_t schedule(TaskStore::ScheduledTask task);
+        i64 schedule(TaskStore::ScheduledTask task);
 
         /// @brief 取消定时任务（写库标记 cancelled，堆内条目在弹出时惰性跳过）
         /// @return true=取消成功；false=任务不存在或已触发/已取消
-        bool cancel(int64_t id);
+        bool cancel(i64 id);
 
         /// @brief 解析模型给出的时间字符串为本地时间 unix 秒。
         /// 兼容 YYYY-MM-DD / YYYY/MM/DD 与 HH:MM(:SS 可省)，分隔符 T 视同空格
@@ -74,7 +76,7 @@ namespace insoulforge {
         mutable std::mutex m_mutex;
         std::condition_variable m_cv;
         /// @brief 已取消任务的 ID 集合：priority_queue 不支持任意删除，弹出时过滤
-        std::set<int64_t> m_cancelledIds;
+        std::set<i64> m_cancelledIds;
         std::jthread m_thread;
         std::atomic_bool m_running{false};
     };

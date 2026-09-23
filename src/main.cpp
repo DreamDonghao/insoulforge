@@ -10,6 +10,8 @@
 ///          - HTTP 服务启动：监听 7778 端口，提供管理界面和 API
 ///          支持通过输入 "quit" 命令优雅退出
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <admin/AdminStore.hpp>
 #include <admin/auth/AdminAccessToken.hpp>
 #include <admin/http/AdminResponse.hpp>
@@ -62,7 +64,7 @@ int main() {
             std::string command;
             while (!stopToken.stop_requested()) {
                 pollfd input{.fd = STDIN_FILENO, .events = POLLIN, .revents = 0};
-                const int result = poll(&input, 1, 200);
+                const i32 result = poll(&input, 1, 200);
                 if (result == 0) {
                     continue;
                 }

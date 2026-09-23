@@ -1,6 +1,8 @@
 /// @file AffinityMaintenanceService.cpp
 /// @brief 基于持久化消息批次的好感度维护实现
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <conversation/maintenance/affinity/AffinityMaintenanceService.hpp>
 #include <conversation/maintenance/affinity/AffinityMaintenanceStore.hpp>
 #include <conversation/message/MessageRecord.hpp>
@@ -11,7 +13,7 @@
 namespace insoulforge {
     namespace {
         /// @brief 单次评估允许的最大好感度变化量
-        constexpr int kMaxAffinityDelta = 5;
+        constexpr i32 kMaxAffinityDelta = 5;
         /// @brief 单次好感度评估输入的记录数量上限
         constexpr size_t kMaxAffinityRecords = 300;
         constexpr std::chrono::seconds kInitialRetryDelay{2};
@@ -20,7 +22,7 @@ namespace insoulforge {
         /// @brief 每个会话至多运行一个好感度维护消费者
         struct AffinityScheduler {
             std::mutex mutex;
-            std::unordered_set<uint64_t> activeSessions;
+            std::unordered_set<u64> activeSessions;
         };
 
         [[nodiscard]] AffinityScheduler &scheduler() {
@@ -41,7 +43,7 @@ namespace insoulforge {
 
         /// @brief 解析好感度评估响应；格式错误视为本轮评估失败
         [[nodiscard]] std::optional<json> parseAffinityDeltas(
-          const std::optional<std::string> &result, const uint64_t sessionId) {
+          const std::optional<std::string> &result, const u64 sessionId) {
             if (!result) {
                 Logger::error(sessionId, "Affinity", fmt::format("好感度评分: API 请求失败"));
                 return std::nullopt;
@@ -106,13 +108,13 @@ namespace insoulforge {
                 co_return false;
             }
 
-            std::vector<std::pair<uint64_t, int>> appliedDeltas;
+            std::vector<std::pair<u64, i32>> appliedDeltas;
             for (const auto &[qqStr, deltaValue]: deltas->items()) {
-                const uint64_t qqNumber = parseUInt64(qqStr);
+                const u64 qqNumber = parseUInt64(qqStr);
                 if (qqNumber == 0 || qqNumber == SessionId::kSystemAccountId || !deltaValue.is_number_integer()) {
                     continue;
                 }
-                if (const int delta = std::clamp(jsonToInt(deltaValue), -kMaxAffinityDelta, kMaxAffinityDelta);
+                if (const i32 delta = std::clamp(jsonToInt(deltaValue), -kMaxAffinityDelta, kMaxAffinityDelta);
                   delta != 0) {
                     appliedDeltas.emplace_back(qqNumber, delta);
                 }
@@ -123,25 +125,25 @@ namespace insoulforge {
             co_return true;
         }
 
-        [[nodiscard]] std::chrono::seconds retryDelay(const int attempts) {
-            const int exponent = std::clamp(attempts, 0, 5);
+        [[nodiscard]] std::chrono::seconds retryDelay(const i32 attempts) {
+            const i32 exponent = std::clamp(attempts, 0, 5);
             return std::min(kInitialRetryDelay * (1 << exponent), kMaxRetryDelay);
         }
 
-        drogon::Task<> drainSession(const uint64_t sessionId);
+        drogon::Task<> drainSession(const u64 sessionId);
 
-        [[nodiscard]] bool acquireSessionConsumer(const uint64_t sessionId) {
+        [[nodiscard]] bool acquireSessionConsumer(const u64 sessionId) {
             auto &state = scheduler();
             std::lock_guard lock(state.mutex);
             return state.activeSessions.insert(sessionId).second;
         }
 
-        void releaseSessionConsumer(const uint64_t sessionId) {
+        void releaseSessionConsumer(const u64 sessionId) {
             std::lock_guard lock(scheduler().mutex);
             scheduler().activeSessions.erase(sessionId);
         }
 
-        drogon::Task<> drainSession(const uint64_t sessionId) {
+        drogon::Task<> drainSession(const u64 sessionId) {
             try {
                 while (const auto job = AffinityMaintenanceStore::next(sessionId)) {
                     bool completed = false;
@@ -172,7 +174,7 @@ namespace insoulforge {
         }
     } // namespace
 
-    drogon::Task<> AffinityMaintenanceService::processPending(const uint64_t sessionId) {
+    drogon::Task<> AffinityMaintenanceService::processPending(const u64 sessionId) {
         if (!acquireSessionConsumer(sessionId)) {
             co_return;
         }

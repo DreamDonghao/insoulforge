@@ -3,6 +3,8 @@
 /// @author donghao
 /// @date 2026-08-27
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <conversation/message/SessionId.hpp>
 #include <conversation/workflow/OneBotEventWorkflow.hpp>
 #include <include/agent/ability/TaskScheduler.hpp>
@@ -56,7 +58,7 @@ namespace insoulforge {
             const std::string text = buildText(task, delayed);
 
             // 合成消息 ID 用远离真实 ID 的固定区段，避免与 NapCat 分配的冲突
-            static std::atomic<int64_t> s_syntheticMsgId{0};
+            static std::atomic<i64> s_syntheticMsgId{0};
             const auto msgId = 9000000000LL + s_syntheticMsgId.fetch_add(1);
 
             json body;
@@ -111,8 +113,8 @@ namespace insoulforge {
         }
     }
 
-    int64_t TaskScheduler::schedule(TaskStore::ScheduledTask task) {
-        const int64_t id = TaskStore::addScheduledTask(task);
+    i64 TaskScheduler::schedule(TaskStore::ScheduledTask task) {
+        const i64 id = TaskStore::addScheduledTask(task);
 
         Entry entry;
         entry.task = std::move(task);
@@ -136,7 +138,7 @@ namespace insoulforge {
         m_cv.notify_all();
     }
 
-    bool TaskScheduler::cancel(const int64_t id) {
+    bool TaskScheduler::cancel(const i64 id) {
         // 先登记取消集合再写库：缩小"弹出时既不在集合里、库里也已非 pending"的竞态窗口
         {
             std::lock_guard lock(m_mutex);
@@ -212,7 +214,7 @@ namespace insoulforge {
     }
 
     void TaskScheduler::trigger(TaskStore::ScheduledTask task) {
-        const uint64_t logSessionId =
+        const u64 logSessionId =
           task.sessionType == "private" ? SessionId::fromPrivateUser(task.targetId) : task.targetId;
 
         const std::time_t now = std::time(nullptr);

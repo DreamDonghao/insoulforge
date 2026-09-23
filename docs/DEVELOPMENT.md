@@ -4,17 +4,18 @@
 
 ## 环境要求
 
-以 [Dockerfile](../Dockerfile) 的 `builder` 阶段为准：它是发布镜像实际使用的、可复现的构建环境。CMake 配置阶段会查找下列依赖；缺失任一必需项会直接失败。
+以 [Dockerfile](../Dockerfile) 的 `builder` 阶段为准：它是发布镜像实际使用的、可复现的构建环境。CMake
+配置阶段会查找下列依赖；缺失任一必需项会直接失败。
 
-| 依赖 | 要求 | CMake / 构建用途 |
-| --- | --- | --- |
-| CMake | 3.20 或更高 | 项目构建系统 |
-| C++ 编译器 | 支持 C++23，推荐 GCC 13+ 或同等 Clang + 标准库 | 后端代码使用 C++23 与 `<format>` |
-| npm | Node.js 18+ | CMake 配置阶段查找 npm，`insoulforge` 目标自动构建前端 |
-| Drogon | 1.9.10 | `find_package(Drogon CONFIG REQUIRED)` |
-| SQLite3、spdlog、fmt、OpenSSL | 开发包 | 存储、日志、格式化、加密 |
-| nlohmann-json | 头文件或 CMake 包 | JSON；CMake 找不到包时会直接查找头文件 |
-| libpng、giflib | 开发包 | 图片与 GIF 解码 |
+| 依赖                          | 要求                                           | CMake / 构建用途                                       |
+|-------------------------------|------------------------------------------------|--------------------------------------------------------|
+| CMake                         | 3.20 或更高                                    | 项目构建系统                                           |
+| C++ 编译器                    | 支持 C++23，推荐 GCC 13+ 或同等 Clang + 标准库 | 后端代码使用 C++23 与 `<format>`                       |
+| npm                           | Node.js 18+                                    | CMake 配置阶段查找 npm，`insoulforge` 目标自动构建前端 |
+| Drogon                        | 1.9.10                                         | `find_package(Drogon CONFIG REQUIRED)`                 |
+| SQLite3、spdlog、fmt、OpenSSL | 开发包                                         | 存储、日志、格式化、加密                               |
+| nlohmann-json                 | 头文件或 CMake 包                              | JSON；CMake 找不到包时会直接查找头文件                 |
+| libpng、giflib                | 开发包                                         | 图片与 GIF 解码                                        |
 
 `ninja` 不是必需依赖，但与 Dockerfile 一致，推荐作为 CMake 生成器使用。
 
@@ -48,7 +49,8 @@ cmake --build /tmp/drogon/build
 sudo cmake --install /tmp/drogon/build
 ```
 
-Ubuntu 22.04 默认编译器不满足本项目的 C++23 / `<format>` 要求。请升级到 GCC 13+ 后，在首次 CMake 配置时指定 `-DCMAKE_CXX_COMPILER=g++-13`。
+Ubuntu 22.04 默认编译器不满足本项目的 C++23 / `<format>` 要求。请升级到 GCC 13+ 后，在首次 CMake 配置时指定
+`-DCMAKE_CXX_COMPILER=g++-13`。
 
 ### macOS（Homebrew）
 
@@ -56,7 +58,8 @@ Ubuntu 22.04 默认编译器不满足本项目的 C++23 / `<format>` 要求。�
 brew install cmake drogon spdlog fmt nlohmann-json sqlite3 openssl brotli libpng giflib node
 ```
 
-Homebrew 的 `drogon` 会提供 CMake 包。若 CMake 找不到 OpenSSL、SQLite3 等 Homebrew 前缀下的依赖，请在配置时传入对应的 `CMAKE_PREFIX_PATH`。
+Homebrew 的 `drogon` 会提供 CMake 包。若 CMake 找不到 OpenSSL、SQLite3 等 Homebrew 前缀下的依赖，请在配置时传入对应的
+`CMAKE_PREFIX_PATH`。
 
 用 CLion 打开项目后，选择或创建 `cmake-build-debug/` 构建目录即可；CMake 配置和 `insoulforge` 构建会自动安装前端依赖并生成管理后台静态文件。
 
@@ -135,7 +138,7 @@ insoulforge/
 │   │   ├── message/          # 统一消息模型与会话 ID
 │   │   ├── session/          # 会话配置、存储与昵称目录
 │   │   └── workflow/         # OneBot 消息处理工作流
-│   ├── infrastructure/       # 配置、数据库、日志、HTTP 与共享工具
+│   ├── infrastructure/       # NumericTypes.hpp、配置、数据库、日志、HTTP 与共享工具
 │   ├── llm/                  # LLM 客户端、提示词与用量存储
 │   ├── media/                # 图片/GIF 识别与描述缓存
 │   └── onebot/               # OneBot 客户端、消息发送与 HTTP 入口
@@ -244,7 +247,7 @@ MessageService → OneBot API
 ### 会话派生状态维护
 
 - **短期记忆**：`MemoryManager` 按统一会话 ID 从 SQLite 读取当前短期记忆，供 Executor 构建提示词。
-- **长期记忆**：`LongTermMemory` 封装 `long_term_memory` 表的读取与向量检索；embedding 以 float 数组存入 BLOB。
+- **长期记忆**：`LongTermMemory` 封装 `long_term_memory` 表的读取与向量检索；embedding 以 `f32` 数组存入 BLOB。
 - **维护批次**：`MessageList` 到达 `memorySummaryTriggerCount` 后，选取最旧的 `memorySummaryBatchSize` 条消息作为待总结内容，并复制随后最多
   `memorySummaryContextCount` 条只读上下文。待总结消息在任务成功前继续保留在列表中。
 - **任务持久化与恢复**：`ConversationMaintenanceService` 通过 `ConversationMaintenanceStore` 在同一 SQLite 事务中创建
@@ -275,7 +278,8 @@ JSON 损坏则备份为 `config.json.broken.<时间戳>` 后重建；缺失或�
 ### 数据库
 
 SQLite 文件位于 `data/insoulforge.db`（`Database`
-单例，以读写锁保护）。存储包括完整消息恢复副本、短期/长期记忆、记忆与好感度维护任务、提示词、会话配置、管理员、全局 QQ 黑名单、表情与自定义工具。全局运行配置不属于数据库，位于同目录的
+单例，以读写锁保护）。存储包括完整消息恢复副本、短期/长期记忆、记忆与好感度维护任务、提示词、会话配置、管理员、全局 QQ
+黑名单、表情与自定义工具。全局运行配置不属于数据库，位于同目录的
 `config.json`。
 
 调试时可用任意 SQLite 客户端查看：
@@ -287,6 +291,9 @@ sqlite3 data/insoulforge.db ".tables"
 ## 开发指南
 
 ### 添加 C++ 内置工具
+
+新增后端代码中的数值类型使用 `infrastructure/NumericTypes.hpp` 定义的 `i*`、`u*`、`f32`、`f64`；容器大小和索引使用 `size_t`
+。完整规则见 [编码规范](./CODING_STYLE.md#数值类型)。
 
 小型工具可直接按类别编辑 `src/agent/tools/plugins/ReplyToolsPlugin.cpp` / `InfoToolsPlugin.cpp` /
 `ActionToolsPlugin.cpp` 注册（共享的参数 Schema 辅助函数在 `include/agent/tools/ToolArgument.hpp`）。内置文件由对应的

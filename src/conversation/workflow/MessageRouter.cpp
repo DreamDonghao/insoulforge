@@ -1,6 +1,8 @@
 /// @file MessageRouter.cpp
 /// @brief 基于完整消息快照的 Router 实现
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <conversation/message/MessageRecord.hpp>
 #include <conversation/message/SessionId.hpp>
 #include <conversation/workflow/MessageRouter.hpp>
@@ -11,7 +13,7 @@
 namespace insoulforge::MessageRouter {
     namespace {
         [[nodiscard]] RouterDecision makeDecision(const RouterDecision::Action action, std::string reason,
-          const int maxLength = 25, const bool priority = false) {
+          const i32 maxLength = 25, const bool priority = false) {
             return {.action = action,
               .reason = std::move(reason),
               .shouldReply = action == RouterDecision::Action::REPLY,
@@ -19,7 +21,7 @@ namespace insoulforge::MessageRouter {
               .isPriority = priority};
         }
 
-        [[nodiscard]] RouterDecision applySessionType(RouterDecision decision, const uint64_t sessionId) {
+        [[nodiscard]] RouterDecision applySessionType(RouterDecision decision, const u64 sessionId) {
             decision.isPrivate = SessionId::isPrivate(sessionId);
             return decision;
         }
@@ -58,7 +60,7 @@ namespace insoulforge::MessageRouter {
         }
 
         [[nodiscard]] json buildPrompt(
-          const uint64_t sessionId, const std::string_view triggerMessageId, const json &snapshot) {
+          const u64 sessionId, const std::string_view triggerMessageId, const json &snapshot) {
             const auto &config = Config::instance();
             const size_t keep = static_cast<size_t>(config.routerWindowKeepCount);
             const size_t slide = std::max<size_t>(1, static_cast<size_t>(config.routerWindowTriggerCount) - keep);
@@ -126,7 +128,7 @@ namespace insoulforge::MessageRouter {
     } // namespace
 
     drogon::Task<RouterDecision> route(
-      const uint64_t sessionId, const std::string_view triggerMessageId, const json &snapshot) {
+      const u64 sessionId, const std::string_view triggerMessageId, const json &snapshot) {
         if (!snapshot.is_array() || snapshot.empty()) {
             co_return applySessionType(makeDecision(RouterDecision::Action::SKIP, "消息快照为空"), sessionId);
         }

@@ -1,6 +1,8 @@
 /// @file ImageDescriptionStore.cpp
 /// @brief 图片视觉描述缓存存储实现
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 #include <media/ImageDescriptionStore.hpp>
@@ -17,7 +19,7 @@ namespace insoulforge::ImageDescriptionStore {
     } // namespace
 
     std::optional<CachedImageDescription> find(
-      const std::string &contentHash, const std::string &model, const int promptVersion) {
+      const std::string &contentHash, const std::string &model, const i32 promptVersion) {
         const auto &db = Database::instance();
         std::unique_lock lock(db.mutex());
         purgeExpiredLocked(db.handle());
@@ -51,8 +53,8 @@ namespace insoulforge::ImageDescriptionStore {
         return cached;
     }
 
-    void upsert(const std::string &contentHash, const std::string &model, const int promptVersion,
-      const std::string &mediaType, const bool succeeded, const std::string &description, const int sampledFrameCount) {
+    void upsert(const std::string &contentHash, const std::string &model, const i32 promptVersion,
+      const std::string &mediaType, const bool succeeded, const std::string &description, const i32 sampledFrameCount) {
         const auto &db = Database::instance();
         std::unique_lock lock(db.mutex());
         purgeExpiredLocked(db.handle());

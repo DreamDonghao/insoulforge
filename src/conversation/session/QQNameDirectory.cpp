@@ -1,6 +1,8 @@
 /// @file QQNameDirectory.cpp
 /// @brief 运行时 QQ 昵称目录实现
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <conversation/session/QQNameDirectory.hpp>
 
 #include <shared_mutex>
@@ -8,11 +10,11 @@
 namespace insoulforge::QQNameDirectory {
     namespace {
         std::shared_mutex nameMutex;
-        std::unordered_map<uint64_t, std::string> observedNames;
-        std::unordered_map<uint64_t, std::string> customNames;
+        std::unordered_map<u64, std::string> observedNames;
+        std::unordered_map<u64, std::string> customNames;
     } // namespace
 
-    void recordName(const uint64_t qqNumber, std::string name) {
+    void recordName(const u64 qqNumber, std::string name) {
         if (qqNumber == 0 || name.empty()) {
             return;
         }
@@ -22,7 +24,7 @@ namespace insoulforge::QQNameDirectory {
         }
     }
 
-    void setCustomName(const uint64_t qqNumber, std::string name) {
+    void setCustomName(const u64 qqNumber, std::string name) {
         if (qqNumber == 0 || name.empty()) {
             return;
         }
@@ -30,7 +32,7 @@ namespace insoulforge::QQNameDirectory {
         customNames[qqNumber] = std::move(name);
     }
 
-    std::string getName(const uint64_t qqNumber) {
+    std::string getName(const u64 qqNumber) {
         std::shared_lock lock(nameMutex);
         if (const auto custom = customNames.find(qqNumber); custom != customNames.end()) {
             return custom->second;
@@ -41,9 +43,9 @@ namespace insoulforge::QQNameDirectory {
         return "未知";
     }
 
-    std::unordered_map<std::string, uint64_t> nameToQQMap() {
+    std::unordered_map<std::string, u64> nameToQQMap() {
         std::shared_lock lock(nameMutex);
-        std::unordered_map<std::string, uint64_t> names;
+        std::unordered_map<std::string, u64> names;
         names.reserve(observedNames.size() + customNames.size());
         for (const auto &[qqNumber, name]: observedNames) {
             names[name] = qqNumber;

@@ -5,9 +5,11 @@
 ///          - ReplyDecision: Executor Agent 的回复结果
 
 #pragma once
+
 #include <array>
 #include <fmt/core.h>
 #include <format>
+#include <infrastructure/NumericTypes.hpp>
 #include <string>
 #include <string_view>
 
@@ -25,7 +27,7 @@ namespace insoulforge {
         // 回复策略
         bool shouldReply = true;
         std::string tone = "friendly";
-        int maxLength = 25;
+        i32 maxLength = 25;
         bool isPriority = false;
         bool isPrivate = false; ///< 是否私聊会话（决定 Executor 使用私聊人设提示词）
 

@@ -2,6 +2,8 @@
 /// @brief 工具运行时的插件装配与自定义工具加载
 
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <agent/tools/ToolPluginCatalog.hpp>
 #include <agent/tools/ToolRuntime.hpp>
 #include <agent/tools/ToolStore.hpp>
@@ -54,7 +56,7 @@ namespace insoulforge {
     void ToolRuntime::reloadCustomTools() {
         auto &registry = ToolRegistry::instance();
         const auto tools = ToolStore::getEnabledCustomTools();
-        int registeredCount = 0;
+        i32 registeredCount = 0;
 
         // 重载只替换 custom 插件，不会影响内置工具。
         const bool registered =

@@ -1,6 +1,8 @@
 /// @file HttpTrace.cpp
 /// @brief HTTP 请求完整内容内存缓存 - 实现
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <chrono>
 #include <infrastructure/http/HttpTrace.hpp>
 #include <iomanip>
@@ -51,7 +53,7 @@ namespace insoulforge {
         m_entries.push_back(std::move(entry));
     }
 
-    std::vector<HttpTraceEntry> HttpTrace::query(const uint64_t afterId, const size_t limit) const {
+    std::vector<HttpTraceEntry> HttpTrace::query(const u64 afterId, const size_t limit) const {
         std::lock_guard lock(m_mutex);
         // id 按插入序递增，倒序遍历到边界即可停止；返回新的在前
         std::vector<HttpTraceEntry> result;

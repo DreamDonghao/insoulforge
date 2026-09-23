@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <cstdint>
 #include <mutex>
 #include <optional>
@@ -11,15 +13,15 @@
 
 namespace insoulforge {
     struct HttpTraceEntry {
-        uint64_t id = 0;
+        u64 id = 0;
         std::string timestamp;
         std::string tag;
         std::string method;
         std::string url;
         std::string requestBody;
-        int status = 0;
+        i32 status = 0;
         std::string responseBody;
-        std::optional<uint64_t> sessionId;
+        std::optional<u64> sessionId;
     };
 
     /// @brief 保存最近 N 条经过 HttpUtil 的完整请求/响应，供管理后台查询
@@ -31,7 +33,7 @@ namespace insoulforge {
         void append(HttpTraceEntry entry);
 
         /// @brief 按 id 降序取记录（id > afterId，最多 limit 条）
-        [[nodiscard]] std::vector<HttpTraceEntry> query(uint64_t afterId, size_t limit) const;
+        [[nodiscard]] std::vector<HttpTraceEntry> query(u64 afterId, size_t limit) const;
 
         [[nodiscard]] size_t size() const;
 
@@ -42,6 +44,6 @@ namespace insoulforge {
 
         mutable std::mutex m_mutex;
         std::vector<HttpTraceEntry> m_entries;
-        uint64_t m_nextId = 1;
+        u64 m_nextId = 1;
     };
 } // namespace insoulforge

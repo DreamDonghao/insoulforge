@@ -2,6 +2,8 @@
 /// @brief 统一运行日志入口
 
 #pragma once
+
+#include <infrastructure/NumericTypes.hpp>
 #include <string>
 #include <string_view>
 
@@ -16,22 +18,22 @@ namespace insoulforge {
         static void init();
 
         /// @brief 写入 trace 级别日志
-        static void trace(uint64_t sessionId, std::string_view source, std::string content);
+        static void trace(u64 sessionId, std::string_view source, std::string content);
 
         /// @brief 写入 debug 级别日志
-        static void debug(uint64_t sessionId, std::string_view source, std::string content);
+        static void debug(u64 sessionId, std::string_view source, std::string content);
 
         /// @brief 写入 info 级别日志
-        static void info(uint64_t sessionId, std::string_view source, std::string content);
+        static void info(u64 sessionId, std::string_view source, std::string content);
 
         /// @brief 写入 warn 级别日志
-        static void warn(uint64_t sessionId, std::string_view source, std::string content);
+        static void warn(u64 sessionId, std::string_view source, std::string content);
 
         /// @brief 写入 error 级别日志
-        static void error(uint64_t sessionId, std::string_view source, std::string content);
+        static void error(u64 sessionId, std::string_view source, std::string content);
 
         /// @brief 写入 critical 级别日志
-        static void critical(uint64_t sessionId, std::string_view source, std::string content);
+        static void critical(u64 sessionId, std::string_view source, std::string content);
 
         /// @brief 设置运行时日志等级
         /// @return 等级名称有效时返回 true
@@ -44,6 +46,6 @@ namespace insoulforge {
         static void shutdown();
 
     private:
-        static void write(Level level, uint64_t sessionId, std::string_view source, std::string content);
+        static void write(Level level, u64 sessionId, std::string_view source, std::string content);
     };
 } // namespace insoulforge

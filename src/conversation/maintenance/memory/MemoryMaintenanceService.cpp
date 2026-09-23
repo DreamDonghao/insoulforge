@@ -1,6 +1,8 @@
 /// @file MemoryMaintenanceService.cpp
 /// @brief 持久化记忆维护任务的协调实现
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <agent/memory/LongTermMemoryStore.hpp>
 #include <agent/memory/MemoryStore.hpp>
 #include <conversation/maintenance/memory/MemoryMaintenanceService.hpp>
@@ -12,7 +14,7 @@
 
 namespace insoulforge {
     namespace {
-        constexpr int kRecallPerMemory = 2;
+        constexpr i32 kRecallPerMemory = 2;
         constexpr size_t kMaxRecalledEntries = 20;
         constexpr std::chrono::seconds kInitialRetryDelay{2};
         constexpr std::chrono::seconds kMaxRetryDelay{60};
@@ -20,8 +22,8 @@ namespace insoulforge {
         /// @brief 每个会话至多运行一个后台记忆任务消费者
         struct MaintenanceScheduler {
             std::mutex mutex;
-            std::unordered_set<uint64_t> activeSessions;
-            std::function<void(uint64_t)> summaryCompletedCallback;
+            std::unordered_set<u64> activeSessions;
+            std::function<void(u64)> summaryCompletedCallback;
         };
 
         [[nodiscard]] MaintenanceScheduler &scheduler() {
@@ -29,8 +31,8 @@ namespace insoulforge {
             return instance;
         }
 
-        void notifySummaryCompleted(const uint64_t sessionId) {
-            std::function<void(uint64_t)> callback;
+        void notifySummaryCompleted(const u64 sessionId) {
+            std::function<void(u64)> callback;
             {
                 std::lock_guard lock(scheduler().mutex);
                 callback = scheduler().summaryCompletedCallback;
@@ -76,7 +78,7 @@ namespace insoulforge {
         }
 
         [[nodiscard]] std::optional<json> parseLlmJson(
-          const std::optional<std::string> &result, const std::string_view tag, const uint64_t sessionId) {
+          const std::optional<std::string> &result, const std::string_view tag, const u64 sessionId) {
             if (!result) {
                 Logger::error(sessionId, "Memory", fmt::format("{}: API 请求失败", tag));
                 return std::nullopt;
@@ -95,7 +97,7 @@ namespace insoulforge {
         }
 
         drogon::Task<std::optional<std::vector<std::string>>> extractMemories(
-          std::string records, std::string context, const int maxTokens, const uint64_t sessionId) {
+          std::string records, std::string context, const i32 maxTokens, const u64 sessionId) {
             const json messages = json::array({
               {{"role", "system"}, {"content", R"(你是一个【群聊记忆提取器】。从群聊记录中提取值得记住的信息。
 
@@ -129,9 +131,9 @@ namespace insoulforge {
         }
 
         drogon::Task<std::vector<SimilarMemory>> recallForMerge(
-          const std::vector<std::string> &memories, const uint64_t sessionId) {
-            const float threshold = static_cast<float>(Config::instance().longTermRecallThreshold);
-            std::unordered_map<int64_t, SimilarMemory> recalled;
+          const std::vector<std::string> &memories, const u64 sessionId) {
+            const f32 threshold = static_cast<f32>(Config::instance().longTermRecallThreshold);
+            std::unordered_map<i64, SimilarMemory> recalled;
             for (const std::string &memory: memories) {
                 const auto embedding = co_await LlmClient::requestEmbedding(memory, sessionId);
                 if (!embedding) {
@@ -164,7 +166,7 @@ namespace insoulforge {
         }
 
         struct ReconciledLongTermMemory {
-            std::vector<int64_t> sources;
+            std::vector<i64> sources;
             std::string content;
         };
 
@@ -175,7 +177,7 @@ namespace insoulforge {
 
         drogon::Task<std::optional<ReconcileResult>> reconcileMemory(std::vector<std::string> currentShortTerm,
           const std::vector<std::string> &newMemories, const std::vector<SimilarMemory> &recalled,
-          const bool longTermEnabled, const uint64_t sessionId) {
+          const bool longTermEnabled, const u64 sessionId) {
             const auto &config = Config::instance();
             std::string prompt = R"(你是一个【群聊记忆整理器】。把新提取的记忆与当前短期记忆、召回的长期记忆合并整理。
 
@@ -233,7 +235,7 @@ namespace insoulforge {
                         if (!source.is_number_integer()) {
                             continue;
                         }
-                        if (const int64_t id = source.get<int64_t>();
+                        if (const i64 id = source.get<i64>();
                           std::ranges::any_of(recalled, [id](const SimilarMemory &item) { return item.id == id; })) {
                             memory.sources.push_back(id);
                         }
@@ -307,13 +309,13 @@ namespace insoulforge {
 
             std::vector<PreparedLongTermMemory> prepared;
             std::unordered_set<std::string> contents;
-            std::unordered_set<int64_t> replacedIds;
+            std::unordered_set<i64> replacedIds;
             for (const auto &[sources, content]: reconciled->longTerm) {
                 if (!contents.insert(content).second) {
                     continue;
                 }
                 PreparedLongTermMemory item{.content = content};
-                for (const int64_t id: sources) {
+                for (const i64 id: sources) {
                     if (!replacedIds.contains(id)) {
                         item.replacedIds.push_back(id);
                     }
@@ -336,25 +338,25 @@ namespace insoulforge {
             co_return true;
         }
 
-        [[nodiscard]] std::chrono::seconds retryDelay(const int attempts) {
-            const int exponent = std::clamp(attempts, 0, 5);
+        [[nodiscard]] std::chrono::seconds retryDelay(const i32 attempts) {
+            const i32 exponent = std::clamp(attempts, 0, 5);
             return std::min(kInitialRetryDelay * (1 << exponent), kMaxRetryDelay);
         }
 
-        drogon::Task<> drainSession(uint64_t sessionId);
+        drogon::Task<> drainSession(u64 sessionId);
 
-        [[nodiscard]] bool acquireSessionConsumer(const uint64_t sessionId) {
+        [[nodiscard]] bool acquireSessionConsumer(const u64 sessionId) {
             auto &state = scheduler();
             std::lock_guard lock(state.mutex);
             return state.activeSessions.insert(sessionId).second;
         }
 
-        void releaseSessionConsumer(const uint64_t sessionId) {
+        void releaseSessionConsumer(const u64 sessionId) {
             std::lock_guard lock(scheduler().mutex);
             scheduler().activeSessions.erase(sessionId);
         }
 
-        drogon::Task<> drainSession(const uint64_t sessionId) {
+        drogon::Task<> drainSession(const u64 sessionId) {
             try {
                 while (const auto job = MemoryMaintenanceStore::next(sessionId)) {
                     bool completed = false;
@@ -383,7 +385,7 @@ namespace insoulforge {
         }
     } // namespace
 
-    drogon::Task<> MemoryMaintenanceService::processPending(const uint64_t sessionId) {
+    drogon::Task<> MemoryMaintenanceService::processPending(const u64 sessionId) {
         if (!acquireSessionConsumer(sessionId)) {
             co_return;
         }
@@ -399,7 +401,7 @@ namespace insoulforge {
         co_return;
     }
 
-    void MemoryMaintenanceService::setSummaryCompletedCallback(std::function<void(uint64_t)> callback) {
+    void MemoryMaintenanceService::setSummaryCompletedCallback(std::function<void(u64)> callback) {
         std::lock_guard lock(scheduler().mutex);
         scheduler().summaryCompletedCallback = std::move(callback);
     }

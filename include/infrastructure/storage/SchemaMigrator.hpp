@@ -9,13 +9,15 @@
 ///          - 每个迁移步骤在独立事务中执行，失败则回滚并抛出异常
 
 #pragma once
+
+#include <infrastructure/NumericTypes.hpp>
 #include <sqlite3.h>
 
 namespace insoulforge {
     /// @brief Schema 版本迁移器
     namespace SchemaMigrator {
         /// @brief 当前代码对应的最新 Schema 版本号
-        inline constexpr int kLatestVersion = 11;
+        inline constexpr i32 kLatestVersion = 11;
 
         /// @brief 执行迁移：检查当前版本并按序应用所有待执行步骤
         /// @throws DbError 任一迁移步骤失败时抛出（已回滚）

@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <conversation/workflow/MessageList.hpp>
 #include <infrastructure/JsonUtil.hpp>
 #include <memory>
@@ -18,7 +20,7 @@ namespace insoulforge {
     public:
         /// @brief 创建会话工作流状态
         /// @param sessionId 会话 ID
-        explicit SessionWorkflowState(uint64_t sessionId);
+        explicit SessionWorkflowState(u64 sessionId);
 
         /// @brief 取得当前会话的完整消息列表
         /// @return 仅在构造时创建的消息列表实例

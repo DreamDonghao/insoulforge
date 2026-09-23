@@ -6,7 +6,9 @@
 ///          支持会话配置的增删改查和消息计数统计。
 
 #pragma once
+
 #include <conversation/session/SessionStore.hpp>
+#include <infrastructure/NumericTypes.hpp>
 
 /// @brief 会话配置管理
 /// @details 使用 SQLite 存储会话配置信息（表名保持 group_config）
@@ -14,19 +16,19 @@ namespace insoulforge::SessionConfigManager {
     /// @brief 获取群组配置
     /// @param sessionId 会话 ID（私聊会话带标志位）
     /// @return 群组配置结构体
-    [[nodiscard]] SessionConfig getConfig(uint64_t sessionId);
+    [[nodiscard]] SessionConfig getConfig(u64 sessionId);
 
     /// @brief 检查群组是否存在配置
     /// @param sessionId 会话 ID（私聊会话带标志位）
     /// @return 是否存在
-    [[nodiscard]] bool contains(uint64_t sessionId);
+    [[nodiscard]] bool contains(u64 sessionId);
 
     /// @brief 添加群组配置
     /// @param sessionId 会话 ID（私聊会话带标志位）
     /// @param config 群组配置
-    void addConfig(uint64_t sessionId, const SessionConfig &config = SessionConfig());
+    void addConfig(u64 sessionId, const SessionConfig &config = SessionConfig());
 
     /// @brief 增加消息计数
     /// @param sessionId 会话 ID（私聊会话带标志位）
-    void incrementMessageCount(uint64_t sessionId);
+    void incrementMessageCount(u64 sessionId);
 } // namespace insoulforge::SessionConfigManager

@@ -169,11 +169,18 @@ onMounted(() => void Promise.all([loadAdmins(), loadBlacklist()]))
             </template>
             <template v-else>
               <table>
-                <thead><tr><th>QQ号</th><th class="action-column">操作</th></tr></thead>
+                <thead>
+                <tr>
+                  <th>QQ号</th>
+                  <th class="action-column">操作</th>
+                </tr>
+                </thead>
                 <tbody>
                 <tr v-for="admin in admins" :key="admin.qq">
                   <td><code>{{ admin.qq }}</code></td>
-                  <td><button class="btn btn-danger btn-sm" @click="removeAdmin(admin.qq)">移除</button></td>
+                  <td>
+                    <button class="btn btn-danger btn-sm" @click="removeAdmin(admin.qq)">移除</button>
+                  </td>
                 </tr>
                 </tbody>
               </table>
@@ -190,7 +197,8 @@ onMounted(() => void Promise.all([loadAdmins(), loadBlacklist()]))
           <div class="access-form-row">
             <div class="form-group access-form-group">
               <label class="form-label access-form-label">QQ号</label>
-              <input v-model.number="newBlacklistQQ" class="form-input access-input" placeholder="输入QQ号" type="number">
+              <input v-model.number="newBlacklistQQ" class="form-input access-input" placeholder="输入QQ号"
+                     type="number">
             </div>
             <button :disabled="blacklistSaving" class="btn btn-danger access-submit" @click="addBlacklistEntry">
               {{ blacklistSaving ? '添加中...' : '加入黑名单' }}
@@ -211,11 +219,18 @@ onMounted(() => void Promise.all([loadAdmins(), loadBlacklist()]))
             </template>
             <template v-else>
               <table>
-                <thead><tr><th>QQ号</th><th class="action-column">操作</th></tr></thead>
+                <thead>
+                <tr>
+                  <th>QQ号</th>
+                  <th class="action-column">操作</th>
+                </tr>
+                </thead>
                 <tbody>
                 <tr v-for="entry in blacklist" :key="entry.qq">
                   <td><code>{{ entry.qq }}</code></td>
-                  <td><button class="btn btn-danger btn-sm" @click="removeBlacklistEntry(entry.qq)">移除</button></td>
+                  <td>
+                    <button class="btn btn-danger btn-sm" @click="removeBlacklistEntry(entry.qq)">移除</button>
+                  </td>
                 </tr>
                 </tbody>
               </table>

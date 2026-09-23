@@ -1,6 +1,7 @@
 # 参与贡献
 
-感谢你为 InSoulForge 提交改进。本文说明提交 Issue、修改代码和创建 Pull Request 的约定；本地环境、构建命令和项目架构见[开发文档](docs/DEVELOPMENT.md)。
+感谢你为 InSoulForge 提交改进。本文说明提交 Issue、修改代码和创建 Pull Request
+的约定；本地环境、构建命令和项目架构见[开发文档](docs/DEVELOPMENT.md)。
 
 ## 开始前
 
@@ -80,4 +81,5 @@ docs(contributing): 补充外部贡献流程
 
 ## 行为与许可证
 
-讨论应围绕代码和问题本身，尊重其他贡献者。提交 Pull Request 即表示你有权提交该内容，并同意贡献以本项目的 [AGPL-3.0-only](LICENSE) 许可证发布。
+讨论应围绕代码和问题本身，尊重其他贡献者。提交 Pull Request
+即表示你有权提交该内容，并同意贡献以本项目的 [AGPL-3.0-only](LICENSE) 许可证发布。

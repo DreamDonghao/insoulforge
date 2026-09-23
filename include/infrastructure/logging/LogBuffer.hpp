@@ -3,38 +3,39 @@
 
 #pragma once
 
-#include <cstdint>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include <infrastructure/NumericTypes.hpp>
+
 namespace insoulforge {
     struct LogEntry {
-        uint64_t id = 0;
+        u64 id = 0;
         std::string timestamp;
         std::string level;
-        uint64_t sessionId = 0;
+        u64 sessionId = 0;
         std::string source;
         std::string content;
     };
 
     struct LogQuery {
-        std::optional<uint64_t> sessionId;
+        std::optional<u64> sessionId;
         std::optional<std::string> level;
         std::string keyword;
-        uint64_t afterId = 0;
-        std::optional<uint64_t> beforeId;
+        u64 afterId = 0;
+        std::optional<u64> beforeId;
         size_t limit = 200;
     };
 
     struct LogQueryResult {
         std::vector<LogEntry> entries;
         bool hasMore = false;
-        uint64_t nextAfterId = 0;
-        uint64_t nextBeforeId = 0;
-        uint64_t oldestId = 0;
-        uint64_t newestId = 0;
+        u64 nextAfterId = 0;
+        u64 nextBeforeId = 0;
+        u64 oldestId = 0;
+        u64 newestId = 0;
     };
 
     class LogBuffer {
@@ -60,6 +61,6 @@ namespace insoulforge {
 
         mutable std::mutex m_mutex;
         std::vector<LogEntry> m_entries;
-        uint64_t m_nextId = 1;
+        u64 m_nextId = 1;
     };
 } // namespace insoulforge

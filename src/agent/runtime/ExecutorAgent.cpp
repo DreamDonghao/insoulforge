@@ -1,6 +1,8 @@
 /// @file ExecutorAgent.cpp
 /// @brief Executor Agent - 实现
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <agent/runtime/ExecutorAgent.hpp>
 #include <conversation/maintenance/affinity/AffinityStore.hpp>
 #include <conversation/message/MessageRecord.hpp>
@@ -15,7 +17,7 @@
 namespace insoulforge::ExecutorAgent {
     namespace {
         /// @brief 工具调用循环最大轮数（防止模型无限循环调用工具）
-        constexpr int kMaxToolRounds = 8;
+        constexpr i32 kMaxToolRounds = 8;
 
         /// @brief 获取系统提示词（私聊与群聊使用各自的人设提示词，差异行按会话类型拼接）
         std::string getSystemPrompt(const RouterDecision &decision) {
@@ -172,10 +174,10 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
 
         /// @brief 注入发送者当前好感度（读时注入，保证 LLM 看到的永远是最新值）
         /// @details qq 非数字（机器人记录的 "self"）跳过；映射中不存在的用户按 0（中立）注入
-        [[nodiscard]] json injectAffinity(json content, const std::unordered_map<uint64_t, int> &affinityMap) {
+        [[nodiscard]] json injectAffinity(json content, const std::unordered_map<u64, i32> &affinityMap) {
             if (!content.is_object() || !content.contains("sender"))
                 return content;
-            if (const uint64_t qq = parseUInt64(getStr(content["sender"], "qq")); qq > 0) {
+            if (const u64 qq = parseUInt64(getStr(content["sender"], "qq")); qq > 0) {
                 const auto it = affinityMap.find(qq);
                 content["sender"]["affinity"] = it != affinityMap.end() ? it->second : 0;
             }
@@ -245,7 +247,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
 
             json context;
             // 会话详情放最前：群名/群号供模型直接取用，无需再向工具查询
-            const uint64_t sessionId = chatRecords.getSessionId();
+            const u64 sessionId = chatRecords.getSessionId();
             json sessionInfo;
             if (SessionId::isPrivate(sessionId)) {
                 sessionInfo["type"] = "private";
@@ -378,7 +380,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         /// 作为 tool 消息回传，CQ 码类工具的结果累积备用
         /// @return {回复工具决策（同轮多个以最后一个为准，未命中为 nullopt）, 回传工具结果后的消息列表, 累积的 CQ 码}
         drogon::Task<std::tuple<std::optional<ReplyDecision>, json, std::string>> processToolCalls(json message,
-          json messages, std::string accumulatedCQCodes, const uint64_t sessionId, const json &messageSnapshot) {
+          json messages, std::string accumulatedCQCodes, const u64 sessionId, const json &messageSnapshot) {
             ReplyDecision decision;
             bool hasDecision = false;
 
@@ -443,7 +445,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
 
         /// @brief Agent 模式执行（带 tools）：循环「请求模型 → 处理工具调用」，直到产出回复决策或达最大轮数
         drogon::Task<std::optional<ReplyDecision>> executeWithAgent(
-          json messages, const uint64_t sessionId, const json &messageSnapshot) {
+          json messages, const u64 sessionId, const json &messageSnapshot) {
             const auto &config = Config::instance();
             const json tools = ToolRegistry::instance().getTools({.isPrivateSession = SessionId::isPrivate(sessionId)});
             if (tools.empty()) {
@@ -453,7 +455,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
 
             std::string accumulatedCQCodes; // 跨轮累积 CQ 码，产出 reply 时自动拼入正文
 
-            for (int round = 0; round < kMaxToolRounds; ++round) {
+            for (i32 round = 0; round < kMaxToolRounds; ++round) {
                 const auto respJson = co_await LlmClient::requestChat(
                   "LLM", "executor", config.executor, config.executorParams, messages, tools, sessionId);
                 if (!respJson) {
@@ -522,7 +524,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
 
     drogon::Task<std::optional<ReplyDecision>> execute(const ChatRecordManager &chatRecords,
       const MemoryManager &memory, RouterDecision decision, const json messageSnapshot) {
-        const uint64_t sessionId = chatRecords.getSessionId();
+        const u64 sessionId = chatRecords.getSessionId();
         Logger::info(sessionId, "Executor",
           fmt::format("开始执行 | priority={} | maxLength={}", decision.isPriority, decision.maxLength));
 

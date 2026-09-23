@@ -1,6 +1,8 @@
 /// @file AdminAccessToken.cpp
 /// @brief 管理后台启动令牌与会话认证实现
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <admin/auth/AdminAccessToken.hpp>
 
 #include <fmt/format.h>
@@ -76,7 +78,7 @@ namespace insoulforge {
 
     void AdminAccessToken::initialize() {
         std::array<unsigned char, 32> bytes{};
-        if (RAND_bytes(bytes.data(), static_cast<int>(bytes.size())) != 1) {
+        if (RAND_bytes(bytes.data(), static_cast<i32>(bytes.size())) != 1) {
             throw std::runtime_error("无法生成管理后台访问令牌");
         }
 
@@ -85,7 +87,7 @@ namespace insoulforge {
         value = encodeHex(bytes);
     }
 
-    std::vector<std::string> AdminAccessToken::loginUrls(const uint16_t port) {
+    std::vector<std::string> AdminAccessToken::loginUrls(const u16 port) {
         std::vector<std::string> urls;
         for (const auto &address: localIpv4Addresses()) {
             urls.push_back(fmt::format("http://{}:{}/index.html#token={}", address, port, token()));
