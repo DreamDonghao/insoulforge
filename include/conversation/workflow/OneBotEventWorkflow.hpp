@@ -62,6 +62,7 @@ namespace insoulforge {
         drogon::Task<> processPreparationQueue(uint64_t sessionId);
 
         /// @brief 处理一个会话的串行回复工作流，无待处理回复时立即退出
-        drogon::Task<> processReplyWorkflow(uint64_t sessionId);
+        /// @param triggerMessageId 首轮回复的触发入站消息 ID
+        drogon::Task<> processReplyWorkflow(uint64_t sessionId, std::string triggerMessageId);
     };
 } // namespace insoulforge

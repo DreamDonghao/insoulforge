@@ -30,27 +30,25 @@ namespace insoulforge {
         return message;
     }
 
-    SessionWorkflowState::ReplyRequestResult SessionWorkflowState::requestReplyProcessing(
-      const bool mayWaitForCurrentReply) {
+    std::optional<std::string> SessionWorkflowState::requestReplyProcessing(
+      std::string triggerMessageId, const bool mayWaitForCurrentReply) {
         std::lock_guard lock(m_mutex);
         if (m_isReplyProcessing) {
-            if (!mayWaitForCurrentReply) {
-                return ReplyRequestResult::Skipped;
+            if (mayWaitForCurrentReply) {
+                m_pendingReplyMessageId = std::move(triggerMessageId);
             }
-            m_hasPendingReply = true;
-            return ReplyRequestResult::Pending;
+            return std::nullopt;
         }
         m_isReplyProcessing = true;
-        return ReplyRequestResult::StartProcessor;
+        return triggerMessageId;
     }
 
-    bool SessionWorkflowState::completeReplyProcessing() {
+    std::optional<std::string> SessionWorkflowState::completeReplyProcessing() {
         std::lock_guard lock(m_mutex);
-        if (m_hasPendingReply) {
-            m_hasPendingReply = false;
-            return true;
+        if (m_pendingReplyMessageId) {
+            return std::exchange(m_pendingReplyMessageId, std::nullopt);
         }
         m_isReplyProcessing = false;
-        return false;
+        return std::nullopt;
     }
 } // namespace insoulforge

@@ -169,17 +169,25 @@ namespace {
         const uint64_t originalSelfId = config.selfQQNumber;
         config.selfQQNumber = 42;
 
-        const insoulforge::json mentionSnapshot = insoulforge::json::array({{{"sender", {{"qq", "11"}}},
-          {"segments", insoulforge::json::array(
-                         {{{"type", "at"}, {"target", {{"qq", "42"}}}}, {{"type", "text"}, {"text", "在吗"}}})}}});
-        const auto mention = drogon::sync_wait(insoulforge::MessageRouter::route(100, mentionSnapshot));
+        const insoulforge::json mentionSnapshot =
+          insoulforge::json::array({{{"message_id", "mention"}, {"sender", {{"qq", "11"}}},
+            {"segments", insoulforge::json::array(
+                           {{{"type", "at"}, {"target", {{"qq", "42"}}}}, {{"type", "text"}, {"text", "在吗"}}})}}});
+        const auto mention = drogon::sync_wait(insoulforge::MessageRouter::route(100, "mention", mentionSnapshot));
         check(mention.shouldReply, "bot mention replies without LLM", kTestName);
         check(mention.isPriority, "bot mention is priority", kTestName);
 
-        const insoulforge::json shortSnapshot = insoulforge::json::array(
-          {{{"sender", {{"qq", "11"}}}, {"segments", insoulforge::json::array({{{"type", "text"}, {"text", "嗯"}}})}}});
-        const auto shortMessage = drogon::sync_wait(insoulforge::MessageRouter::route(100, shortSnapshot));
+        const insoulforge::json shortSnapshot = insoulforge::json::array({{{"message_id", "short"},
+          {"sender", {{"qq", "11"}}}, {"segments", insoulforge::json::array({{{"type", "text"}, {"text", "嗯"}}})}}});
+        const auto shortMessage = drogon::sync_wait(insoulforge::MessageRouter::route(100, "short", shortSnapshot));
         check(!shortMessage.shouldReply, "short group message skips without LLM", kTestName);
+
+        auto assistantAfterMention = mentionSnapshot;
+        assistantAfterMention.push_back(
+          {{"message_id", "assistant"}, {"sender", {{"qq", "self"}}}, {"segments", insoulforge::json::array()}});
+        const auto queuedMention =
+          drogon::sync_wait(insoulforge::MessageRouter::route(100, "mention", assistantAfterMention));
+        check(queuedMention.shouldReply, "queued bot mention replies despite trailing assistant message", kTestName);
 
         config.selfQQNumber = originalSelfId;
     }
