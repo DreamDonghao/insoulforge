@@ -1,6 +1,8 @@
 /// @file ImageDescriptionService.cpp
 /// @brief 图片与动图的视觉描述服务实现
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <media/ImageDescriptionService.hpp>
 
 #include <gif_lib.h>
@@ -15,11 +17,11 @@
 namespace insoulforge::ImageDescriptionService {
     namespace {
         constexpr size_t kMaxDownloadBytes = 8U * 1024U * 1024U;
-        constexpr int kMaxGifDecodedFrames = 240;
-        constexpr int kMaxGifSubmittedFrames = 16;
-        constexpr int kMaxGifDimension = 1024;
-        constexpr int kGifFrameMaxEdge = 512;
-        constexpr int kPromptVersion = 2;
+        constexpr i32 kMaxGifDecodedFrames = 240;
+        constexpr i32 kMaxGifSubmittedFrames = 16;
+        constexpr i32 kMaxGifDimension = 1024;
+        constexpr i32 kGifFrameMaxEdge = 512;
+        constexpr i32 kPromptVersion = 2;
 
         struct DownloadedMedia {
             std::string bytes;
@@ -28,7 +30,7 @@ namespace insoulforge::ImageDescriptionService {
         };
 
         struct GifInput {
-            const uint8_t *data{nullptr};
+            const u8 *data{nullptr};
             size_t size{0};
             size_t offset{0};
         };
@@ -72,9 +74,9 @@ namespace insoulforge::ImageDescriptionService {
             std::string output;
             output.reserve((input.size() + 2) / 3 * 4);
             for (size_t i = 0; i < input.size(); i += 3) {
-                const uint32_t value =
-                  static_cast<uint32_t>(static_cast<unsigned char>(input[i])) << 16U |
-                  (i + 1 < input.size() ? static_cast<uint32_t>(static_cast<unsigned char>(input[i + 1])) << 8U : 0U) |
+                const u32 value =
+                  static_cast<u32>(static_cast<unsigned char>(input[i])) << 16U |
+                  (i + 1 < input.size() ? static_cast<u32>(static_cast<unsigned char>(input[i + 1])) << 8U : 0U) |
                   (i + 2 < input.size() ? static_cast<unsigned char>(input[i + 2]) : 0U);
                 output += alphabet[(value >> 18U) & 0x3FU];
                 output += alphabet[(value >> 12U) & 0x3FU];
@@ -98,7 +100,7 @@ namespace insoulforge::ImageDescriptionService {
         }
 
         /// @brief 下载 URL 的原始媒体字节，不写入 HTTP 跟踪日志以避免二进制内容进入内存日志。
-        drogon::Task<std::optional<DownloadedMedia>> download(std::string sourceUrl, const uint64_t sessionId) {
+        drogon::Task<std::optional<DownloadedMedia>> download(std::string sourceUrl, const u64 sessionId) {
             static const std::regex urlPattern(R"(^(https?://[^/]+)(/.*)?$)", std::regex::icase);
             std::smatch match;
             if (!std::regex_match(sourceUrl, match, urlPattern)) {
@@ -114,7 +116,7 @@ namespace insoulforge::ImageDescriptionService {
                 if (!response || response->getStatusCode() < drogon::k200OK ||
                     response->getStatusCode() >= drogon::k300MultipleChoices) {
                     Logger::warn(sessionId, "Media",
-                      fmt::format("下载失败: status={}", response ? static_cast<int>(response->getStatusCode()) : 0));
+                      fmt::format("下载失败: status={}", response ? static_cast<i32>(response->getStatusCode()) : 0));
                     co_return std::nullopt;
                 }
                 std::string bytes(response->body());
@@ -142,18 +144,18 @@ namespace insoulforge::ImageDescriptionService {
                 std::iota(all.begin(), all.end(), 0);
                 return all;
             }
-            std::vector<int> delays(count, 1);
-            int64_t totalDelay = 0;
+            std::vector<i32> delays(count, 1);
+            i64 totalDelay = 0;
             for (size_t i = 0; i < count; ++i) {
                 GraphicsControlBlock control{};
-                if (DGifSavedExtensionToGCB(&gif, static_cast<int>(i), &control) == GIF_OK && control.DelayTime > 0)
+                if (DGifSavedExtensionToGCB(&gif, static_cast<i32>(i), &control) == GIF_OK && control.DelayTime > 0)
                     delays[i] = control.DelayTime;
                 totalDelay += delays[i];
             }
             std::set<size_t> selected{0, count - 1};
-            for (int sample = 1; sample < kMaxGifSubmittedFrames - 1; ++sample) {
-                const int64_t target = totalDelay * sample / (kMaxGifSubmittedFrames - 1);
-                int64_t elapsed = 0;
+            for (i32 sample = 1; sample < kMaxGifSubmittedFrames - 1; ++sample) {
+                const i64 target = totalDelay * sample / (kMaxGifSubmittedFrames - 1);
+                i64 elapsed = 0;
                 size_t index = count - 1;
                 for (size_t frame = 0; frame < count; ++frame) {
                     elapsed += delays[frame];
@@ -175,7 +177,7 @@ namespace insoulforge::ImageDescriptionService {
         }
 
         [[nodiscard]] std::optional<std::string> encodePng(
-          const std::vector<uint8_t> &rgba, const int width, const int height) {
+          const std::vector<u8> &rgba, const i32 width, const i32 height) {
             png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
             if (!png)
                 return std::nullopt;
@@ -193,7 +195,7 @@ namespace insoulforge::ImageDescriptionService {
             png_set_IHDR(png, info, width, height, 8, PNG_COLOR_TYPE_RGBA, PNG_INTERLACE_NONE,
               PNG_COMPRESSION_TYPE_BASE, PNG_FILTER_TYPE_BASE);
             std::vector<png_bytep> rows(static_cast<size_t>(height));
-            for (int row = 0; row < height; ++row)
+            for (i32 row = 0; row < height; ++row)
                 rows[static_cast<size_t>(row)] =
                   const_cast<png_bytep>(rgba.data() + static_cast<size_t>(row * width * 4));
             png_set_rows(png, info, rows.data());
@@ -202,22 +204,22 @@ namespace insoulforge::ImageDescriptionService {
             return output;
         }
 
-        [[nodiscard]] std::vector<uint8_t> resizeRgba(
-          const std::vector<uint8_t> &input, const int width, const int height, int &outputWidth, int &outputHeight) {
-            const int maxEdge = std::max(width, height);
+        [[nodiscard]] std::vector<u8> resizeRgba(
+          const std::vector<u8> &input, const i32 width, const i32 height, i32 &outputWidth, i32 &outputHeight) {
+            const i32 maxEdge = std::max(width, height);
             if (maxEdge <= kGifFrameMaxEdge) {
                 outputWidth = width;
                 outputHeight = height;
                 return input;
             }
-            const double scale = static_cast<double>(kGifFrameMaxEdge) / maxEdge;
-            outputWidth = std::max(1, static_cast<int>(width * scale));
-            outputHeight = std::max(1, static_cast<int>(height * scale));
-            std::vector<uint8_t> output(static_cast<size_t>(outputWidth * outputHeight * 4));
-            for (int y = 0; y < outputHeight; ++y) {
-                for (int x = 0; x < outputWidth; ++x) {
-                    const int sourceX = std::min(width - 1, static_cast<int>(x / scale));
-                    const int sourceY = std::min(height - 1, static_cast<int>(y / scale));
+            const f64 scale = static_cast<f64>(kGifFrameMaxEdge) / maxEdge;
+            outputWidth = std::max(1, static_cast<i32>(width * scale));
+            outputHeight = std::max(1, static_cast<i32>(height * scale));
+            std::vector<u8> output(static_cast<size_t>(outputWidth * outputHeight * 4));
+            for (i32 y = 0; y < outputHeight; ++y) {
+                for (i32 x = 0; x < outputWidth; ++x) {
+                    const i32 sourceX = std::min(width - 1, static_cast<i32>(x / scale));
+                    const i32 sourceY = std::min(height - 1, static_cast<i32>(y / scale));
                     std::copy_n(input.data() + static_cast<size_t>((sourceY * width + sourceX) * 4), 4,
                       output.data() + static_cast<size_t>((y * outputWidth + x) * 4));
                 }
@@ -225,9 +227,9 @@ namespace insoulforge::ImageDescriptionService {
             return output;
         }
 
-        [[nodiscard]] std::vector<std::string> extractGifFrames(const std::string &bytes, const uint64_t sessionId) {
-            GifInput input{.data = reinterpret_cast<const uint8_t *>(bytes.data()), .size = bytes.size()};
-            int error = 0;
+        [[nodiscard]] std::vector<std::string> extractGifFrames(const std::string &bytes, const u64 sessionId) {
+            GifInput input{.data = reinterpret_cast<const u8 *>(bytes.data()), .size = bytes.size()};
+            i32 error = 0;
             std::unique_ptr<GifFileType, GifFileDeleter> gif(DGifOpen(&input, readGif, &error));
             if (!gif || gif->SWidth <= 0 || gif->SHeight <= 0 || gif->SWidth > kMaxGifDimension ||
                 gif->SHeight > kMaxGifDimension || DGifSlurp(gif.get()) != GIF_OK || gif->ImageCount <= 0 ||
@@ -235,13 +237,13 @@ namespace insoulforge::ImageDescriptionService {
                 Logger::warn(sessionId, "Media", fmt::format("GIF 解码失败或超过资源限制"));
                 return {};
             }
-            const int width = gif->SWidth;
-            const int height = gif->SHeight;
+            const i32 width = gif->SWidth;
+            const i32 height = gif->SHeight;
             const auto selected = selectGifFrames(*gif);
             const std::set<size_t> selectedSet(selected.begin(), selected.end());
-            std::vector<uint8_t> canvas(static_cast<size_t>(width * height * 4), 0);
+            std::vector<u8> canvas(static_cast<size_t>(width * height * 4), 0);
             std::vector<std::string> frames;
-            for (int frameIndex = 0; frameIndex < gif->ImageCount; ++frameIndex) {
+            for (i32 frameIndex = 0; frameIndex < gif->ImageCount; ++frameIndex) {
                 const SavedImage &frame = gif->SavedImages[frameIndex];
                 const GifImageDesc &desc = frame.ImageDesc;
                 const ColorMapObject *colors = desc.ColorMap ? desc.ColorMap : gif->SColorMap;
@@ -249,15 +251,14 @@ namespace insoulforge::ImageDescriptionService {
                     return {};
                 GraphicsControlBlock control{.TransparentColor = NO_TRANSPARENT_COLOR};
                 DGifSavedExtensionToGCB(gif.get(), frameIndex, &control);
-                const std::vector<uint8_t> before =
-                  control.DisposalMode == DISPOSE_PREVIOUS ? canvas : std::vector<uint8_t>{};
-                for (int y = 0; y < desc.Height; ++y) {
-                    for (int x = 0; x < desc.Width; ++x) {
-                        const int pixelIndex = frame.RasterBits[y * desc.Width + x];
+                const std::vector<u8> before = control.DisposalMode == DISPOSE_PREVIOUS ? canvas : std::vector<u8>{};
+                for (i32 y = 0; y < desc.Height; ++y) {
+                    for (i32 x = 0; x < desc.Width; ++x) {
+                        const i32 pixelIndex = frame.RasterBits[y * desc.Width + x];
                         if (pixelIndex == control.TransparentColor || pixelIndex >= colors->ColorCount)
                             continue;
-                        const int targetX = desc.Left + x;
-                        const int targetY = desc.Top + y;
+                        const i32 targetX = desc.Left + x;
+                        const i32 targetY = desc.Top + y;
                         if (targetX < 0 || targetX >= width || targetY < 0 || targetY >= height)
                             continue;
                         const GifColorType color = colors->Colors[pixelIndex];
@@ -271,17 +272,17 @@ namespace insoulforge::ImageDescriptionService {
                     }
                 }
                 if (selectedSet.contains(static_cast<size_t>(frameIndex))) {
-                    int outputWidth = 0;
-                    int outputHeight = 0;
+                    i32 outputWidth = 0;
+                    i32 outputHeight = 0;
                     const auto resized = resizeRgba(canvas, width, height, outputWidth, outputHeight);
                     if (const auto png = encodePng(resized, outputWidth, outputHeight))
                         frames.push_back("data:image/png;base64," + base64Encode(*png));
                 }
                 if (control.DisposalMode == DISPOSE_BACKGROUND) {
-                    for (int y = 0; y < desc.Height; ++y) {
-                        for (int x = 0; x < desc.Width; ++x) {
-                            const int targetX = desc.Left + x;
-                            const int targetY = desc.Top + y;
+                    for (i32 y = 0; y < desc.Height; ++y) {
+                        for (i32 x = 0; x < desc.Width; ++x) {
+                            const i32 targetX = desc.Left + x;
+                            const i32 targetY = desc.Top + y;
                             if (targetX >= 0 && targetX < width && targetY >= 0 && targetY < height)
                                 std::fill_n(canvas.data() + static_cast<size_t>((targetY * width + targetX) * 4), 4, 0);
                         }
@@ -294,7 +295,7 @@ namespace insoulforge::ImageDescriptionService {
         }
 
         drogon::Task<std::optional<std::string>> requestVision(
-          std::vector<std::string> images, const bool isGif, const uint64_t sessionId) {
+          std::vector<std::string> images, const bool isGif, const u64 sessionId) {
             const auto &config = Config::instance();
             if (!LlmClient::isConfigured(config.image)) {
                 Logger::debug(sessionId, "Media", fmt::format("图片识别模型未配置，跳过识别"));
@@ -323,7 +324,7 @@ namespace insoulforge::ImageDescriptionService {
         }
     } // namespace
 
-    drogon::Task<std::optional<ImageDescriptionResult>> describe(std::string sourceUrl, const uint64_t sessionId) {
+    drogon::Task<std::optional<ImageDescriptionResult>> describe(std::string sourceUrl, const u64 sessionId) {
         const auto &config = Config::instance();
         if (!LlmClient::isConfigured(config.image)) {
             Logger::debug(sessionId, "Media", fmt::format("图片识别模型未配置，跳过识别"));
@@ -359,10 +360,10 @@ namespace insoulforge::ImageDescriptionService {
             co_return std::nullopt;
         }
         ImageDescriptionStore::upsert(
-          hash, config.image.model, kPromptVersion, mediaType, true, *description, static_cast<int>(images.size()));
+          hash, config.image.model, kPromptVersion, mediaType, true, *description, static_cast<i32>(images.size()));
         co_return ImageDescriptionResult{.contentHash = hash,
           .mediaType = mediaType,
           .description = *description,
-          .sampledFrameCount = static_cast<int>(images.size())};
+          .sampledFrameCount = static_cast<i32>(images.size())};
     }
 } // namespace insoulforge::ImageDescriptionService

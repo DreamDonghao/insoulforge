@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <agent/runtime/AgentTypes.hpp>
 #include <drogon/utils/coroutine.h>
 
@@ -16,5 +18,5 @@ namespace insoulforge::MessageRouter {
     /// @return Router 决策；找不到触发消息或快照为空时返回跳过决策
     /// @details 触发消息决定硬规则，完整快照仅提供上下文，允许其末条为机器人已经发送的消息。
     [[nodiscard]] drogon::Task<RouterDecision> route(
-      uint64_t sessionId, std::string_view triggerMessageId, const json &snapshot);
+      u64 sessionId, std::string_view triggerMessageId, const json &snapshot);
 } // namespace insoulforge::MessageRouter

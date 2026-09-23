@@ -3,6 +3,8 @@
 /// @author donghao
 /// @date 2026-08-30
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <conversation/session/SessionStore.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
@@ -10,7 +12,7 @@
 
 namespace insoulforge {
     namespace SessionStore {
-        SessionConfig getSessionConfig(const uint64_t sessionId) {
+        SessionConfig getSessionConfig(const u64 sessionId) {
             const auto &db = Database::instance();
             std::shared_lock lock(db.mutex());
             SessionConfig config;
@@ -22,7 +24,7 @@ namespace insoulforge {
             return config;
         }
 
-        void saveSessionConfig(const uint64_t sessionId, const SessionConfig &config) {
+        void saveSessionConfig(const u64 sessionId, const SessionConfig &config) {
             const auto &db = Database::instance();
             std::unique_lock lock(db.mutex());
             const Statement stmt(
@@ -32,7 +34,7 @@ namespace insoulforge {
             stmt.exec();
         }
 
-        void incrementMessageCount(const uint64_t sessionId) {
+        void incrementMessageCount(const u64 sessionId) {
             const auto &db = Database::instance();
             std::unique_lock lock(db.mutex());
 
@@ -51,7 +53,7 @@ namespace insoulforge {
             }
         }
 
-        bool hasSessionConfig(const uint64_t sessionId) {
+        bool hasSessionConfig(const u64 sessionId) {
             const auto &db = Database::instance();
             std::shared_lock lock(db.mutex());
             const Statement stmt(db.handle(), "SELECT 1 FROM group_config WHERE group_id = ?");
@@ -59,7 +61,7 @@ namespace insoulforge {
             return stmt.step();
         }
 
-        bool isSessionEnabled(const uint64_t sessionId) {
+        bool isSessionEnabled(const u64 sessionId) {
             const auto &db = Database::instance();
             std::shared_lock lock(db.mutex());
             const Statement stmt(db.handle(), "SELECT enabled FROM enabled_groups WHERE group_id = ?");
@@ -67,7 +69,7 @@ namespace insoulforge {
             return stmt.step() && stmt.getInt(0) == 1;
         }
 
-        void enableSession(const uint64_t sessionId) {
+        void enableSession(const u64 sessionId) {
             const auto &db = Database::instance();
             std::unique_lock lock(db.mutex());
             const Statement stmt(
@@ -77,7 +79,7 @@ namespace insoulforge {
             Logger::info(sessionId, "Session", "已启用");
         }
 
-        void disableSession(const uint64_t sessionId) {
+        void disableSession(const u64 sessionId) {
             const auto &db = Database::instance();
             std::unique_lock lock(db.mutex());
             const Statement stmt(db.handle(), "DELETE FROM enabled_groups WHERE group_id = ?");
@@ -86,10 +88,10 @@ namespace insoulforge {
             Logger::info(sessionId, "Session", "已禁用");
         }
 
-        std::vector<uint64_t> getEnabledGroups() {
+        std::vector<u64> getEnabledGroups() {
             const auto &db = Database::instance();
             std::shared_lock lock(db.mutex());
-            std::vector<uint64_t> groups;
+            std::vector<u64> groups;
             const Statement stmt(db.handle(), "SELECT group_id FROM enabled_groups WHERE enabled = 1");
             while (stmt.step()) {
                 groups.push_back(stmt.getInt64(0));
@@ -97,10 +99,10 @@ namespace insoulforge {
             return groups;
         }
 
-        std::vector<std::tuple<uint64_t, std::string, int>> getSessionsWithChatRecords() {
+        std::vector<std::tuple<u64, std::string, i32>> getSessionsWithChatRecords() {
             const auto &db = Database::instance();
             std::shared_lock lock(db.mutex());
-            std::vector<std::tuple<uint64_t, std::string, int>> groups;
+            std::vector<std::tuple<u64, std::string, i32>> groups;
             const Statement stmt(db.handle(), "SELECT cr.group_id, COALESCE(eg.group_name, ''), COUNT(*) as cnt "
                                               "FROM chat_records cr "
                                               "LEFT JOIN enabled_groups eg ON cr.group_id = eg.group_id "
@@ -112,10 +114,10 @@ namespace insoulforge {
             return groups;
         }
 
-        std::vector<std::tuple<uint64_t, std::string, bool, int>> getAllSessionsWithStatus() {
+        std::vector<std::tuple<u64, std::string, bool, i32>> getAllSessionsWithStatus() {
             const auto &db = Database::instance();
             std::shared_lock lock(db.mutex());
-            std::vector<std::tuple<uint64_t, std::string, bool, int>> groups;
+            std::vector<std::tuple<u64, std::string, bool, i32>> groups;
             const Statement stmt(db.handle(), "SELECT eg.group_id, eg.group_name, eg.enabled, "
                                               "(SELECT COUNT(*) FROM chat_records WHERE group_id = eg.group_id) as cnt "
                                               "FROM enabled_groups eg "
@@ -126,7 +128,7 @@ namespace insoulforge {
             return groups;
         }
 
-        void toggleSessionStatus(const uint64_t sessionId) {
+        void toggleSessionStatus(const u64 sessionId) {
             const auto &db = Database::instance();
             std::unique_lock lock(db.mutex());
             const Statement stmt(db.handle(), "UPDATE enabled_groups SET enabled = NOT enabled WHERE group_id = ?");
@@ -134,7 +136,7 @@ namespace insoulforge {
             stmt.exec();
         }
 
-        void updateSessionName(const uint64_t sessionId, const std::string &name) {
+        void updateSessionName(const u64 sessionId, const std::string &name) {
             const auto &db = Database::instance();
             std::unique_lock lock(db.mutex());
             const Statement stmt(db.handle(), "UPDATE enabled_groups SET group_name = ? WHERE group_id = ?");
@@ -144,7 +146,7 @@ namespace insoulforge {
             Logger::info(sessionId, "Session", fmt::format("名称已更新: {}", name));
         }
 
-        std::string getSessionName(const uint64_t sessionId) {
+        std::string getSessionName(const u64 sessionId) {
             const auto &db = Database::instance();
             std::shared_lock lock(db.mutex());
             const Statement stmt(db.handle(), "SELECT group_name FROM enabled_groups WHERE group_id = ?");

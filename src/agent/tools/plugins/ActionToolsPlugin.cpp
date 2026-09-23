@@ -1,6 +1,8 @@
 /// @file ActionToolsPlugin.cpp
 /// @brief 动作工具插件实现（ACTION，执行操作、产生副作用）
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <agent/runtime/ExecutorAgent.hpp>
 #include <agent/tools/ToolArgument.hpp>
 #include <agent/tools/ToolRuntime.hpp>
@@ -40,7 +42,7 @@ namespace insoulforge {
             .description = "获取QQ原生表情的CQ码。返回的CQ码必须复制到reply的content中，非必要不使用",
             .parameters = faceParams,
             .handler = [](const json args, ToolCallContext) -> drogon::Task<std::string> {
-                const int id = getInt(args, "id", 1);
+                const i32 id = getInt(args, "id", 1);
                 co_return fmt::format("[CQ:face,id={}]", id);
             },
           },
@@ -115,7 +117,7 @@ namespace insoulforge {
 
                 // 走 MessageService 发送：成功后自动记入会话列表并推送 WebSocket，
                 // 后续轮次模型能从记录中看到自己发过这张表情
-                std::optional<uint64_t> messageId;
+                std::optional<u64> messageId;
                 if (SessionId::isPrivate(sessionId)) {
                     messageId = co_await MessageService::sendPrivateMsg(SessionId::privateUserId(sessionId), cqCode);
                 } else {
@@ -157,7 +159,7 @@ namespace insoulforge {
 
                 // 与 send_sticker 相同：经 MessageService 发送，成功后记入会话列表并推送 WebSocket
                 const auto sessionId = ctx.sessionId;
-                std::optional<uint64_t> messageId;
+                std::optional<u64> messageId;
                 if (SessionId::isPrivate(sessionId)) {
                     messageId = co_await MessageService::sendPrivateMsg(SessionId::privateUserId(sessionId), content);
                 } else {
@@ -201,8 +203,8 @@ namespace insoulforge {
             .parameters = saveParams,
             .handler = [](json args, ToolCallContext ctx) -> drogon::Task<std::string> {
                 const auto sessionId = ctx.sessionId;
-                const uint64_t messageId = parseUInt64(argString(args, "message_id"));
-                const int imageIndex = getInt(args, "image_index", -1);
+                const u64 messageId = parseUInt64(argString(args, "message_id"));
+                const i32 imageIndex = getInt(args, "image_index", -1);
                 const std::string name = argString(args, "name");
                 if (messageId == 0)
                     co_return std::string("请提供有效的图片消息ID(message_id)");
@@ -443,14 +445,14 @@ namespace insoulforge {
                            "偶尔骂人)60-300秒，中度(持续刷屏骂人)600-1800秒，重度(恶意骚扰)3600秒+",
             .parameters = banParams,
             .handler = [](const json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
-                const uint64_t sessionId = ctx.sessionId;
+                const u64 sessionId = ctx.sessionId;
                 if (SessionId::isPrivate(sessionId))
                     co_return std::string("私聊中无法禁言");
                 if (sessionId == 0)
                     co_return std::string("禁言失败: 无法获取群号");
 
-                const uint64_t userId = parseUInt64(argString(args, "qq"));
-                const uint64_t duration = getUInt(args, "duration", 600);
+                const u64 userId = parseUInt64(argString(args, "qq"));
+                const u64 duration = getUInt(args, "duration", 600);
                 if (userId == 0)
                     co_return std::string("禁言失败: 请提供有效的QQ号");
 
@@ -482,14 +484,14 @@ namespace insoulforge {
               "用 send_poke(qq=\"123456\") 来拍他。",
             .parameters = pokeParams,
             .handler = [](const json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
-                const uint64_t sessionId = ctx.sessionId;
+                const u64 sessionId = ctx.sessionId;
                 if (SessionId::isPrivate(sessionId)) {
                     co_return std::string("私聊中不支持拍一拍，直接回复即可");
                 }
                 if (sessionId == 0)
                     co_return std::string("拍一拍失败: 无法获取群号");
 
-                const uint64_t userId = parseUInt64(argString(args, "qq"));
+                const u64 userId = parseUInt64(argString(args, "qq"));
                 if (userId == 0)
                     co_return std::string("拍一拍失败: 请提供有效的QQ号");
 
@@ -535,7 +537,7 @@ namespace insoulforge {
                            "reply_to 字段的值；若想撤回某条消息本身，用 message_id 字段的值。",
             .parameters = recallParams,
             .handler = [](const json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
-                const uint64_t messageId = parseUInt64(argString(args, "message_id"));
+                const u64 messageId = parseUInt64(argString(args, "message_id"));
                 if (messageId == 0)
                     co_return std::string("撤回失败: 请提供有效的消息ID");
 
@@ -598,7 +600,7 @@ namespace insoulforge {
                     co_return std::string("时间过早远：不允许设置超过一年后的提醒");
                 }
 
-                const uint64_t sessionId = ctx.sessionId;
+                const u64 sessionId = ctx.sessionId;
                 if (sessionId == 0)
                     co_return std::string("会话上下文缺失，无法确定提醒目标");
                 const bool isPrivateSession = SessionId::isPrivate(sessionId);
@@ -613,7 +615,7 @@ namespace insoulforge {
                 task.isDaily = isDaily;
 
                 try {
-                    const int64_t id = TaskScheduler::instance().schedule(std::move(task));
+                    const i64 id = TaskScheduler::instance().schedule(std::move(task));
                     if (isDaily) {
                         co_return fmt::format("每日定时任务 #{} 已创建，每天 {} 在{}触发提醒", id,
                           formatTimeOfDay(*remindTime), isPrivateSession ? "私聊" : "本群");
@@ -646,7 +648,7 @@ namespace insoulforge {
                            "如不知道任务编号，先用 list_scheduled_tasks 查询。",
             .parameters = cancelTaskParams,
             .handler = [](const json args, ToolCallContext) -> drogon::Task<std::string> {
-                const int64_t taskId = static_cast<int64_t>(parseUInt64(argString(args, "task_id")));
+                const i64 taskId = static_cast<i64>(parseUInt64(argString(args, "task_id")));
                 if (taskId == 0)
                     co_return std::string("请提供有效的任务编号（可先用 list_scheduled_tasks 查询）");
 

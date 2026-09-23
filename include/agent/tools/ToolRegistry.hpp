@@ -8,9 +8,11 @@
 ///          - 工具定义生成：生成 OpenAI 兼容的工具定义 JSON
 
 #pragma once
+
 #include <drogon/utils/coroutine.h>
 #include <functional>
 #include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/NumericTypes.hpp>
 #include <map>
 #include <string>
 #include <vector>
@@ -18,7 +20,7 @@
 namespace insoulforge {
     /// @brief 单次工具调用的执行环境（随调用显式传参，无共享状态）
     struct ToolCallContext {
-        uint64_t sessionId = 0;
+        u64 sessionId = 0;
         json conversationContext; ///< system 之后的完整消息列表，deep_think 等需要会话上下文的工具使用
         json messageSnapshot; ///< 本轮冻结的完整消息快照，图片保存等工具读取服务端媒体来源
     };
@@ -46,7 +48,7 @@ namespace insoulforge {
         ToolHandler handler;
         ToolScope scope = ToolScope::ALL_SESSIONS; ///< 工具注入的会话范围
         /// 同分类内的稳定展示优先级；数值越小越靠前，名称作为最终排序键
-        int promptOrder = 0;
+        i32 promptOrder = 0;
     };
 
     /// @brief 工具分类
@@ -107,6 +109,6 @@ namespace insoulforge {
         std::string m_activePluginId;
         bool m_pluginRegistrationFailed = false;
 
-        static int categoryOrder(ToolCategory category);
+        static i32 categoryOrder(ToolCategory category);
     };
 } // namespace insoulforge

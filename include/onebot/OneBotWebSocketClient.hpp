@@ -2,6 +2,8 @@
 /// @brief OneBot 正向 WebSocket 连接管理器
 #pragma once
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <coroutine>
 #include <cstdint>
 #include <drogon/WebSocketClient.h>
@@ -42,14 +44,14 @@ namespace insoulforge {
         /// @param params 动作参数
         /// @param timeout 超时秒数
         /// @return OneBot 完整响应；连接不可用、断开或超时时返回 nullopt
-        [[nodiscard]] drogon::Task<std::optional<json>> callApi(std::string action, json params, double timeout);
+        [[nodiscard]] drogon::Task<std::optional<json>> callApi(std::string action, json params, f64 timeout);
 
     private:
         using ResponseCallback = std::function<void(std::optional<json>)>;
 
         class ApiResponseAwaiter : public drogon::CallbackAwaiter<std::optional<json>> {
         public:
-            ApiResponseAwaiter(OneBotWebSocketClient &client, std::string action, json params, double timeout);
+            ApiResponseAwaiter(OneBotWebSocketClient &client, std::string action, json params, f64 timeout);
 
             bool await_suspend(std::coroutine_handle<> continuation);
 
@@ -57,16 +59,16 @@ namespace insoulforge {
             OneBotWebSocketClient &m_client;
             std::string m_action;
             json m_params;
-            double m_timeout;
+            f64 m_timeout;
         };
 
         OneBotWebSocketClient() = default;
 
-        void connect(std::uint64_t generation);
+        void connect(u64 generation);
 
-        void scheduleReconnect(std::uint64_t generation);
+        void scheduleReconnect(u64 generation);
 
-        bool sendApiRequest(std::string action, json params, double timeout, ResponseCallback callback);
+        bool sendApiRequest(std::string action, json params, f64 timeout, ResponseCallback callback);
 
         void handleMessage(const std::string &message, drogon::WebSocketMessageType type);
 
@@ -82,8 +84,8 @@ namespace insoulforge {
 
         mutable std::mutex m_mutex;
         bool m_running = false;
-        std::uint64_t m_generation = 0;
-        std::uint64_t m_nextEcho = 0;
+        u64 m_generation = 0;
+        u64 m_nextEcho = 0;
         drogon::WebSocketClientPtr m_client;
         drogon::WebSocketConnectionPtr m_connection;
         std::unordered_map<std::string, ResponseCallback> m_pendingRequests;

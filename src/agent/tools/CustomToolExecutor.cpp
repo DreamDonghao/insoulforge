@@ -1,6 +1,8 @@
 /// @file CustomToolExecutor.cpp
 /// @brief 自定义 Python 与 HTTP 工具执行实现
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <fstream>
 #include <infrastructure/logging/Logger.hpp>
 #include <random>
@@ -41,7 +43,7 @@ namespace insoulforge {
         }
 
         /// @brief 关闭由 openReadPipe 创建的管道
-        [[nodiscard]] int closePipe(FILE *pipe) {
+        [[nodiscard]] i32 closePipe(FILE *pipe) {
 #ifdef _WIN32
             return _pclose(pipe);
 #else
@@ -93,10 +95,10 @@ namespace insoulforge {
 
         std::array<char, 4096> buffer{};
         std::string result;
-        while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe.get())) {
+        while (fgets(buffer.data(), static_cast<i32>(buffer.size()), pipe.get())) {
             result += buffer.data();
         }
-        if (const int exitCode = closePipe(pipe.release()); exitCode != 0) {
+        if (const i32 exitCode = closePipe(pipe.release()); exitCode != 0) {
             Logger::warn(0, "Tool", fmt::format("Python工具执行返回非零: {}, 输出: {}", exitCode, result));
         }
 
@@ -106,7 +108,7 @@ namespace insoulforge {
         co_return result;
     }
 
-    drogon::Task<std::string> ToolRuntime::executeHttpTool(std::string config, json args, const uint64_t sessionId) {
+    drogon::Task<std::string> ToolRuntime::executeHttpTool(std::string config, json args, const u64 sessionId) {
         json configJson;
         if (!tryParseJson(config, configJson)) {
             Logger::error(0, "Tool", fmt::format("HTTP工具配置解析失败"));

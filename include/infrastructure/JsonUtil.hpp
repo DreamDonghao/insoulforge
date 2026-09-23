@@ -16,7 +16,6 @@
 
 #include <charconv>
 #include <cstdint>
-#include <cstdlib>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -25,9 +24,11 @@
 
 #include <drogon/HttpRequest.h>
 #include <drogon/HttpResponse.h>
-#include <infrastructure/CommonUtil.hpp>
-#include <infrastructure/logging/Logger.hpp>
 #include <nlohmann/json.hpp>
+
+#include <infrastructure/CommonUtil.hpp>
+#include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/logging/Logger.hpp>
 
 namespace insoulforge {
     /// @brief 项目统一 JSON 类型：ordered_json 按插入顺序保存键（nlohmann::json 默认按字典序排序）
@@ -57,7 +58,7 @@ namespace insoulforge {
     /// @param indent 缩进宽度（-1 表示紧凑输出）
     /// @details 无效 UTF-8 字节替换为 U+FFFD 而不是抛异常：日志/LLM/自定义工具输出可能
     ///          携带坏字节，序列化处于所有对外边界（HTTP/WS/存储），不允许因坏字节中断
-    [[nodiscard]] inline std::string dumpJson(const json &value, const bool emitUtf8 = true, const int indent = -1) {
+    [[nodiscard]] inline std::string dumpJson(const json &value, const bool emitUtf8 = true, const i32 indent = -1) {
         return value.dump(indent, ' ', !emitUtf8, json::error_handler_t::replace);
     }
 
@@ -93,64 +94,64 @@ namespace insoulforge {
         return fallback;
     }
 
-    [[nodiscard]] inline int jsonToInt(const json &value, const int fallback = 0) {
+    [[nodiscard]] inline i32 jsonToInt(const json &value, const i32 fallback = 0) {
         if (value.is_number_unsigned()) {
-            const auto n = value.get<uint64_t>();
-            return n <= static_cast<uint64_t>(INT32_MAX) ? static_cast<int>(n) : fallback;
+            const auto n = value.get<u64>();
+            return n <= static_cast<u64>(INT32_MAX) ? static_cast<i32>(n) : fallback;
         }
         if (value.is_number_integer())
-            return static_cast<int>(value.get<int64_t>());
+            return static_cast<i32>(value.get<i64>());
         if (value.is_number_float())
-            return static_cast<int>(value.get<double>());
+            return static_cast<i32>(value.get<f64>());
         if (value.is_string()) {
             const std::string s = value.get<std::string>();
-            int n = 0;
-            const auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), n);
-            if (ec == std::errc{} && ptr == s.data() + s.size())
+            i32 n = 0;
+            if (const auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), n);
+              ec == std::errc{} && ptr == s.data() + s.size())
                 return n;
         }
         return fallback;
     }
 
-    [[nodiscard]] inline int64_t jsonToInt64(const json &value, const int64_t fallback = 0) {
+    [[nodiscard]] inline i64 jsonToInt64(const json &value, const i64 fallback = 0) {
         if (value.is_number_unsigned()) {
-            const auto n = value.get<uint64_t>();
-            return n <= static_cast<uint64_t>(INT64_MAX) ? static_cast<int64_t>(n) : fallback;
+            const auto n = value.get<u64>();
+            return n <= static_cast<u64>(INT64_MAX) ? static_cast<i64>(n) : fallback;
         }
         if (value.is_number_integer())
-            return value.get<int64_t>();
+            return value.get<i64>();
         if (value.is_number_float())
-            return static_cast<int64_t>(value.get<double>());
+            return static_cast<i64>(value.get<f64>());
         if (value.is_string()) {
             const std::string s = value.get<std::string>();
-            int64_t n = 0;
-            const auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), n);
-            if (ec == std::errc{} && ptr == s.data() + s.size())
+            i64 n = 0;
+            if (const auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), n);
+              ec == std::errc{} && ptr == s.data() + s.size())
                 return n;
         }
         return fallback;
     }
 
-    /// @brief 数值/字符串 → uint64_t（字符串按十进制解析；缺失/空/null/负数/浮点一律返回 fallback）
-    [[nodiscard]] inline uint64_t jsonToUInt64(const json &value, const uint64_t fallback = 0) {
+    /// @brief 数值/字符串 → u64（字符串按十进制解析；缺失/空/null/负数/浮点一律返回 fallback）
+    [[nodiscard]] inline u64 jsonToUInt64(const json &value, const u64 fallback = 0) {
         if (value.is_number_unsigned())
-            return value.get<uint64_t>();
+            return value.get<u64>();
         if (value.is_number_integer()) {
-            const auto n = value.get<int64_t>();
-            return n >= 0 ? static_cast<uint64_t>(n) : fallback;
+            const auto n = value.get<i64>();
+            return n >= 0 ? static_cast<u64>(n) : fallback;
         }
         if (value.is_string())
             return parseUInt64(value.get<std::string>(), fallback);
         return fallback;
     }
 
-    [[nodiscard]] inline double jsonToDouble(const json &value, const double fallback = 0.0) {
+    [[nodiscard]] inline f64 jsonToDouble(const json &value, const f64 fallback = 0.0) {
         if (value.is_number())
-            return value.get<double>();
+            return value.get<f64>();
         if (value.is_string()) {
             const std::string s = value.get<std::string>();
             char *end = nullptr;
-            const double n = std::strtod(s.c_str(), &end);
+            const f64 n = std::strtod(s.c_str(), &end);
             if (end != s.c_str() && *end == '\0')
                 return n;
         }
@@ -161,7 +162,7 @@ namespace insoulforge {
         if (value.is_boolean())
             return value.get<bool>();
         if (value.is_number())
-            return value.get<double>() != 0.0;
+            return value.get<f64>() != 0.0;
         if (value.is_string()) {
             const std::string s = value.get<std::string>();
             if (s == "true" || s == "1")
@@ -178,19 +179,19 @@ namespace insoulforge {
         return jsonToString(atOrNull(value, key), std::move(fallback));
     }
 
-    [[nodiscard]] inline int getInt(const json &value, const char *key, const int fallback = 0) {
+    [[nodiscard]] inline i32 getInt(const json &value, const char *key, const i32 fallback = 0) {
         return jsonToInt(atOrNull(value, key), fallback);
     }
 
-    [[nodiscard]] inline int64_t getInt64(const json &value, const char *key, const int64_t fallback = 0) {
+    [[nodiscard]] inline i64 getInt64(const json &value, const char *key, const i64 fallback = 0) {
         return jsonToInt64(atOrNull(value, key), fallback);
     }
 
-    [[nodiscard]] inline uint64_t getUInt(const json &value, const char *key, const uint64_t fallback = 0) {
+    [[nodiscard]] inline u64 getUInt(const json &value, const char *key, const u64 fallback = 0) {
         return jsonToUInt64(atOrNull(value, key), fallback);
     }
 
-    [[nodiscard]] inline double getDouble(const json &value, const char *key, const double fallback = 0.0) {
+    [[nodiscard]] inline f64 getDouble(const json &value, const char *key, const f64 fallback = 0.0) {
         return jsonToDouble(atOrNull(value, key), fallback);
     }
 

@@ -2,8 +2,10 @@
 /// @brief 运行日志 WebSocket 管理器
 
 #pragma once
+
 #include <drogon/WebSocketConnection.h>
 #include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/logging/LogBuffer.hpp>
 #include <mutex>
 #include <optional>
@@ -13,7 +15,7 @@
 
 namespace insoulforge {
     struct LogSubscription {
-        std::optional<uint64_t> sessionId;
+        std::optional<u64> sessionId;
         std::optional<std::string> level;
         std::string keyword;
     };

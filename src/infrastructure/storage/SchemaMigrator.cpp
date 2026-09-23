@@ -3,6 +3,8 @@
 /// @author donghao
 /// @date 2026-08-30
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/SchemaMigrator.hpp>
@@ -165,7 +167,7 @@ namespace insoulforge {
         PRIMARY KEY (group_id, qq_number)
     ))"};
 
-        /// @brief v6 新增表：long_term_memory（长期记忆，embedding 以 float 数组存 BLOB，检索为暴力余弦）
+        /// @brief v6 新增表：long_term_memory（长期记忆，embedding 以 f32 数组存 BLOB，检索为暴力余弦）
         constexpr std::array v6Tables = {
           R"(CREATE TABLE IF NOT EXISTS long_term_memory (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -225,12 +227,12 @@ namespace insoulforge {
         qq_number INTEGER PRIMARY KEY,
         added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ))"};
-        int getUserVersion(sqlite3 *db) {
+        i32 getUserVersion(sqlite3 *db) {
             const Statement stmt(db, "PRAGMA user_version");
             return stmt.step() ? stmt.getInt(0) : 0;
         }
 
-        void setUserVersion(sqlite3 *db, const int version) {
+        void setUserVersion(sqlite3 *db, const i32 version) {
             execSQL(db, fmt::format("PRAGMA user_version = {}", version));
         }
 
@@ -268,7 +270,7 @@ namespace insoulforge {
             // long_term_memory → short_term_memory
             // 注：表可能刚被上面创建为空表，需先检查旧表是否有数据
             if (tableExists(db, "long_term_memory")) {
-                int64_t oldCount = 0;
+                i64 oldCount = 0;
                 if (const Statement stmt(db, "SELECT COUNT(*) FROM long_term_memory"); stmt.step()) {
                     oldCount = stmt.getInt64(0);
                 }
@@ -468,7 +470,7 @@ namespace insoulforge {
 
     namespace SchemaMigrator {
         void migrate(sqlite3 *db) {
-            const int version = getUserVersion(db);
+            const i32 version = getUserVersion(db);
 
             if (version == 0 && !hasUserTables(db)) {
                 Logger::info(0, "Storage", fmt::format("检测到全新数据库，直接创建最新 Schema (v{})", kLatestVersion));
@@ -496,7 +498,7 @@ namespace insoulforge {
               &migrateV10ToV11, // 新增全局 QQ 黑名单
             };
 
-            for (int v = version; v < kLatestVersion; ++v) {
+            for (i32 v = version; v < kLatestVersion; ++v) {
                 char *errMsg = nullptr;
                 if (sqlite3_exec(db, "BEGIN IMMEDIATE", nullptr, nullptr, &errMsg) != SQLITE_OK) {
                     std::string err = errMsg ? errMsg : "BEGIN failed";

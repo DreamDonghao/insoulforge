@@ -3,6 +3,8 @@
 /// @author donghao
 /// @date 2026-09-01
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <agent/memory/LongTermMemory.hpp>
 
 #include <agent/memory/LongTermMemoryStore.hpp>
@@ -11,7 +13,7 @@
 
 namespace insoulforge {
     drogon::Task<std::optional<std::string>> LongTermMemory::searchMemory(
-      std::string query, const int topK, const uint64_t sessionId) {
+      std::string query, const i32 topK, const u64 sessionId) {
         const auto embedding = co_await LlmClient::requestEmbedding(std::move(query), sessionId);
         if (!embedding) {
             Logger::warn(sessionId, "Memory", "记忆检索向量化失败（Embedding 未配置或请求失败）");

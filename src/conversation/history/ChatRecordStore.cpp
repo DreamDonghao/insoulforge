@@ -3,6 +3,8 @@
 /// @author donghao
 /// @date 2026-08-30
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <conversation/history/ChatRecordStore.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
@@ -10,7 +12,7 @@
 
 namespace insoulforge {
     namespace ChatRecordStore {
-        void addChatRecord(const uint64_t sessionId, const std::string &role, const std::string &content) {
+        void addChatRecord(const u64 sessionId, const std::string &role, const std::string &content) {
             const auto &db = Database::instance();
             std::unique_lock lock(db.mutex());
             const Statement stmt(db.handle(), "INSERT INTO chat_records (group_id, role, content) VALUES (?, ?, ?)");
@@ -20,7 +22,7 @@ namespace insoulforge {
             stmt.exec();
         }
 
-        std::vector<json> getChatRecords(const uint64_t sessionId, const int limit) {
+        std::vector<json> getChatRecords(const u64 sessionId, const i32 limit) {
             const auto &db = Database::instance();
             std::shared_lock lock(db.mutex());
             std::vector<json> records;
@@ -41,7 +43,7 @@ namespace insoulforge {
             return records;
         }
 
-        std::vector<json> getChatRecordsWithIds(const uint64_t sessionId, const int limit) {
+        std::vector<json> getChatRecordsWithIds(const u64 sessionId, const i32 limit) {
             const auto &db = Database::instance();
             std::shared_lock lock(db.mutex());
             std::vector<json> records;
@@ -62,18 +64,18 @@ namespace insoulforge {
             return records;
         }
 
-        std::vector<uint64_t> getSessionIds() {
+        std::vector<u64> getSessionIds() {
             const auto &db = Database::instance();
             std::shared_lock lock(db.mutex());
             const Statement stmt(db.handle(), "SELECT DISTINCT group_id FROM chat_records");
-            std::vector<uint64_t> sessionIds;
+            std::vector<u64> sessionIds;
             while (stmt.step()) {
-                sessionIds.push_back(static_cast<uint64_t>(stmt.getInt64(0)));
+                sessionIds.push_back(static_cast<u64>(stmt.getInt64(0)));
             }
             return sessionIds;
         }
 
-        std::optional<std::string> findContentByMessageId(const uint64_t sessionId, const uint64_t messageId) {
+        std::optional<std::string> findContentByMessageId(const u64 sessionId, const u64 messageId) {
             const auto &db = Database::instance();
             std::shared_lock lock(db.mutex());
             const Statement stmt(db.handle(), "SELECT content FROM chat_records WHERE group_id = ? ORDER BY id DESC");
@@ -88,7 +90,7 @@ namespace insoulforge {
             return std::nullopt;
         }
 
-        void updateChatRecord(const int recordId, const std::string &content) {
+        void updateChatRecord(const i32 recordId, const std::string &content) {
             const auto &db = Database::instance();
             std::unique_lock lock(db.mutex());
             const Statement stmt(db.handle(), "UPDATE chat_records SET content = ? WHERE id = ?");
@@ -97,7 +99,7 @@ namespace insoulforge {
             stmt.exec();
         }
 
-        void deleteChatRecord(const int recordId) {
+        void deleteChatRecord(const i32 recordId) {
             const auto &db = Database::instance();
             std::unique_lock lock(db.mutex());
             const Statement stmt(db.handle(), "DELETE FROM chat_records WHERE id = ?");
@@ -105,7 +107,7 @@ namespace insoulforge {
             stmt.exec();
         }
 
-        void clearSessionChatRecords(const uint64_t sessionId) {
+        void clearSessionChatRecords(const u64 sessionId) {
             const auto &db = Database::instance();
             std::unique_lock lock(db.mutex());
             const Statement stmt(db.handle(), "DELETE FROM chat_records WHERE group_id = ?");

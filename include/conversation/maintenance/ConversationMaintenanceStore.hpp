@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <cstdint>
 
 #include <infrastructure/JsonUtil.hpp>
@@ -13,5 +15,5 @@ namespace insoulforge::ConversationMaintenanceStore {
     /// @param messages 真正参与记忆提取与好感度评估的完整消息
     /// @param contextMessages 仅帮助记忆提取理解语境的后续消息
     /// @details 记忆与好感度任务处于同一 SQLite 事务，任一任务未写入时整个批次不会提交。
-    void enqueue(uint64_t sessionId, const json &messages, const json &contextMessages);
+    void enqueue(u64 sessionId, const json &messages, const json &contextMessages);
 } // namespace insoulforge::ConversationMaintenanceStore

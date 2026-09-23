@@ -4,7 +4,9 @@
 ///          面向 Agent、记忆和工具的读取逻辑统一在此处兼容旧记录，避免重复暴露图片 URL。
 
 #pragma once
+
 #include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/NumericTypes.hpp>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -17,7 +19,7 @@ namespace insoulforge::MessageRecord {
         std::string url; ///< OneBot 图片下载地址
     };
 
-    [[nodiscard]] uint64_t getSessionId(const json &record);
+    [[nodiscard]] u64 getSessionId(const json &record);
 
     /// @brief 将机器人实际发送的 CQ 内容转换为统一聊天记录
     /// @param senderName 机器人的显示名称
@@ -25,7 +27,7 @@ namespace insoulforge::MessageRecord {
     /// @param content 已发送的 CQ 内容
     /// @return 不含重复 text 字段的富内容记录
     /// @details 收藏表情仅记录 `sticker.name`；普通 CQ 图片只保留图片动作，不保存外部 URL。
-    [[nodiscard]] json createAssistantRecord(std::string senderName, uint64_t messageId, const std::string &content);
+    [[nodiscard]] json createAssistantRecord(std::string senderName, u64 messageId, const std::string &content);
 
     /// @brief 按段出现顺序拼接记录中的文本内容
     /// @param record 统一聊天记录
@@ -41,7 +43,7 @@ namespace insoulforge::MessageRecord {
     /// @details 同时兼容新结构 `target.qq` 与旧结构 `qq`。
     /// @param record 统一聊天记录
     /// @param qqNumber 目标 QQ 号
-    [[nodiscard]] bool mentions(const json &record, uint64_t qqNumber);
+    [[nodiscard]] bool mentions(const json &record, u64 qqNumber);
 
     /// @brief 判断记录是否由机器人发送
     [[nodiscard]] bool isAssistant(const json &record);

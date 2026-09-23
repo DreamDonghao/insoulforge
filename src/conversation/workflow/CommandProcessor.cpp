@@ -1,6 +1,8 @@
 /// @file CommandProcessor.cpp
 /// @brief 消息工作流的管理命令处理实现
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <admin/AdminStore.hpp>
 #include <admin/BlacklistStore.hpp>
 #include <agent/tools/ToolRuntime.hpp>
@@ -31,7 +33,7 @@ namespace insoulforge::CommandProcessor {
     } // namespace
 
     bool isCommand(const json &message) {
-        const uint64_t sessionId = getUInt(message, "session_id");
+        const u64 sessionId = getUInt(message, "session_id");
         if (sessionId == 0 ||
             (!SessionId::isPrivate(sessionId) && !MessageRecord::mentions(message, Config::instance().selfQQNumber))) {
             return false;
@@ -40,8 +42,8 @@ namespace insoulforge::CommandProcessor {
     }
 
     drogon::Task<std::string> execute(const json &message) {
-        const uint64_t sessionId = getUInt(message, "session_id");
-        const uint64_t senderQQ = getUInt(atOrNull(message, "sender"), "qq");
+        const u64 sessionId = getUInt(message, "session_id");
+        const u64 senderQQ = getUInt(atOrNull(message, "sender"), "qq");
         const bool hasPermission = AdminStore::isAdmin(senderQQ);
 
         std::istringstream input(commandText(message));
@@ -83,7 +85,7 @@ namespace insoulforge::CommandProcessor {
                 co_return "暂无管理员";
             }
             std::string response = "管理员列表:\n";
-            for (const uint64_t qq: admins) {
+            for (const u64 qq: admins) {
                 response += fmt::format("- {}\n", qq);
             }
             co_return response;
@@ -99,7 +101,7 @@ namespace insoulforge::CommandProcessor {
             co_return fmt::format("权限不足，你({})不是管理员", senderQQ);
         }
         if (command == "/enable" || command == "/启用") {
-            uint64_t targetSession = sessionId;
+            u64 targetSession = sessionId;
             if (std::string argument; input >> argument) {
                 if (const auto parsed = tryParseUInt64(argument)) {
                     targetSession = *parsed;
@@ -111,7 +113,7 @@ namespace insoulforge::CommandProcessor {
             co_return fmt::format("已启用会话: {}", targetSession);
         }
         if (command == "/disable" || command == "/禁用") {
-            uint64_t targetSession = sessionId;
+            u64 targetSession = sessionId;
             if (std::string argument; input >> argument) {
                 if (const auto parsed = tryParseUInt64(argument)) {
                     targetSession = *parsed;
@@ -128,7 +130,7 @@ namespace insoulforge::CommandProcessor {
                 co_return "没有启用的群聊";
             }
             std::string response = "启用的群聊列表:\n";
-            for (const uint64_t groupId: groups) {
+            for (const u64 groupId: groups) {
                 response += fmt::format("- {}\n", groupId);
             }
             co_return response;
@@ -161,7 +163,7 @@ namespace insoulforge::CommandProcessor {
                 co_return "黑名单为空";
             }
             std::string response = "黑名单:\n";
-            for (const uint64_t qq: users) {
+            for (const u64 qq: users) {
                 response += fmt::format("- {}\n", qq);
             }
             co_return response;

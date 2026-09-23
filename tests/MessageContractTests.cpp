@@ -1,6 +1,8 @@
 /// @file MessageContractTests.cpp
 /// @brief 消息链路的契约测试
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <agent/memory/LongTermMemoryStore.hpp>
 #include <agent/memory/MemoryStore.hpp>
 #include <conversation/history/ChatRecordStore.hpp>
@@ -32,7 +34,11 @@
 #include <vector>
 
 namespace {
-    int failures = 0;
+    using insoulforge::i32;
+    using insoulforge::i64;
+    using insoulforge::u64;
+
+    i32 failures = 0;
 
     void check(const bool condition, const std::string_view expression, const std::string_view testName) {
         if (!condition) {
@@ -117,7 +123,7 @@ namespace {
     void testNewWorkflowDetectsCommands() {
         constexpr std::string_view kTestName = "new workflow command detection";
         auto &config = insoulforge::Config::instance();
-        const uint64_t originalSelfId = config.selfQQNumber;
+        const u64 originalSelfId = config.selfQQNumber;
         config.selfQQNumber = 42;
 
         const insoulforge::json groupCommand = {{"session_id", 100},
@@ -166,7 +172,7 @@ namespace {
     void testNewWorkflowRouterHardRules() {
         constexpr std::string_view kTestName = "new workflow router hard rules";
         auto &config = insoulforge::Config::instance();
-        const uint64_t originalSelfId = config.selfQQNumber;
+        const u64 originalSelfId = config.selfQQNumber;
         config.selfQQNumber = 42;
 
         const insoulforge::json mentionSnapshot =
@@ -254,15 +260,15 @@ namespace {
         sqlite3_exec(db, "PRAGMA user_version = 6", nullptr, nullptr, nullptr);
         insoulforge::SchemaMigrator::migrate(db);
         sqlite3_stmt *stmt = nullptr;
-        const int prepareResult =
+        const i32 prepareResult =
           sqlite3_prepare_v2(db, "SELECT sampled_frame_count FROM image_description_cache LIMIT 1", -1, &stmt, nullptr);
         check(prepareResult == SQLITE_OK, "v6 migration creates sampled frame count column", kTestName);
         sqlite3_finalize(stmt);
-        const int jobPrepareResult = sqlite3_prepare_v2(
+        const i32 jobPrepareResult = sqlite3_prepare_v2(
           db, "SELECT messages, attempt_count FROM memory_maintenance_jobs LIMIT 1", -1, &stmt, nullptr);
         check(jobPrepareResult == SQLITE_OK, "migration creates durable memory maintenance jobs", kTestName);
         sqlite3_finalize(stmt);
-        const int affinityJobPrepareResult = sqlite3_prepare_v2(
+        const i32 affinityJobPrepareResult = sqlite3_prepare_v2(
           db, "SELECT messages, attempt_count FROM affinity_maintenance_jobs LIMIT 1", -1, &stmt, nullptr);
         check(affinityJobPrepareResult == SQLITE_OK, "migration creates durable affinity maintenance jobs", kTestName);
         sqlite3_finalize(stmt);
@@ -275,10 +281,9 @@ namespace {
         database.initialize(":memory:");
 
         const insoulforge::json messages = {{{"message_id", "1"}, {"segments", insoulforge::json::array()}}};
-        const int64_t firstJob =
-          insoulforge::MemoryMaintenanceStore::enqueue(100, messages, insoulforge::json::array(), 2);
+        const i64 firstJob = insoulforge::MemoryMaintenanceStore::enqueue(100, messages, insoulforge::json::array(), 2);
         const auto pending = insoulforge::MemoryMaintenanceStore::pendingSessionIds();
-        check(pending == std::vector<uint64_t>{100}, "pending session survives storage boundary", kTestName);
+        check(pending == std::vector<u64>{100}, "pending session survives storage boundary", kTestName);
         const auto first = insoulforge::MemoryMaintenanceStore::next(100);
         check(first && first->id == firstJob && first->messages == messages, "loads oldest persisted job", kTestName);
 
@@ -293,7 +298,7 @@ namespace {
         check(insoulforge::MemoryStore::getShortTermMemory(100) == "近期状态\n", "completion commits short-term memory",
           kTestName);
 
-        const int64_t secondJob =
+        const i64 secondJob =
           insoulforge::MemoryMaintenanceStore::enqueue(100, messages, insoulforge::json::array(), 0);
         const insoulforge::PreparedLongTermMemory longTerm{
           .content = "Alice 喜欢 C++", .embedding = {0.1F, 0.2F}, .replacedIds = {}};
@@ -376,16 +381,16 @@ namespace {
         database.initialize(":memory:");
 
         auto &config = insoulforge::Config::instance();
-        const int originalContextLimit = config.contextWindowLimit;
-        const int originalTriggerCount = config.memorySummaryTriggerCount;
-        const int originalBatchSize = config.memorySummaryBatchSize;
-        const int originalSummaryContextCount = config.memorySummaryContextCount;
+        const i32 originalContextLimit = config.contextWindowLimit;
+        const i32 originalTriggerCount = config.memorySummaryTriggerCount;
+        const i32 originalBatchSize = config.memorySummaryBatchSize;
+        const i32 originalSummaryContextCount = config.memorySummaryContextCount;
         config.contextWindowLimit = 2;
         config.memorySummaryTriggerCount = 3;
         config.memorySummaryBatchSize = 2;
         config.memorySummaryContextCount = 1;
 
-        const auto makeMessage = [](const int id) {
+        const auto makeMessage = [](const i32 id) {
             insoulforge::json message;
             message["message_id"] = std::to_string(id);
             message["sender"] = {{"qq", "11"}, {"name", "Alice"}};

@@ -1,6 +1,8 @@
 /// @file OneBotWebSocketClient.cpp
 /// @brief OneBot 正向 WebSocket 连接管理器实现
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <infrastructure/logging/Logger.hpp>
 #include <onebot/OneBotWebSocketClient.hpp>
 
@@ -9,7 +11,7 @@
 
 namespace insoulforge {
     namespace {
-        constexpr double kReconnectDelaySeconds = 3.0;
+        constexpr f64 kReconnectDelaySeconds = 3.0;
     } // namespace
 
     OneBotWebSocketClient &OneBotWebSocketClient::instance() {
@@ -18,7 +20,7 @@ namespace insoulforge {
     }
 
     OneBotWebSocketClient::ApiResponseAwaiter::ApiResponseAwaiter(
-      OneBotWebSocketClient &client, std::string action, json params, const double timeout) :
+      OneBotWebSocketClient &client, std::string action, json params, const f64 timeout) :
         m_client(client), m_action(std::move(action)), m_params(std::move(params)), m_timeout(timeout) {}
 
     bool OneBotWebSocketClient::ApiResponseAwaiter::await_suspend(const std::coroutine_handle<> continuation) {
@@ -34,7 +36,7 @@ namespace insoulforge {
     }
 
     void OneBotWebSocketClient::start() {
-        std::uint64_t generation = 0;
+        u64 generation = 0;
         {
             std::scoped_lock lock(m_mutex);
             if (m_running || Config::instance().oneBotTransport != "websocket") {
@@ -74,11 +76,11 @@ namespace insoulforge {
     }
 
     drogon::Task<std::optional<json>> OneBotWebSocketClient::callApi(
-      std::string action, json params, const double timeout) {
+      std::string action, json params, const f64 timeout) {
         co_return co_await ApiResponseAwaiter(*this, std::move(action), std::move(params), timeout);
     }
 
-    void OneBotWebSocketClient::connect(const std::uint64_t generation) {
+    void OneBotWebSocketClient::connect(const u64 generation) {
         const auto &config = Config::instance();
         std::string origin;
         std::string path;
@@ -124,7 +126,7 @@ namespace insoulforge {
                      const drogon::WebSocketClientPtr &connectedClient) {
               if (result != drogon::ReqResult::Ok) {
                   Logger::warn(
-                    0, "OneBot", fmt::format("OneBot WebSocket 连接失败: result={}", static_cast<int>(result)));
+                    0, "OneBot", fmt::format("OneBot WebSocket 连接失败: result={}", static_cast<i32>(result)));
                   handleConnectionClosed(connectedClient);
                   return;
               }
@@ -140,12 +142,12 @@ namespace insoulforge {
           });
     }
 
-    void OneBotWebSocketClient::scheduleReconnect(const std::uint64_t generation) {
+    void OneBotWebSocketClient::scheduleReconnect(const u64 generation) {
         drogon::app().getLoop()->runAfter(kReconnectDelaySeconds, [this, generation] { connect(generation); });
     }
 
     bool OneBotWebSocketClient::sendApiRequest(
-      std::string action, json params, const double timeout, ResponseCallback callback) {
+      std::string action, json params, const f64 timeout, ResponseCallback callback) {
         drogon::WebSocketConnectionPtr connection;
         std::string echo;
         {
@@ -178,7 +180,7 @@ namespace insoulforge {
     void OneBotWebSocketClient::handleMessage(const std::string &message, const drogon::WebSocketMessageType type) {
         if (type == drogon::WebSocketMessageType::Close) {
             const auto *data = reinterpret_cast<const unsigned char *>(message.data());
-            const uint16_t closeCode = message.size() >= 2 ? static_cast<uint16_t>((data[0] << 8U) | data[1]) : 0;
+            const u16 closeCode = message.size() >= 2 ? static_cast<u16>((data[0] << 8U) | data[1]) : 0;
             const std::string reason = message.size() > 2 ? message.substr(2) : "";
             Logger::warn(
               0, "OneBot", fmt::format("OneBot WebSocket 收到关闭帧: code={}, reason={}", closeCode, reason));
@@ -206,7 +208,7 @@ namespace insoulforge {
     }
 
     void OneBotWebSocketClient::handleConnectionClosed(const drogon::WebSocketClientPtr &client) {
-        std::uint64_t generation = 0;
+        u64 generation = 0;
         bool shouldReconnect = false;
         std::vector<ResponseCallback> callbacks;
         {

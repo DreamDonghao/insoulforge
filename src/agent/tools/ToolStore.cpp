@@ -3,6 +3,8 @@
 /// @author donghao
 /// @date 2026-08-30
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <agent/tools/ToolStore.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
@@ -41,7 +43,7 @@ namespace insoulforge {
 
         std::vector<CustomTool> getEnabledCustomTools() { return loadCustomTools(true); }
 
-        int addCustomTool(const CustomTool &tool) {
+        i32 addCustomTool(const CustomTool &tool) {
             const auto &db = Database::instance();
             std::unique_lock lock(db.mutex());
             const Statement stmt(db.handle(), "INSERT INTO custom_tools (name, description, parameters, executor_type, "
@@ -57,7 +59,7 @@ namespace insoulforge {
             stmt.bind(8, tool.enabled ? 1 : 0);
             stmt.exec();
             Logger::info(0, "Tool", fmt::format("已添加自定义工具: {}", tool.name));
-            return static_cast<int>(Statement::lastInsertRowId(db.handle()));
+            return static_cast<i32>(Statement::lastInsertRowId(db.handle()));
         }
 
         void updateCustomTool(const CustomTool &tool) {
@@ -80,7 +82,7 @@ namespace insoulforge {
             Logger::info(0, "Tool", fmt::format("已更新自定义工具: {}", tool.name));
         }
 
-        void deleteCustomTool(const int id) {
+        void deleteCustomTool(const i32 id) {
             const auto &db = Database::instance();
             std::unique_lock lock(db.mutex());
             const Statement stmt(db.handle(), "DELETE FROM custom_tools WHERE id=?");
@@ -89,7 +91,7 @@ namespace insoulforge {
             Logger::info(0, "Tool", fmt::format("已删除自定义工具 ID: {}", id));
         }
 
-        void toggleCustomTool(const int id) {
+        void toggleCustomTool(const i32 id) {
             const auto &db = Database::instance();
             std::unique_lock lock(db.mutex());
             const Statement stmt(db.handle(), "UPDATE custom_tools SET enabled = NOT enabled WHERE id=?");

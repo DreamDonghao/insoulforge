@@ -1,6 +1,8 @@
 /// @file OneBotClient.cpp
 /// @brief OneBot API 客户端实现
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/http/HttpUtil.hpp>
 #include <infrastructure/logging/Logger.hpp>
@@ -16,7 +18,7 @@ namespace insoulforge::OneBotClient {
         /// @param timeout 超时秒数
         /// @return 响应 JSON（含 status/retcode/data）；请求失败或 status != ok 时返回 nullopt（已记日志）
         [[nodiscard]] drogon::Task<std::optional<json>> callApi(std::string_view tag, std::string api, json params,
-          std::optional<uint64_t> sessionId = std::nullopt, double timeout = 30.0) {
+          std::optional<u64> sessionId = std::nullopt, f64 timeout = 30.0) {
             json body;
             const auto &config = Config::instance();
             if (config.oneBotTransport == "websocket") {
@@ -35,7 +37,7 @@ namespace insoulforge::OneBotClient {
                 if ((*response)->getStatusCode() != drogon::k200OK || !tryParseJson((*response)->body(), body)) {
                     Logger::error(sessionId.value_or(0), "OneBot",
                       fmt::format("{} API {} 请求失败: http_status={}", tag, api,
-                        static_cast<int>((*response)->getStatusCode())));
+                        static_cast<i32>((*response)->getStatusCode())));
                     co_return std::nullopt;
                 }
             }
@@ -53,8 +55,8 @@ namespace insoulforge::OneBotClient {
         }
 
         /// @brief 发送消息的公共实现（群聊/私聊共用，仅 API 名与目标字段不同）
-        drogon::Task<std::optional<uint64_t>> sendMessage(std::string api, std::string targetKey,
-          const uint64_t targetId, std::string message, const std::optional<uint64_t> sessionId) {
+        drogon::Task<std::optional<u64>> sendMessage(std::string api, std::string targetKey, const u64 targetId,
+          std::string message, const std::optional<u64> sessionId) {
             json params;
             params[targetKey] = targetId;
             params["message"] = message;
@@ -70,16 +72,16 @@ namespace insoulforge::OneBotClient {
         }
     } // namespace
 
-    drogon::Task<std::optional<uint64_t>> sendGroupMsg(const uint64_t groupId, std::string message) {
+    drogon::Task<std::optional<u64>> sendGroupMsg(const u64 groupId, std::string message) {
         co_return co_await sendMessage("send_group_msg", "group_id", groupId, std::move(message), groupId);
     }
 
-    drogon::Task<std::optional<uint64_t>> sendPrivateMsg(
-      const uint64_t userId, std::string message, const std::optional<uint64_t> sessionId) {
+    drogon::Task<std::optional<u64>> sendPrivateMsg(
+      const u64 userId, std::string message, const std::optional<u64> sessionId) {
         co_return co_await sendMessage("send_private_msg", "user_id", userId, std::move(message), sessionId);
     }
 
-    drogon::Task<bool> setGroupBan(const uint64_t groupId, const uint64_t userId, const uint64_t duration) {
+    drogon::Task<bool> setGroupBan(const u64 groupId, const u64 userId, const u64 duration) {
         json params;
         params["group_id"] = groupId;
         params["user_id"] = userId;
@@ -93,7 +95,7 @@ namespace insoulforge::OneBotClient {
         co_return true;
     }
 
-    drogon::Task<json> getGroupInfo(const uint64_t groupId) {
+    drogon::Task<json> getGroupInfo(const u64 groupId) {
         json params;
         params["group_id"] = groupId;
 
@@ -101,7 +103,7 @@ namespace insoulforge::OneBotClient {
         co_return resp.value_or(json{});
     }
 
-    drogon::Task<json> getStrangerInfo(const uint64_t userId, const std::optional<uint64_t> sessionId) {
+    drogon::Task<json> getStrangerInfo(const u64 userId, const std::optional<u64> sessionId) {
         json params;
         params["user_id"] = userId;
 
@@ -109,7 +111,7 @@ namespace insoulforge::OneBotClient {
         co_return resp.value_or(json{});
     }
 
-    drogon::Task<bool> sendPoke(const uint64_t groupId, const uint64_t userId) {
+    drogon::Task<bool> sendPoke(const u64 groupId, const u64 userId) {
         json params;
         params["group_id"] = groupId;
         params["user_id"] = userId;
@@ -122,7 +124,7 @@ namespace insoulforge::OneBotClient {
         co_return true;
     }
 
-    drogon::Task<bool> deleteMsg(const uint64_t messageId, const std::optional<uint64_t> sessionId) {
+    drogon::Task<bool> deleteMsg(const u64 messageId, const std::optional<u64> sessionId) {
         json params;
         params["message_id"] = messageId;
 
@@ -134,7 +136,7 @@ namespace insoulforge::OneBotClient {
         co_return true;
     }
 
-    drogon::Task<std::optional<std::string>> getImage(std::string file, const std::optional<uint64_t> sessionId) {
+    drogon::Task<std::optional<std::string>> getImage(std::string file, const std::optional<u64> sessionId) {
         json params;
         params["file"] = std::move(file);
 
@@ -145,7 +147,7 @@ namespace insoulforge::OneBotClient {
         co_return jsonToString(atOrNull(atOrNull(*resp, "data"), "file"));
     }
 
-    drogon::Task<std::optional<std::string>> downloadFile(std::string url, const std::optional<uint64_t> sessionId) {
+    drogon::Task<std::optional<std::string>> downloadFile(std::string url, const std::optional<u64> sessionId) {
         json params;
         params["url"] = std::move(url);
 
@@ -156,7 +158,7 @@ namespace insoulforge::OneBotClient {
         co_return jsonToString(atOrNull(atOrNull(*resp, "data"), "file"));
     }
 
-    drogon::Task<bool> addCustomFace(std::string file, const std::optional<uint64_t> sessionId) {
+    drogon::Task<bool> addCustomFace(std::string file, const std::optional<u64> sessionId) {
         json params;
         params["file"] = file;
 
@@ -168,8 +170,8 @@ namespace insoulforge::OneBotClient {
         co_return true;
     }
 
-    drogon::Task<bool> setCustomFaceDesc(std::string emojiId, std::string resId, std::string md5, std::string desc,
-      const std::optional<uint64_t> sessionId) {
+    drogon::Task<bool> setCustomFaceDesc(
+      std::string emojiId, std::string resId, std::string md5, std::string desc, const std::optional<u64> sessionId) {
         json params;
         params["emoji_id"] = std::move(emojiId);
         params["res_id"] = std::move(resId);
@@ -180,7 +182,7 @@ namespace insoulforge::OneBotClient {
         co_return resp.has_value();
     }
 
-    drogon::Task<bool> deleteCustomFace(std::string resId, const std::optional<uint64_t> sessionId) {
+    drogon::Task<bool> deleteCustomFace(std::string resId, const std::optional<u64> sessionId) {
         json params;
         params["res_id"] = std::move(resId);
 
@@ -188,7 +190,7 @@ namespace insoulforge::OneBotClient {
         co_return resp.has_value();
     }
 
-    drogon::Task<json> fetchCustomFaceDetail(const std::optional<uint64_t> sessionId) {
+    drogon::Task<json> fetchCustomFaceDetail(const std::optional<u64> sessionId) {
         json params;
         params["count"] = 200;
 

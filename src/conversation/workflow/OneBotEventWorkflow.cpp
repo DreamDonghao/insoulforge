@@ -1,6 +1,8 @@
 /// @file OneBotEventWorkflow.cpp
 /// @brief OneBot 入站事件处理工作流实现
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <admin/BlacklistStore.hpp>
 #include <admin/realtime/WebSocketManager.hpp>
 #include <agent/runtime/AgentSystem.hpp>
@@ -29,7 +31,7 @@ namespace insoulforge {
         }
 
         /// @brief 记录已完成主处理消息的会话统计
-        void recordMessageProcessingStats(const uint64_t sessionId) {
+        void recordMessageProcessingStats(const u64 sessionId) {
             try {
                 SessionConfigManager::incrementMessageCount(sessionId);
             } catch (const std::exception &error) {
@@ -42,7 +44,7 @@ namespace insoulforge {
         /// @brief 将已插入的完整消息记录推送至管理后台，推送失败不得影响消息工作流
         /// @param sessionId
         /// @param message 已写入消息列表的完整消息
-        void pushRecordedMessage(const uint64_t sessionId, const json &message) {
+        void pushRecordedMessage(const u64 sessionId, const json &message) {
             try {
                 const auto role = MessageRecord::isAssistant(message) ? "assistant" : "user";
                 WebSocketManager::instance().pushMessage(sessionId, role, dumpJson(message));
@@ -55,7 +57,7 @@ namespace insoulforge {
 
         /// @brief 原子持久化会话派生状态任务，再分别启动异步消费者
         void scheduleConversationMaintenance(
-          const uint64_t sessionId, const std::shared_ptr<MessageList> &messageList, const MemorySummaryBatch &batch) {
+          const u64 sessionId, const std::shared_ptr<MessageList> &messageList, const MemorySummaryBatch &batch) {
             try {
                 ConversationMaintenanceService::enqueue(sessionId, batch.messages, batch.contextMessages);
             } catch (const std::exception &error) {
@@ -80,7 +82,7 @@ namespace insoulforge {
         for (const auto sessionId: ChatRecordStore::getSessionIds()) {
             m_sessions.emplace(sessionId, std::make_shared<SessionWorkflowState>(sessionId));
         }
-        ConversationMaintenanceService::setMemorySummaryCompletedCallback([this](const uint64_t sessionId) {
+        ConversationMaintenanceService::setMemorySummaryCompletedCallback([this](const u64 sessionId) {
             const auto sessionState = getOrCreateSessionState(sessionId);
             if (const auto batch = sessionState->messageList()->removeCompletedSummaryMessages()) {
                 scheduleConversationMaintenance(sessionId, sessionState->messageList(), *batch);
@@ -107,7 +109,7 @@ namespace insoulforge {
         }
     }
 
-    void OneBotEventWorkflow::appendDeliveredAssistantMessage(const uint64_t sessionId, json message) {
+    void OneBotEventWorkflow::appendDeliveredAssistantMessage(const u64 sessionId, json message) {
         const auto sessionState = getOrCreateSessionState(sessionId);
         const auto update = sessionState->messageList()->append(std::move(message));
         if (!update) {
@@ -119,7 +121,7 @@ namespace insoulforge {
         }
     }
 
-    std::optional<json> OneBotEventWorkflow::getSessionMessages(const uint64_t sessionId) {
+    std::optional<json> OneBotEventWorkflow::getSessionMessages(const u64 sessionId) {
         std::shared_ptr<SessionWorkflowState> sessionState;
         {
             std::lock_guard lock(m_sessionsMutex);
@@ -132,7 +134,7 @@ namespace insoulforge {
         return sessionState->messageList()->fullSnapshot();
     }
 
-    std::shared_ptr<SessionWorkflowState> OneBotEventWorkflow::getOrCreateSessionState(const uint64_t sessionId) {
+    std::shared_ptr<SessionWorkflowState> OneBotEventWorkflow::getOrCreateSessionState(const u64 sessionId) {
         std::lock_guard lock(m_sessionsMutex);
         // 以有会话工作流状态则直接返回
         if (const auto found = m_sessions.find(sessionId); found != m_sessions.end()) {
@@ -190,7 +192,7 @@ namespace insoulforge {
         drogon::async_run([this, sessionId]() -> drogon::Task<> { co_await processPreparationQueue(sessionId); });
     }
 
-    drogon::Task<> OneBotEventWorkflow::processPreparationQueue(const uint64_t sessionId) {
+    drogon::Task<> OneBotEventWorkflow::processPreparationQueue(const u64 sessionId) {
         const auto sessionState = getOrCreateSessionState(sessionId);
         while (true) {
             auto nextMessage = sessionState->takePreparationMessage();
@@ -252,7 +254,7 @@ namespace insoulforge {
         }
     }
 
-    drogon::Task<> OneBotEventWorkflow::processReplyWorkflow(uint64_t sessionId, std::string triggerMessageId) {
+    drogon::Task<> OneBotEventWorkflow::processReplyWorkflow(u64 sessionId, std::string triggerMessageId) {
         const auto sessionState = getOrCreateSessionState(sessionId);
         bool isInitialReply = true;
         while (true) {

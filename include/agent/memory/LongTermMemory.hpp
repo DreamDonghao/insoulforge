@@ -6,7 +6,9 @@
 ///          - 记忆检索：searchMemory()
 
 #pragma once
+
 #include <drogon/utils/coroutine.h>
+#include <infrastructure/NumericTypes.hpp>
 #include <optional>
 #include <string>
 
@@ -17,5 +19,5 @@ namespace insoulforge::LongTermMemory {
     /// @param topK 返回结果数量
     /// @param sessionId 会话 ID
     /// @return 检索结果文本；向量化失败返回 std::nullopt，无相似记忆返回 "未找到相关信息"
-    drogon::Task<std::optional<std::string>> searchMemory(std::string query, int topK, uint64_t sessionId);
+    drogon::Task<std::optional<std::string>> searchMemory(std::string query, i32 topK, u64 sessionId);
 } // namespace insoulforge::LongTermMemory

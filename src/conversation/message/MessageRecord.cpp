@@ -1,6 +1,8 @@
 /// @file MessageRecord.cpp
 /// @brief 聊天记录富内容的构造、兼容与投影实现
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <conversation/message/MessageRecord.hpp>
 #include <conversation/session/QQNameDirectory.hpp>
 
@@ -93,7 +95,7 @@ namespace insoulforge::MessageRecord {
                 return;
             }
             if (type == "image") {
-                const int explicitIndex = getInt(segment, "image_index", -1);
+                const i32 explicitIndex = getInt(segment, "image_index", -1);
                 const size_t imageIndex = explicitIndex >= 0 ? static_cast<size_t>(explicitIndex) : legacyImageIndex++;
                 const json &image = imageIndex < images.size() ? images[imageIndex] : segment;
                 result.push_back(imageSummary(image, imageIndex));
@@ -136,7 +138,7 @@ namespace insoulforge::MessageRecord {
                   !reason.empty()) {
                     event["reason"] = reason;
                 }
-                if (const uint64_t operatorId = getUInt(segment, "operator_id"); operatorId > 0) {
+                if (const u64 operatorId = getUInt(segment, "operator_id"); operatorId > 0) {
                     event["operator"] = {{"qq", std::to_string(operatorId)}};
                 }
                 result.push_back(std::move(event));
@@ -148,9 +150,9 @@ namespace insoulforge::MessageRecord {
         }
     } // namespace
 
-    uint64_t getSessionId(const json &record) { return getUInt(record, "session_id"); }
+    u64 getSessionId(const json &record) { return getUInt(record, "session_id"); }
 
-    json createAssistantRecord(std::string senderName, const uint64_t messageId, const std::string &content) {
+    json createAssistantRecord(std::string senderName, const u64 messageId, const std::string &content) {
         json segments = json::array();
         std::optional<std::string> replyTo;
         static const std::regex cqPattern(R"(\[CQ:([^,\]]+)(?:,([^\]]*))?\])");
@@ -228,7 +230,7 @@ namespace insoulforge::MessageRecord {
           atOrNull(record, "segments"), [type](const json &segment) { return getStr(segment, "type") == type; });
     }
 
-    bool mentions(const json &record, const uint64_t qqNumber) {
+    bool mentions(const json &record, const u64 qqNumber) {
         return std::ranges::any_of(atOrNull(record, "segments"), [qqNumber](const json &segment) {
             return getStr(segment, "type") == "at" &&
                    getUInt(atOrNull(segment, "target"), "qq", getUInt(segment, "qq")) == qqNumber;

@@ -2,15 +2,17 @@
 /// @brief 单会话完整消息列表实现
 
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <conversation/history/ChatRecordStore.hpp>
 #include <conversation/maintenance/ConversationMaintenanceService.hpp>
 #include <conversation/workflow/MessageList.hpp>
 #include <infrastructure/config/Config.hpp>
 
 namespace insoulforge {
-    MessageList::MessageList(const uint64_t sessionId) : m_sessionId(sessionId) {
+    MessageList::MessageList(const u64 sessionId) : m_sessionId(sessionId) {
         // 总结任务完成前不能丢失其待删除前缀；模型可见范围由 snapshotLocked 单独限制。
-        for (const json &record: ChatRecordStore::getChatRecords(sessionId, std::numeric_limits<int>::max())) {
+        for (const json &record: ChatRecordStore::getChatRecords(sessionId, std::numeric_limits<i32>::max())) {
             if (json message; tryParseJson(getStr(record, "content"), message) && message.is_object()) {
                 m_messages.push_back(std::move(message));
             }

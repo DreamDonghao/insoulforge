@@ -3,11 +3,13 @@
 /// @author donghao
 /// @date 2026-08-30
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 
 namespace insoulforge::MemoryStore {
-    std::string getShortTermMemory(const uint64_t sessionId) {
+    std::string getShortTermMemory(const u64 sessionId) {
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
         const Statement stmt(db.handle(), "SELECT memory_content FROM short_term_memory WHERE group_id = ?");
@@ -16,7 +18,7 @@ namespace insoulforge::MemoryStore {
     }
 
     // upsert 而非 REPLACE：手动编辑记忆(后台)时不能重置水位线
-    void updateShortTermMemory(const uint64_t sessionId, const std::string &memory) {
+    void updateShortTermMemory(const u64 sessionId, const std::string &memory) {
         const auto &db = Database::instance();
         std::unique_lock lock(db.mutex());
         const Statement stmt(db.handle(), "INSERT INTO short_term_memory (group_id, memory_content) VALUES (?, ?) "

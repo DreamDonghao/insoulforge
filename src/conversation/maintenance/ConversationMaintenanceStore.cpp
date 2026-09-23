@@ -1,6 +1,8 @@
 /// @file ConversationMaintenanceStore.cpp
 /// @brief 会话派生状态维护任务的原子持久化边界实现
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <conversation/maintenance/ConversationMaintenanceStore.hpp>
 
 #include <infrastructure/storage/Database.hpp>
@@ -19,7 +21,7 @@ namespace insoulforge::ConversationMaintenanceStore {
         }
     } // namespace
 
-    void enqueue(const uint64_t sessionId, const json &messages, const json &contextMessages) {
+    void enqueue(const u64 sessionId, const json &messages, const json &contextMessages) {
         const auto &database = Database::instance();
         std::unique_lock lock(database.mutex());
         sqlite3 *handle = database.handle();
@@ -31,7 +33,7 @@ namespace insoulforge::ConversationMaintenanceStore {
             memoryTask.bind(1, sessionId);
             memoryTask.bind(2, dumpJson(messages));
             memoryTask.bind(3, dumpJson(contextMessages));
-            memoryTask.bind(4, static_cast<int64_t>(messages.size()));
+            memoryTask.bind(4, static_cast<i64>(messages.size()));
             memoryTask.execOrThrow();
 
             const Statement affinityTask(

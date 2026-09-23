@@ -1,6 +1,8 @@
 /// @file MemoryMaintenanceStore.cpp
 /// @brief 记忆维护任务及其提交结果的持久化存储实现
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <conversation/maintenance/memory/MemoryMaintenanceStore.hpp>
 
 #include <infrastructure/storage/Database.hpp>
@@ -8,9 +10,9 @@
 
 namespace insoulforge::MemoryMaintenanceStore {
     namespace {
-        /// @brief 把 float 向量转换为 SQLite BLOB
-        [[nodiscard]] std::vector<uint8_t> toBytes(const std::vector<float> &embedding) {
-            std::vector<uint8_t> bytes(embedding.size() * sizeof(float));
+        /// @brief 把 f32 向量转换为 SQLite BLOB
+        [[nodiscard]] std::vector<u8> toBytes(const std::vector<f32> &embedding) {
+            std::vector<u8> bytes(embedding.size() * sizeof(f32));
             if (!bytes.empty()) {
                 std::memcpy(bytes.data(), embedding.data(), bytes.size());
             }
@@ -28,8 +30,7 @@ namespace insoulforge::MemoryMaintenanceStore {
         }
     } // namespace
 
-    int64_t enqueue(
-      const uint64_t sessionId, const json &messages, const json &contextMessages, const size_t removeCount) {
+    i64 enqueue(const u64 sessionId, const json &messages, const json &contextMessages, const size_t removeCount) {
         const auto &database = Database::instance();
         std::unique_lock lock(database.mutex());
         const Statement statement(database.handle(),
@@ -38,24 +39,24 @@ namespace insoulforge::MemoryMaintenanceStore {
         statement.bind(1, sessionId);
         statement.bind(2, dumpJson(messages));
         statement.bind(3, dumpJson(contextMessages));
-        statement.bind(4, static_cast<int64_t>(removeCount));
+        statement.bind(4, static_cast<i64>(removeCount));
         statement.execOrThrow();
         return Statement::lastInsertRowId(database.handle());
     }
 
-    std::vector<uint64_t> pendingSessionIds() {
+    std::vector<u64> pendingSessionIds() {
         const auto &database = Database::instance();
         std::shared_lock lock(database.mutex());
         const Statement statement(database.handle(),
           "SELECT DISTINCT session_id FROM memory_maintenance_jobs WHERE status = 'pending' ORDER BY session_id");
-        std::vector<uint64_t> sessionIds;
+        std::vector<u64> sessionIds;
         while (statement.step()) {
-            sessionIds.push_back(static_cast<uint64_t>(statement.getInt64(0)));
+            sessionIds.push_back(static_cast<u64>(statement.getInt64(0)));
         }
         return sessionIds;
     }
 
-    bool hasUnfinished(const uint64_t sessionId) {
+    bool hasUnfinished(const u64 sessionId) {
         const auto &database = Database::instance();
         std::shared_lock lock(database.mutex());
         const Statement statement(
@@ -64,7 +65,7 @@ namespace insoulforge::MemoryMaintenanceStore {
         return statement.step();
     }
 
-    std::optional<MemoryMaintenanceJob> next(const uint64_t sessionId) {
+    std::optional<MemoryMaintenanceJob> next(const u64 sessionId) {
         const auto &database = Database::instance();
         std::shared_lock lock(database.mutex());
         const Statement statement(database.handle(),
@@ -87,11 +88,11 @@ namespace insoulforge::MemoryMaintenanceStore {
           .sessionId = sessionId,
           .messages = std::move(messages),
           .contextMessages = std::move(contextMessages),
-          .removeCount = static_cast<size_t>(std::max(statement.getInt64(3), int64_t{0})),
+          .removeCount = static_cast<size_t>(std::max(statement.getInt64(3), i64{0})),
           .attemptCount = statement.getInt(4)};
     }
 
-    std::optional<size_t> takeCompleted(const uint64_t sessionId) {
+    std::optional<size_t> takeCompleted(const u64 sessionId) {
         const auto &database = Database::instance();
         std::unique_lock lock(database.mutex());
         sqlite3 *handle = database.handle();
@@ -102,15 +103,15 @@ namespace insoulforge::MemoryMaintenanceStore {
         if (!select.step()) {
             return std::nullopt;
         }
-        const int64_t jobId = select.getInt64(0);
-        const size_t removeCount = static_cast<size_t>(std::max(select.getInt64(1), int64_t{0}));
+        const i64 jobId = select.getInt64(0);
+        const size_t removeCount = static_cast<size_t>(std::max(select.getInt64(1), i64{0}));
         const Statement remove(handle, "DELETE FROM memory_maintenance_jobs WHERE id = ?");
         remove.bind(1, jobId);
         remove.execOrThrow();
         return removeCount;
     }
 
-    void incrementAttempt(const int64_t jobId) {
+    void incrementAttempt(const i64 jobId) {
         const auto &database = Database::instance();
         std::unique_lock lock(database.mutex());
         const Statement statement(database.handle(),
@@ -120,7 +121,7 @@ namespace insoulforge::MemoryMaintenanceStore {
         statement.execOrThrow();
     }
 
-    void complete(const int64_t jobId, const uint64_t sessionId, const std::optional<std::string> &shortTermMemory,
+    void complete(const i64 jobId, const u64 sessionId, const std::optional<std::string> &shortTermMemory,
       const std::vector<PreparedLongTermMemory> &longTermMemories) {
         const auto &database = Database::instance();
         std::unique_lock lock(database.mutex());
@@ -137,7 +138,7 @@ namespace insoulforge::MemoryMaintenanceStore {
                 statement.execOrThrow();
             }
 
-            std::unordered_set<int64_t> replacedIds;
+            std::unordered_set<i64> replacedIds;
             for (const PreparedLongTermMemory &memory: longTermMemories) {
                 const Statement statement(
                   handle, "INSERT INTO long_term_memory (group_id, content, embedding) VALUES (?, ?, ?)");
@@ -147,7 +148,7 @@ namespace insoulforge::MemoryMaintenanceStore {
                 statement.execOrThrow();
                 replacedIds.insert(memory.replacedIds.begin(), memory.replacedIds.end());
             }
-            for (const int64_t memoryId: replacedIds) {
+            for (const i64 memoryId: replacedIds) {
                 const Statement statement(handle, "DELETE FROM long_term_memory WHERE id = ? AND group_id = ?");
                 statement.bind(1, memoryId);
                 statement.bind(2, sessionId);

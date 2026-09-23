@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <deque>
 #include <mutex>
 #include <optional>
@@ -29,7 +31,7 @@ namespace insoulforge {
     public:
         /// @brief 从数据库恢复一个统一会话的最近完整消息
         /// @param sessionId 群号或带私聊标志位的用户 QQ 号
-        explicit MessageList(uint64_t sessionId);
+        explicit MessageList(u64 sessionId);
 
         /// @brief 追加完整消息并生成冻结快照
         /// @param message 完整消息 JSON；内部不会保留工作流专用 `session_id`
@@ -65,7 +67,7 @@ namespace insoulforge {
         /// @brief 在未存在总结任务且达到阈值时保留一批最旧消息供异步总结
         [[nodiscard]] std::optional<MemorySummaryBatch> createSummaryBatchLocked();
 
-        uint64_t m_sessionId; ///< 绑定的统一会话 ID
+        u64 m_sessionId; ///< 绑定的统一会话 ID
         mutable std::mutex m_mutex; ///< 保护消息、总结批次状态与快照生成
         std::deque<json> m_messages; ///< 按时间顺序保存的完整消息
         bool m_summaryBatchPending{false}; ///< 是否已有尚未完成的总结任务

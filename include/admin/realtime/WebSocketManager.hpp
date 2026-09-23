@@ -8,7 +8,9 @@
 ///          - 消息推送：实时推送新消息
 
 #pragma once
+
 #include <drogon/WebSocketConnection.h>
+#include <infrastructure/NumericTypes.hpp>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -37,18 +39,18 @@ namespace insoulforge {
         /// @brief 订阅特定群的消息
         /// @param conn WebSocket 连接指针
         /// @param sessionId 会话 ID（私聊会话带标志位）
-        void subscribeSession(const drogon::WebSocketConnectionPtr &conn, uint64_t sessionId);
+        void subscribeSession(const drogon::WebSocketConnectionPtr &conn, u64 sessionId);
 
         /// @brief 取消订阅群
         /// @param conn WebSocket 连接指针
         /// @param sessionId 会话 ID（私聊会话带标志位）
-        void unsubscribeSession(const drogon::WebSocketConnectionPtr &conn, uint64_t sessionId);
+        void unsubscribeSession(const drogon::WebSocketConnectionPtr &conn, u64 sessionId);
 
         /// @brief 推送新消息到订阅该群的连接
         /// @param sessionId 会话 ID（私聊会话带标志位）
         /// @param role 角色（user/assistant）
         /// @param content 消息内容
-        void pushMessage(uint64_t sessionId, const std::string &role, const std::string &content);
+        void pushMessage(u64 sessionId, const std::string &role, const std::string &content);
 
         /// @brief 广播事件到所有连接
         /// @param type 事件类型
@@ -59,8 +61,7 @@ namespace insoulforge {
         WebSocketManager() = default;
 
         std::unordered_set<drogon::WebSocketConnectionPtr> m_connections; ///< 所有连接
-        std::unordered_map<uint64_t, std::unordered_set<drogon::WebSocketConnectionPtr>>
-          m_subscriptions; ///< 群订阅映射
+        std::unordered_map<u64, std::unordered_set<drogon::WebSocketConnectionPtr>> m_subscriptions; ///< 群订阅映射
         mutable std::mutex m_mutex; ///< 线程安全锁
     };
 } // namespace insoulforge

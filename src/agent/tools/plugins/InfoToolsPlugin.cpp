@@ -1,6 +1,8 @@
 /// @file InfoToolsPlugin.cpp
 /// @brief 信息工具插件实现（INFORMATION，查询数据、获取答案，不产生副作用）
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <agent/ability/TaskStore.hpp>
 #include <agent/memory/LongTermMemory.hpp>
 #include <agent/tools/ToolArgument.hpp>
@@ -84,7 +86,7 @@ namespace insoulforge {
                 if (query.empty())
                     co_return std::string("请提供回忆关键词");
 
-                const uint64_t sessionId = ctx.sessionId;
+                const u64 sessionId = ctx.sessionId;
                 const auto result = co_await LongTermMemory::searchMemory(query, 3, sessionId);
                 if (!result || result->empty()) {
                     co_return "想不起来了，没有找到相关记忆";
@@ -114,7 +116,7 @@ namespace insoulforge {
                            "拿到答案后据此组织回复。简单闲聊、日常对话禁止调用。",
             .parameters = thinkParams,
             .handler = [](json args, ToolCallContext ctx) -> drogon::Task<std::string> {
-                const uint64_t sessionId = ctx.sessionId;
+                const u64 sessionId = ctx.sessionId;
                 const std::string question = argString(args, "question");
 
                 // 上下文随调用参数传入，由协程帧持有，co_await 期间不会被其他会话覆盖
@@ -166,7 +168,7 @@ namespace insoulforge {
                            "时使用。返回任务编号、触发时间和备忘内容。",
             .parameters = json(),
             .handler = [](json, const ToolCallContext ctx) -> drogon::Task<std::string> {
-                const uint64_t sessionId = ctx.sessionId;
+                const u64 sessionId = ctx.sessionId;
                 if (sessionId == 0)
                     co_return std::string("会话上下文缺失，无法查询定时任务");
                 const auto [sessionType, targetId] = SessionId::toStorageTarget(sessionId);

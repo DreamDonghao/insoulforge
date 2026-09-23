@@ -2,6 +2,8 @@
 /// @brief 统一消息的媒体与长期记忆富化实现
 
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <agent/memory/LongTermMemoryStore.hpp>
 #include <conversation/message/MessageRecord.hpp>
 #include <fmt/format.h>
@@ -12,7 +14,7 @@
 
 namespace insoulforge::MessageContentEnricher {
     namespace {
-        constexpr int kRecallTopK = 3;
+        constexpr i32 kRecallTopK = 3;
         constexpr size_t kMinRecallChars = 3;
 
         /// @brief 计算 UTF-8 代码点数量
@@ -22,7 +24,7 @@ namespace insoulforge::MessageContentEnricher {
         }
     } // namespace
 
-    drogon::Task<json> enrichImages(json message, const uint64_t sessionId) {
+    drogon::Task<json> enrichImages(json message, const u64 sessionId) {
         if (!message.is_object()) {
             co_return message;
         }
@@ -59,7 +61,7 @@ namespace insoulforge::MessageContentEnricher {
         co_return message;
     }
 
-    drogon::Task<json> injectMemories(json message, const uint64_t sessionId) {
+    drogon::Task<json> injectMemories(json message, const u64 sessionId) {
         const std::string query = MessageRecord::extractRecallText(message);
         if (utf8Length(query) <= kMinRecallChars) {
             co_return message;
@@ -70,7 +72,7 @@ namespace insoulforge::MessageContentEnricher {
             co_return message;
         }
 
-        const float threshold = static_cast<float>(Config::instance().longTermInjectThreshold);
+        const f32 threshold = static_cast<f32>(Config::instance().longTermInjectThreshold);
         json memories = json::array();
         for (const auto &[id, content, similarity]:
           LongTermMemoryStore::searchSimilar(sessionId, *embedding, kRecallTopK)) {

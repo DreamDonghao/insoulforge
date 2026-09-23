@@ -1,6 +1,8 @@
 /// @file AffinityMaintenanceStore.cpp
 /// @brief 好感度维护任务的持久化存储实现
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <conversation/maintenance/affinity/AffinityMaintenanceStore.hpp>
 
 #include <infrastructure/storage/Database.hpp>
@@ -19,19 +21,19 @@ namespace insoulforge::AffinityMaintenanceStore {
         }
     } // namespace
 
-    std::vector<uint64_t> pendingSessionIds() {
+    std::vector<u64> pendingSessionIds() {
         const auto &database = Database::instance();
         std::shared_lock lock(database.mutex());
         const Statement statement(
           database.handle(), "SELECT DISTINCT session_id FROM affinity_maintenance_jobs ORDER BY session_id");
-        std::vector<uint64_t> sessionIds;
+        std::vector<u64> sessionIds;
         while (statement.step()) {
-            sessionIds.push_back(static_cast<uint64_t>(statement.getInt64(0)));
+            sessionIds.push_back(static_cast<u64>(statement.getInt64(0)));
         }
         return sessionIds;
     }
 
-    std::optional<AffinityMaintenanceJob> next(const uint64_t sessionId) {
+    std::optional<AffinityMaintenanceJob> next(const u64 sessionId) {
         const auto &database = Database::instance();
         std::shared_lock lock(database.mutex());
         const Statement statement(database.handle(),
@@ -50,7 +52,7 @@ namespace insoulforge::AffinityMaintenanceStore {
           .attemptCount = statement.getInt(2)};
     }
 
-    void incrementAttempt(const int64_t jobId) {
+    void incrementAttempt(const i64 jobId) {
         const auto &database = Database::instance();
         std::unique_lock lock(database.mutex());
         const Statement statement(database.handle(),
@@ -60,7 +62,7 @@ namespace insoulforge::AffinityMaintenanceStore {
         statement.execOrThrow();
     }
 
-    void complete(const int64_t jobId, const uint64_t sessionId, const std::vector<std::pair<uint64_t, int>> &deltas) {
+    void complete(const i64 jobId, const u64 sessionId, const std::vector<std::pair<u64, i32>> &deltas) {
         const auto &database = Database::instance();
         std::unique_lock lock(database.mutex());
         sqlite3 *handle = database.handle();

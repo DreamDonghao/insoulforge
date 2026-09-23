@@ -1,6 +1,8 @@
 /// @file OneBotEventNormalizer.cpp
 /// @brief OneBot 上报事件到统一消息记录的转换实现
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <conversation/message/SessionId.hpp>
 #include <conversation/session/QQNameDirectory.hpp>
 #include <conversation/workflow/OneBotEventNormalizer.hpp>
@@ -10,11 +12,11 @@ namespace insoulforge::OneBotEventNormalizer {
         std::atomic nextSyntheticMessageId{9'100'000'000LL};
 
         /// @brief 为缺少消息 ID 的通知事件生成进程内唯一 ID
-        [[nodiscard]] int64_t makeSyntheticMessageId() { return nextSyntheticMessageId.fetch_add(1); }
+        [[nodiscard]] i64 makeSyntheticMessageId() { return nextSyntheticMessageId.fetch_add(1); }
 
         /// @brief 将 OneBot Unix 时间戳转换为统一记录的本地时间字符串
         [[nodiscard]] std::string normalizeTime(const json &body) {
-            const int64_t timestamp = getInt64(body, "time");
+            const i64 timestamp = getInt64(body, "time");
             return timestamp > 0 ? formatUnixTime(timestamp) : currentDateTime();
         }
 
@@ -40,7 +42,7 @@ namespace insoulforge::OneBotEventNormalizer {
 
         /// @brief 追加一个普通 OneBot 消息段，并返回其引用回复 ID（若存在）
         [[nodiscard]] std::optional<std::string> appendMessageSegment(
-          const json &source, json &segments, json &images, const uint64_t selfId) {
+          const json &source, json &segments, json &images, const u64 selfId) {
             const std::string type = getStr(source, "type");
             const json &data = atOrNull(source, "data");
             if (type == "text") {
@@ -59,7 +61,7 @@ namespace insoulforge::OneBotEventNormalizer {
                 images.push_back({{"source", {{"file", getStr(data, "file")}, {"url", getStr(data, "url")}}}});
                 segments.push_back({{"type", "image"}, {"image_index", imageIndex}});
             } else if (type == "poke") {
-                const uint64_t actorId = getUInt(data, "actor_id");
+                const u64 actorId = getUInt(data, "actor_id");
                 json target{{"qq", jsonToString(atOrNull(data, "target_id"))}};
                 if (const std::string name = getStr(data, "target_name"); !name.empty()) {
                     target["name"] = name;
@@ -91,28 +93,28 @@ namespace insoulforge::OneBotEventNormalizer {
 
         /// @brief 初始化统一记录的公共元数据字段
         [[nodiscard]] json createRecord(
-          const json &body, const uint64_t senderId, const std::string &senderName, const int64_t messageId) {
+          const json &body, const u64 senderId, const std::string &senderName, const i64 messageId) {
             return {{"time", normalizeTime(body)}, {"sender", {{"name", senderName}, {"qq", std::to_string(senderId)}}},
               {"message_id", std::to_string(messageId)}, {"segments", json::array()}};
         }
 
         /// @brief 从原始上报提取统一会话 ID
         /// @details 群聊以群号为 ID；私聊以用户 QQ 号加私聊标志位，避免与群号冲突。
-        [[nodiscard]] uint64_t extractSessionId(const json &body, const uint64_t senderId) {
-            if (const uint64_t groupId = getUInt(body, "group_id"); groupId != 0) {
+        [[nodiscard]] u64 extractSessionId(const json &body, const u64 senderId) {
+            if (const u64 groupId = getUInt(body, "group_id"); groupId != 0) {
                 return groupId;
             }
             if (getStr(body, "post_type") == "message" && getStr(body, "message_type") != "private") {
                 return 0;
             }
-            const uint64_t userId = getUInt(body, "user_id", senderId);
+            const u64 userId = getUInt(body, "user_id", senderId);
             return userId == 0 ? 0 : SessionId::fromPrivateUser(userId);
         }
 
         /// @brief 归一化普通消息上报
         [[nodiscard]] std::optional<json> normalizeMessage(const json &body) {
-            const uint64_t senderId = getUInt(atOrNull(body, "sender"), "user_id", getUInt(body, "user_id"));
-            const int64_t messageId = getInt64(body, "message_id");
+            const u64 senderId = getUInt(atOrNull(body, "sender"), "user_id", getUInt(body, "user_id"));
+            const i64 messageId = getInt64(body, "message_id");
             if (senderId == 0 || messageId == 0) {
                 return std::nullopt;
             }
@@ -122,7 +124,7 @@ namespace insoulforge::OneBotEventNormalizer {
             json record = createRecord(body, senderId, senderName, messageId);
             json images = json::array();
             std::optional<std::string> replyTo;
-            const uint64_t selfId = getUInt(body, "self_id");
+            const u64 selfId = getUInt(body, "self_id");
             if (senderId == selfId && selfId != 0) {
                 record["sender"]["qq"] = "self";
             }
@@ -142,8 +144,8 @@ namespace insoulforge::OneBotEventNormalizer {
 
         /// @brief 归一化拍一拍通知
         [[nodiscard]] std::optional<json> normalizePokeNotice(const json &body) {
-            const uint64_t actorId = getUInt(body, "user_id");
-            const uint64_t targetId = getUInt(body, "target_id");
+            const u64 actorId = getUInt(body, "user_id");
+            const u64 targetId = getUInt(body, "target_id");
             if (actorId == 0 || targetId == 0) {
                 return std::nullopt;
             }
@@ -162,7 +164,7 @@ namespace insoulforge::OneBotEventNormalizer {
 
         /// @brief 归一化群成员变动通知
         [[nodiscard]] std::optional<json> normalizeMembershipNotice(const json &body) {
-            const uint64_t memberId = getUInt(body, "user_id");
+            const u64 memberId = getUInt(body, "user_id");
             if (memberId == 0 || getUInt(body, "group_id") == 0) {
                 return std::nullopt;
             }
@@ -199,8 +201,8 @@ namespace insoulforge::OneBotEventNormalizer {
             return std::nullopt;
         }
 
-        const uint64_t senderId = getUInt(atOrNull(body, "sender"), "user_id", getUInt(body, "user_id"));
-        const uint64_t sessionId = extractSessionId(body, senderId);
+        const u64 senderId = getUInt(atOrNull(body, "sender"), "user_id", getUInt(body, "user_id"));
+        const u64 sessionId = extractSessionId(body, senderId);
         if (sessionId == 0) {
             return std::nullopt;
         }

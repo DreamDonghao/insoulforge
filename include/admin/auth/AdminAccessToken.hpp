@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <drogon/HttpRequest.h>
 #include <drogon/HttpResponse.h>
 
@@ -26,7 +28,7 @@ namespace insoulforge {
         ///          启用的 IPv4 地址。Docker 默认桥接网络无法枚举宿主机的局域网地址。
         /// @param port 管理后台监听端口。
         /// @return 每个可用本机 IPv4 地址对应的自动登录链接。
-        [[nodiscard]] static std::vector<std::string> loginUrls(uint16_t port);
+        [[nodiscard]] static std::vector<std::string> loginUrls(u16 port);
 
         /// @brief 获取当前进程有效的管理后台访问令牌副本。
         /// @warning 调用方不得将令牌写入配置、数据库或不受信任的输出通道。

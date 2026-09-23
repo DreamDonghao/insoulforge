@@ -3,13 +3,15 @@
 /// @author donghao
 /// @date 2026-08-30
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 
 namespace insoulforge::UsageStore {
-    void addUsageRecord(const std::string &role, const std::string &model, const int promptTokens,
-      const int completionTokens, const int totalTokens, const int cachedTokens) {
+    void addUsageRecord(const std::string &role, const std::string &model, const i32 promptTokens,
+      const i32 completionTokens, const i32 totalTokens, const i32 cachedTokens) {
         const auto &db = Database::instance();
         std::unique_lock lock(db.mutex());
         const Statement stmt(db.handle(),
@@ -24,7 +26,7 @@ namespace insoulforge::UsageStore {
         stmt.exec();
     }
 
-    json getUsageSummary(const int days) {
+    json getUsageSummary(const i32 days) {
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
         json result;
@@ -132,7 +134,7 @@ namespace insoulforge::UsageStore {
         return result;
     }
 
-    json getRecentUsage(const int limit) {
+    json getRecentUsage(const i32 limit) {
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
         json result = json::array();

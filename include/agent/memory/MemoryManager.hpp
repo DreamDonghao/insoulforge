@@ -6,6 +6,8 @@
 ///          短期记忆以纯文本形式存储，每行一条记忆条目。
 
 #pragma once
+
+#include <infrastructure/NumericTypes.hpp>
 #include <string>
 
 namespace insoulforge {
@@ -16,13 +18,13 @@ namespace insoulforge {
     public:
         /// @brief 构造函数
         /// @param sessionId 会话 ID（私聊会话带标志位）
-        explicit MemoryManager(uint64_t sessionId);
+        explicit MemoryManager(u64 sessionId);
 
         /// @brief 获取短期记忆
         /// @return 记忆内容（每行一条）
         [[nodiscard]] std::string getMemory() const;
 
     private:
-        uint64_t m_sessionId; ///< 群号
+        u64 m_sessionId; ///< 群号
     };
 } // namespace insoulforge

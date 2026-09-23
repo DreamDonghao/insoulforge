@@ -15,16 +15,16 @@
 
 名称必须描述职责或数据含义，不使用无语义缩写。布尔变量与布尔函数应能直接读成判断句。
 
-| 对象 | 规则 | 示例 |
-| --- | --- | --- |
-| 头文件、源文件 | `PascalCase.hpp`、`PascalCase.cpp` | `OneBotEventWorkflow.hpp` |
-| 类型、枚举、别名 | `PascalCase` | `MessageList`、`ToolCategory` |
-| 枚举值 | 枚举内保持一致 | `Level::Warning` 或 `ToolCategory::INFORMATION` |
-| 函数、方法、局部变量、参数 | `camelCase` | `processMessage`、`groupId` |
-| 成员变量 | `m_` + `camelCase` | `m_sessionId` |
-| 静态数据成员 | `s_` + `camelCase` | `s_instance` |
-| 命名常量 | `k` + `PascalCase` | `kMaxRetries` |
-| 命名空间 | 全小写 | `insoulforge` |
+| 对象                       | 规则                               | 示例                                            |
+|----------------------------|------------------------------------|-------------------------------------------------|
+| 头文件、源文件             | `PascalCase.hpp`、`PascalCase.cpp` | `OneBotEventWorkflow.hpp`                       |
+| 类型、枚举、别名           | `PascalCase`                       | `MessageList`、`ToolCategory`                   |
+| 枚举值                     | 枚举内保持一致                     | `Level::Warning` 或 `ToolCategory::INFORMATION` |
+| 函数、方法、局部变量、参数 | `camelCase`                        | `processMessage`、`groupId`                     |
+| 成员变量                   | `m_` + `camelCase`                 | `m_sessionId`                                   |
+| 静态数据成员               | `s_` + `camelCase`                 | `s_instance`                                    |
+| 命名常量                   | `k` + `PascalCase`                 | `kMaxRetries`                                   |
+| 命名空间                   | 全小写                             | `insoulforge`                                   |
 
 补充规则：
 
@@ -77,12 +77,35 @@ registry.registerTool(
 
 ## 类型与所有权
 
-### Almost Always Auto（AAA）
+### 数值类型
 
-局部变量默认使用 **Almost Always Auto（AAA）**。当初始化表达式或右侧显式类型足以说明结果类型时，使用 `auto`、`const auto` 或 `const auto &`，避免重复类型、意外转换和错误的引用语义。
+项目自有代码通过 `infrastructure/NumericTypes.hpp` 使用定宽别名：有符号整数为 `i8`、`i16`、`i32`、`i64`，无符号整数为 `u8`、
+`u16`、`u32`、`u64`，浮点数为 `f32`、`f64`。这些名称是类型命名规则的例外；按实际范围和精度选类型，不因简写改变数值语义。
 
 ```cpp
-const auto sessionId = message.at("group_id").get<uint64_t>();
+#include <infrastructure/NumericTypes.hpp>
+
+namespace insoulforge {
+    struct NumericExample {
+        i32 retryCount = 0;
+        u64 sessionId = 0;
+        f32 similarity = 0.0F;
+        f64 temperature = 0.7;
+    };
+}
+```
+
+- 容器大小、偏移和索引使用 `size_t`，不强制转换为固定宽度整数。
+- `main` 和第三方库要求的函数签名、输出参数保留库定义的类型；在边界处按需转换并检查范围。
+- `f32` 对应 `float`，`f64` 对应 `double`。序列化需要双精度的配置值继续使用 `f64`。
+
+### Almost Always Auto（AAA）
+
+局部变量默认使用 **Almost Always Auto（AAA）**。当初始化表达式或右侧显式类型足以说明结果类型时，使用 `auto`、`const auto` 或
+`const auto &`，避免重复类型、意外转换和错误的引用语义。
+
+```cpp
+const auto sessionId = message.at("group_id").get<u64>();
 auto response = co_await client.sendRequest(std::move(request));
 const auto &config = Config::instance().llm();
 auto retryPolicy = RetryPolicy{.maxAttempts = 3, .retryDelay = std::chrono::seconds{1}};
@@ -91,7 +114,7 @@ auto retryPolicy = RetryPolicy{.maxAttempts = 3, .retryDelay = std::chrono::seco
 需要明确构造目标类型时，使用 `auto variable = Type{...}`：类型只出现一次，同时保留构造意图。
 
 ```cpp
-auto messageIds = std::vector<uint64_t>{firstId, secondId};
+auto messageIds = std::vector<u64>{firstId, secondId};
 ```
 
 花括号会优先匹配 `std::initializer_list`。若这会改变构造语义，必须使用圆括号选择目标构造函数：
@@ -109,7 +132,8 @@ auto retryDelays = std::vector<std::chrono::seconds>(3, std::chrono::seconds{1})
 - 需要明确窄化、类型转换或重载选择。
 - 函数返回类型、公开成员、接口参数和序列化模型等对外契约。AAA 只适用于局部变量。
 
-`auto` 不会保留引用或 `const`，除非显式写出。只读借用使用 `const auto &`；需要取得所有权或延长临时对象生命周期时使用 `auto` 或 `const auto`。不得因使用 `auto` 意外复制大型对象或丢失引用语义。
+`auto` 不会保留引用或 `const`，除非显式写出。只读借用使用 `const auto &`；需要取得所有权或延长临时对象生命周期时使用 `auto`
+或 `const auto`。不得因使用 `auto` 意外复制大型对象或丢失引用语义。
 
 ### 参数与返回值
 
@@ -121,7 +145,8 @@ auto retryDelays = std::vector<std::chrono::seconds>(3, std::chrono::seconds{1})
 
 ## Doxygen 注释
 
-注释说明“为什么、约束和边界”，不复述代码已经表达的“做什么”。对外头文件、公共类型、非直观的公共函数，以及并发或生命周期敏感的接口必须使用 Doxygen 注释。
+注释说明“为什么、约束和边界”，不复述代码已经表达的“做什么”。对外头文件、公共类型、非直观的公共函数，以及并发或生命周期敏感的接口必须使用
+Doxygen 注释。
 
 ```cpp
 /// @file MessageList.hpp
@@ -145,12 +170,15 @@ auto retryDelays = std::vector<std::chrono::seconds>(3, std::chrono::seconds{1})
 
 ## 协程参数（`drogon::Task`）
 
-协程可以在调用方栈帧结束后继续运行，因此参数的生命周期必须覆盖整个协程。`drogon::Task` 的值语义数据必须由协程帧持有，不能把调用方局部对象的引用或指针跨越挂起点保存。
+协程可以在调用方栈帧结束后继续运行，因此参数的生命周期必须覆盖整个协程。`drogon::Task`
+的值语义数据必须由协程帧持有，不能把调用方局部对象的引用或指针跨越挂起点保存。
 
-1. `json`、`std::string`、容器和业务结构体等值语义参数一律按值传入协程；调用后不再使用实参时传入 `std::move(value)`，否则传入 lvalue 让协程复制。
+1. `json`、`std::string`、容器和业务结构体等值语义参数一律按值传入协程；调用后不再使用实参时传入 `std::move(value)`，否则传入
+   lvalue 让协程复制。
 2. 禁止从单例、配置成员或会被复用的 lambda 捕获中移动数据。
 3. 普通非协程函数不受此限制：只读大对象仍使用 `const T &`；消费型函数可按值接收后移动。
-4. 仅当引用对象的生命周期明确覆盖整个协程，且调用方会 `co_await` 到完成时，才允许协程接收 `const T &`。进程级单例成员和不可复制的会话级管理器属于此例外。
+4. 仅当引用对象的生命周期明确覆盖整个协程，且调用方会 `co_await` 到完成时，才允许协程接收 `const T &`
+   。进程级单例成员和不可复制的会话级管理器属于此例外。
 5. `std::string_view` 只能接收生命周期覆盖协程全程的字符串字面量、静态字符串或受同一持有者管理的字符串。
 6. 框架固定签名无法改为值参数时，在进入协程后、首次挂起前复制需要保留的数据。
 7. 不使用 `T &` 作为跨协程输出参数；通过返回值或聚合返回类型传回结果。

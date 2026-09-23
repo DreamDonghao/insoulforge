@@ -1,3 +1,5 @@
+#include <infrastructure/NumericTypes.hpp>
+
 #include <admin/realtime/AdminWebSocket.hpp>
 #include <infrastructure/logging/Logger.hpp>
 
@@ -32,7 +34,7 @@ void AdminWebSocket::handleNewMessage(
     // 处理订阅请求（线上 JSON 字段沿用 "groupId"，字符串形式可承载大数，内部语义为 sessionId）
     if (msg.contains("action")) {
         if (std::string action = getStr(msg, "action"); action == "subscribe" && msg.contains("groupId")) {
-            const uint64_t sessionId = parseUInt64(getStr(msg, "groupId"));
+            const u64 sessionId = parseUInt64(getStr(msg, "groupId"));
             wsMgr.subscribeSession(conn, sessionId);
 
             // 发送确认
@@ -41,7 +43,7 @@ void AdminWebSocket::handleNewMessage(
             resp["groupId"] = sessionId;
             conn->send(dumpJson(resp));
         } else if (action == "unsubscribe" && msg.contains("groupId")) {
-            const uint64_t sessionId = parseUInt64(getStr(msg, "groupId"));
+            const u64 sessionId = parseUInt64(getStr(msg, "groupId"));
             wsMgr.unsubscribeSession(conn, sessionId);
 
             json resp;

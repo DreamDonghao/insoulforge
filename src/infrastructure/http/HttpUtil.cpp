@@ -1,6 +1,8 @@
 /// @file HttpUtil.cpp
 /// @brief HTTP 请求工具 - 实现
 
+#include <infrastructure/NumericTypes.hpp>
+
 #include <infrastructure/http/HttpTrace.hpp>
 #include <infrastructure/http/HttpUtil.hpp>
 #include <infrastructure/logging/Logger.hpp>
@@ -64,8 +66,8 @@ namespace insoulforge::HttpUtil {
     } // namespace
 
     drogon::Task<std::optional<drogon::HttpResponsePtr>> send(const std::string_view tag, std::string baseUrl,
-      std::string path, const drogon::HttpMethod method, json body, std::string bearerToken, const double timeout,
-      std::optional<uint64_t> sessionId) {
+      std::string path, const drogon::HttpMethod method, json body, std::string bearerToken, const f64 timeout,
+      std::optional<u64> sessionId) {
         normalizeTarget(baseUrl, path);
         // 请求体完整序列化一次，供请求调试记录和实际请求共用；运行日志不记录正常请求细节。
         auto bodyText = body.is_null() ? std::string{} : dumpJson(body);
@@ -102,7 +104,7 @@ namespace insoulforge::HttpUtil {
         }
         trace.requestBody = std::move(bodyText);
 
-        const auto finishTrace = [&](const int statusCode, std::string responseBody) {
+        const auto finishTrace = [&](const i32 statusCode, std::string responseBody) {
             trace.status = statusCode;
             trace.responseBody = std::move(responseBody);
             HttpTrace::instance().append(std::move(trace));
@@ -126,11 +128,11 @@ namespace insoulforge::HttpUtil {
         // 非 2xx（如 DNS 解析失败、连接被拒等）同样把地址打出来，方便定位
         if (resp->getStatusCode() >= drogon::k400BadRequest) {
             Logger::warn(sessionId.value_or(0), tag,
-              fmt::format("HTTP 响应异常: status={} ({} {}{})", static_cast<int>(resp->getStatusCode()),
+              fmt::format("HTTP 响应异常: status={} ({} {}{})", static_cast<i32>(resp->getStatusCode()),
                 methodName(method), baseUrl, path));
         }
 
-        finishTrace(static_cast<int>(resp->getStatusCode()), std::string{resp->body()});
+        finishTrace(static_cast<i32>(resp->getStatusCode()), std::string{resp->body()});
 
         co_return resp;
     }
