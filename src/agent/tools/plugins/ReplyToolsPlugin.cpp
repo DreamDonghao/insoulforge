@@ -7,7 +7,7 @@
 #include <include/agent/tools/ToolRegistry.hpp>
 
 namespace insoulforge {
-    std::string_view ReplyToolsPlugin::id() const noexcept { return "builtin.reply"; }
+    auto ReplyToolsPlugin::id() const noexcept -> std::string_view { return "builtin.reply"; }
 
     /// @brief 注册回复工具（REPLY，调用即结束回合）
     void ReplyToolsPlugin::registerTools(ToolRegistry &registry) const {

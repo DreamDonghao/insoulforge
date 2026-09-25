@@ -10,7 +10,7 @@
 #include <spdlog/spdlog.h>
 
 namespace insoulforge {
-    Database &Database::instance() {
+    auto Database::instance() -> Database & {
         static Database db;
         return db;
     }

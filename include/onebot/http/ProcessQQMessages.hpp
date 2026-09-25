@@ -25,7 +25,7 @@ namespace insoulforge {
         /// @param req HTTP 请求，包含 OneBot 协议的 JSON 事件
         /// @param callback HTTP 响应回调
         /// @details 有效请求会先返回成功响应，再将事件投入所属会话的顺序处理队列。
-        static drogon::Task<> receiveOneBotEvent(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback);
+        static auto receiveOneBotEvent(
+          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) -> drogon::Task<>;
     };
 } // namespace insoulforge

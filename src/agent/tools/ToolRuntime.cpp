@@ -13,7 +13,7 @@
 namespace insoulforge {
     namespace {
         /// @brief 解析并规范化自定义工具的参数 Schema
-        [[nodiscard]] json parseCustomToolParameters(const ToolStore::CustomTool &tool) {
+        [[nodiscard]] auto parseCustomToolParameters(const ToolStore::CustomTool &tool) -> json {
             json parameters;
             if (!tool.parameters.empty()) {
                 std::ignore = tryParseJson(tool.parameters, parameters);
@@ -25,7 +25,7 @@ namespace insoulforge {
         }
 
         /// @brief 按执行器类型构建自定义工具定义
-        [[nodiscard]] std::optional<Tool> makeCustomTool(const ToolStore::CustomTool &tool, json parameters) {
+        [[nodiscard]] auto makeCustomTool(const ToolStore::CustomTool &tool, json parameters) -> std::optional<Tool> {
             if (tool.executorType == "python") {
                 return Tool{
                   .name = tool.name,
@@ -60,7 +60,7 @@ namespace insoulforge {
 
         // 重载只替换 custom 插件，不会影响内置工具。
         const bool registered =
-          registry.registerPlugin("custom", [&tools, &registeredCount](ToolRegistry &pluginRegistry) {
+          registry.registerPlugin("custom", [&tools, &registeredCount](ToolRegistry &pluginRegistry) -> void {
               for (const auto &tool: tools) {
                   auto definition = makeCustomTool(tool, parseCustomToolParameters(tool));
                   if (!definition) {

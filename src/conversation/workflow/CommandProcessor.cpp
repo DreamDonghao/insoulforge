@@ -16,7 +16,7 @@
 namespace insoulforge::CommandProcessor {
     namespace {
         /// @brief 跳过命令文本开头的空白字符
-        [[nodiscard]] size_t firstCommandCharacter(const std::string_view text) {
+        [[nodiscard]] auto firstCommandCharacter(const std::string_view text) -> size_t {
             size_t position = 0;
             while (position < text.size() && std::isspace(static_cast<unsigned char>(text[position]))) {
                 ++position;
@@ -25,14 +25,14 @@ namespace insoulforge::CommandProcessor {
         }
 
         /// @brief 提取以 `/` 开头的完整命令文本
-        [[nodiscard]] std::string commandText(const json &message) {
+        [[nodiscard]] auto commandText(const json &message) -> std::string {
             const std::string text = MessageRecord::extractText(message);
             const size_t position = firstCommandCharacter(text);
             return position < text.size() && text[position] == '/' ? text.substr(position) : std::string{};
         }
     } // namespace
 
-    bool isCommand(const json &message) {
+    auto isCommand(const json &message) -> bool {
         const u64 sessionId = getUInt(message, "session_id");
         if (sessionId == 0 ||
             (!SessionId::isPrivate(sessionId) && !MessageRecord::mentions(message, Config::instance().selfQQNumber))) {
@@ -41,7 +41,7 @@ namespace insoulforge::CommandProcessor {
         return !commandText(message).empty();
     }
 
-    drogon::Task<std::string> execute(const json &message) {
+    auto execute(const json &message) -> drogon::Task<std::string> {
         const u64 sessionId = getUInt(message, "session_id");
         const u64 senderQQ = getUInt(atOrNull(message, "sender"), "qq");
         const bool hasPermission = AdminStore::isAdmin(senderQQ);

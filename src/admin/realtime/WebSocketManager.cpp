@@ -7,7 +7,7 @@
 #include <infrastructure/logging/Logger.hpp>
 
 namespace insoulforge {
-    WebSocketManager &WebSocketManager::instance() {
+    auto WebSocketManager::instance() -> WebSocketManager & {
         static WebSocketManager mgr;
         return mgr;
     }

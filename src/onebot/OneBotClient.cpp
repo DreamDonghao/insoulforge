@@ -17,8 +17,8 @@ namespace insoulforge::OneBotClient {
         /// @param sessionId 会话 ID（用于会话日志，可空）
         /// @param timeout 超时秒数
         /// @return 响应 JSON（含 status/retcode/data）；请求失败或 status != ok 时返回 nullopt（已记日志）
-        [[nodiscard]] drogon::Task<std::optional<json>> callApi(std::string_view tag, std::string api, json params,
-          std::optional<u64> sessionId = std::nullopt, f64 timeout = 30.0) {
+        [[nodiscard]] auto callApi(std::string_view tag, std::string api, json params,
+          std::optional<u64> sessionId = std::nullopt, f64 timeout = 30.0) -> drogon::Task<std::optional<json>> {
             json body;
             const auto &config = Config::instance();
             if (config.oneBotTransport == "websocket") {
@@ -55,8 +55,8 @@ namespace insoulforge::OneBotClient {
         }
 
         /// @brief 发送消息的公共实现（群聊/私聊共用，仅 API 名与目标字段不同）
-        drogon::Task<std::optional<u64>> sendMessage(std::string api, std::string targetKey, const u64 targetId,
-          std::string message, const std::optional<u64> sessionId) {
+        auto sendMessage(std::string api, std::string targetKey, const u64 targetId, std::string message,
+          const std::optional<u64> sessionId) -> drogon::Task<std::optional<u64>> {
             json params;
             params[targetKey] = targetId;
             params["message"] = message;
@@ -72,16 +72,16 @@ namespace insoulforge::OneBotClient {
         }
     } // namespace
 
-    drogon::Task<std::optional<u64>> sendGroupMsg(const u64 groupId, std::string message) {
+    auto sendGroupMsg(const u64 groupId, std::string message) -> drogon::Task<std::optional<u64>> {
         co_return co_await sendMessage("send_group_msg", "group_id", groupId, std::move(message), groupId);
     }
 
-    drogon::Task<std::optional<u64>> sendPrivateMsg(
-      const u64 userId, std::string message, const std::optional<u64> sessionId) {
+    auto sendPrivateMsg(const u64 userId, std::string message, const std::optional<u64> sessionId)
+      -> drogon::Task<std::optional<u64>> {
         co_return co_await sendMessage("send_private_msg", "user_id", userId, std::move(message), sessionId);
     }
 
-    drogon::Task<bool> setGroupBan(const u64 groupId, const u64 userId, const u64 duration) {
+    auto setGroupBan(const u64 groupId, const u64 userId, const u64 duration) -> drogon::Task<bool> {
         json params;
         params["group_id"] = groupId;
         params["user_id"] = userId;
@@ -95,7 +95,7 @@ namespace insoulforge::OneBotClient {
         co_return true;
     }
 
-    drogon::Task<json> getGroupInfo(const u64 groupId) {
+    auto getGroupInfo(const u64 groupId) -> drogon::Task<json> {
         json params;
         params["group_id"] = groupId;
 
@@ -103,7 +103,7 @@ namespace insoulforge::OneBotClient {
         co_return resp.value_or(json{});
     }
 
-    drogon::Task<json> getStrangerInfo(const u64 userId, const std::optional<u64> sessionId) {
+    auto getStrangerInfo(const u64 userId, const std::optional<u64> sessionId) -> drogon::Task<json> {
         json params;
         params["user_id"] = userId;
 
@@ -111,7 +111,7 @@ namespace insoulforge::OneBotClient {
         co_return resp.value_or(json{});
     }
 
-    drogon::Task<bool> sendPoke(const u64 groupId, const u64 userId) {
+    auto sendPoke(const u64 groupId, const u64 userId) -> drogon::Task<bool> {
         json params;
         params["group_id"] = groupId;
         params["user_id"] = userId;
@@ -124,7 +124,7 @@ namespace insoulforge::OneBotClient {
         co_return true;
     }
 
-    drogon::Task<bool> deleteMsg(const u64 messageId, const std::optional<u64> sessionId) {
+    auto deleteMsg(const u64 messageId, const std::optional<u64> sessionId) -> drogon::Task<bool> {
         json params;
         params["message_id"] = messageId;
 
@@ -136,7 +136,7 @@ namespace insoulforge::OneBotClient {
         co_return true;
     }
 
-    drogon::Task<std::optional<std::string>> getImage(std::string file, const std::optional<u64> sessionId) {
+    auto getImage(std::string file, const std::optional<u64> sessionId) -> drogon::Task<std::optional<std::string>> {
         json params;
         params["file"] = std::move(file);
 
@@ -147,7 +147,7 @@ namespace insoulforge::OneBotClient {
         co_return jsonToString(atOrNull(atOrNull(*resp, "data"), "file"));
     }
 
-    drogon::Task<std::optional<std::string>> downloadFile(std::string url, const std::optional<u64> sessionId) {
+    auto downloadFile(std::string url, const std::optional<u64> sessionId) -> drogon::Task<std::optional<std::string>> {
         json params;
         params["url"] = std::move(url);
 
@@ -158,7 +158,7 @@ namespace insoulforge::OneBotClient {
         co_return jsonToString(atOrNull(atOrNull(*resp, "data"), "file"));
     }
 
-    drogon::Task<bool> addCustomFace(std::string file, const std::optional<u64> sessionId) {
+    auto addCustomFace(std::string file, const std::optional<u64> sessionId) -> drogon::Task<bool> {
         json params;
         params["file"] = file;
 
@@ -170,8 +170,8 @@ namespace insoulforge::OneBotClient {
         co_return true;
     }
 
-    drogon::Task<bool> setCustomFaceDesc(
-      std::string emojiId, std::string resId, std::string md5, std::string desc, const std::optional<u64> sessionId) {
+    auto setCustomFaceDesc(std::string emojiId, std::string resId, std::string md5, std::string desc,
+      const std::optional<u64> sessionId) -> drogon::Task<bool> {
         json params;
         params["emoji_id"] = std::move(emojiId);
         params["res_id"] = std::move(resId);
@@ -182,7 +182,7 @@ namespace insoulforge::OneBotClient {
         co_return resp.has_value();
     }
 
-    drogon::Task<bool> deleteCustomFace(std::string resId, const std::optional<u64> sessionId) {
+    auto deleteCustomFace(std::string resId, const std::optional<u64> sessionId) -> drogon::Task<bool> {
         json params;
         params["res_id"] = std::move(resId);
 
@@ -190,7 +190,7 @@ namespace insoulforge::OneBotClient {
         co_return resp.has_value();
     }
 
-    drogon::Task<json> fetchCustomFaceDetail(const std::optional<u64> sessionId) {
+    auto fetchCustomFaceDetail(const std::optional<u64> sessionId) -> drogon::Task<json> {
         json params;
         params["count"] = 200;
 

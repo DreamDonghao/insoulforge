@@ -31,7 +31,7 @@ namespace insoulforge {
         bool isPriority = false;
         bool isPrivate = false; ///< 是否私聊会话（决定 Executor 使用私聊人设提示词）
 
-        [[nodiscard]] static constexpr std::string_view actionToString(Action a) {
+        [[nodiscard]] static constexpr auto actionToString(Action a) -> std::string_view {
             constexpr std::array names = {"skip", "reply"};
             return names[static_cast<size_t>(a)];
         }

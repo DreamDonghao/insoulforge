@@ -11,7 +11,7 @@
 namespace insoulforge::MemoryMaintenanceStore {
     namespace {
         /// @brief 把 f32 向量转换为 SQLite BLOB
-        [[nodiscard]] std::vector<u8> toBytes(const std::vector<f32> &embedding) {
+        [[nodiscard]] auto toBytes(const std::vector<f32> &embedding) -> std::vector<u8> {
             std::vector<u8> bytes(embedding.size() * sizeof(f32));
             if (!bytes.empty()) {
                 std::memcpy(bytes.data(), embedding.data(), bytes.size());
@@ -30,7 +30,8 @@ namespace insoulforge::MemoryMaintenanceStore {
         }
     } // namespace
 
-    i64 enqueue(const u64 sessionId, const json &messages, const json &contextMessages, const size_t removeCount) {
+    auto enqueue(const u64 sessionId, const json &messages, const json &contextMessages, const size_t removeCount)
+      -> i64 {
         const auto &database = Database::instance();
         std::unique_lock lock(database.mutex());
         const Statement statement(database.handle(),
@@ -44,7 +45,7 @@ namespace insoulforge::MemoryMaintenanceStore {
         return Statement::lastInsertRowId(database.handle());
     }
 
-    std::vector<u64> pendingSessionIds() {
+    auto pendingSessionIds() -> std::vector<u64> {
         const auto &database = Database::instance();
         std::shared_lock lock(database.mutex());
         const Statement statement(database.handle(),
@@ -56,7 +57,7 @@ namespace insoulforge::MemoryMaintenanceStore {
         return sessionIds;
     }
 
-    bool hasUnfinished(const u64 sessionId) {
+    auto hasUnfinished(const u64 sessionId) -> bool {
         const auto &database = Database::instance();
         std::shared_lock lock(database.mutex());
         const Statement statement(
@@ -65,7 +66,7 @@ namespace insoulforge::MemoryMaintenanceStore {
         return statement.step();
     }
 
-    std::optional<MemoryMaintenanceJob> next(const u64 sessionId) {
+    auto next(const u64 sessionId) -> std::optional<MemoryMaintenanceJob> {
         const auto &database = Database::instance();
         std::shared_lock lock(database.mutex());
         const Statement statement(database.handle(),
@@ -92,7 +93,7 @@ namespace insoulforge::MemoryMaintenanceStore {
           .attemptCount = statement.getInt(4)};
     }
 
-    std::optional<size_t> takeCompleted(const u64 sessionId) {
+    auto takeCompleted(const u64 sessionId) -> std::optional<size_t> {
         const auto &database = Database::instance();
         std::unique_lock lock(database.mutex());
         sqlite3 *handle = database.handle();

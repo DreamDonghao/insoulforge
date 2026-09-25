@@ -20,19 +20,19 @@ namespace insoulforge::ConfigStore {
 
     // ==================== LLM 配置 ====================
 
-    [[nodiscard]] json getLLMConfig(const std::string &name);
+    [[nodiscard]] auto getLLMConfig(const std::string &name) -> json;
 
     void saveLLMConfig(const std::string &name, const json &config);
 
-    [[nodiscard]] json getAllLLMConfigs();
+    [[nodiscard]] auto getAllLLMConfigs() -> json;
 
     // ==================== QQ Bot / 记忆配置 ====================
 
-    [[nodiscard]] json getQQConfig();
+    [[nodiscard]] auto getQQConfig() -> json;
 
     void saveQQConfig(const json &config);
 
-    [[nodiscard]] json getMemoryConfig();
+    [[nodiscard]] auto getMemoryConfig() -> json;
 
     void saveMemoryConfig(const json &config);
 

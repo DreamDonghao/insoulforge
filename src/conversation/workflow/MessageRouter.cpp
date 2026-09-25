@@ -12,8 +12,8 @@
 
 namespace insoulforge::MessageRouter {
     namespace {
-        [[nodiscard]] RouterDecision makeDecision(const RouterDecision::Action action, std::string reason,
-          const i32 maxLength = 25, const bool priority = false) {
+        [[nodiscard]] auto makeDecision(const RouterDecision::Action action, std::string reason,
+          const i32 maxLength = 25, const bool priority = false) -> RouterDecision {
             return {.action = action,
               .reason = std::move(reason),
               .shouldReply = action == RouterDecision::Action::REPLY,
@@ -21,30 +21,30 @@ namespace insoulforge::MessageRouter {
               .isPriority = priority};
         }
 
-        [[nodiscard]] RouterDecision applySessionType(RouterDecision decision, const u64 sessionId) {
+        [[nodiscard]] auto applySessionType(RouterDecision decision, const u64 sessionId) -> RouterDecision {
             decision.isPrivate = SessionId::isPrivate(sessionId);
             return decision;
         }
 
         /// @brief 统计 UTF-8 字符数量，不将多字节汉字误计为多个字符
-        [[nodiscard]] size_t utf8CharacterCount(const std::string_view text) {
-            return static_cast<size_t>(
-              std::ranges::count_if(text, [](const unsigned char character) { return (character & 0xC0U) != 0x80U; }));
+        [[nodiscard]] auto utf8CharacterCount(const std::string_view text) -> size_t {
+            return static_cast<size_t>(std::ranges::count_if(
+              text, [](const unsigned char character) -> bool { return (character & 0xC0U) != 0x80U; }));
         }
 
-        [[nodiscard]] bool isSpam(const json &message) {
-            const bool hasNonTextSegment = std::ranges::any_of(
-              atOrNull(message, "segments"), [](const json &segment) { return getStr(segment, "type") != "text"; });
+        [[nodiscard]] auto isSpam(const json &message) -> bool {
+            const bool hasNonTextSegment = std::ranges::any_of(atOrNull(message, "segments"),
+              [](const json &segment) -> bool { return getStr(segment, "type") != "text"; });
             if (hasNonTextSegment) {
                 return false;
             }
             std::string text = MessageRecord::extractText(message);
             std::erase_if(
-              text, [](const char character) { return std::isspace(static_cast<unsigned char>(character)); });
+              text, [](const char character) -> int { return std::isspace(static_cast<unsigned char>(character)); });
             return text.empty() || utf8CharacterCount(text) <= 2;
         }
 
-        [[nodiscard]] json compactMessage(const json &message) {
+        [[nodiscard]] auto compactMessage(const json &message) -> json {
             const json projected = MessageRecord::projectForAgent(message);
             json compact;
             compact["message_id"] = getStr(message, "message_id");
@@ -59,8 +59,8 @@ namespace insoulforge::MessageRouter {
             return compact;
         }
 
-        [[nodiscard]] json buildPrompt(
-          const u64 sessionId, const std::string_view triggerMessageId, const json &snapshot) {
+        [[nodiscard]] auto buildPrompt(
+          const u64 sessionId, const std::string_view triggerMessageId, const json &snapshot) -> json {
             const auto &config = Config::instance();
             const size_t keep = static_cast<size_t>(config.routerWindowKeepCount);
             const size_t slide = std::max<size_t>(1, static_cast<size_t>(config.routerWindowTriggerCount) - keep);
@@ -102,7 +102,7 @@ namespace insoulforge::MessageRouter {
             return prompt;
         }
 
-        [[nodiscard]] std::optional<RouterDecision> parseDecision(const json &response) {
+        [[nodiscard]] auto parseDecision(const json &response) -> std::optional<RouterDecision> {
             const std::string content = jsonToString(atOrNull(atOrNull(response["choices"][0], "message"), "content"));
             std::string payload;
             if (!tryExtractJsonObject(content, payload)) {
@@ -115,7 +115,7 @@ namespace insoulforge::MessageRouter {
 
             std::string action = getStr(parsed, "action", "reply");
             std::ranges::transform(action, action.begin(),
-              [](const unsigned char character) { return static_cast<char>(std::tolower(character)); });
+              [](const unsigned char character) -> char { return static_cast<char>(std::tolower(character)); });
             const RouterDecision::Action decisionAction =
               action == "skip" ? RouterDecision::Action::SKIP : RouterDecision::Action::REPLY;
             RouterDecision decision = makeDecision(decisionAction, getStr(parsed, "reason"));
@@ -127,14 +127,15 @@ namespace insoulforge::MessageRouter {
         }
     } // namespace
 
-    drogon::Task<RouterDecision> route(
-      const u64 sessionId, const std::string_view triggerMessageId, const json &snapshot) {
+    auto route(const u64 sessionId, const std::string_view triggerMessageId, const json &snapshot)
+      -> drogon::Task<RouterDecision> {
         if (!snapshot.is_array() || snapshot.empty()) {
             co_return applySessionType(makeDecision(RouterDecision::Action::SKIP, "消息快照为空"), sessionId);
         }
 
-        const auto trigger = std::ranges::find_if(snapshot,
-          [triggerMessageId](const json &message) { return getStr(message, "message_id") == triggerMessageId; });
+        const auto trigger = std::ranges::find_if(snapshot, [triggerMessageId](const json &message) -> bool {
+            return getStr(message, "message_id") == triggerMessageId;
+        });
         if (trigger == snapshot.end()) {
             co_return applySessionType(makeDecision(RouterDecision::Action::SKIP, "找不到触发消息"), sessionId);
         }

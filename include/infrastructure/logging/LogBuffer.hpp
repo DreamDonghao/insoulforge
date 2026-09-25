@@ -40,24 +40,24 @@ namespace insoulforge {
 
     class LogBuffer {
     public:
-        static LogBuffer &instance();
+        static auto instance() -> LogBuffer &;
 
         void loadFromDirectory(const std::string &directory);
 
         /// @brief 追加由 Logger 创建的日志条目
         /// @return 带内存序列 ID 的最终条目
-        [[nodiscard]] LogEntry append(LogEntry entry);
+        [[nodiscard]] auto append(LogEntry entry) -> LogEntry;
 
-        [[nodiscard]] LogQueryResult query(const LogQuery &query) const;
+        [[nodiscard]] auto query(const LogQuery &query) const -> LogQueryResult;
 
-        [[nodiscard]] size_t size() const;
+        [[nodiscard]] auto size() const -> size_t;
 
     private:
         LogBuffer() = default;
 
-        static std::optional<LogEntry> parseLine(const std::string &line);
+        static auto parseLine(const std::string &line) -> std::optional<LogEntry>;
 
-        static bool matches(const LogEntry &entry, const LogQuery &query);
+        static auto matches(const LogEntry &entry, const LogQuery &query) -> bool;
 
         mutable std::mutex m_mutex;
         std::vector<LogEntry> m_entries;

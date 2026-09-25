@@ -15,5 +15,5 @@ namespace insoulforge::OneBotEventNormalizer {
     ///          命令识别或路由判断。`segments` 是内容和顺序的唯一来源，图片传输来源仅写入
     ///          `assets.images`。结果还包含仅供工作流使用的 `session_id`，用于后续会话配置、记录
     ///          和并发控制。
-    [[nodiscard]] std::optional<json> normalize(json body);
+    [[nodiscard]] auto normalize(json body) -> std::optional<json>;
 } // namespace insoulforge::OneBotEventNormalizer

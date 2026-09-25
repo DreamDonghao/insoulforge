@@ -20,7 +20,7 @@ namespace insoulforge::ExecutorAgent {
         constexpr i32 kMaxToolRounds = 8;
 
         /// @brief 获取系统提示词（私聊与群聊使用各自的人设提示词，差异行按会话类型拼接）
-        std::string getSystemPrompt(const RouterDecision &decision) {
+        auto getSystemPrompt(const RouterDecision &decision) -> std::string {
             std::string prompt = decision.isPrivate ? PromptService::getExecutorPrivateSystemPrompt()
                                                     : PromptService::getExecutorSystemPrompt();
             prompt +=
@@ -124,7 +124,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         }
 
         /// @brief 解析记录的 content 字段（由本服务写入的 JSON 对象字符串）
-        [[nodiscard]] json parseRecordContent(const json &record) {
+        [[nodiscard]] auto parseRecordContent(const json &record) -> json {
             json parsed;
             if (!tryParseJson(getStr(record, "content"), parsed) || !parsed.is_object()) {
                 return {};
@@ -133,7 +133,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         }
 
         /// @brief 按 UTF-8 字符边界截断，超长时末尾追加省略号
-        [[nodiscard]] std::string truncateUtf8(const std::string &text, const size_t maxChars) {
+        [[nodiscard]] auto truncateUtf8(const std::string &text, const size_t maxChars) -> std::string {
             size_t i = 0;
             size_t count = 0;
             while (i < text.size() && count < maxChars) {
@@ -154,7 +154,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         }
 
         /// @brief 将持久化记录投影为 Agent 上下文，可选截断较早消息的文本段
-        [[nodiscard]] json projectRecordForAgent(const json &record, const bool truncateText) {
+        [[nodiscard]] auto projectRecordForAgent(const json &record, const bool truncateText) -> json {
             const json raw = parseRecordContent(record);
             if (!raw.is_object()) {
                 return getStr(record, "content"); // 历史存量可能是纯文本
@@ -174,7 +174,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
 
         /// @brief 注入发送者当前好感度（读时注入，保证 LLM 看到的永远是最新值）
         /// @details qq 非数字（机器人记录的 "self"）跳过；映射中不存在的用户按 0（中立）注入
-        [[nodiscard]] json injectAffinity(json content, const std::unordered_map<u64, i32> &affinityMap) {
+        [[nodiscard]] auto injectAffinity(json content, const std::unordered_map<u64, i32> &affinityMap) -> json {
             if (!content.is_object() || !content.contains("sender"))
                 return content;
             if (const u64 qq = parseUInt64(getStr(content["sender"], "qq")); qq > 0) {
@@ -193,7 +193,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         /// @brief 构建聊天记录上下文：
         /// 最新 kRecentRecordCount 条保留完整语义投影，更早记录的文本段截断到 500 字；
         /// 每条 sender 注入当前好感度 affinity；消息预处理阶段已将召回记忆写入完整消息。
-        ChatContext buildChatContext(const ChatRecordManager &chatRecords) {
+        auto buildChatContext(const ChatRecordManager &chatRecords) -> ChatContext {
             const auto records = chatRecords.getRecords(); // 旧 → 新
             const size_t totalRecords = records.size();
             const size_t olderCount = totalRecords > kRecentRecordCount ? totalRecords - kRecentRecordCount : 0;
@@ -217,7 +217,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         }
 
         /// @brief 把短期记忆文本（每行一条）拆为字符串数组，跳过空白行
-        [[nodiscard]] json splitMemoryLines(const std::string &text) {
+        [[nodiscard]] auto splitMemoryLines(const std::string &text) -> json {
             json lines = json::array();
             for (size_t start = 0; start < text.size();) {
                 const size_t end = text.find('\n', start);
@@ -234,8 +234,8 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         /// user 消息：session → short_term_memory → earlier_conversation → recent_conversation →
         /// response_requirements，
         /// 避免连续多条 user（部分 OpenAI 兼容后端不支持）
-        [[nodiscard]] json buildPrompt(
-          const ChatRecordManager &chatRecords, const MemoryManager &memory, const RouterDecision &decision) {
+        [[nodiscard]] auto buildPrompt(
+          const ChatRecordManager &chatRecords, const MemoryManager &memory, const RouterDecision &decision) -> json {
             json messages = json::array();
 
             json systemMsg;
@@ -278,11 +278,13 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         }
 
         /// @brief 结果为内联 CQ 码、需在产出 reply 时自动拼入正文的工具（send_sticker 已直接发送，不经此路径）
-        [[nodiscard]] bool isCqCodeTool(const std::string &name) { return name == "send_face" || name == "send_image"; }
+        [[nodiscard]] auto isCqCodeTool(const std::string &name) -> bool {
+            return name == "send_face" || name == "send_image";
+        }
 
         /// @brief 清理回复内容，并在模型忘记拼接 CQ 码时自动补上已获取的 CQ 码
-        [[nodiscard]] std::string finalizeContent(
-          const std::string &rawContent, const std::string &accumulatedCQCodes) {
+        [[nodiscard]] auto finalizeContent(const std::string &rawContent, const std::string &accumulatedCQCodes)
+          -> std::string {
             std::string content = cleanReplyContent(rawContent);
             if (!accumulatedCQCodes.empty() && content.find("[CQ:") == std::string::npos) {
                 content += accumulatedCQCodes;
@@ -298,8 +300,8 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
 
         /// @brief 校验并处理回复工具（no_reply / reply / reply_with_quote）
         /// @return 已生成决策、参数无效或非回复工具；参数无效由调用方回传错误给模型。
-        [[nodiscard]] ReplyToolResult applyReplyTool(
-          const std::string &name, const json &args, const std::string &accumulatedCQCodes, ReplyDecision &decision) {
+        [[nodiscard]] auto applyReplyTool(const std::string &name, const json &args,
+          const std::string &accumulatedCQCodes, ReplyDecision &decision) -> ReplyToolResult {
             if (name == "no_reply") {
                 decision.shouldReply = false;
                 return ReplyToolResult::Applied;
@@ -338,7 +340,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
 
         /// @brief 解析兼容接口返回的工具参数
         /// @details OpenAI 兼容格式使用 JSON 字符串，部分接口直接返回 JSON 对象；两种格式均归一化为对象。
-        [[nodiscard]] json parseToolArguments(const json &toolCall) {
+        [[nodiscard]] auto parseToolArguments(const json &toolCall) -> json {
             const json &rawArguments = atOrNull(atOrNull(toolCall, "function"), "arguments");
             if (rawArguments.is_object())
                 return rawArguments;
@@ -350,7 +352,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         }
 
         /// @brief 将工具参数序列化为 OpenAI tool 消息要求的 JSON 字符串
-        [[nodiscard]] std::string serializeToolArguments(const json &toolCall) {
+        [[nodiscard]] auto serializeToolArguments(const json &toolCall) -> std::string {
             const json &rawArguments = atOrNull(atOrNull(toolCall, "function"), "arguments");
             if (rawArguments.is_string())
                 return jsonToString(rawArguments);
@@ -358,7 +360,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         }
 
         /// @brief 把模型返回的 tool_calls 转为需回传以补全上下文的 assistant 消息
-        [[nodiscard]] json buildAssistantToolCallMessage(const json &message) {
+        [[nodiscard]] auto buildAssistantToolCallMessage(const json &message) -> json {
             json assistantMsg;
             assistantMsg["role"] = "assistant";
             assistantMsg["content"] = message.contains("content") ? jsonToString(message["content"]) : "";
@@ -379,8 +381,8 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         /// @brief 逐个处理本轮工具调用：回复工具直接产出回复决策；其余工具经 ToolRegistry 执行并把结果
         /// 作为 tool 消息回传，CQ 码类工具的结果累积备用
         /// @return {回复工具决策（同轮多个以最后一个为准，未命中为 nullopt）, 回传工具结果后的消息列表, 累积的 CQ 码}
-        drogon::Task<std::tuple<std::optional<ReplyDecision>, json, std::string>> processToolCalls(json message,
-          json messages, std::string accumulatedCQCodes, const u64 sessionId, const json &messageSnapshot) {
+        auto processToolCalls(json message, json messages, std::string accumulatedCQCodes, const u64 sessionId,
+          const json &messageSnapshot) -> drogon::Task<std::tuple<std::optional<ReplyDecision>, json, std::string>> {
             ReplyDecision decision;
             bool hasDecision = false;
 
@@ -444,8 +446,8 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         }
 
         /// @brief Agent 模式执行（带 tools）：循环「请求模型 → 处理工具调用」，直到产出回复决策或达最大轮数
-        drogon::Task<std::optional<ReplyDecision>> executeWithAgent(
-          json messages, const u64 sessionId, const json &messageSnapshot) {
+        auto executeWithAgent(json messages, const u64 sessionId, const json &messageSnapshot)
+          -> drogon::Task<std::optional<ReplyDecision>> {
             const auto &config = Config::instance();
             const json tools = ToolRegistry::instance().getTools({.isPrivateSession = SessionId::isPrivate(sessionId)});
             if (tools.empty()) {
@@ -493,7 +495,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
     } // namespace
 
     /// @brief 清理模型输出的污染内容（think标签、tool_call标签、DSML标签等）
-    std::string cleanReplyContent(const std::string &text) {
+    auto cleanReplyContent(const std::string &text) -> std::string {
         // 按序应用的净化规则：Qwen 的 DSML 标签、DeepSeek 的 think 标签、tool_call 残留等
         static const std::vector<std::pair<std::regex, std::string>> rules = {
           // <tool_call>...</tool_call> 块及残留的独立标签
@@ -522,8 +524,8 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         return result;
     }
 
-    drogon::Task<std::optional<ReplyDecision>> execute(const ChatRecordManager &chatRecords,
-      const MemoryManager &memory, RouterDecision decision, const json messageSnapshot) {
+    auto execute(const ChatRecordManager &chatRecords, const MemoryManager &memory, RouterDecision decision,
+      const json messageSnapshot) -> drogon::Task<std::optional<ReplyDecision>> {
         const u64 sessionId = chatRecords.getSessionId();
         Logger::info(sessionId, "Executor",
           fmt::format("开始执行 | priority={} | maxLength={}", decision.isPriority, decision.maxLength));

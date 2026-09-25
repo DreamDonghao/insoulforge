@@ -36,36 +36,36 @@ namespace insoulforge {
         /// @brief 追加完整消息并生成冻结快照
         /// @param message 完整消息 JSON；内部不会保留工作流专用 `session_id`
         /// @return 成功插入时返回受限快照与可能产生的记忆总结批次；相同非空消息 ID 已存在时返回空值
-        [[nodiscard]] std::optional<MessageListAppendResult> append(json message);
+        [[nodiscard]] auto append(json message) -> std::optional<MessageListAppendResult>;
 
         /// @brief 应用已经成功完成的记忆总结，并删除其对应的最旧消息
         /// @return 删除后若再次达到阈值，返回下一批待持久化的总结任务
         /// @note 线程安全。只删除已由记忆任务成功提交的批次，不会删除总结中的消息。
-        [[nodiscard]] std::optional<MemorySummaryBatch> removeCompletedSummaryMessages();
+        [[nodiscard]] auto removeCompletedSummaryMessages() -> std::optional<MemorySummaryBatch>;
 
         /// @brief 取消未能持久化的总结批次保留状态
         /// @note 线程安全。仅在任务尚未写入数据库时调用。
         void cancelSummaryBatch();
 
         /// @brief 获取模型可见的近期消息值快照
-        [[nodiscard]] json snapshot() const;
+        [[nodiscard]] auto snapshot() const -> json;
 
         /// @brief 获取管理后台与持久化恢复使用的完整消息值快照
         /// @note 线程安全。与模型上下文窗口无关，不会截断尚未总结删除的较早消息。
-        [[nodiscard]] json fullSnapshot() const;
+        [[nodiscard]] auto fullSnapshot() const -> json;
 
         /// @brief 将当前完整列表持久化为会话的恢复副本
         void flushToStorage() const;
 
     private:
         /// @brief 生成锁保护下模型可见的最近消息快照
-        [[nodiscard]] json snapshotLocked() const;
+        [[nodiscard]] auto snapshotLocked() const -> json;
 
         /// @brief 生成锁保护下用于恢复的完整消息快照
-        [[nodiscard]] json fullSnapshotLocked() const;
+        [[nodiscard]] auto fullSnapshotLocked() const -> json;
 
         /// @brief 在未存在总结任务且达到阈值时保留一批最旧消息供异步总结
-        [[nodiscard]] std::optional<MemorySummaryBatch> createSummaryBatchLocked();
+        [[nodiscard]] auto createSummaryBatchLocked() -> std::optional<MemorySummaryBatch>;
 
         u64 m_sessionId; ///< 绑定的统一会话 ID
         mutable std::mutex m_mutex; ///< 保护消息、总结批次状态与快照生成

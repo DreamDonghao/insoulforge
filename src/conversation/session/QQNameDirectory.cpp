@@ -32,7 +32,7 @@ namespace insoulforge::QQNameDirectory {
         customNames[qqNumber] = std::move(name);
     }
 
-    std::string getName(const u64 qqNumber) {
+    auto getName(const u64 qqNumber) -> std::string {
         std::shared_lock lock(nameMutex);
         if (const auto custom = customNames.find(qqNumber); custom != customNames.end()) {
             return custom->second;
@@ -43,7 +43,7 @@ namespace insoulforge::QQNameDirectory {
         return "未知";
     }
 
-    std::unordered_map<std::string, u64> nameToQQMap() {
+    auto nameToQQMap() -> std::unordered_map<std::string, u64> {
         std::shared_lock lock(nameMutex);
         std::unordered_map<std::string, u64> names;
         names.reserve(observedNames.size() + customNames.size());

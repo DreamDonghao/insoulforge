@@ -41,12 +41,12 @@ namespace insoulforge {
 
         Statement(const Statement &) = delete;
 
-        Statement &operator=(const Statement &) = delete;
+        auto operator=(const Statement &) -> Statement & = delete;
 
         Statement(Statement &&other) noexcept :
             m_db(std::exchange(other.m_db, nullptr)), m_stmt(std::exchange(other.m_stmt, nullptr)) {}
 
-        Statement &operator=(Statement &&other) noexcept {
+        auto operator=(Statement &&other) noexcept -> Statement & {
             if (this != &other) {
                 if (m_stmt)
                     sqlite3_finalize(m_stmt);
@@ -85,7 +85,7 @@ namespace insoulforge {
         void bindNull(i32 idx) const noexcept { sqlite3_bind_null(m_stmt, idx); }
 
         /// @brief 推进一步：true=有行可读，false=完成或出错（错误仅记日志）
-        [[nodiscard]] bool step() const noexcept {
+        [[nodiscard]] auto step() const noexcept -> bool {
             i32 rc = sqlite3_step(m_stmt);
             if (rc == SQLITE_ROW)
                 return true;
@@ -110,20 +110,22 @@ namespace insoulforge {
             sqlite3_clear_bindings(m_stmt);
         }
 
-        [[nodiscard]] i64 getInt64(i32 col) const noexcept { return sqlite3_column_int64(m_stmt, col); }
+        [[nodiscard]] auto getInt64(i32 col) const noexcept -> i64 { return sqlite3_column_int64(m_stmt, col); }
 
-        [[nodiscard]] i32 getInt(i32 col) const noexcept { return sqlite3_column_int(m_stmt, col); }
+        [[nodiscard]] auto getInt(i32 col) const noexcept -> i32 { return sqlite3_column_int(m_stmt, col); }
 
-        [[nodiscard]] f64 getDouble(i32 col) const noexcept { return sqlite3_column_double(m_stmt, col); }
+        [[nodiscard]] auto getDouble(i32 col) const noexcept -> f64 { return sqlite3_column_double(m_stmt, col); }
 
-        [[nodiscard]] std::string getText(i32 col) const noexcept {
+        [[nodiscard]] auto getText(i32 col) const noexcept -> std::string {
             const auto *p = sqlite3_column_text(m_stmt, col);
             return p ? reinterpret_cast<const char *>(p) : "";
         }
 
-        [[nodiscard]] bool isNull(i32 col) const noexcept { return sqlite3_column_type(m_stmt, col) == SQLITE_NULL; }
+        [[nodiscard]] auto isNull(i32 col) const noexcept -> bool {
+            return sqlite3_column_type(m_stmt, col) == SQLITE_NULL;
+        }
 
-        [[nodiscard]] std::vector<u8> getBlob(i32 col) const noexcept {
+        [[nodiscard]] auto getBlob(i32 col) const noexcept -> std::vector<u8> {
             const auto *p = static_cast<const u8 *>(sqlite3_column_blob(m_stmt, col));
             i32 size = sqlite3_column_bytes(m_stmt, col);
             if (!p || size <= 0)
@@ -131,9 +133,9 @@ namespace insoulforge {
             return {p, p + size};
         }
 
-        [[nodiscard]] static i64 lastInsertRowId(sqlite3 *db) noexcept { return sqlite3_last_insert_rowid(db); }
+        [[nodiscard]] static auto lastInsertRowId(sqlite3 *db) noexcept -> i64 { return sqlite3_last_insert_rowid(db); }
 
-        [[nodiscard]] static i32 changes(sqlite3 *db) noexcept { return sqlite3_changes(db); }
+        [[nodiscard]] static auto changes(sqlite3 *db) noexcept -> i32 { return sqlite3_changes(db); }
 
     private:
         sqlite3 *m_db;

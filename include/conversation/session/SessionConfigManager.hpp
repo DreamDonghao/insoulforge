@@ -16,12 +16,12 @@ namespace insoulforge::SessionConfigManager {
     /// @brief 获取群组配置
     /// @param sessionId 会话 ID（私聊会话带标志位）
     /// @return 群组配置结构体
-    [[nodiscard]] SessionConfig getConfig(u64 sessionId);
+    [[nodiscard]] auto getConfig(u64 sessionId) -> SessionConfig;
 
     /// @brief 检查群组是否存在配置
     /// @param sessionId 会话 ID（私聊会话带标志位）
     /// @return 是否存在
-    [[nodiscard]] bool contains(u64 sessionId);
+    [[nodiscard]] auto contains(u64 sessionId) -> bool;
 
     /// @brief 添加群组配置
     /// @param sessionId 会话 ID（私聊会话带标志位）

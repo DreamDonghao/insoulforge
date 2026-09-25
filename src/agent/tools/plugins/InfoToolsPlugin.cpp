@@ -20,7 +20,7 @@ namespace insoulforge {
         constexpr size_t kThinkingPreviewChars = 100;
 
         /// @brief 深度思考的系统提示词（专家求解定位：只产出问题答案，不组织聊天回复）
-        std::string buildThinkingSystemPrompt(const std::string &question) {
+        auto buildThinkingSystemPrompt(const std::string &question) -> std::string {
             return fmt::format("你是被咨询的领域专家，负责解答问题、提供知识与分析。\n\n"
                                "结合对话上下文理解【问题】，给出准确的答案。\n\n"
                                "【问题】\n{}\n\n"
@@ -34,7 +34,7 @@ namespace insoulforge {
 
     } // namespace
 
-    std::string_view InfoToolsPlugin::id() const noexcept { return "builtin.info"; }
+    auto InfoToolsPlugin::id() const noexcept -> std::string_view { return "builtin.info"; }
 
     /// @brief 注册内容获取工具（INFORMATION，查询数据、获取答案，不产生副作用）
     void InfoToolsPlugin::registerTools(ToolRegistry &registry) const {

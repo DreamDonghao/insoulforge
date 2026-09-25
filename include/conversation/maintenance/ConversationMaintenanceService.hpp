@@ -23,11 +23,11 @@ namespace insoulforge::ConversationMaintenanceService {
     void setMemorySummaryCompletedCallback(std::function<void(u64)> callback);
 
     /// @brief 判断会话是否存在尚未完成或尚未应用删除的记忆总结任务
-    [[nodiscard]] bool hasPendingMemorySummary(u64 sessionId);
+    [[nodiscard]] auto hasPendingMemorySummary(u64 sessionId) -> bool;
 
     /// @brief 确认已完成总结的消息前缀删除，并返回其数量
     /// @return 没有待确认的已完成任务时返回空值
-    [[nodiscard]] std::optional<size_t> takeCompletedMemorySummary(u64 sessionId);
+    [[nodiscard]] auto takeCompletedMemorySummary(u64 sessionId) -> std::optional<size_t>;
 
     /// @brief 恢复并调度所有遗留的会话派生状态维护任务
     void resumePending();

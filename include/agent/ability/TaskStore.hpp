@@ -25,21 +25,21 @@ namespace insoulforge::TaskStore {
 
     /// @brief 新增定时任务
     /// @return 任务 ID
-    i64 addScheduledTask(const ScheduledTask &task);
+    auto addScheduledTask(const ScheduledTask &task) -> i64;
 
     /// @brief 获取所有待触发的定时任务（按提醒时间升序）
-    std::vector<ScheduledTask> getPendingScheduledTasks();
+    auto getPendingScheduledTasks() -> std::vector<ScheduledTask>;
 
     /// @brief 获取指定会话待触发的定时任务（按提醒时间升序）
-    std::vector<ScheduledTask> getPendingScheduledTasksByTarget(const std::string &sessionType, u64 targetId);
+    auto getPendingScheduledTasksByTarget(const std::string &sessionType, u64 targetId) -> std::vector<ScheduledTask>;
 
     /// @brief 取消待触发的定时任务
     /// @return true=取消成功；false=任务不存在或已触发/已取消
-    bool cancelScheduledTask(i64 id);
+    auto cancelScheduledTask(i64 id) -> bool;
 
     /// @brief 推进每日任务的下次触发时刻
     /// @return true=成功；false=任务不存在或非 pending（如触发途中被取消）
-    bool rescheduleDailyTask(i64 id, i64 nextTime);
+    auto rescheduleDailyTask(i64 id, i64 nextTime) -> bool;
 
     /// @brief 标记定时任务已完成触发
     void finishScheduledTask(i64 id);

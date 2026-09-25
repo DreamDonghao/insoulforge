@@ -18,7 +18,7 @@ namespace insoulforge::ExecutorAgent {
     /// @brief 清理模型输出中的工具调用标签等污染内容
     /// @param text 原始内容
     /// @return 清理后的内容
-    [[nodiscard]] std::string cleanReplyContent(const std::string &text);
+    [[nodiscard]] auto cleanReplyContent(const std::string &text) -> std::string;
 
     /// @brief 执行回复生成
     /// @param chatRecords 聊天记录
@@ -26,6 +26,6 @@ namespace insoulforge::ExecutorAgent {
     /// @param decision Router 的决策结果（包含回复策略）
     /// @param messageSnapshot 本轮冻结的完整消息快照，工具可读取未投影的媒体来源
     /// @return 回复内容
-    [[nodiscard]] drogon::Task<std::optional<ReplyDecision>> execute(const ChatRecordManager &chatRecords,
-      const MemoryManager &memory, RouterDecision decision, json messageSnapshot = {});
+    [[nodiscard]] auto execute(const ChatRecordManager &chatRecords, const MemoryManager &memory,
+      RouterDecision decision, json messageSnapshot = {}) -> drogon::Task<std::optional<ReplyDecision>>;
 } // namespace insoulforge::ExecutorAgent

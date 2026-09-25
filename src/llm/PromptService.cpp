@@ -204,7 +204,7 @@ reply 的场景：
         Logger::info(0, "Prompt", fmt::format("提示词服务初始化完成"));
     }
 
-    std::string PromptService::getPrompt(const std::string &key) {
+    auto PromptService::getPrompt(const std::string &key) -> std::string {
         std::string content = PromptStore::getPrompt(key, "");
         // 替换 {botName} 占位符
         if (content.find("{botName}") != std::string::npos) {
@@ -223,11 +223,11 @@ reply 的场景：
         Logger::info(0, "Prompt", fmt::format("提示词已更新: {}", key));
     }
 
-    std::string PromptService::getExecutorSystemPrompt() { return getPrompt("executor_system"); }
+    auto PromptService::getExecutorSystemPrompt() -> std::string { return getPrompt("executor_system"); }
 
-    std::string PromptService::getExecutorPrivateSystemPrompt() { return getPrompt("executor_private_system"); }
+    auto PromptService::getExecutorPrivateSystemPrompt() -> std::string { return getPrompt("executor_private_system"); }
 
-    std::string PromptService::getRouterSystemPrompt() { return getPrompt("router_system"); }
+    auto PromptService::getRouterSystemPrompt() -> std::string { return getPrompt("router_system"); }
 
-    std::string PromptService::getRouterPrivateSystemPrompt() { return getPrompt("router_private_system"); }
+    auto PromptService::getRouterPrivateSystemPrompt() -> std::string { return getPrompt("router_private_system"); }
 } // namespace insoulforge

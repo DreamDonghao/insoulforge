@@ -3,8 +3,8 @@
 #include <infrastructure/logging/Logger.hpp>
 #include <onebot/http/ProcessQQMessages.hpp>
 
-drogon::Task<> insoulforge::ProcessQQMessages::receiveOneBotEvent(
-  const drogon::HttpRequestPtr req, const std::function<void(const drogon::HttpResponsePtr &)> callback) {
+auto insoulforge::ProcessQQMessages::receiveOneBotEvent(const drogon::HttpRequestPtr req,
+  const std::function<void(const drogon::HttpResponsePtr &)> callback) -> drogon::Task<> {
     if (Config::instance().oneBotTransport != "http") {
         // OneBot 实现可能在切换期间继续投递 HTTP 上报。成功确认但不处理，避免其将 4xx 识别为快速操作失败。
         Logger::debug(0, "OneBot", fmt::format("忽略 OneBot HTTP 上报：当前传输方式为 WebSocket"));

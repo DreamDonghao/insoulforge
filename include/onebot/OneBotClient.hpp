@@ -20,63 +20,65 @@ namespace insoulforge::OneBotClient {
     /// @brief 发送群消息（群号即会话 ID，无需单独传 sessionId）
     /// @note OneBot 11: send_group_msg
     /// @return message_id；失败返回 nullopt
-    [[nodiscard]] drogon::Task<std::optional<u64>> sendGroupMsg(u64 groupId, std::string message);
+    [[nodiscard]] auto sendGroupMsg(u64 groupId, std::string message) -> drogon::Task<std::optional<u64>>;
 
     /// @brief 发送私聊消息
     /// @note OneBot 11: send_private_msg
     /// @return message_id；失败返回 nullopt
-    [[nodiscard]] drogon::Task<std::optional<u64>> sendPrivateMsg(
-      u64 userId, std::string message, std::optional<u64> sessionId = std::nullopt);
+    [[nodiscard]] auto sendPrivateMsg(u64 userId, std::string message, std::optional<u64> sessionId = std::nullopt)
+      -> drogon::Task<std::optional<u64>>;
 
     /// @brief 群组单人禁言
     /// @note OneBot 11: set_group_ban（duration=0 解除禁言）
-    [[nodiscard]] drogon::Task<bool> setGroupBan(u64 groupId, u64 userId, u64 duration);
+    [[nodiscard]] auto setGroupBan(u64 groupId, u64 userId, u64 duration) -> drogon::Task<bool>;
 
     /// @brief 获取群信息
     /// @note OneBot 11: get_group_info
     /// @return 响应 JSON（data 含 group_name 等）；失败返回 null
-    [[nodiscard]] drogon::Task<json> getGroupInfo(u64 groupId);
+    [[nodiscard]] auto getGroupInfo(u64 groupId) -> drogon::Task<json>;
 
     /// @brief 获取陌生人（QQ 用户）信息
     /// @note OneBot 11: get_stranger_info
     /// @return 响应 JSON（data 含 nickname 等）；失败返回 null
-    [[nodiscard]] drogon::Task<json> getStrangerInfo(u64 userId, std::optional<u64> sessionId = std::nullopt);
+    [[nodiscard]] auto getStrangerInfo(u64 userId, std::optional<u64> sessionId = std::nullopt) -> drogon::Task<json>;
 
     /// @brief 群聊戳一拍
     /// @note NapCat: send_poke（支持群聊/私聊）
-    [[nodiscard]] drogon::Task<bool> sendPoke(u64 groupId, u64 userId);
+    [[nodiscard]] auto sendPoke(u64 groupId, u64 userId) -> drogon::Task<bool>;
 
     /// @brief 撤回消息
     /// @note OneBot 11: delete_msg
-    [[nodiscard]] drogon::Task<bool> deleteMsg(u64 messageId, std::optional<u64> sessionId = std::nullopt);
+    [[nodiscard]] auto deleteMsg(u64 messageId, std::optional<u64> sessionId = std::nullopt) -> drogon::Task<bool>;
 
     /// @brief 获取图片在 QQ 客户端容器内的路径
     /// @note OneBot 11: get_image
     /// @return data.file 路径；失败返回 nullopt（15 秒超时，商城表情等会失败）
-    [[nodiscard]] drogon::Task<std::optional<std::string>> getImage(
-      std::string file, std::optional<u64> sessionId = std::nullopt);
+    [[nodiscard]] auto getImage(std::string file, std::optional<u64> sessionId = std::nullopt)
+      -> drogon::Task<std::optional<std::string>>;
 
     /// @brief 下载文件到 QQ 客户端缓存目录
     /// @note go-cqhttp: download_file
     /// @return data.file 路径；失败返回 nullopt
-    [[nodiscard]] drogon::Task<std::optional<std::string>> downloadFile(
-      std::string url, std::optional<u64> sessionId = std::nullopt);
+    [[nodiscard]] auto downloadFile(std::string url, std::optional<u64> sessionId = std::nullopt)
+      -> drogon::Task<std::optional<std::string>>;
 
     /// @brief 将图片保存为 QQ 收藏表情
     /// @note NapCat 扩展: add_custom_face（api.md 未收录）
-    [[nodiscard]] drogon::Task<bool> addCustomFace(std::string file, std::optional<u64> sessionId = std::nullopt);
+    [[nodiscard]] auto addCustomFace(std::string file, std::optional<u64> sessionId = std::nullopt)
+      -> drogon::Task<bool>;
 
     /// @brief 设置收藏表情描述
     /// @note NapCat 扩展: set_custom_face_desc（api.md 未收录）
-    [[nodiscard]] drogon::Task<bool> setCustomFaceDesc(std::string emojiId, std::string resId, std::string md5,
-      std::string desc, std::optional<u64> sessionId = std::nullopt);
+    [[nodiscard]] auto setCustomFaceDesc(std::string emojiId, std::string resId, std::string md5, std::string desc,
+      std::optional<u64> sessionId = std::nullopt) -> drogon::Task<bool>;
 
     /// @brief 从收藏表情中删除
     /// @note NapCat 扩展: delete_custom_face（api.md 未收录）
-    [[nodiscard]] drogon::Task<bool> deleteCustomFace(std::string resId, std::optional<u64> sessionId = std::nullopt);
+    [[nodiscard]] auto deleteCustomFace(std::string resId, std::optional<u64> sessionId = std::nullopt)
+      -> drogon::Task<bool>;
 
     /// @brief 获取收藏表情详情列表
     /// @note NapCat 扩展（与 api.md 收录的 NapCat fetch_custom_face 同族）
     /// @return data 数组；失败返回空数组
-    [[nodiscard]] drogon::Task<json> fetchCustomFaceDetail(std::optional<u64> sessionId = std::nullopt);
+    [[nodiscard]] auto fetchCustomFaceDetail(std::optional<u64> sessionId = std::nullopt) -> drogon::Task<json>;
 } // namespace insoulforge::OneBotClient

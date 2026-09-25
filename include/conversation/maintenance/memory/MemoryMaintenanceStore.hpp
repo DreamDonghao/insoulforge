@@ -31,20 +31,20 @@ namespace insoulforge {
     namespace MemoryMaintenanceStore {
         /// @brief 持久化一批待总结消息及其只读上下文
         /// @return 新任务 ID
-        i64 enqueue(u64 sessionId, const json &messages, const json &contextMessages, size_t removeCount);
+        auto enqueue(u64 sessionId, const json &messages, const json &contextMessages, size_t removeCount) -> i64;
 
         /// @brief 获取仍有待处理任务的会话 ID
-        [[nodiscard]] std::vector<u64> pendingSessionIds();
+        [[nodiscard]] auto pendingSessionIds() -> std::vector<u64>;
 
         /// @brief 判断会话是否已有尚未完成或尚未应用删除的总结任务
-        [[nodiscard]] bool hasUnfinished(u64 sessionId);
+        [[nodiscard]] auto hasUnfinished(u64 sessionId) -> bool;
 
         /// @brief 获取一个会话最早的待处理任务
-        [[nodiscard]] std::optional<MemoryMaintenanceJob> next(u64 sessionId);
+        [[nodiscard]] auto next(u64 sessionId) -> std::optional<MemoryMaintenanceJob>;
 
         /// @brief 取走一个已完成任务的删除数量，并确认移除该任务
         /// @return 不存在已完成任务时返回空值；返回 0 表示历史任务不删除运行时消息
-        [[nodiscard]] std::optional<size_t> takeCompleted(u64 sessionId);
+        [[nodiscard]] auto takeCompleted(u64 sessionId) -> std::optional<size_t>;
 
         /// @brief 记录一次失败处理尝试
         void incrementAttempt(i64 jobId);

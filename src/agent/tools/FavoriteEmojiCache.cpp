@@ -16,7 +16,7 @@ namespace insoulforge {
         std::chrono::steady_clock::time_point favoriteEmojiCacheTime{};
 
         /// @brief 清理 CQ 码参数中不允许出现的字符
-        [[nodiscard]] std::string sanitizeCqParameter(std::string value) {
+        [[nodiscard]] auto sanitizeCqParameter(std::string value) -> std::string {
             for (char &character: value) {
                 if (character == ',' || character == '[' || character == ']') {
                     character = ' ';
@@ -26,7 +26,7 @@ namespace insoulforge {
         }
     } // namespace
 
-    drogon::Task<json> ToolRuntime::fetchFavoriteEmojis(const std::optional<u64> sessionId) {
+    auto ToolRuntime::fetchFavoriteEmojis(const std::optional<u64> sessionId) -> drogon::Task<json> {
         {
             std::lock_guard lock(favoriteEmojiCacheMutex);
             if (!favoriteEmojiCache.is_null() &&
@@ -63,7 +63,7 @@ namespace insoulforge {
         co_return result;
     }
 
-    drogon::Task<json> ToolRuntime::findFavoriteEmoji(std::string name, const std::optional<u64> sessionId) {
+    auto ToolRuntime::findFavoriteEmoji(std::string name, const std::optional<u64> sessionId) -> drogon::Task<json> {
         for (const json emojis = co_await fetchFavoriteEmojis(sessionId); const auto &emoji: emojis) {
             if (getStr(emoji, "name") == name || getStr(emoji, "summary") == name) {
                 co_return emoji;

@@ -22,9 +22,9 @@ namespace insoulforge::QQNameDirectory {
     /// @brief 查询 QQ 号的当前昵称
     /// @param qqNumber QQ 号
     /// @return 已知昵称；未记录时返回“未知”
-    [[nodiscard]] std::string getName(u64 qqNumber);
+    [[nodiscard]] auto getName(u64 qqNumber) -> std::string;
 
     /// @brief 获取昵称到 QQ 号的反向索引快照
     /// @return 独立副本，调用者可安全遍历或修改
-    [[nodiscard]] std::unordered_map<std::string, u64> nameToQQMap();
+    [[nodiscard]] auto nameToQQMap() -> std::unordered_map<std::string, u64>;
 } // namespace insoulforge::QQNameDirectory

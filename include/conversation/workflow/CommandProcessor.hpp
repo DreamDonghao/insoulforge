@@ -11,10 +11,10 @@ namespace insoulforge::CommandProcessor {
     /// @brief 判断统一消息是否为发给机器人的管理命令
     /// @param message 统一消息 JSON
     /// @return 私聊命令或 @ 机器人且以 `/` 开头的群聊命令返回 true
-    [[nodiscard]] bool isCommand(const json &message);
+    [[nodiscard]] auto isCommand(const json &message) -> bool;
 
     /// @brief 执行统一消息中的管理命令
     /// @param message 已经通过 isCommand 判断的统一消息 JSON
     /// @return 应回复给命令发起者的执行结果
-    drogon::Task<std::string> execute(const json &message);
+    auto execute(const json &message) -> drogon::Task<std::string>;
 } // namespace insoulforge::CommandProcessor

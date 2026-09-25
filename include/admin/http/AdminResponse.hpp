@@ -7,7 +7,7 @@
 
 namespace insoulforge::AdminResponse {
     /// @brief 成功响应 {"success":true[, "message": ...]}
-    inline json okJson(const std::string &message = {}) {
+    inline auto okJson(const std::string &message = {}) -> json {
         json resp;
         resp["success"] = true;
         if (!message.empty()) {
@@ -17,14 +17,14 @@ namespace insoulforge::AdminResponse {
     }
 
     /// @brief 错误响应 {"error": ...}
-    inline json errorJson(const std::string &message) {
+    inline auto errorJson(const std::string &message) -> json {
         json resp;
         resp["error"] = message;
         return resp;
     }
 
     /// @brief 失败响应 {"success":false, "error": ...}
-    inline json failJson(const std::string &message) {
+    inline auto failJson(const std::string &message) -> json {
         json resp;
         resp["success"] = false;
         resp["error"] = message;

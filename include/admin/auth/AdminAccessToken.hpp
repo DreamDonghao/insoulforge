@@ -28,17 +28,17 @@ namespace insoulforge {
         ///          启用的 IPv4 地址。Docker 默认桥接网络无法枚举宿主机的局域网地址。
         /// @param port 管理后台监听端口。
         /// @return 每个可用本机 IPv4 地址对应的自动登录链接。
-        [[nodiscard]] static std::vector<std::string> loginUrls(u16 port);
+        [[nodiscard]] static auto loginUrls(u16 port) -> std::vector<std::string>;
 
         /// @brief 获取当前进程有效的管理后台访问令牌副本。
         /// @warning 调用方不得将令牌写入配置、数据库或不受信任的输出通道。
-        [[nodiscard]] static std::string token();
+        [[nodiscard]] static auto token() -> std::string;
 
         /// @brief 判断请求是否携带有效的管理后台会话 Cookie。
-        [[nodiscard]] static bool isAuthorized(const drogon::HttpRequestPtr &request);
+        [[nodiscard]] static auto isAuthorized(const drogon::HttpRequestPtr &request) -> bool;
 
         /// @brief 校验用户输入的启动令牌。
-        [[nodiscard]] static bool matches(std::string_view token);
+        [[nodiscard]] static auto matches(std::string_view token) -> bool;
 
         /// @brief 在登录响应中写入 HttpOnly 会话 Cookie。
         static void grantSession(const drogon::HttpResponsePtr &response);

@@ -26,7 +26,7 @@ namespace insoulforge {
     public:
         /// @brief 获取单例实例
         /// @return WebSocketManager 实例引用
-        static WebSocketManager &instance();
+        static auto instance() -> WebSocketManager &;
 
         /// @brief 添加连接
         /// @param conn WebSocket 连接指针

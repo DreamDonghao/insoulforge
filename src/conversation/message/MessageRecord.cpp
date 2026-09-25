@@ -23,7 +23,7 @@ namespace insoulforge::MessageRecord {
         }
 
         /// @brief 解析 CQ 参数列表；参数值中的逗号应由 CQ 编码转义，解析失败的片段直接忽略
-        [[nodiscard]] std::unordered_map<std::string, std::string> parseCqParams(const std::string_view input) {
+        [[nodiscard]] auto parseCqParams(const std::string_view input) -> std::unordered_map<std::string, std::string> {
             std::unordered_map<std::string, std::string> params;
             for (size_t begin = 0; begin < input.size();) {
                 const size_t end = input.find(',', begin);
@@ -41,7 +41,7 @@ namespace insoulforge::MessageRecord {
         }
 
         /// @brief 从新旧图片条目中提取模型可见的识别摘要
-        [[nodiscard]] json imageSummary(const json &image, const size_t imageIndex) {
+        [[nodiscard]] auto imageSummary(const json &image, const size_t imageIndex) -> json {
             json summary;
             summary["type"] = "image";
             summary["image_index"] = imageIndex;
@@ -55,7 +55,7 @@ namespace insoulforge::MessageRecord {
         }
 
         /// @brief 将旧版或新版 @ 段投影为统一结构
-        [[nodiscard]] json projectMention(const json &segment) {
+        [[nodiscard]] auto projectMention(const json &segment) -> json {
             json mention;
             mention["type"] = "at";
             if (const json &target = atOrNull(segment, "target"); target.is_object()) {
@@ -77,7 +77,7 @@ namespace insoulforge::MessageRecord {
         }
 
         /// @brief 读取新版记录的图片资产
-        [[nodiscard]] const json &assetImages(const json &record) {
+        [[nodiscard]] auto assetImages(const json &record) -> const json & {
             const json &assets = atOrNull(record, "assets");
             const json &images = atOrNull(assets, "images");
             return images.is_array() ? images : atOrNull(record, "images");
@@ -150,9 +150,9 @@ namespace insoulforge::MessageRecord {
         }
     } // namespace
 
-    u64 getSessionId(const json &record) { return getUInt(record, "session_id"); }
+    auto getSessionId(const json &record) -> u64 { return getUInt(record, "session_id"); }
 
-    json createAssistantRecord(std::string senderName, const u64 messageId, const std::string &content) {
+    auto createAssistantRecord(std::string senderName, const u64 messageId, const std::string &content) -> json {
         json segments = json::array();
         std::optional<std::string> replyTo;
         static const std::regex cqPattern(R"(\[CQ:([^,\]]+)(?:,([^\]]*))?\])");
@@ -211,7 +211,7 @@ namespace insoulforge::MessageRecord {
         return record;
     }
 
-    std::string extractText(const json &record) {
+    auto extractText(const json &record) -> std::string {
         std::string text;
         const json &segments = atOrNull(record, "segments");
         if (!segments.is_array()) {
@@ -225,25 +225,25 @@ namespace insoulforge::MessageRecord {
         return text;
     }
 
-    bool hasSegmentType(const json &record, const std::string_view type) {
-        return std::ranges::any_of(
-          atOrNull(record, "segments"), [type](const json &segment) { return getStr(segment, "type") == type; });
+    auto hasSegmentType(const json &record, const std::string_view type) -> bool {
+        return std::ranges::any_of(atOrNull(record, "segments"),
+          [type](const json &segment) -> bool { return getStr(segment, "type") == type; });
     }
 
-    bool mentions(const json &record, const u64 qqNumber) {
-        return std::ranges::any_of(atOrNull(record, "segments"), [qqNumber](const json &segment) {
+    auto mentions(const json &record, const u64 qqNumber) -> bool {
+        return std::ranges::any_of(atOrNull(record, "segments"), [qqNumber](const json &segment) -> bool {
             return getStr(segment, "type") == "at" &&
                    getUInt(atOrNull(segment, "target"), "qq", getUInt(segment, "qq")) == qqNumber;
         });
     }
 
-    bool isAssistant(const json &record) { return getStr(atOrNull(record, "sender"), "qq") == "self"; }
+    auto isAssistant(const json &record) -> bool { return getStr(atOrNull(record, "sender"), "qq") == "self"; }
 
-    bool isSystem(const json &record) {
+    auto isSystem(const json &record) -> bool {
         return getStr(atOrNull(record, "sender"), "qq") == std::to_string(SessionId::kSystemAccountId);
     }
 
-    json projectForAgent(const json &record) {
+    auto projectForAgent(const json &record) -> json {
         if (!record.is_object()) {
             return record;
         }
@@ -298,7 +298,7 @@ namespace insoulforge::MessageRecord {
         return projected;
     }
 
-    std::string extractRecallText(const json &record) {
+    auto extractRecallText(const json &record) -> std::string {
         std::string text;
         for (const json projected = projectForAgent(record); const auto &segment: atOrNull(projected, "segments")) {
             if (const std::string type = getStr(segment, "type"); type == "text") {
@@ -315,7 +315,7 @@ namespace insoulforge::MessageRecord {
         return text;
     }
 
-    std::optional<ImageSource> findImageSource(const json &record, const size_t imageIndex) {
+    auto findImageSource(const json &record, const size_t imageIndex) -> std::optional<ImageSource> {
         const json &images = assetImages(record);
         if (!images.is_array() || imageIndex >= images.size()) {
             return std::nullopt;

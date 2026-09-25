@@ -22,7 +22,7 @@ namespace insoulforge::ToolPluginCatalog {
         auto &registry = ToolRegistry::instance();
         for (const auto *plugin: plugins) {
             registry.registerPlugin(std::string(plugin->id()),
-              [plugin](ToolRegistry &pluginRegistry) { plugin->registerTools(pluginRegistry); });
+              [plugin](ToolRegistry &pluginRegistry) -> void { plugin->registerTools(pluginRegistry); });
         }
     }
 } // namespace insoulforge::ToolPluginCatalog

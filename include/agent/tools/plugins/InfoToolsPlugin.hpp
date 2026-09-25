@@ -10,7 +10,7 @@ namespace insoulforge {
     class InfoToolsPlugin final : public ToolPlugin {
     public:
         /// @brief 获取固定插件 ID builtin.info
-        [[nodiscard]] std::string_view id() const noexcept override;
+        [[nodiscard]] auto id() const noexcept -> std::string_view override;
 
         /// @brief 注册信息工具
         /// @param registry 当前插件的注册中心

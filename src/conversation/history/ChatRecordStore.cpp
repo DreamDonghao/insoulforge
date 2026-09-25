@@ -22,7 +22,7 @@ namespace insoulforge {
             stmt.exec();
         }
 
-        std::vector<json> getChatRecords(const u64 sessionId, const i32 limit) {
+        auto getChatRecords(const u64 sessionId, const i32 limit) -> std::vector<json> {
             const auto &db = Database::instance();
             std::shared_lock lock(db.mutex());
             std::vector<json> records;
@@ -43,7 +43,7 @@ namespace insoulforge {
             return records;
         }
 
-        std::vector<json> getChatRecordsWithIds(const u64 sessionId, const i32 limit) {
+        auto getChatRecordsWithIds(const u64 sessionId, const i32 limit) -> std::vector<json> {
             const auto &db = Database::instance();
             std::shared_lock lock(db.mutex());
             std::vector<json> records;
@@ -64,7 +64,7 @@ namespace insoulforge {
             return records;
         }
 
-        std::vector<u64> getSessionIds() {
+        auto getSessionIds() -> std::vector<u64> {
             const auto &db = Database::instance();
             std::shared_lock lock(db.mutex());
             const Statement stmt(db.handle(), "SELECT DISTINCT group_id FROM chat_records");
@@ -75,15 +75,15 @@ namespace insoulforge {
             return sessionIds;
         }
 
-        std::optional<std::string> findContentByMessageId(const u64 sessionId, const u64 messageId) {
+        auto findContentByMessageId(const u64 sessionId, const u64 messageId) -> std::optional<std::string> {
             const auto &db = Database::instance();
             std::shared_lock lock(db.mutex());
             const Statement stmt(db.handle(), "SELECT content FROM chat_records WHERE group_id = ? ORDER BY id DESC");
             stmt.bind(1, sessionId);
             while (stmt.step()) {
                 std::string content = stmt.getText(0);
-                json parsed;
-                if (tryParseJson(content, parsed) && parseUInt64(getStr(parsed, "message_id")) == messageId) {
+                if (json parsed;
+                  tryParseJson(content, parsed) && parseUInt64(getStr(parsed, "message_id")) == messageId) {
                     return content;
                 }
             }

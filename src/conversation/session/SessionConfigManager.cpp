@@ -6,11 +6,13 @@
 #include <conversation/session/SessionConfigManager.hpp>
 
 namespace insoulforge {
-    SessionConfig SessionConfigManager::getConfig(const u64 sessionId) {
+    auto SessionConfigManager::getConfig(const u64 sessionId) -> SessionConfig {
         return SessionStore::getSessionConfig(sessionId);
     }
 
-    bool SessionConfigManager::contains(const u64 sessionId) { return SessionStore::hasSessionConfig(sessionId); }
+    auto SessionConfigManager::contains(const u64 sessionId) -> bool {
+        return SessionStore::hasSessionConfig(sessionId);
+    }
 
     void SessionConfigManager::addConfig(const u64 sessionId, const SessionConfig &config) {
         SessionStore::saveSessionConfig(sessionId, config);

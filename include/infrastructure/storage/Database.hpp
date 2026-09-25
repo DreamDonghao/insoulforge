@@ -14,7 +14,7 @@ namespace insoulforge {
     /// @brief SQLite 数据库连接管理类
     class Database {
     public:
-        static Database &instance();
+        static auto instance() -> Database &;
 
         /// @brief 打开数据库并执行 Schema 迁移
         void initialize(const std::string &dbPath);
@@ -23,10 +23,10 @@ namespace insoulforge {
         void close();
 
         /// @brief 获取底层连接（配合 mutex() 加锁使用）
-        [[nodiscard]] sqlite3 *handle() const { return m_db; }
+        [[nodiscard]] auto handle() const -> sqlite3 * { return m_db; }
 
         /// @brief 全局读写锁：读操作用 shared_lock，写操作用 unique_lock
-        [[nodiscard]] std::shared_mutex &mutex() const { return m_mutex; }
+        [[nodiscard]] auto mutex() const -> std::shared_mutex & { return m_mutex; }
 
     private:
         Database() = default;

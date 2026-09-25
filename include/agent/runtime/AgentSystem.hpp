@@ -9,12 +9,12 @@ namespace insoulforge {
     /// @details 消息处理流程由 OneBotEventWorkflow 协调；本类仅管理其所依赖的全局初始化状态。
     class AgentSystem {
     public:
-        static AgentSystem &instance();
+        static auto instance() -> AgentSystem &;
 
-        [[nodiscard]] bool isRunning() const noexcept;
+        [[nodiscard]] auto isRunning() const noexcept -> bool;
 
         /// @brief 判断 Agent 是否已完成初始化且允许处理消息
-        [[nodiscard]] bool isReady() const noexcept;
+        [[nodiscard]] auto isReady() const noexcept -> bool;
 
         /// @brief 设置 Agent 的运行开关
         void setRunning(bool running) noexcept;

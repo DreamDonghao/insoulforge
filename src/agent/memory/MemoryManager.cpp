@@ -9,5 +9,5 @@
 namespace insoulforge {
     MemoryManager::MemoryManager(u64 sessionId) : m_sessionId(sessionId) {}
 
-    std::string MemoryManager::getMemory() const { return MemoryStore::getShortTermMemory(m_sessionId); }
+    auto MemoryManager::getMemory() const -> std::string { return MemoryStore::getShortTermMemory(m_sessionId); }
 } // namespace insoulforge

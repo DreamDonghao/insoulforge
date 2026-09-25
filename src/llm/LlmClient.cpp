@@ -26,12 +26,12 @@ namespace insoulforge {
         constexpr size_t kErrorBodyMaxChars = 500;
 
         /// @brief 是否为可重试的临时性 HTTP 状态码
-        bool isRetryableStatus(const i32 status) { return status == 503 || status == 429 || status == 500; }
+        auto isRetryableStatus(const i32 status) -> bool { return status == 503 || status == 429 || status == 500; }
 
         /// @brief 通用 API 请求函数
-        drogon::Task<std::optional<std::string>> requestStr(json messages, std::string base_url, std::string path,
-          std::string api_key, std::string model, const f64 temperature, const f64 top_p, const i32 max_tokens,
-          std::string role, const std::optional<u64> sessionId, const f64 timeoutSeconds) {
+        auto requestStr(json messages, std::string base_url, std::string path, std::string api_key, std::string model,
+          const f64 temperature, const f64 top_p, const i32 max_tokens, std::string role,
+          const std::optional<u64> sessionId, const f64 timeoutSeconds) -> drogon::Task<std::optional<std::string>> {
             const LLMApiConfig api{.apiKey = api_key, .baseUrl = base_url, .path = path, .model = model};
             if (!LlmClient::isConfigured(api)) {
                 if (sessionId) {
@@ -70,11 +70,12 @@ namespace insoulforge {
     } // namespace
 
     namespace LlmClient {
-        bool isConfigured(const LLMApiConfig &api) {
+        auto isConfigured(const LLMApiConfig &api) -> bool {
             return !api.baseUrl.empty() && !api.path.empty() && !api.model.empty();
         }
 
-        json buildChatRequestBody(const LLMApiConfig &api, const LLMModelParams &params, json messages, json tools) {
+        auto buildChatRequestBody(const LLMApiConfig &api, const LLMModelParams &params, json messages, json tools)
+          -> json {
             json body;
             body["model"] = api.model;
             body["messages"] = std::move(messages);
@@ -88,7 +89,7 @@ namespace insoulforge {
             return body;
         }
 
-        std::optional<json> validChatJson(const drogon::HttpResponsePtr &resp) {
+        auto validChatJson(const drogon::HttpResponsePtr &resp) -> std::optional<json> {
             if (!resp || resp->getStatusCode() != drogon::k200OK)
                 return std::nullopt;
             json parsed;
@@ -101,8 +102,9 @@ namespace insoulforge {
             return parsed;
         }
 
-        drogon::Task<std::optional<json>> requestChat(std::string label, std::string usageRole,
-          const LLMApiConfig &apiConfig, const LLMModelParams &params, json messages, json tools, const u64 sessionId) {
+        auto requestChat(std::string label, std::string usageRole, const LLMApiConfig &apiConfig,
+          const LLMModelParams &params, json messages, json tools, const u64 sessionId)
+          -> drogon::Task<std::optional<json>> {
             if (!isConfigured(apiConfig)) {
                 Logger::warn(sessionId, label, "未配置服务地址、请求路径或模型名，跳过请求");
                 co_return std::nullopt;
@@ -138,17 +140,17 @@ namespace insoulforge {
         }
     } // namespace LlmClient
 
-    drogon::Task<std::optional<std::string>> LlmClient::requestLLM(json messages, const f64 temperature,
-      const f64 top_p, const i32 max_tokens, std::string role, const std::optional<u64> sessionId,
-      const f64 timeoutSeconds) {
+    auto LlmClient::requestLLM(json messages, const f64 temperature, const f64 top_p, const i32 max_tokens,
+      std::string role, const std::optional<u64> sessionId, const f64 timeoutSeconds)
+      -> drogon::Task<std::optional<std::string>> {
         const auto &config = Config::instance();
         co_return co_await requestStr(std::move(messages), config.executor.baseUrl, config.executor.path,
           config.executor.apiKey, config.executor.model, temperature, top_p, max_tokens, std::move(role), sessionId,
           timeoutSeconds);
     }
 
-    drogon::Task<std::optional<std::vector<f32>>> LlmClient::requestEmbedding(
-      std::string text, const std::optional<u64> sessionId) {
+    auto LlmClient::requestEmbedding(std::string text, const std::optional<u64> sessionId)
+      -> drogon::Task<std::optional<std::vector<f32>>> {
         const auto &config = Config::instance().embedding;
         if (!isConfigured(config)) {
             Logger::debug(0, "LLM", fmt::format("Embedding 未配置，跳过向量化"));

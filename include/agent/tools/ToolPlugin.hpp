@@ -17,7 +17,7 @@ namespace insoulforge {
 
         /// @brief 返回全局唯一且稳定的插件标识
         /// @return 小写命名空间形式的插件 ID，如 builtin.weather
-        [[nodiscard]] virtual std::string_view id() const noexcept = 0;
+        [[nodiscard]] virtual auto id() const noexcept -> std::string_view = 0;
 
         /// @brief 向当前插件注册回调提供的注册中心添加工具
         /// @param registry 当前插件专属的工具注册入口

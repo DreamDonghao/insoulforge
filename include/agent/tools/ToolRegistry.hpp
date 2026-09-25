@@ -64,31 +64,32 @@ namespace insoulforge {
         /// @brief 在插件注册上下文中调用的工具声明函数
         using PluginRegistrar = std::function<void(ToolRegistry &registry)>;
 
-        static ToolRegistry &instance();
+        static auto instance() -> ToolRegistry &;
 
         /// @brief 注册或重载一个进程内工具插件
         /// @details 注册失败时保留该插件此前的工具；其他插件不受影响。
-        bool registerPlugin(std::string pluginId, const PluginRegistrar &registrar);
+        auto registerPlugin(std::string pluginId, const PluginRegistrar &registrar) -> bool;
 
         /// @brief 卸载一个插件及其注册的全部工具
         void unregisterPlugin(const std::string &pluginId);
 
         /// @brief 在当前插件注册回调中注册工具到指定分类
         /// @return 成功注册返回 true；名称已被其他插件占用时返回 false
-        bool registerTool(const Tool &tool, ToolCategory category);
+        auto registerTool(const Tool &tool, ToolCategory category) -> bool;
 
         /// @brief 按会话能力筛选并获取工具定义
         /// @details 输出顺序固定为：分类、promptOrder、名称，避免请求间顺序漂移。
-        [[nodiscard]] json getTools(const ToolQuery &query) const;
+        [[nodiscard]] auto getTools(const ToolQuery &query) const -> json;
 
         /// @brief 获取所有工具定义（兼容管理与诊断用途）
-        [[nodiscard]] json getAllTools() const;
+        [[nodiscard]] auto getAllTools() const -> json;
 
         /// @brief 执行工具（异步，ctx 随调用传给 handler）
-        [[nodiscard]] drogon::Task<std::string> executeTool(std::string name, json args, ToolCallContext ctx) const;
+        [[nodiscard]] auto executeTool(std::string name, json args, ToolCallContext ctx) const
+          -> drogon::Task<std::string>;
 
         /// @brief 检查工具是否存在
-        [[nodiscard]] bool hasTool(const std::string &name) const;
+        [[nodiscard]] auto hasTool(const std::string &name) const -> bool;
 
         /// @brief 注销工具
         void unregisterTool(const std::string &name);
@@ -109,6 +110,6 @@ namespace insoulforge {
         std::string m_activePluginId;
         bool m_pluginRegistrationFailed = false;
 
-        static i32 categoryOrder(ToolCategory category);
+        static auto categoryOrder(ToolCategory category) -> i32;
     };
 } // namespace insoulforge

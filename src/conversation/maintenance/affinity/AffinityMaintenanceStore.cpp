@@ -21,7 +21,7 @@ namespace insoulforge::AffinityMaintenanceStore {
         }
     } // namespace
 
-    std::vector<u64> pendingSessionIds() {
+    auto pendingSessionIds() -> std::vector<u64> {
         const auto &database = Database::instance();
         std::shared_lock lock(database.mutex());
         const Statement statement(
@@ -33,7 +33,7 @@ namespace insoulforge::AffinityMaintenanceStore {
         return sessionIds;
     }
 
-    std::optional<AffinityMaintenanceJob> next(const u64 sessionId) {
+    auto next(const u64 sessionId) -> std::optional<AffinityMaintenanceJob> {
         const auto &database = Database::instance();
         std::shared_lock lock(database.mutex());
         const Statement statement(database.handle(),

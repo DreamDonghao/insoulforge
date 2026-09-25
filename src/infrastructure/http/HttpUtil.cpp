@@ -11,7 +11,7 @@ namespace insoulforge::HttpUtil {
     namespace {
         constexpr size_t kBodyLogMax = 400; // 日志中请求体截断长度
 
-        const char *methodName(const drogon::HttpMethod m) {
+        auto methodName(const drogon::HttpMethod m) -> const char * {
             switch (m) {
                 case drogon::Get:
                     return "GET";
@@ -32,7 +32,7 @@ namespace insoulforge::HttpUtil {
             }
         }
 
-        std::string truncate(std::string s, const size_t max) {
+        auto truncate(std::string s, const size_t max) -> std::string {
             if (s.size() <= max)
                 return s;
             return s.substr(0, max) + "…(截断)";
@@ -65,9 +65,9 @@ namespace insoulforge::HttpUtil {
         }
     } // namespace
 
-    drogon::Task<std::optional<drogon::HttpResponsePtr>> send(const std::string_view tag, std::string baseUrl,
-      std::string path, const drogon::HttpMethod method, json body, std::string bearerToken, const f64 timeout,
-      std::optional<u64> sessionId) {
+    auto send(const std::string_view tag, std::string baseUrl, std::string path, const drogon::HttpMethod method,
+      json body, std::string bearerToken, const f64 timeout, std::optional<u64> sessionId)
+      -> drogon::Task<std::optional<drogon::HttpResponsePtr>> {
         normalizeTarget(baseUrl, path);
         // 请求体完整序列化一次，供请求调试记录和实际请求共用；运行日志不记录正常请求细节。
         auto bodyText = body.is_null() ? std::string{} : dumpJson(body);
@@ -104,7 +104,7 @@ namespace insoulforge::HttpUtil {
         }
         trace.requestBody = std::move(bodyText);
 
-        const auto finishTrace = [&](const i32 statusCode, std::string responseBody) {
+        const auto finishTrace = [&](const i32 statusCode, std::string responseBody) -> void {
             trace.status = statusCode;
             trace.responseBody = std::move(responseBody);
             HttpTrace::instance().append(std::move(trace));

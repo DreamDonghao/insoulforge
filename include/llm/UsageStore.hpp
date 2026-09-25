@@ -18,8 +18,8 @@ namespace insoulforge::UsageStore {
       i32 totalTokens, i32 cachedTokens);
 
     /// @brief 获取最近 N 天用量汇总（按角色、按天聚合）
-    [[nodiscard]] json getUsageSummary(i32 days);
+    [[nodiscard]] auto getUsageSummary(i32 days) -> json;
 
     /// @brief 获取最近调用明细
-    [[nodiscard]] json getRecentUsage(i32 limit);
+    [[nodiscard]] auto getRecentUsage(i32 limit) -> json;
 } // namespace insoulforge::UsageStore

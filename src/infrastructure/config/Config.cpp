@@ -33,7 +33,7 @@ namespace insoulforge {
         }
     } // namespace
 
-    Config &Config::instance() {
+    auto Config::instance() -> Config & {
         static Config config{};
         return config;
     }

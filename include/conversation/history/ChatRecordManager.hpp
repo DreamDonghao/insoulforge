@@ -21,11 +21,11 @@ namespace insoulforge {
         ChatRecordManager(u64 sessionId, std::deque<json> records);
 
         /// @brief 获取会话 ID
-        [[nodiscard]] u64 getSessionId() const;
+        [[nodiscard]] auto getSessionId() const -> u64;
 
         /// @brief 获取冻结的聊天记录（旧→新）
         /// @return 聊天记录队列
-        [[nodiscard]] std::deque<json> getRecords() const;
+        [[nodiscard]] auto getRecords() const -> std::deque<json>;
 
     private:
         u64 m_sessionId; ///< 所属会话 ID

@@ -28,14 +28,14 @@ namespace insoulforge {
     /// @details 仅存内存，重启清空；status 为 0 表示请求未得到响应（超时/异常）
     class HttpTrace {
     public:
-        static HttpTrace &instance();
+        static auto instance() -> HttpTrace &;
 
         void append(HttpTraceEntry entry);
 
         /// @brief 按 id 降序取记录（id > afterId，最多 limit 条）
-        [[nodiscard]] std::vector<HttpTraceEntry> query(u64 afterId, size_t limit) const;
+        [[nodiscard]] auto query(u64 afterId, size_t limit) const -> std::vector<HttpTraceEntry>;
 
-        [[nodiscard]] size_t size() const;
+        [[nodiscard]] auto size() const -> size_t;
 
         void clear();
 

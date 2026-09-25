@@ -27,13 +27,13 @@ namespace insoulforge {
         };
 
         /// @brief 获取所有自定义工具
-        [[nodiscard]] std::vector<CustomTool> getCustomTools();
+        [[nodiscard]] auto getCustomTools() -> std::vector<CustomTool>;
 
         /// @brief 获取启用的自定义工具（供 ToolRuntime 使用）
-        [[nodiscard]] std::vector<CustomTool> getEnabledCustomTools();
+        [[nodiscard]] auto getEnabledCustomTools() -> std::vector<CustomTool>;
 
         /// @brief 添加自定义工具
-        [[nodiscard]] i32 addCustomTool(const CustomTool &tool);
+        [[nodiscard]] auto addCustomTool(const CustomTool &tool) -> i32;
 
         /// @brief 更新自定义工具
         void updateCustomTool(const CustomTool &tool);
@@ -45,10 +45,10 @@ namespace insoulforge {
         void toggleCustomTool(i32 id);
 
         /// @brief 检查工具名是否已存在
-        [[nodiscard]] bool hasCustomTool(const std::string &name);
+        [[nodiscard]] auto hasCustomTool(const std::string &name) -> bool;
 
         /// @brief 获取自定义工具Python解释器路径
-        [[nodiscard]] std::string getCustomToolPython();
+        [[nodiscard]] auto getCustomToolPython() -> std::string;
 
         /// @brief 设置自定义工具Python解释器路径
         void setCustomToolPython(const std::string &pythonPath);

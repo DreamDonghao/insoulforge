@@ -20,21 +20,21 @@ namespace insoulforge {
             explicit TemporaryFile(std::string path) : m_path(std::move(path)) {}
 
             TemporaryFile(const TemporaryFile &) = delete;
-            TemporaryFile &operator=(const TemporaryFile &) = delete;
+            auto operator=(const TemporaryFile &) -> TemporaryFile & = delete;
 
             ~TemporaryFile() {
                 std::error_code error;
                 std::filesystem::remove(m_path, error);
             }
 
-            [[nodiscard]] const std::string &path() const noexcept { return m_path; }
+            [[nodiscard]] auto path() const noexcept -> const std::string & { return m_path; }
 
         private:
             std::string m_path;
         };
 
         /// @brief 在当前平台启动读取子进程输出的管道
-        [[nodiscard]] FILE *openReadPipe(const char *command) {
+        [[nodiscard]] auto openReadPipe(const char *command) -> FILE * {
 #ifdef _WIN32
             return _popen(command, "r");
 #else
@@ -43,7 +43,7 @@ namespace insoulforge {
         }
 
         /// @brief 关闭由 openReadPipe 创建的管道
-        [[nodiscard]] i32 closePipe(FILE *pipe) {
+        [[nodiscard]] auto closePipe(FILE *pipe) -> i32 {
 #ifdef _WIN32
             return _pclose(pipe);
 #else
@@ -52,7 +52,7 @@ namespace insoulforge {
         }
 
         /// @brief 移除脚本开头的空白行，保留内部缩进
-        [[nodiscard]] std::string trimScriptPrefix(std::string script) {
+        [[nodiscard]] auto trimScriptPrefix(std::string script) -> std::string {
             const size_t firstNonSpace = script.find_first_not_of(" \t\n\r");
             if (firstNonSpace != std::string::npos) {
                 script.erase(0, firstNonSpace);
@@ -61,7 +61,7 @@ namespace insoulforge {
         }
     } // namespace
 
-    drogon::Task<std::string> ToolRuntime::executePythonTool(std::string scriptContent, json args) {
+    auto ToolRuntime::executePythonTool(std::string scriptContent, json args) -> drogon::Task<std::string> {
         if (scriptContent.empty()) {
             co_return std::string("脚本内容为空");
         }
@@ -108,7 +108,7 @@ namespace insoulforge {
         co_return result;
     }
 
-    drogon::Task<std::string> ToolRuntime::executeHttpTool(std::string config, json args, const u64 sessionId) {
+    auto ToolRuntime::executeHttpTool(std::string config, json args, const u64 sessionId) -> drogon::Task<std::string> {
         json configJson;
         if (!tryParseJson(config, configJson)) {
             Logger::error(0, "Tool", fmt::format("HTTP工具配置解析失败"));

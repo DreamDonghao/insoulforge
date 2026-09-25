@@ -28,13 +28,13 @@ namespace insoulforge {
                 execSQL(db, sql);
         }
 
-        bool tableExists(sqlite3 *db, std::string_view name) {
+        auto tableExists(sqlite3 *db, std::string_view name) -> bool {
             const Statement stmt(db, "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?");
             stmt.bind(1, name);
             return stmt.step();
         }
 
-        bool columnExists(sqlite3 *db, std::string_view table, std::string_view column) {
+        auto columnExists(sqlite3 *db, std::string_view table, std::string_view column) -> bool {
             const Statement stmt(db, fmt::format("PRAGMA table_info({})", table));
             while (stmt.step()) {
                 if (stmt.getText(1) == column)
@@ -227,7 +227,7 @@ namespace insoulforge {
         qq_number INTEGER PRIMARY KEY,
         added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ))"};
-        i32 getUserVersion(sqlite3 *db) {
+        auto getUserVersion(sqlite3 *db) -> i32 {
             const Statement stmt(db, "PRAGMA user_version");
             return stmt.step() ? stmt.getInt(0) : 0;
         }
@@ -236,7 +236,7 @@ namespace insoulforge {
             execSQL(db, fmt::format("PRAGMA user_version = {}", version));
         }
 
-        bool hasUserTables(sqlite3 *db) {
+        auto hasUserTables(sqlite3 *db) -> bool {
             const Statement stmt(
               db, "SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' LIMIT 1");
             return stmt.step();

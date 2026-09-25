@@ -14,7 +14,7 @@ namespace insoulforge {
         constexpr size_t kMaxEntries = 5000;
     }
 
-    LogBuffer &LogBuffer::instance() {
+    auto LogBuffer::instance() -> LogBuffer & {
         static LogBuffer buffer;
         return buffer;
     }
@@ -52,7 +52,7 @@ namespace insoulforge {
         }
     }
 
-    LogEntry LogBuffer::append(LogEntry entry) {
+    auto LogBuffer::append(LogEntry entry) -> LogEntry {
         std::lock_guard lock(m_mutex);
         entry.id = m_nextId++;
         if (m_entries.size() >= kMaxEntries) {
@@ -62,7 +62,7 @@ namespace insoulforge {
         return entry;
     }
 
-    LogQueryResult LogBuffer::query(const LogQuery &query) const {
+    auto LogBuffer::query(const LogQuery &query) const -> LogQueryResult {
         std::lock_guard lock(m_mutex);
         LogQueryResult result;
         if (!m_entries.empty()) {
@@ -85,11 +85,11 @@ namespace insoulforge {
         size_t end = matched.size();
         if (query.afterId > 0) {
             start = std::distance(matched.begin(),
-              std::ranges::find_if(matched, [&](const auto *entry) { return entry->id > query.afterId; }));
+              std::ranges::find_if(matched, [&](const auto *entry) -> auto { return entry->id > query.afterId; }));
             end = std::min(start + query.limit, matched.size());
         } else if (query.beforeId.has_value()) {
             end = std::distance(matched.begin(),
-              std::ranges::find_if(matched, [&](const auto *entry) { return entry->id >= *query.beforeId; }));
+              std::ranges::find_if(matched, [&](const auto *entry) -> auto { return entry->id >= *query.beforeId; }));
             start = end > query.limit ? end - query.limit : 0;
         } else if (end > query.limit) {
             start = end - query.limit;
@@ -107,12 +107,12 @@ namespace insoulforge {
         return result;
     }
 
-    size_t LogBuffer::size() const {
+    auto LogBuffer::size() const -> size_t {
         std::lock_guard lock(m_mutex);
         return m_entries.size();
     }
 
-    std::optional<LogEntry> LogBuffer::parseLine(const std::string &line) {
+    auto LogBuffer::parseLine(const std::string &line) -> std::optional<LogEntry> {
         // 新文件格式：[YYYY-MM-DD HH:MM:SS.mmm] [level][session_id][source][content]。
         // 旧版文件额外携带 sink 的等级段：[timestamp] [level] content。
         constexpr size_t kTimestampWidth = 23;
@@ -176,7 +176,7 @@ namespace insoulforge {
         }
     }
 
-    bool LogBuffer::matches(const LogEntry &entry, const LogQuery &query) {
+    auto LogBuffer::matches(const LogEntry &entry, const LogQuery &query) -> bool {
         if (query.sessionId.has_value() && entry.sessionId != *query.sessionId) {
             return false;
         }

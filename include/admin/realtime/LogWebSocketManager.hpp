@@ -22,7 +22,7 @@ namespace insoulforge {
 
     class LogWebSocketManager {
     public:
-        static LogWebSocketManager &instance();
+        static auto instance() -> LogWebSocketManager &;
 
         void addConnection(const drogon::WebSocketConnectionPtr &conn);
 
@@ -38,7 +38,7 @@ namespace insoulforge {
     private:
         LogWebSocketManager() = default;
 
-        [[nodiscard]] static bool matches(const LogSubscription &subscription, const LogEntry &entry);
+        [[nodiscard]] static auto matches(const LogSubscription &subscription, const LogEntry &entry) -> bool;
 
         std::mutex m_mutex;
         std::unordered_set<drogon::WebSocketConnectionPtr> m_connections;

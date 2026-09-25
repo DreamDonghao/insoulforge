@@ -24,17 +24,17 @@ namespace insoulforge::ToolRuntime {
     /// @brief 执行 Python 脚本工具
     /// @param scriptContent Python脚本内容（直接存储在数据库中）
     /// @param args 传入参数
-    drogon::Task<std::string> executePythonTool(std::string scriptContent, json args);
+    auto executePythonTool(std::string scriptContent, json args) -> drogon::Task<std::string>;
 
     /// @brief 执行 HTTP 工具（sessionId 来自工具调用上下文）
-    drogon::Task<std::string> executeHttpTool(std::string config, json args, u64 sessionId);
+    auto executeHttpTool(std::string config, json args, u64 sessionId) -> drogon::Task<std::string>;
 
     /// @brief 获取 QQ 收藏表情列表（调用 NapCat fetch_custom_face_detail，带60秒缓存）
     /// @return 归一化后的表情数组，失败时返回空数组
-    drogon::Task<json> fetchFavoriteEmojis(std::optional<u64> sessionId = std::nullopt);
+    auto fetchFavoriteEmojis(std::optional<u64> sessionId = std::nullopt) -> drogon::Task<json>;
 
     /// @brief 在收藏表情列表中按名称查找表情（名称 = desc 或 "表情N"）
-    drogon::Task<json> findFavoriteEmoji(std::string name, std::optional<u64> sessionId = std::nullopt);
+    auto findFavoriteEmoji(std::string name, std::optional<u64> sessionId = std::nullopt) -> drogon::Task<json>;
 
     /// @brief 使收藏表情缓存失效（修改/删除后调用）
     void invalidateFavoriteEmojiCache();

@@ -45,7 +45,7 @@ namespace insoulforge::ImageDescriptionService {
         };
 
         /// @brief GIF 库的内存读取回调
-        int readGif(GifFileType *file, GifByteType *output, const int size) {
+        auto readGif(GifFileType *file, GifByteType *output, const int size) -> int {
             auto &input = *static_cast<GifInput *>(file->UserData);
             const size_t readable = std::min(static_cast<size_t>(size), input.size - input.offset);
             std::memcpy(output, input.data + input.offset, readable);
@@ -54,7 +54,7 @@ namespace insoulforge::ImageDescriptionService {
         }
 
         /// @brief 通过文件魔数判断媒体格式
-        [[nodiscard]] std::optional<std::pair<std::string, bool>> detectMedia(const std::string &bytes) {
+        [[nodiscard]] auto detectMedia(const std::string &bytes) -> std::optional<std::pair<std::string, bool>> {
             if (bytes.size() >= 6 && (bytes.starts_with("GIF87a") || bytes.starts_with("GIF89a")))
                 return std::pair{"image/gif", true};
             if (bytes.size() >= 8 && std::memcmp(bytes.data(), "\x89PNG\r\n\x1a\n", 8) == 0)
@@ -68,7 +68,7 @@ namespace insoulforge::ImageDescriptionService {
             return std::nullopt;
         }
 
-        [[nodiscard]] std::string base64Encode(const std::string_view input) {
+        [[nodiscard]] auto base64Encode(const std::string_view input) -> std::string {
             static constexpr std::string_view alphabet =
               "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
             std::string output;
@@ -86,7 +86,7 @@ namespace insoulforge::ImageDescriptionService {
             return output;
         }
 
-        [[nodiscard]] std::string sha256(const std::string_view bytes) {
+        [[nodiscard]] auto sha256(const std::string_view bytes) -> std::string {
             std::array<unsigned char, SHA256_DIGEST_LENGTH> digest{};
             SHA256(reinterpret_cast<const unsigned char *>(bytes.data()), bytes.size(), digest.data());
             static constexpr std::string_view hex = "0123456789abcdef";
@@ -100,7 +100,7 @@ namespace insoulforge::ImageDescriptionService {
         }
 
         /// @brief 下载 URL 的原始媒体字节，不写入 HTTP 跟踪日志以避免二进制内容进入内存日志。
-        drogon::Task<std::optional<DownloadedMedia>> download(std::string sourceUrl, const u64 sessionId) {
+        auto download(std::string sourceUrl, const u64 sessionId) -> drogon::Task<std::optional<DownloadedMedia>> {
             static const std::regex urlPattern(R"(^(https?://[^/]+)(/.*)?$)", std::regex::icase);
             std::smatch match;
             if (!std::regex_match(sourceUrl, match, urlPattern)) {
@@ -137,7 +137,7 @@ namespace insoulforge::ImageDescriptionService {
             }
         }
 
-        [[nodiscard]] std::vector<size_t> selectGifFrames(GifFileType &gif) {
+        [[nodiscard]] auto selectGifFrames(GifFileType &gif) -> std::vector<size_t> {
             const auto count = static_cast<size_t>(gif.ImageCount);
             if (count <= kMaxGifSubmittedFrames) {
                 std::vector<size_t> all(count);
@@ -176,8 +176,8 @@ namespace insoulforge::ImageDescriptionService {
             output.append(reinterpret_cast<const char *>(data), length);
         }
 
-        [[nodiscard]] std::optional<std::string> encodePng(
-          const std::vector<u8> &rgba, const i32 width, const i32 height) {
+        [[nodiscard]] auto encodePng(const std::vector<u8> &rgba, const i32 width, const i32 height)
+          -> std::optional<std::string> {
             png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
             if (!png)
                 return std::nullopt;
@@ -204,8 +204,8 @@ namespace insoulforge::ImageDescriptionService {
             return output;
         }
 
-        [[nodiscard]] std::vector<u8> resizeRgba(
-          const std::vector<u8> &input, const i32 width, const i32 height, i32 &outputWidth, i32 &outputHeight) {
+        [[nodiscard]] auto resizeRgba(const std::vector<u8> &input, const i32 width, const i32 height, i32 &outputWidth,
+          i32 &outputHeight) -> std::vector<u8> {
             const i32 maxEdge = std::max(width, height);
             if (maxEdge <= kGifFrameMaxEdge) {
                 outputWidth = width;
@@ -227,7 +227,7 @@ namespace insoulforge::ImageDescriptionService {
             return output;
         }
 
-        [[nodiscard]] std::vector<std::string> extractGifFrames(const std::string &bytes, const u64 sessionId) {
+        [[nodiscard]] auto extractGifFrames(const std::string &bytes, const u64 sessionId) -> std::vector<std::string> {
             GifInput input{.data = reinterpret_cast<const u8 *>(bytes.data()), .size = bytes.size()};
             i32 error = 0;
             std::unique_ptr<GifFileType, GifFileDeleter> gif(DGifOpen(&input, readGif, &error));
@@ -294,8 +294,8 @@ namespace insoulforge::ImageDescriptionService {
             return frames;
         }
 
-        drogon::Task<std::optional<std::string>> requestVision(
-          std::vector<std::string> images, const bool isGif, const u64 sessionId) {
+        auto requestVision(std::vector<std::string> images, const bool isGif, const u64 sessionId)
+          -> drogon::Task<std::optional<std::string>> {
             const auto &config = Config::instance();
             if (!LlmClient::isConfigured(config.image)) {
                 Logger::debug(sessionId, "Media", fmt::format("图片识别模型未配置，跳过识别"));
@@ -324,7 +324,7 @@ namespace insoulforge::ImageDescriptionService {
         }
     } // namespace
 
-    drogon::Task<std::optional<ImageDescriptionResult>> describe(std::string sourceUrl, const u64 sessionId) {
+    auto describe(std::string sourceUrl, const u64 sessionId) -> drogon::Task<std::optional<ImageDescriptionResult>> {
         const auto &config = Config::instance();
         if (!LlmClient::isConfigured(config.image)) {
             Logger::debug(sessionId, "Media", fmt::format("图片识别模型未配置，跳过识别"));

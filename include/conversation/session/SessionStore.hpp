@@ -25,7 +25,7 @@ namespace insoulforge {
         /// @brief 获取会话的累计消息统计
         /// @param sessionId 统一会话 ID
         /// @return 已保存的统计配置；不存在时各字段均为 0
-        [[nodiscard]] SessionConfig getSessionConfig(u64 sessionId);
+        [[nodiscard]] auto getSessionConfig(u64 sessionId) -> SessionConfig;
 
         /// @brief 覆盖保存会话的累计消息统计
         /// @param sessionId 统一会话 ID
@@ -40,12 +40,12 @@ namespace insoulforge {
         /// @brief 检查会话是否已有统计配置
         /// @param sessionId 统一会话 ID
         /// @return 存在 `group_config` 记录时返回 true
-        [[nodiscard]] bool hasSessionConfig(u64 sessionId);
+        [[nodiscard]] auto hasSessionConfig(u64 sessionId) -> bool;
 
         /// @brief 检查会话是否启用常规消息处理
         /// @param sessionId 统一会话 ID
         /// @return 启用记录存在且 `enabled` 为 true 时返回 true
-        [[nodiscard]] bool isSessionEnabled(u64 sessionId);
+        [[nodiscard]] auto isSessionEnabled(u64 sessionId) -> bool;
 
         /// @brief 启用会话的常规消息处理
         /// @param sessionId 统一会话 ID
@@ -59,17 +59,17 @@ namespace insoulforge {
 
         /// @brief 获取所有已启用的会话 ID
         /// @return `enabled_groups` 中 `enabled` 为 true 的会话 ID 列表
-        [[nodiscard]] std::vector<u64> getEnabledGroups();
+        [[nodiscard]] auto getEnabledGroups() -> std::vector<u64>;
 
         /// @brief 获取所有存在聊天记录的会话摘要
         /// @return 元组列表 `{sessionId, sessionName, recordCount}`，按记录数降序排列
         /// @details 会话未设置名称时 `sessionName` 为空字符串。
-        [[nodiscard]] std::vector<std::tuple<u64, std::string, i32>> getSessionsWithChatRecords();
+        [[nodiscard]] auto getSessionsWithChatRecords() -> std::vector<std::tuple<u64, std::string, i32>>;
 
         /// @brief 获取所有已登记启用状态的会话摘要
         /// @return 元组列表 `{sessionId, sessionName, enabled, recordCount}`，优先返回已启用会话
         /// @details 仅返回 `enabled_groups` 中的记录；从未启用且没有名称的会话不在结果中。
-        [[nodiscard]] std::vector<std::tuple<u64, std::string, bool, i32>> getAllSessionsWithStatus();
+        [[nodiscard]] auto getAllSessionsWithStatus() -> std::vector<std::tuple<u64, std::string, bool, i32>>;
 
         /// @brief 切换已有会话的启用状态
         /// @param sessionId 统一会话 ID
@@ -85,6 +85,6 @@ namespace insoulforge {
         /// @brief 获取会话显示名称
         /// @param sessionId 统一会话 ID
         /// @return 已保存的显示名称；未设置或记录不存在时返回空字符串
-        [[nodiscard]] std::string getSessionName(u64 sessionId);
+        [[nodiscard]] auto getSessionName(u64 sessionId) -> std::string;
     } // namespace SessionStore
 } // namespace insoulforge
