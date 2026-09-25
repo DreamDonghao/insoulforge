@@ -7,8 +7,8 @@
 
 #include <drogon/HttpController.h>
 #include <drogon/utils/coroutine.h>
+
 #include <infrastructure/logging/LogBuffer.hpp>
-#include <onebot/MessageService.hpp>
 
 namespace insoulforge {
     /// @brief 管理后台 REST API 控制器
@@ -164,205 +164,213 @@ namespace insoulforge {
         METHOD_LIST_END
 
         /// @brief 获取当前浏览器的管理后台登录状态。
-        drogon::Task<> getAuthStatus(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto getAuthStatus(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         /// @brief 使用本次启动生成的令牌创建管理后台会话。
-        drogon::Task<> login(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto login(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const
+          -> drogon::Task<>;
 
         /// @brief 清除当前浏览器的管理后台会话。
-        drogon::Task<> logout(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto logout(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const
+          -> drogon::Task<>;
 
         // ============== LLM 配置 ==============
 
         /// @brief 获取所有 LLM 配置
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
-        drogon::Task<> getLLMConfigs(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto getLLMConfigs(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         /// @brief 保存指定 LLM 配置
         /// @param req HTTP 请求，body 包含配置 JSON
         /// @param callback HTTP 响应回调
-        drogon::Task<> saveLLMConfig(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto saveLLMConfig(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         // ============== 提示词 ==============
 
         /// @brief 获取所有提示词
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
-        drogon::Task<> getPrompts(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto getPrompts(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const
+          -> drogon::Task<>;
 
         /// @brief 保存提示词
         /// @param req HTTP 请求，body 包含 key 和 content
         /// @param callback HTTP 响应回调
-        drogon::Task<> savePrompt(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto savePrompt(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const
+          -> drogon::Task<>;
 
         // ============== 表情库 ==============
 
         /// @brief 获取表情包库（QQ 收藏表情列表，含预览图 URL）
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
-        drogon::Task<> getEmojis(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto getEmojis(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const
+          -> drogon::Task<>;
 
         /// @brief 修改收藏表情描述（调用 NapCat set_custom_face_desc）
         /// @param req body: {emoji_id, res_id, md5, desc}
-        drogon::Task<> updateEmojiDesc(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        /// @param callback
+        auto updateEmojiDesc(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         /// @brief 获取 Token 用量统计
         /// @param req query: days（可选，默认30）
-        drogon::Task<> getUsage(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        /// @param callback
+        auto getUsage(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const
+          -> drogon::Task<>;
 
         /// @brief 查询运行日志
-        drogon::Task<> getLogs(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto getLogs(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const
+          -> drogon::Task<>;
 
         /// @brief 查询最近的 HTTP 请求记录（含完整请求/响应体）
         /// @param req query: afterId / limit（可选）
-        drogon::Task<> getHttpTraces(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        /// @param callback
+        auto getHttpTraces(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         /// @brief 清空 HTTP 请求记录
-        drogon::Task<> clearHttpTraces(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto clearHttpTraces(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         /// @brief 获取运行信息（启动时间、运行时长）
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
-        drogon::Task<> getSystemInfo(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto getSystemInfo(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         /// @brief 获取机器人运行状态
-        drogon::Task<> getBotStatus(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto getBotStatus(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         /// @brief 设置机器人运行状态
-        drogon::Task<> setBotStatus(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto setBotStatus(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         /// @brief 获取当前生效的 OneBot 传输方式及连接状态
-        drogon::Task<> getOneBotStatus(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto getOneBotStatus(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         // ============== 管理员 ==============
 
         /// @brief 获取管理员列表
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
-        drogon::Task<> getAdmins(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto getAdmins(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const
+          -> drogon::Task<>;
 
         /// @brief 添加管理员
         /// @param req HTTP 请求，body 包含 qq
         /// @param callback HTTP 响应回调
-        drogon::Task<> addAdmin(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto addAdmin(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const
+          -> drogon::Task<>;
 
         /// @brief 删除管理员
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
         /// @param qq 管理员 QQ 号
-        drogon::Task<> removeAdmin(drogon::HttpRequestPtr req,
-          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &qq) const;
+        auto removeAdmin(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback,
+          const std::string &qq) const -> drogon::Task<>;
 
         /// @brief 获取全局 QQ 黑名单。
-        drogon::Task<> getBlacklist(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto getBlacklist(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         /// @brief 添加全局 QQ 黑名单项。
         /// @param req HTTP 请求，body 包含 qq。
-        drogon::Task<> addBlacklistEntry(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        /// @param callback
+        auto addBlacklistEntry(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         /// @brief 移除全局 QQ 黑名单项。
+        /// @param req
+        /// @param callback
         /// @param qq 要移除的 QQ 号。
-        drogon::Task<> removeBlacklistEntry(drogon::HttpRequestPtr req,
-          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &qq) const;
+        auto removeBlacklistEntry(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &qq) const -> drogon::Task<>;
 
         // ============== 启用群 ==============
 
         /// @brief 获取启用群列表
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
-        drogon::Task<> getGroups(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto getGroups(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const
+          -> drogon::Task<>;
 
         /// @brief 启用群
         /// @param req HTTP 请求，body 包含 sessionId
         /// @param callback HTTP 响应回调
-        drogon::Task<> enableSession(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto enableSession(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         /// @brief 切换群启用/禁用状态
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
         /// @param sessionId 会话 ID（私聊会话带标志位）
-        drogon::Task<> toggleSession(drogon::HttpRequestPtr req,
-          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &sessionId) const;
+        auto toggleSession(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback,
+          const std::string &sessionId) const -> drogon::Task<>;
 
         /// @brief 删除群（从数据库移除）
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
         /// @param sessionId 会话 ID（私聊会话带标志位）
-        drogon::Task<> removeSession(drogon::HttpRequestPtr req,
-          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &sessionId) const;
+        auto removeSession(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback,
+          const std::string &sessionId) const -> drogon::Task<>;
 
         /// @brief 刷新群名称
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
         /// @param sessionId 会话 ID（私聊会话带标志位）
-        drogon::Task<> refreshSessionName(drogon::HttpRequestPtr req,
-          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &sessionId) const;
+        auto refreshSessionName(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &sessionId) const
+          -> drogon::Task<>;
 
         /// @brief 批量刷新所有群名称
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
-        drogon::Task<> refreshAllSessionNames(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto refreshAllSessionNames(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         // ============== 聊天记录 ==============
 
         /// @brief 获取所有有聊天记录的群列表
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
-        drogon::Task<> getChatSessions(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto getChatSessions(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         /// @brief 获取群聊天记录
         /// @param req HTTP 请求，可选 limit 参数
         /// @param callback HTTP 响应回调
         /// @param sessionId 会话 ID（私聊会话带标志位）
-        drogon::Task<> getChatRecords(drogon::HttpRequestPtr req,
-          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &sessionId) const;
+        auto getChatRecords(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback,
+          const std::string &sessionId) const -> drogon::Task<>;
 
         /// @brief 更新聊天记录
         /// @param req HTTP 请求，body 包含 content
         /// @param callback HTTP 响应回调
         /// @param recordId 记录ID
-        drogon::Task<> updateChatRecord(drogon::HttpRequestPtr req,
-          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &recordId) const;
+        auto updateChatRecord(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback,
+          const std::string &recordId) const -> drogon::Task<>;
 
         /// @brief 删除聊天记录
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
         /// @param recordId 记录ID
-        drogon::Task<> deleteChatRecord(drogon::HttpRequestPtr req,
-          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &recordId) const;
+        auto deleteChatRecord(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback,
+          const std::string &recordId) const -> drogon::Task<>;
 
         /// @brief 清空群的所有聊天记录
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
         /// @param sessionId 会话 ID（私聊会话带标志位）
-        drogon::Task<> clearSessionChatRecords(drogon::HttpRequestPtr req,
-          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &sessionId) const;
+        auto clearSessionChatRecords(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &sessionId) const
+          -> drogon::Task<>;
 
         // ============== 群记忆 ==============
 
@@ -370,15 +378,16 @@ namespace insoulforge {
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
         /// @param sessionId 会话 ID（私聊会话带标志位）
-        drogon::Task<> getSessionMemory(drogon::HttpRequestPtr req,
-          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &sessionId) const;
+        auto getSessionMemory(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback,
+          const std::string &sessionId) const -> drogon::Task<>;
 
         /// @brief 更新群记忆
         /// @param req HTTP 请求，body 包含 memory
         /// @param callback HTTP 响应回调
         /// @param sessionId 会话 ID（私聊会话带标志位）
-        drogon::Task<> updateSessionMemory(drogon::HttpRequestPtr req,
-          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &sessionId) const;
+        auto updateSessionMemory(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &sessionId) const
+          -> drogon::Task<>;
 
         // ============== 好感度 ==============
 
@@ -386,8 +395,9 @@ namespace insoulforge {
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
         /// @param sessionId 会话 ID（私聊会话带标志位）
-        drogon::Task<> getSessionAffinity(drogon::HttpRequestPtr req,
-          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &sessionId) const;
+        auto getSessionAffinity(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &sessionId) const
+          -> drogon::Task<>;
 
         // ============== 定时任务 ==============
 
@@ -395,117 +405,118 @@ namespace insoulforge {
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
         /// @param sessionId 会话 ID（私聊会话带标志位）
-        drogon::Task<> getScheduledTasks(drogon::HttpRequestPtr req,
-          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &sessionId) const;
+        auto getScheduledTasks(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &sessionId) const
+          -> drogon::Task<>;
 
         /// @brief 取消待触发的定时任务
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
         /// @param id 任务 ID
-        drogon::Task<> cancelScheduledTask(drogon::HttpRequestPtr req,
-          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &id) const;
+        auto cancelScheduledTask(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &id) const -> drogon::Task<>;
 
         // ============== 记忆配置 ==============
 
         /// @brief 获取记忆系统配置
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
-        drogon::Task<> getMemoryConfig(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto getMemoryConfig(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         /// @brief 保存记忆系统配置
         /// @param req HTTP 请求，body 包含配置 JSON
         /// @param callback HTTP 响应回调
-        drogon::Task<> saveMemoryConfig(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto saveMemoryConfig(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         /// @brief 分页查询长期记忆
         /// @param req HTTP 请求，可选 sessionId / limit / offset 参数
         /// @param callback HTTP 响应回调
-        drogon::Task<> getLongTermMemories(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto getLongTermMemories(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         /// @brief 删除一条长期记忆
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
         /// @param id 记录 ID
-        drogon::Task<> deleteLongTermMemory(drogon::HttpRequestPtr req,
-          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &id) const;
+        auto deleteLongTermMemory(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &id) const -> drogon::Task<>;
 
         // ============== QQ Bot 配置 ==============
 
         /// @brief 获取 QQ Bot 配置
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
-        drogon::Task<> getQQConfig(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto getQQConfig(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         /// @brief 保存 QQ Bot 配置
         /// @param req HTTP 请求，body 包含配置 JSON
         /// @param callback HTTP 响应回调
-        drogon::Task<> saveQQConfig(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto saveQQConfig(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         // ============== 自定义工具 ==============
 
         /// @brief 获取所有自定义工具
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
-        drogon::Task<> getCustomTools(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto getCustomTools(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         /// @brief 添加自定义工具
         /// @param req HTTP 请求，body 包含工具配置 JSON
         /// @param callback HTTP 响应回调
-        drogon::Task<> addCustomTool(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto addCustomTool(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         /// @brief 更新自定义工具
         /// @param req HTTP 请求，body 包含工具配置 JSON
         /// @param callback HTTP 响应回调
         /// @param id 工具ID
-        drogon::Task<> updateCustomTool(drogon::HttpRequestPtr req,
-          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &id) const;
+        auto updateCustomTool(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback,
+          const std::string &id) const -> drogon::Task<>;
 
         /// @brief 删除自定义工具
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
         /// @param id 工具ID
-        drogon::Task<> deleteCustomTool(drogon::HttpRequestPtr req,
-          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &id) const;
+        auto deleteCustomTool(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback,
+          const std::string &id) const -> drogon::Task<>;
 
         /// @brief 切换自定义工具启用状态
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
         /// @param id 工具ID
-        drogon::Task<> toggleCustomTool(drogon::HttpRequestPtr req,
-          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &id) const;
+        auto toggleCustomTool(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback,
+          const std::string &id) const -> drogon::Task<>;
 
         /// @brief 重载自定义工具（从数据库重新加载到 ToolRegistry）
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
-        drogon::Task<> reloadCustomTools(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto reloadCustomTools(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         /// @brief 测试自定义工具
         /// @param req HTTP 请求，body 包含 toolId 和 testArgs
         /// @param callback HTTP 响应回调
-        drogon::Task<> testCustomTool(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto testCustomTool(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         // ============== 自定义工具配置 ==============
 
         /// @brief 获取自定义工具配置（Python解释器路径等）
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
-        drogon::Task<> getCustomToolConfig(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto getCustomToolConfig(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         /// @brief 保存自定义工具配置
         /// @param req HTTP 请求，body 包含 pythonPath
         /// @param callback HTTP 响应回调
-        drogon::Task<> saveCustomToolConfig(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto saveCustomToolConfig(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         // ============== 自定义工具导入导出 ==============
 
@@ -513,13 +524,13 @@ namespace insoulforge {
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
         /// @param id 工具ID
-        drogon::Task<> exportCustomTool(drogon::HttpRequestPtr req,
-          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &id) const;
+        auto exportCustomTool(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback,
+          const std::string &id) const -> drogon::Task<>;
 
         /// @brief 导入工具 JSON 文件
         /// @param req HTTP 请求，body 包含工具 JSON
         /// @param callback HTTP 响应回调
-        drogon::Task<> importCustomTool(
-          drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const;
+        auto importCustomTool(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
     };
 } // namespace insoulforge

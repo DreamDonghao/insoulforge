@@ -9,9 +9,11 @@ namespace insoulforge {
     SessionWorkflowState::SessionWorkflowState(const u64 sessionId) :
         m_messageList(std::make_shared<MessageList>(sessionId)) {}
 
-    const std::shared_ptr<MessageList> &SessionWorkflowState::messageList() const noexcept { return m_messageList; }
+    auto SessionWorkflowState::messageList() const noexcept -> const std::shared_ptr<MessageList> & {
+        return m_messageList;
+    }
 
-    bool SessionWorkflowState::enqueuePreparation(json message) {
+    auto SessionWorkflowState::enqueuePreparation(json message) -> bool {
         std::lock_guard lock(m_mutex);
         m_pendingPreparationMessages.push(std::move(message));
         if (m_isPreparationRunning) {
@@ -21,7 +23,7 @@ namespace insoulforge {
         return true;
     }
 
-    std::optional<json> SessionWorkflowState::takePreparationMessage() {
+    auto SessionWorkflowState::takePreparationMessage() -> std::optional<json> {
         std::lock_guard lock(m_mutex);
         if (m_pendingPreparationMessages.empty()) {
             m_isPreparationRunning = false;
@@ -32,8 +34,8 @@ namespace insoulforge {
         return message;
     }
 
-    std::optional<std::string> SessionWorkflowState::requestReplyProcessing(
-      std::string triggerMessageId, const bool mayWaitForCurrentReply) {
+    auto SessionWorkflowState::requestReplyProcessing(std::string triggerMessageId, const bool mayWaitForCurrentReply)
+      -> std::optional<std::string> {
         std::lock_guard lock(m_mutex);
         if (m_isReplyProcessing) {
             if (mayWaitForCurrentReply) {
@@ -45,7 +47,7 @@ namespace insoulforge {
         return triggerMessageId;
     }
 
-    std::optional<std::string> SessionWorkflowState::completeReplyProcessing() {
+    auto SessionWorkflowState::completeReplyProcessing() -> std::optional<std::string> {
         std::lock_guard lock(m_mutex);
         if (m_pendingReplyMessageId) {
             return std::exchange(m_pendingReplyMessageId, std::nullopt);

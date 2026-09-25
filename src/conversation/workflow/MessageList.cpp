@@ -20,11 +20,11 @@ namespace insoulforge {
         m_summaryBatchPending = ConversationMaintenanceService::hasPendingMemorySummary(sessionId);
     }
 
-    std::optional<MessageListAppendResult> MessageList::append(json message) {
+    auto MessageList::append(json message) -> std::optional<MessageListAppendResult> {
         message.erase("session_id");
         const std::string messageId = getStr(message, "message_id");
         std::lock_guard lock(m_mutex);
-        if (!messageId.empty() && std::ranges::any_of(m_messages, [&messageId](const json &existing) {
+        if (!messageId.empty() && std::ranges::any_of(m_messages, [&messageId](const json &existing) -> bool {
                 return getStr(existing, "message_id") == messageId;
             })) {
             return std::nullopt;
@@ -33,7 +33,7 @@ namespace insoulforge {
         return MessageListAppendResult{.messageSnapshot = snapshotLocked(), .summaryBatch = createSummaryBatchLocked()};
     }
 
-    std::optional<MemorySummaryBatch> MessageList::removeCompletedSummaryMessages() {
+    auto MessageList::removeCompletedSummaryMessages() -> std::optional<MemorySummaryBatch> {
         std::lock_guard lock(m_mutex);
         while (const auto completed = ConversationMaintenanceService::takeCompletedMemorySummary(m_sessionId)) {
             const size_t count = std::min(*completed, m_messages.size());
@@ -50,12 +50,12 @@ namespace insoulforge {
         m_summaryBatchPending = false;
     }
 
-    json MessageList::snapshot() const {
+    auto MessageList::snapshot() const -> json {
         std::lock_guard lock(m_mutex);
         return snapshotLocked();
     }
 
-    json MessageList::fullSnapshot() const {
+    auto MessageList::fullSnapshot() const -> json {
         std::lock_guard lock(m_mutex);
         return fullSnapshotLocked();
     }
@@ -69,7 +69,7 @@ namespace insoulforge {
         }
     }
 
-    json MessageList::snapshotLocked() const {
+    auto MessageList::snapshotLocked() const -> json {
         json result = json::array();
         const size_t limit = static_cast<size_t>(std::max(Config::instance().contextWindowLimit, 1));
         const size_t first = m_messages.size() > limit ? m_messages.size() - limit : 0;
@@ -79,7 +79,7 @@ namespace insoulforge {
         return result;
     }
 
-    json MessageList::fullSnapshotLocked() const {
+    auto MessageList::fullSnapshotLocked() const -> json {
         json result = json::array();
         for (const json &message: m_messages) {
             result.push_back(message);
@@ -87,7 +87,7 @@ namespace insoulforge {
         return result;
     }
 
-    std::optional<MemorySummaryBatch> MessageList::createSummaryBatchLocked() {
+    auto MessageList::createSummaryBatchLocked() -> std::optional<MemorySummaryBatch> {
         const auto &config = Config::instance();
         if (const size_t trigger = static_cast<size_t>(std::max(config.memorySummaryTriggerCount, 1));
           m_summaryBatchPending || m_messages.size() < trigger) {

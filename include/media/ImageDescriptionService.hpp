@@ -23,7 +23,7 @@ namespace insoulforge {
         /// @param sessionId 关联日志与用量的会话 ID
         /// @return 成功时返回描述；下载、解码或模型调用失败时返回空值
         /// @details GIF 最多向视觉模型提交 16 帧；超过时按播放时间均匀抽样并保留首尾帧。
-        [[nodiscard]] drogon::Task<std::optional<ImageDescriptionResult>> describe(
-          std::string sourceUrl, u64 sessionId);
+        [[nodiscard]] auto describe(std::string sourceUrl, u64 sessionId)
+          -> drogon::Task<std::optional<ImageDescriptionResult>>;
     } // namespace ImageDescriptionService
 } // namespace insoulforge

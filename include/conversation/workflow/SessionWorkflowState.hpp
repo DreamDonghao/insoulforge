@@ -25,18 +25,18 @@ namespace insoulforge {
         /// @brief 取得当前会话的完整消息列表
         /// @return 仅在构造时创建的消息列表实例
         /// @note 线程安全。返回的 MessageList 自行保证其内容访问的线程安全。
-        [[nodiscard]] const std::shared_ptr<MessageList> &messageList() const noexcept;
+        [[nodiscard]] auto messageList() const noexcept -> const std::shared_ptr<MessageList> &;
 
         /// @brief 加入等待预处理的消息
         /// @param message 已归一化的入站消息
         /// @return 是否需要由调用者启动预处理消费者
         /// @note 线程安全。
-        [[nodiscard]] bool enqueuePreparation(json message);
+        [[nodiscard]] auto enqueuePreparation(json message) -> bool;
 
         /// @brief 取出一条等待预处理的消息
         /// @return 队首消息；队列为空时返回空值并结束预处理消费者状态
         /// @note 线程安全。仅应由该会话唯一的预处理消费者调用。
-        [[nodiscard]] std::optional<json> takePreparationMessage();
+        [[nodiscard]] auto takePreparationMessage() -> std::optional<json>;
 
         /// @brief 请求会话回复处理
         /// @param triggerMessageId 本轮由其触发的入站消息 ID
@@ -45,13 +45,13 @@ namespace insoulforge {
         /// @details 回复处理协程每轮从 MessageList 获取最新上下文。已有回复任务时，强制回复消息会
         ///          覆盖保存为下一轮的触发目标；普通消息不会触发额外回复。
         /// @note 线程安全。
-        [[nodiscard]] std::optional<std::string> requestReplyProcessing(
-          std::string triggerMessageId, bool mayWaitForCurrentReply);
+        [[nodiscard]] auto requestReplyProcessing(std::string triggerMessageId, bool mayWaitForCurrentReply)
+          -> std::optional<std::string>;
 
         /// @brief 完成当前一轮回复处理并决定是否开始下一轮
         /// @return 等待期间最新的强制回复消息 ID；没有时返回空值并结束回复处理状态
         /// @note 线程安全。仅应由该会话唯一的回复处理协程调用。
-        [[nodiscard]] std::optional<std::string> completeReplyProcessing();
+        [[nodiscard]] auto completeReplyProcessing() -> std::optional<std::string>;
 
     private:
         std::mutex m_mutex;

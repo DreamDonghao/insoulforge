@@ -20,8 +20,8 @@
 #include <infrastructure/NumericTypes.hpp>
 
 /// @brief 去除字符串首尾空白（isspace 语义）
-[[nodiscard]] inline std::string trim(std::string s) {
-    const auto isSpace = [](const unsigned char c) { return std::isspace(c) != 0; };
+[[nodiscard]] inline auto trim(std::string s) -> std::string {
+    const auto isSpace = [](const unsigned char c) -> bool { return std::isspace(c) != 0; };
     while (!s.empty() && isSpace(static_cast<unsigned char>(s.front())))
         s.erase(s.begin());
     while (!s.empty() && isSpace(static_cast<unsigned char>(s.back())))
@@ -32,7 +32,7 @@
 /// @brief 尝试解析无符号整数（非抛出，替代 std::stoull）
 /// @param s 输入字符串
 /// @return 解析结果；要求整串都是数字（允许前导空白），否则返回 nullopt
-[[nodiscard]] inline std::optional<insoulforge::u64> tryParseUInt64(std::string_view s) {
+[[nodiscard]] inline auto tryParseUInt64(std::string_view s) -> std::optional<insoulforge::u64> {
     insoulforge::u64 value = 0;
     const auto *begin = s.data();
     const auto *end = s.data() + s.size();
@@ -49,7 +49,7 @@
 /// @param s 输入字符串
 /// @param fallback 解析失败时返回的值
 /// @return 解析结果；要求整串都是数字，否则返回 fallback
-[[nodiscard]] inline insoulforge::u64 parseUInt64(std::string_view s, insoulforge::u64 fallback = 0) {
+[[nodiscard]] inline auto parseUInt64(std::string_view s, insoulforge::u64 fallback = 0) -> insoulforge::u64 {
     return tryParseUInt64(s).value_or(fallback);
 }
 
@@ -57,7 +57,7 @@
 #include <fmt/chrono.h>
 
 /// @brief time_t 转本地 std::tm（各平台的安全转换）
-inline std::tm localTime(const std::time_t t) {
+inline auto localTime(const std::time_t t) -> std::tm {
     std::tm tm{};
 #ifdef _WIN32
     localtime_s(&tm, &t);
@@ -67,17 +67,17 @@ inline std::tm localTime(const std::time_t t) {
     return tm;
 }
 
-inline std::string currentDateTime() {
+inline auto currentDateTime() -> std::string {
     using namespace std::chrono;
     return fmt::format("{:%Y-%m-%d %H:%M:%S}", localTime(system_clock::to_time_t(system_clock::now())));
 }
 
 /// @brief unix 秒格式化为本地时间 YYYY-MM-DD HH:MM:SS
-[[nodiscard]] inline std::string formatUnixTime(const insoulforge::i64 unixSec) {
+[[nodiscard]] inline auto formatUnixTime(const insoulforge::i64 unixSec) -> std::string {
     return fmt::format("{:%Y-%m-%d %H:%M:%S}", localTime(static_cast<std::time_t>(unixSec)));
 }
 
 /// @brief unix 秒格式化为本地时间 HH:MM
-[[nodiscard]] inline std::string formatTimeOfDay(const insoulforge::i64 unixSec) {
+[[nodiscard]] inline auto formatTimeOfDay(const insoulforge::i64 unixSec) -> std::string {
     return fmt::format("{:%H:%M}", localTime(static_cast<std::time_t>(unixSec)));
 }

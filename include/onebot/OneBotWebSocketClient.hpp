@@ -24,7 +24,7 @@ namespace insoulforge {
     class OneBotWebSocketClient {
     public:
         /// @brief 获取全局 WebSocket 连接管理器
-        static OneBotWebSocketClient &instance();
+        static auto instance() -> OneBotWebSocketClient &;
 
         /// @brief 按当前配置建立 WebSocket 连接
         /// @details 仅当 oneBotTransport 为 websocket 时生效；连接断开后会延迟重连。
@@ -37,14 +37,14 @@ namespace insoulforge {
         void reconfigure();
 
         /// @brief 判断正向 WebSocket 是否已建立连接
-        [[nodiscard]] bool isConnected() const;
+        [[nodiscard]] auto isConnected() const -> bool;
 
         /// @brief 通过 WebSocket 调用 OneBot 11 动作 API
         /// @param action OneBot action，例如 send_group_msg
         /// @param params 动作参数
         /// @param timeout 超时秒数
         /// @return OneBot 完整响应；连接不可用、断开或超时时返回 nullopt
-        [[nodiscard]] drogon::Task<std::optional<json>> callApi(std::string action, json params, f64 timeout);
+        [[nodiscard]] auto callApi(std::string action, json params, f64 timeout) -> drogon::Task<std::optional<json>>;
 
     private:
         using ResponseCallback = std::function<void(std::optional<json>)>;
@@ -53,7 +53,7 @@ namespace insoulforge {
         public:
             ApiResponseAwaiter(OneBotWebSocketClient &client, std::string action, json params, f64 timeout);
 
-            bool await_suspend(std::coroutine_handle<> continuation);
+            auto await_suspend(std::coroutine_handle<> continuation) -> bool;
 
         private:
             OneBotWebSocketClient &m_client;
@@ -68,7 +68,7 @@ namespace insoulforge {
 
         void scheduleReconnect(u64 generation);
 
-        bool sendApiRequest(std::string action, json params, f64 timeout, ResponseCallback callback);
+        auto sendApiRequest(std::string action, json params, f64 timeout, ResponseCallback callback) -> bool;
 
         void handleMessage(const std::string &message, drogon::WebSocketMessageType type);
 
@@ -76,9 +76,9 @@ namespace insoulforge {
 
         void resolveRequest(const std::string &echo, std::optional<json> response);
 
-        static bool splitWebSocketUrl(const std::string &url, std::string &origin, std::string &path);
+        static auto splitWebSocketUrl(const std::string &url, std::string &origin, std::string &path) -> bool;
 
-        [[nodiscard]] std::vector<ResponseCallback> takePendingCallbacksLocked();
+        [[nodiscard]] auto takePendingCallbacksLocked() -> std::vector<ResponseCallback>;
 
         static void failRequests(const std::vector<ResponseCallback> &callbacks);
 

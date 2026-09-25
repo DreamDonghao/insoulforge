@@ -9,7 +9,7 @@ namespace insoulforge {
     ChatRecordManager::ChatRecordManager(const u64 sessionId, std::deque<json> records) :
         m_sessionId(sessionId), m_records(std::move(records)) {}
 
-    u64 ChatRecordManager::getSessionId() const { return m_sessionId; }
+    auto ChatRecordManager::getSessionId() const -> u64 { return m_sessionId; }
 
-    std::deque<json> ChatRecordManager::getRecords() const { return m_records; }
+    auto ChatRecordManager::getRecords() const -> std::deque<json> { return m_records; }
 } // namespace insoulforge

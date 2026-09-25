@@ -6,19 +6,17 @@
 
 #pragma once
 
-#include <cstdint>
 #include <infrastructure/NumericTypes.hpp>
 #include <vector>
 
-namespace insoulforge {
-    /// @brief 管理员存储
-    namespace AdminStore {
-        [[nodiscard]] bool isAdmin(u64 qqNumber);
 
-        void addAdmin(u64 qqNumber);
+/// @brief 管理员存储
+namespace insoulforge::AdminStore {
+    [[nodiscard]] auto isAdmin(u64 qqNumber) -> bool;
 
-        void removeAdmin(u64 qqNumber);
+    void addAdmin(u64 qqNumber);
 
-        [[nodiscard]] std::vector<u64> getAdmins();
-    } // namespace AdminStore
-} // namespace insoulforge
+    void removeAdmin(u64 qqNumber);
+
+    [[nodiscard]] auto getAdmins() -> std::vector<u64>;
+} // namespace insoulforge::AdminStore

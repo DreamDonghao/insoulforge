@@ -24,7 +24,7 @@ namespace insoulforge {
     /// @brief 定时任务调度器
     class TaskScheduler {
     public:
-        static TaskScheduler &instance();
+        static auto instance() -> TaskScheduler &;
 
         /// @brief 启动调度线程并恢复未完成任务（重复调用无副作用）
         void start();
@@ -35,16 +35,16 @@ namespace insoulforge {
         /// @brief 创建定时任务（先落库再入堆）
         /// @param task 任务内容（sessionType/targetId/remindTime/content/isDaily 需已填充）
         /// @return 任务 ID；数据库写入失败抛出异常
-        i64 schedule(TaskStore::ScheduledTask task);
+        auto schedule(TaskStore::ScheduledTask task) -> i64;
 
         /// @brief 取消定时任务（写库标记 cancelled，堆内条目在弹出时惰性跳过）
         /// @return true=取消成功；false=任务不存在或已触发/已取消
-        bool cancel(i64 id);
+        auto cancel(i64 id) -> bool;
 
         /// @brief 解析模型给出的时间字符串为本地时间 unix 秒。
         /// 兼容 YYYY-MM-DD / YYYY/MM/DD 与 HH:MM(:SS 可省)，分隔符 T 视同空格
         /// @return 解析结果；无法解析返回 nullopt
-        [[nodiscard]] static std::optional<std::time_t> parseTimeString(const std::string &input);
+        [[nodiscard]] static auto parseTimeString(const std::string &input) -> std::optional<std::time_t>;
 
     private:
         TaskScheduler() = default;
@@ -57,7 +57,7 @@ namespace insoulforge {
             /// @brief 实际触发时刻（remindTime 减去提前量）
             std::time_t fireTime = 0;
 
-            bool operator>(const Entry &other) const { return fireTime > other.fireTime; }
+            auto operator>(const Entry &other) const -> bool { return fireTime > other.fireTime; }
         };
 
         void runLoop();

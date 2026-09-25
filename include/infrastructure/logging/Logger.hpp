@@ -37,10 +37,10 @@ namespace insoulforge {
 
         /// @brief 设置运行时日志等级
         /// @return 等级名称有效时返回 true
-        static bool setLevel(std::string_view levelName);
+        static auto setLevel(std::string_view levelName) -> bool;
 
         /// @brief 获取当前运行时日志等级
-        static std::string level();
+        static auto level() -> std::string;
 
         /// @brief 刷新并关闭日志系统，应在程序退出前调用
         static void shutdown();

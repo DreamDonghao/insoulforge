@@ -25,13 +25,13 @@ namespace insoulforge {
             std::unordered_set<u64> activeSessions;
         };
 
-        [[nodiscard]] AffinityScheduler &scheduler() {
+        [[nodiscard]] auto scheduler() -> AffinityScheduler & {
             static AffinityScheduler instance;
             return instance;
         }
 
         /// @brief 将记录内容拼接为供 LLM 消费的 JSON 数组
-        [[nodiscard]] std::string formatRecordsText(const std::vector<json> &records, const size_t limit) {
+        [[nodiscard]] auto formatRecordsText(const std::vector<json> &records, const size_t limit) -> std::string {
             std::string text = "[";
             for (size_t index = 0; index < limit; ++index) {
                 if (index != 0)
@@ -42,8 +42,8 @@ namespace insoulforge {
         }
 
         /// @brief 解析好感度评估响应；格式错误视为本轮评估失败
-        [[nodiscard]] std::optional<json> parseAffinityDeltas(
-          const std::optional<std::string> &result, const u64 sessionId) {
+        [[nodiscard]] auto parseAffinityDeltas(const std::optional<std::string> &result, const u64 sessionId)
+          -> std::optional<json> {
             if (!result) {
                 Logger::error(sessionId, "Affinity", fmt::format("好感度评分: API 请求失败"));
                 return std::nullopt;
@@ -63,7 +63,7 @@ namespace insoulforge {
             }
             return deltas;
         }
-        drogon::Task<bool> maintainJob(const AffinityMaintenanceJob &job) {
+        auto maintainJob(const AffinityMaintenanceJob &job) -> drogon::Task<bool> {
             std::vector<json> records;
             records.reserve(job.messages.size());
             for (const json &message: job.messages) {
@@ -125,14 +125,14 @@ namespace insoulforge {
             co_return true;
         }
 
-        [[nodiscard]] std::chrono::seconds retryDelay(const i32 attempts) {
+        [[nodiscard]] auto retryDelay(const i32 attempts) -> std::chrono::seconds {
             const i32 exponent = std::clamp(attempts, 0, 5);
             return std::min(kInitialRetryDelay * (1 << exponent), kMaxRetryDelay);
         }
 
-        drogon::Task<> drainSession(const u64 sessionId);
+        auto drainSession(const u64 sessionId) -> drogon::Task<>;
 
-        [[nodiscard]] bool acquireSessionConsumer(const u64 sessionId) {
+        [[nodiscard]] auto acquireSessionConsumer(const u64 sessionId) -> bool {
             auto &state = scheduler();
             std::lock_guard lock(state.mutex);
             return state.activeSessions.insert(sessionId).second;
@@ -143,7 +143,7 @@ namespace insoulforge {
             scheduler().activeSessions.erase(sessionId);
         }
 
-        drogon::Task<> drainSession(const u64 sessionId) {
+        auto drainSession(const u64 sessionId) -> drogon::Task<> {
             try {
                 while (const auto job = AffinityMaintenanceStore::next(sessionId)) {
                     bool completed = false;
@@ -174,7 +174,7 @@ namespace insoulforge {
         }
     } // namespace
 
-    drogon::Task<> AffinityMaintenanceService::processPending(const u64 sessionId) {
+    auto AffinityMaintenanceService::processPending(const u64 sessionId) -> drogon::Task<> {
         if (!acquireSessionConsumer(sessionId)) {
             co_return;
         }

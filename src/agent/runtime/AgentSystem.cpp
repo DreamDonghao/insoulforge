@@ -6,14 +6,16 @@
 #include <llm/PromptService.hpp>
 
 namespace insoulforge {
-    AgentSystem &AgentSystem::instance() {
+    auto AgentSystem::instance() -> AgentSystem & {
         static AgentSystem system;
         return system;
     }
 
-    bool AgentSystem::isRunning() const noexcept { return m_running.load(std::memory_order_acquire); }
+    auto AgentSystem::isRunning() const noexcept -> bool { return m_running.load(std::memory_order_acquire); }
 
-    bool AgentSystem::isReady() const noexcept { return m_initialized.load(std::memory_order_acquire) && isRunning(); }
+    auto AgentSystem::isReady() const noexcept -> bool {
+        return m_initialized.load(std::memory_order_acquire) && isRunning();
+    }
 
     void AgentSystem::setRunning(const bool running) noexcept { m_running.store(running, std::memory_order_release); }
 

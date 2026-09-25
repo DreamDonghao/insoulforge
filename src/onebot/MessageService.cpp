@@ -14,7 +14,7 @@
 #include <onebot/OneBotClient.hpp>
 
 namespace insoulforge {
-    std::string MessageService::convertAtToCQCode(std::string text) {
+    auto MessageService::convertAtToCQCode(std::string text) -> std::string {
         std::string result = std::move(text);
 
         // 格式 @[...数字...] → 提取数字转为 [CQ:at,qq=数字]
@@ -27,7 +27,7 @@ namespace insoulforge {
         // 按昵称长度降序排序，避免短昵称先匹配
         std::vector<std::pair<std::string, u64>> sortedNames(nameToQQ.begin(), nameToQQ.end());
         std::ranges::sort(
-          sortedNames, [](const auto &a, const auto &b) { return a.first.length() > b.first.length(); });
+          sortedNames, [](const auto &a, const auto &b) -> auto { return a.first.length() > b.first.length(); });
 
         for (const auto &[name, qq]: sortedNames) {
             const std::string mention = "@" + name;
@@ -63,8 +63,8 @@ namespace insoulforge {
         /// @param sessionId 会话 ID
         /// @param channelName 日志中的渠道名（"群消息"/"私聊消息"）
         /// @return 发送成功返回 message_id；失败不记聊天记录，返回 nullopt（已记日志）
-        drogon::Task<std::optional<u64>> afterSendMessage(drogon::Task<std::optional<u64>> sendTask,
-          std::string processedMessage, const u64 sessionId, std::string_view channelName) {
+        auto afterSendMessage(drogon::Task<std::optional<u64>> sendTask, std::string processedMessage,
+          const u64 sessionId, std::string_view channelName) -> drogon::Task<std::optional<u64>> {
             const auto messageId = co_await std::move(sendTask);
             if (!messageId) {
                 co_return std::nullopt;
@@ -81,21 +81,21 @@ namespace insoulforge {
         }
     } // namespace
 
-    drogon::Task<std::optional<u64>> MessageService::sendGroupMsg(const u64 groupId, std::string message) {
+    auto MessageService::sendGroupMsg(const u64 groupId, std::string message) -> drogon::Task<std::optional<u64>> {
         // 转换 @[QQ:xxx] 为 CQ 码
         const std::string processedMessage = convertAtToCQCode(std::move(message));
         co_return co_await afterSendMessage(
           OneBotClient::sendGroupMsg(groupId, processedMessage), processedMessage, groupId, "群消息");
     }
 
-    drogon::Task<std::optional<u64>> MessageService::sendPrivateMsg(const u64 userId, std::string message) {
+    auto MessageService::sendPrivateMsg(const u64 userId, std::string message) -> drogon::Task<std::optional<u64>> {
         const std::string processedMessage = convertAtToCQCode(std::move(message));
         co_return co_await afterSendMessage(
           OneBotClient::sendPrivateMsg(userId, processedMessage, SessionId::fromPrivateUser(userId)), processedMessage,
           SessionId::fromPrivateUser(userId), "私聊消息");
     }
 
-    drogon::Task<std::string> MessageService::fetchAndUpdateSessionName(const u64 sessionId) {
+    auto MessageService::fetchAndUpdateSessionName(const u64 sessionId) -> drogon::Task<std::string> {
         std::string name;
         if (SessionId::isPrivate(sessionId)) {
             // 私聊会话取 QQ 昵称，复用 groupName 列存储

@@ -20,14 +20,15 @@ using namespace drogon;
 
 // ==================== LLM配置 ====================
 
-Task<> AdminController::getLLMConfigs(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const {
+auto AdminController::getLLMConfigs(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
+  -> Task<> {
     const auto configs = ConfigStore::getAllLLMConfigs();
     callback(jsonResponse(configs));
     co_return;
 }
 
-Task<> AdminController::saveLLMConfig(
-  const HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const {
+auto AdminController::saveLLMConfig(
+  const HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const -> Task<> {
     const auto body = parseJsonBody(req);
     if (!body || !body->contains("name")) {
         callback(jsonResponse(AdminResponse::errorJson("缺少name字段")));
@@ -77,7 +78,8 @@ Task<> AdminController::saveLLMConfig(
 
 // ==================== 提示词 ====================
 
-Task<> AdminController::getPrompts(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const {
+auto AdminController::getPrompts(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
+  -> Task<> {
     const auto prompts = PromptStore::getAllPrompts();
 
     json result;
@@ -88,7 +90,8 @@ Task<> AdminController::getPrompts(HttpRequestPtr req, std::function<void(const 
     co_return;
 }
 
-Task<> AdminController::savePrompt(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const {
+auto AdminController::savePrompt(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
+  -> Task<> {
     auto body = parseJsonBody(req);
     if (!body || !body->contains("key") || !body->contains("content")) {
         callback(jsonResponse(AdminResponse::errorJson("缺少key或content字段")));
@@ -116,8 +119,8 @@ Task<> AdminController::savePrompt(HttpRequestPtr req, std::function<void(const 
 
 // ==================== 自定义工具 ====================
 
-Task<> AdminController::getCustomTools(
-  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const {
+auto AdminController::getCustomTools(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
+  -> Task<> {
     const auto tools = ToolStore::getCustomTools();
 
     json result(json::array());
@@ -138,7 +141,8 @@ Task<> AdminController::getCustomTools(
     co_return;
 }
 
-Task<> AdminController::addCustomTool(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const {
+auto AdminController::addCustomTool(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
+  -> Task<> {
     const auto body = parseJsonBody(req);
     if (!body || !body->contains("name") || !body->contains("executorType") || !body->contains("executorConfig")) {
         callback(jsonResponse(AdminResponse::errorJson("缺少必要字段 (name, executorType, executorConfig)")));
@@ -175,8 +179,8 @@ Task<> AdminController::addCustomTool(HttpRequestPtr req, std::function<void(con
     co_return;
 }
 
-Task<> AdminController::updateCustomTool(
-  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &id) const {
+auto AdminController::updateCustomTool(
+  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &id) const -> Task<> {
     const auto body = parseJsonBody(req);
     if (!body || !body->contains("name") || !body->contains("executorType") || !body->contains("executorConfig")) {
         callback(jsonResponse(AdminResponse::errorJson("缺少必要字段 (name, executorType, executorConfig)")));
@@ -203,8 +207,8 @@ Task<> AdminController::updateCustomTool(
     co_return;
 }
 
-Task<> AdminController::deleteCustomTool(
-  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &id) const {
+auto AdminController::deleteCustomTool(
+  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &id) const -> Task<> {
     const i32 toolId = std::stoi(id);
     ToolStore::deleteCustomTool(toolId);
 
@@ -215,8 +219,8 @@ Task<> AdminController::deleteCustomTool(
     co_return;
 }
 
-Task<> AdminController::toggleCustomTool(
-  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &id) const {
+auto AdminController::toggleCustomTool(
+  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &id) const -> Task<> {
     const i32 toolId = std::stoi(id);
     ToolStore::toggleCustomTool(toolId);
 
@@ -227,16 +231,16 @@ Task<> AdminController::toggleCustomTool(
     co_return;
 }
 
-Task<> AdminController::reloadCustomTools(
-  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const {
+auto AdminController::reloadCustomTools(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
+  -> Task<> {
     ToolRuntime::reloadCustomTools();
 
     callback(jsonResponse(AdminResponse::okJson("自定义工具已重新加载")));
     co_return;
 }
 
-Task<> AdminController::testCustomTool(
-  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const {
+auto AdminController::testCustomTool(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
+  -> Task<> {
     auto body = parseJsonBody(req);
     if (!body) {
         callback(jsonResponse(AdminResponse::failJson("缺少请求数据")));
@@ -255,7 +259,7 @@ Task<> AdminController::testCustomTool(
         // 从数据库加载工具
         const i32 toolId = getInt(*body, "toolId");
         auto tools = ToolStore::getCustomTools();
-        auto it = std::ranges::find_if(tools, [toolId](const auto &t) { return t.id == toolId; });
+        auto it = std::ranges::find_if(tools, [toolId](const auto &t) -> auto { return t.id == toolId; });
         if (it == tools.end()) {
             callback(jsonResponse(AdminResponse::failJson("工具不存在")));
             co_return;
@@ -289,16 +293,16 @@ Task<> AdminController::testCustomTool(
 
 // ==================== 自定义工具配置 ====================
 
-Task<> AdminController::getCustomToolConfig(
-  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const {
+auto AdminController::getCustomToolConfig(
+  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const -> Task<> {
     json resp;
     resp["pythonPath"] = ToolStore::getCustomToolPython();
     callback(jsonResponse(resp));
     co_return;
 }
 
-Task<> AdminController::saveCustomToolConfig(
-  const HttpRequestPtr req, const std::function<void(const HttpResponsePtr &)> callback) const {
+auto AdminController::saveCustomToolConfig(
+  const HttpRequestPtr req, const std::function<void(const HttpResponsePtr &)> callback) const -> Task<> {
     const auto body = parseJsonBody(req);
     if (!body || !body->contains("pythonPath")) {
         callback(jsonResponse(AdminResponse::failJson("缺少 pythonPath 字段")));
@@ -314,12 +318,12 @@ Task<> AdminController::saveCustomToolConfig(
 
 // ============== 自定义工具导入导出 ==============
 
-Task<> AdminController::exportCustomTool(
-  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &id) const {
+auto AdminController::exportCustomTool(
+  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &id) const -> Task<> {
     i32 toolId = std::stoi(id);
     auto tools = ToolStore::getCustomTools();
 
-    auto it = std::ranges::find_if(tools, [toolId](const ToolStore::CustomTool &t) { return t.id == toolId; });
+    auto it = std::ranges::find_if(tools, [toolId](const ToolStore::CustomTool &t) -> bool { return t.id == toolId; });
 
     if (it == tools.end()) {
         callback(jsonResponse(AdminResponse::failJson("工具不存在")));
@@ -362,8 +366,8 @@ Task<> AdminController::exportCustomTool(
     co_return;
 }
 
-Task<> AdminController::importCustomTool(
-  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const {
+auto AdminController::importCustomTool(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
+  -> Task<> {
     auto body = parseJsonBody(req);
     if (!body) {
         callback(jsonResponse(AdminResponse::failJson("无效的 JSON 数据")));

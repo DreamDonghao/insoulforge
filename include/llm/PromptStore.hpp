@@ -11,12 +11,12 @@
 namespace insoulforge {
     /// @brief 提示词存储
     namespace PromptStore {
-        [[nodiscard]] std::string getPrompt(const std::string &key, const std::string &defaultValue = "");
+        [[nodiscard]] auto getPrompt(const std::string &key, const std::string &defaultValue = "") -> std::string;
 
         void setPrompt(const std::string &key, const std::string &content, const std::string &description = "");
 
-        [[nodiscard]] bool hasPrompt(const std::string &key);
+        [[nodiscard]] auto hasPrompt(const std::string &key) -> bool;
 
-        [[nodiscard]] std::unordered_map<std::string, std::string> getAllPrompts();
+        [[nodiscard]] auto getAllPrompts() -> std::unordered_map<std::string, std::string>;
     } // namespace PromptStore
 } // namespace insoulforge

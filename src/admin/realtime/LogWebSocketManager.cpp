@@ -6,7 +6,7 @@
 #include <vector>
 
 namespace insoulforge {
-    LogWebSocketManager &LogWebSocketManager::instance() {
+    auto LogWebSocketManager::instance() -> LogWebSocketManager & {
         static LogWebSocketManager manager;
         return manager;
     }
@@ -73,7 +73,7 @@ namespace insoulforge {
         }
     }
 
-    bool LogWebSocketManager::matches(const LogSubscription &subscription, const LogEntry &entry) {
+    auto LogWebSocketManager::matches(const LogSubscription &subscription, const LogEntry &entry) -> bool {
         if (subscription.sessionId.has_value() && entry.sessionId != *subscription.sessionId) {
             return false;
         }

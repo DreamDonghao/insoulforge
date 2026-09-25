@@ -19,7 +19,7 @@ namespace insoulforge::MemoryMaintenanceService {
     /// @brief 处理指定会话已持久化的记忆维护任务
     /// @param sessionId 会话 ID（私聊会话带标志位）
     /// @details 重复调用安全；同一会话已有消费者时立即返回，不会轮询或空转等待。
-    drogon::Task<> processPending(u64 sessionId);
+    auto processPending(u64 sessionId) -> drogon::Task<>;
 
     /// @brief 注册记忆总结成功后的通知回调
     /// @details 回调在记忆结果提交事务完成后调用，用于让消息列表删除已总结的前缀。回调不得抛出异常。

@@ -12,8 +12,8 @@
 #include <llm/LlmClient.hpp>
 
 namespace insoulforge {
-    drogon::Task<std::optional<std::string>> LongTermMemory::searchMemory(
-      std::string query, const i32 topK, const u64 sessionId) {
+    auto LongTermMemory::searchMemory(std::string query, const i32 topK, const u64 sessionId)
+      -> drogon::Task<std::optional<std::string>> {
         const auto embedding = co_await LlmClient::requestEmbedding(std::move(query), sessionId);
         if (!embedding) {
             Logger::warn(sessionId, "Memory", "记忆检索向量化失败（Embedding 未配置或请求失败）");

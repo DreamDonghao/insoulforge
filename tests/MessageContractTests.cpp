@@ -390,7 +390,7 @@ namespace {
         config.memorySummaryBatchSize = 2;
         config.memorySummaryContextCount = 1;
 
-        const auto makeMessage = [](const i32 id) {
+        const auto makeMessage = [](const i32 id) -> insoulforge::json {
             insoulforge::json message;
             message["message_id"] = std::to_string(id);
             message["sender"] = {{"qq", "11"}, {"name", "Alice"}};
@@ -445,7 +445,7 @@ namespace {
 
 } // namespace
 
-int main() {
+auto main() -> int {
     testNewWorkflowNormalizesOneBotEvent();
     testNewWorkflowNormalizesOneBotNotices();
     testNewWorkflowDetectsCommands();

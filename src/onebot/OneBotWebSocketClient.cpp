@@ -14,7 +14,7 @@ namespace insoulforge {
         constexpr f64 kReconnectDelaySeconds = 3.0;
     } // namespace
 
-    OneBotWebSocketClient &OneBotWebSocketClient::instance() {
+    auto OneBotWebSocketClient::instance() -> OneBotWebSocketClient & {
         static OneBotWebSocketClient client;
         return client;
     }
@@ -23,9 +23,9 @@ namespace insoulforge {
       OneBotWebSocketClient &client, std::string action, json params, const f64 timeout) :
         m_client(client), m_action(std::move(action)), m_params(std::move(params)), m_timeout(timeout) {}
 
-    bool OneBotWebSocketClient::ApiResponseAwaiter::await_suspend(const std::coroutine_handle<> continuation) {
+    auto OneBotWebSocketClient::ApiResponseAwaiter::await_suspend(const std::coroutine_handle<> continuation) -> bool {
         if (m_client.sendApiRequest(std::move(m_action), std::move(m_params), m_timeout,
-              [this, continuation](std::optional<json> response) mutable {
+              [this, continuation](std::optional<json> response) mutable -> void {
                   setValue(std::move(response));
                   continuation.resume();
               })) {
@@ -45,7 +45,7 @@ namespace insoulforge {
             m_running = true;
             generation = ++m_generation;
         }
-        drogon::app().getLoop()->queueInLoop([this, generation] { connect(generation); });
+        drogon::app().getLoop()->queueInLoop([this, generation] -> void { connect(generation); });
     }
 
     void OneBotWebSocketClient::stop() {
@@ -70,13 +70,13 @@ namespace insoulforge {
         start();
     }
 
-    bool OneBotWebSocketClient::isConnected() const {
+    auto OneBotWebSocketClient::isConnected() const -> bool {
         std::scoped_lock lock(m_mutex);
         return m_connection && m_connection->connected();
     }
 
-    drogon::Task<std::optional<json>> OneBotWebSocketClient::callApi(
-      std::string action, json params, const f64 timeout) {
+    auto OneBotWebSocketClient::callApi(std::string action, json params, const f64 timeout)
+      -> drogon::Task<std::optional<json>> {
         co_return co_await ApiResponseAwaiter(*this, std::move(action), std::move(params), timeout);
     }
 
@@ -107,10 +107,11 @@ namespace insoulforge {
         }
         request->setPath(path);
 
-        client->setMessageHandler([this](std::string &&message, const drogon::WebSocketClientPtr &,
-                                    const drogon::WebSocketMessageType &type) { handleMessage(message, type); });
+        client->setMessageHandler(
+          [this](std::string &&message, const drogon::WebSocketClientPtr &,
+            const drogon::WebSocketMessageType &type) -> void { handleMessage(message, type); });
         client->setConnectionClosedHandler(
-          [this](const drogon::WebSocketClientPtr &closedClient) { handleConnectionClosed(closedClient); });
+          [this](const drogon::WebSocketClientPtr &closedClient) -> void { handleConnectionClosed(closedClient); });
 
         {
             std::scoped_lock lock(m_mutex);
@@ -121,9 +122,9 @@ namespace insoulforge {
             m_client = client;
         }
 
-        client->connectToServer(
-          request, [this, generation](const drogon::ReqResult result, const drogon::HttpResponsePtr &,
-                     const drogon::WebSocketClientPtr &connectedClient) {
+        client->connectToServer(request,
+          [this, generation](const drogon::ReqResult result, const drogon::HttpResponsePtr &,
+            const drogon::WebSocketClientPtr &connectedClient) -> void {
               if (result != drogon::ReqResult::Ok) {
                   Logger::warn(
                     0, "OneBot", fmt::format("OneBot WebSocket 连接失败: result={}", static_cast<i32>(result)));
@@ -143,11 +144,11 @@ namespace insoulforge {
     }
 
     void OneBotWebSocketClient::scheduleReconnect(const u64 generation) {
-        drogon::app().getLoop()->runAfter(kReconnectDelaySeconds, [this, generation] { connect(generation); });
+        drogon::app().getLoop()->runAfter(kReconnectDelaySeconds, [this, generation] -> void { connect(generation); });
     }
 
-    bool OneBotWebSocketClient::sendApiRequest(
-      std::string action, json params, const f64 timeout, ResponseCallback callback) {
+    auto OneBotWebSocketClient::sendApiRequest(
+      std::string action, json params, const f64 timeout, ResponseCallback callback) -> bool {
         drogon::WebSocketConnectionPtr connection;
         std::string echo;
         {
@@ -173,7 +174,7 @@ namespace insoulforge {
             m_pendingRequests.erase(echo);
             return false;
         }
-        drogon::app().getLoop()->runAfter(timeout, [this, echo] { resolveRequest(echo, std::nullopt); });
+        drogon::app().getLoop()->runAfter(timeout, [this, echo] -> void { resolveRequest(echo, std::nullopt); });
         return true;
     }
 
@@ -245,7 +246,8 @@ namespace insoulforge {
         callback(std::move(response));
     }
 
-    bool OneBotWebSocketClient::splitWebSocketUrl(const std::string &url, std::string &origin, std::string &path) {
+    auto OneBotWebSocketClient::splitWebSocketUrl(const std::string &url, std::string &origin, std::string &path)
+      -> bool {
         const size_t schemeEnd = url.find("://");
         if (schemeEnd == std::string::npos) {
             return false;
@@ -263,7 +265,7 @@ namespace insoulforge {
         return !origin.empty() && path.find('#') == std::string::npos;
     }
 
-    std::vector<OneBotWebSocketClient::ResponseCallback> OneBotWebSocketClient::takePendingCallbacksLocked() {
+    auto OneBotWebSocketClient::takePendingCallbacksLocked() -> std::vector<OneBotWebSocketClient::ResponseCallback> {
         std::vector<ResponseCallback> callbacks;
         callbacks.reserve(m_pendingRequests.size());
         for (auto &callback: m_pendingRequests | std::views::values) {

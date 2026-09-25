@@ -26,7 +26,7 @@ namespace insoulforge::UsageStore {
         stmt.exec();
     }
 
-    json getUsageSummary(const i32 days) {
+    auto getUsageSummary(const i32 days) -> json {
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
         json result;
@@ -134,7 +134,7 @@ namespace insoulforge::UsageStore {
         return result;
     }
 
-    json getRecentUsage(const i32 limit) {
+    auto getRecentUsage(const i32 limit) -> json {
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
         json result = json::array();

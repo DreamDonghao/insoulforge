@@ -20,7 +20,7 @@
 #include <onebot/OneBotClient.hpp>
 
 namespace insoulforge {
-    std::string_view ActionToolsPlugin::id() const noexcept { return "builtin.action"; }
+    auto ActionToolsPlugin::id() const noexcept -> std::string_view { return "builtin.action"; }
 
     /// @brief 注册动作执行工具（ACTION，执行操作、产生副作用）
     void ActionToolsPlugin::registerTools(ToolRegistry &registry) const {

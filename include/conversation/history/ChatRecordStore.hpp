@@ -17,20 +17,20 @@
 namespace insoulforge::ChatRecordStore {
     void addChatRecord(u64 sessionId, const std::string &role, const std::string &content);
 
-    [[nodiscard]] std::vector<json> getChatRecords(u64 sessionId, i32 limit = 50);
+    [[nodiscard]] auto getChatRecords(u64 sessionId, i32 limit = 50) -> std::vector<json>;
 
-    [[nodiscard]] std::vector<json> getChatRecordsWithIds(u64 sessionId, i32 limit = 50);
+    [[nodiscard]] auto getChatRecordsWithIds(u64 sessionId, i32 limit = 50) -> std::vector<json>;
 
     /// @brief 获取存在聊天记录的全部会话 ID
     /// @return 去重后的会话 ID 列表
-    [[nodiscard]] std::vector<u64> getSessionIds();
+    [[nodiscard]] auto getSessionIds() -> std::vector<u64>;
 
     /// @brief 按 OneBot 消息 ID 查找指定会话中的聊天记录内容
     /// @param sessionId 统一会话 ID
     /// @param messageId OneBot 消息 ID
     /// @return 匹配记录的 content JSON 字符串；找不到时返回空值
     /// @details 逐条解析内容以兼容未使用 SQLite JSON 扩展的部署环境。
-    [[nodiscard]] std::optional<std::string> findContentByMessageId(u64 sessionId, u64 messageId);
+    [[nodiscard]] auto findContentByMessageId(u64 sessionId, u64 messageId) -> std::optional<std::string>;
 
     /// @brief 更新聊天记录内容
     void updateChatRecord(i32 recordId, const std::string &content);

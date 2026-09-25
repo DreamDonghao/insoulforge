@@ -29,7 +29,7 @@
 #include <poll.h>
 #include <unistd.h>
 
-int main() {
+auto main() -> int {
     using namespace insoulforge;
     try {
         // 系统初始化
@@ -60,7 +60,7 @@ int main() {
 
         // 启动服务
         // 启动控制台命令线程
-        std::jthread commandThread([](const std::stop_token &stopToken) {
+        std::jthread commandThread([](const std::stop_token &stopToken) -> void {
             std::string command;
             while (!stopToken.stop_requested()) {
                 pollfd input{.fd = STDIN_FILENO, .events = POLLIN, .revents = 0};
@@ -96,7 +96,7 @@ int main() {
 
         drogon::app().registerPreRoutingAdvice(
           [](const drogon::HttpRequestPtr &request, drogon::AdviceCallback &&callback,
-            drogon::AdviceChainCallback &&next) {
+            drogon::AdviceChainCallback &&next) -> void {
               const std::string &path = request->path();
               const bool isAdminApi = path.starts_with("/admin/api/");
               const bool isAdminWebSocket = path == "/admin/ws" || path == "/admin/logs/ws";

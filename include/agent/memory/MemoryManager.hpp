@@ -22,7 +22,7 @@ namespace insoulforge {
 
         /// @brief 获取短期记忆
         /// @return 记忆内容（每行一条）
-        [[nodiscard]] std::string getMemory() const;
+        [[nodiscard]] auto getMemory() const -> std::string;
 
     private:
         u64 m_sessionId; ///< 群号

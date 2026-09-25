@@ -12,7 +12,7 @@ using insoulforge::json;
 
 namespace {
     /// @brief 构建单个工具的 OpenAI function calling 定义（缺省字段补齐为合法 schema）
-    json buildToolDef(const insoulforge::Tool &tool) {
+    auto buildToolDef(const insoulforge::Tool &tool) -> json {
         json toolDef;
         toolDef["type"] = "function";
         toolDef["function"]["name"] = tool.name;
@@ -31,12 +31,12 @@ namespace {
 } // namespace
 
 namespace insoulforge {
-    ToolRegistry &ToolRegistry::instance() {
+    auto ToolRegistry::instance() -> ToolRegistry & {
         static ToolRegistry registry;
         return registry;
     }
 
-    bool ToolRegistry::registerPlugin(std::string pluginId, const PluginRegistrar &registrar) {
+    auto ToolRegistry::registerPlugin(std::string pluginId, const PluginRegistrar &registrar) -> bool {
         if (pluginId.empty() || !registrar || !m_activePluginId.empty()) {
             Logger::error(0, "Tool", fmt::format("工具插件注册失败：插件 ID、注册函数无效或发生嵌套注册"));
             return false;
@@ -89,7 +89,7 @@ namespace insoulforge {
         m_pluginTools.erase(it);
     }
 
-    bool ToolRegistry::registerTool(const Tool &tool, const ToolCategory category) {
+    auto ToolRegistry::registerTool(const Tool &tool, const ToolCategory category) -> bool {
         if (tool.name.empty() || !tool.handler) {
             Logger::error(0, "Tool", fmt::format("工具注册失败：工具名称或处理器为空"));
             if (!m_activePluginId.empty())
@@ -114,7 +114,7 @@ namespace insoulforge {
         return true;
     }
 
-    json ToolRegistry::getTools(const ToolQuery &query) const {
+    auto ToolRegistry::getTools(const ToolQuery &query) const -> json {
         json tools = json::array();
 
         std::vector<const RegisteredTool *> visibleTools;
@@ -125,7 +125,7 @@ namespace insoulforge {
             visibleTools.push_back(&registered);
         }
 
-        std::ranges::sort(visibleTools, [](const RegisteredTool *lhs, const RegisteredTool *rhs) {
+        std::ranges::sort(visibleTools, [](const RegisteredTool *lhs, const RegisteredTool *rhs) -> bool {
             return std::tuple{categoryOrder(lhs->category), lhs->tool.promptOrder, lhs->tool.name} <
                    std::tuple{categoryOrder(rhs->category), rhs->tool.promptOrder, rhs->tool.name};
         });
@@ -135,16 +135,17 @@ namespace insoulforge {
         return tools;
     }
 
-    json ToolRegistry::getAllTools() const { return getTools({}); }
+    auto ToolRegistry::getAllTools() const -> json { return getTools({}); }
 
-    drogon::Task<std::string> ToolRegistry::executeTool(const std::string name, json args, ToolCallContext ctx) const {
+    auto ToolRegistry::executeTool(const std::string name, json args, ToolCallContext ctx) const
+      -> drogon::Task<std::string> {
         if (const auto it = m_tools.find(name); it != m_tools.end()) {
             co_return co_await it->second.tool.handler(std::move(args), std::move(ctx));
         }
         co_return "工具未找到: " + name;
     }
 
-    bool ToolRegistry::hasTool(const std::string &name) const { return m_tools.contains(name); }
+    auto ToolRegistry::hasTool(const std::string &name) const -> bool { return m_tools.contains(name); }
 
     void ToolRegistry::unregisterTool(const std::string &name) {
         m_tools.erase(name);
@@ -159,7 +160,7 @@ namespace insoulforge {
         }
     }
 
-    i32 ToolRegistry::categoryOrder(const ToolCategory category) {
+    auto ToolRegistry::categoryOrder(const ToolCategory category) -> i32 {
         switch (category) {
             case ToolCategory::REPLY:
                 return 0;

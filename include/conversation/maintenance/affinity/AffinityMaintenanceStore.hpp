@@ -23,10 +23,10 @@ namespace insoulforge {
 
     namespace AffinityMaintenanceStore {
         /// @brief 获取拥有待处理好感度任务的会话 ID
-        [[nodiscard]] std::vector<u64> pendingSessionIds();
+        [[nodiscard]] auto pendingSessionIds() -> std::vector<u64>;
 
         /// @brief 获取会话最早的待处理好感度任务
-        [[nodiscard]] std::optional<AffinityMaintenanceJob> next(u64 sessionId);
+        [[nodiscard]] auto next(u64 sessionId) -> std::optional<AffinityMaintenanceJob>;
 
         /// @brief 记录一次失败尝试
         void incrementAttempt(i64 jobId);

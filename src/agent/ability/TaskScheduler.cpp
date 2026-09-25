@@ -26,7 +26,7 @@ namespace insoulforge {
 
         /// @brief 计算每日任务的下次触发时刻：自上次时刻起逐日推进到严格晚于当前
         /// （mktime 归一化跨月/跨年，tm_isdst=-1 交给系统处理夏令时偏移）
-        std::time_t nextDailyFire(const std::time_t lastTime) {
+        auto nextDailyFire(const std::time_t lastTime) -> std::time_t {
             const std::time_t now = std::time(nullptr);
             std::tm tm{};
             localtime_r(&lastTime, &tm);
@@ -39,7 +39,7 @@ namespace insoulforge {
             return next;
         }
 
-        std::string buildText(const TaskStore::ScheduledTask &task, const bool delayed) {
+        auto buildText(const TaskStore::ScheduledTask &task, const bool delayed) -> std::string {
             // 正文必须是对机器人下达的指令而非对用户的陈述，
             // content 是备忘而非现成回复，具体怎么说由到点时的 AI 结合上下文自行决定
             const std::string when = task.isDaily ? fmt::format("你设定的每日 {}", formatTimeOfDay(task.remindTime))
@@ -53,7 +53,7 @@ namespace insoulforge {
             return text;
         }
 
-        json buildSystemEvent(const TaskStore::ScheduledTask &task, const bool delayed) {
+        auto buildSystemEvent(const TaskStore::ScheduledTask &task, const bool delayed) -> json {
             const auto &config = Config::instance();
             const std::string text = buildText(task, delayed);
 
@@ -84,7 +84,7 @@ namespace insoulforge {
         }
     } // namespace
 
-    TaskScheduler &TaskScheduler::instance() {
+    auto TaskScheduler::instance() -> TaskScheduler & {
         static TaskScheduler scheduler;
         return scheduler;
     }
@@ -97,7 +97,7 @@ namespace insoulforge {
         }
 
         restorePendingTasks();
-        m_thread = std::jthread([this] { runLoop(); });
+        m_thread = std::jthread([this] -> void { runLoop(); });
     }
 
     void TaskScheduler::stop() {
@@ -113,7 +113,7 @@ namespace insoulforge {
         }
     }
 
-    i64 TaskScheduler::schedule(TaskStore::ScheduledTask task) {
+    auto TaskScheduler::schedule(TaskStore::ScheduledTask task) -> i64 {
         const i64 id = TaskStore::addScheduledTask(task);
 
         Entry entry;
@@ -138,7 +138,7 @@ namespace insoulforge {
         m_cv.notify_all();
     }
 
-    bool TaskScheduler::cancel(const i64 id) {
+    auto TaskScheduler::cancel(const i64 id) -> bool {
         // 先登记取消集合再写库：缩小"弹出时既不在集合里、库里也已非 pending"的竞态窗口
         {
             std::lock_guard lock(m_mutex);
@@ -183,7 +183,7 @@ namespace insoulforge {
         std::unique_lock lock(m_mutex);
         while (m_running.load()) {
             if (m_heap.empty()) {
-                m_cv.wait(lock, [this] { return !m_heap.empty() || !m_running.load(); });
+                m_cv.wait(lock, [this] -> bool { return !m_heap.empty() || !m_running.load(); });
                 continue;
             }
 
@@ -253,7 +253,7 @@ namespace insoulforge {
         instance().pushEntry(std::move(entry));
     }
 
-    std::optional<std::time_t> TaskScheduler::parseTimeString(const std::string &input) {
+    auto TaskScheduler::parseTimeString(const std::string &input) -> std::optional<std::time_t> {
         // 规整输入：去首尾空白、ISO 分隔符 T 视同空格
         const size_t begin = input.find_first_not_of(" \t\r\n");
         if (begin == std::string::npos) {

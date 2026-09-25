@@ -11,5 +11,5 @@ namespace insoulforge {
     /// @param args 工具调用参数
     /// @param key 参数名称
     /// @return 参数值；缺失或类型不匹配时返回空字符串
-    inline std::string argString(const json &args, const char *key) { return getStr(args, key); }
+    inline auto argString(const json &args, const char *key) -> std::string { return getStr(args, key); }
 } // namespace insoulforge

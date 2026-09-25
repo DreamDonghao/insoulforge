@@ -35,7 +35,7 @@ namespace insoulforge {
     using json = nlohmann::ordered_json;
 
     /// @brief 解析 JSON，失败时打印日志并返回 null
-    [[nodiscard]] inline json parseJson(const std::string &jsonStr) {
+    [[nodiscard]] inline auto parseJson(const std::string &jsonStr) -> json {
         json parsed = json::parse(jsonStr, nullptr, false);
         if (parsed.is_discarded()) {
             Logger::warn(0, "Json", fmt::format("解析失败: {}", jsonStr.substr(0, 100)));
@@ -48,7 +48,7 @@ namespace insoulforge {
     /// @param jsonStr 输入字符串
     /// @param root 输出的 JSON 值；解析失败时被置为 discarded
     /// @return 是否解析成功
-    [[nodiscard]] inline bool tryParseJson(const std::string_view jsonStr, json &root) {
+    [[nodiscard]] inline auto tryParseJson(const std::string_view jsonStr, json &root) -> bool {
         root = json::parse(jsonStr, nullptr, false);
         return !root.is_discarded();
     }
@@ -58,12 +58,13 @@ namespace insoulforge {
     /// @param indent 缩进宽度（-1 表示紧凑输出）
     /// @details 无效 UTF-8 字节替换为 U+FFFD 而不是抛异常：日志/LLM/自定义工具输出可能
     ///          携带坏字节，序列化处于所有对外边界（HTTP/WS/存储），不允许因坏字节中断
-    [[nodiscard]] inline std::string dumpJson(const json &value, const bool emitUtf8 = true, const i32 indent = -1) {
+    [[nodiscard]] inline auto dumpJson(const json &value, const bool emitUtf8 = true, const i32 indent = -1)
+      -> std::string {
         return value.dump(indent, ' ', !emitUtf8, json::error_handler_t::replace);
     }
 
     /// @brief 容忍模型输出 ```json 围栏等杂质：截取首尾大括号之间的内容
-    [[nodiscard]] inline bool tryExtractJsonObject(const std::string &text, std::string &payload) {
+    [[nodiscard]] inline auto tryExtractJsonObject(const std::string &text, std::string &payload) -> bool {
         const size_t start = text.find('{');
         const size_t end = text.rfind('}');
         if (start == std::string::npos || end == std::string::npos || end <= start)
@@ -74,7 +75,7 @@ namespace insoulforge {
 
     /// @brief 安全取字段：非对象或键缺失时返回 null（等价 JsonCpp 宽容的 const operator[]，
     ///        避免 nlohmann const [] 缺键的未定义行为）
-    [[nodiscard]] inline const json &atOrNull(const json &value, const char *key) {
+    [[nodiscard]] inline auto atOrNull(const json &value, const char *key) -> const json & {
         static const json kNull;
         if (!value.is_object())
             return kNull;
@@ -86,7 +87,7 @@ namespace insoulforge {
     // ==================== 按值宽容转换 ====================
 
     /// @brief 字符串/数字 → 字符串（数字按 JSON 文本输出，对齐 JsonCpp asString 的宽容语义）
-    [[nodiscard]] inline std::string jsonToString(const json &value, std::string fallback = {}) {
+    [[nodiscard]] inline auto jsonToString(const json &value, std::string fallback = {}) -> std::string {
         if (value.is_string())
             return value.get<std::string>();
         if (value.is_number())
@@ -94,7 +95,7 @@ namespace insoulforge {
         return fallback;
     }
 
-    [[nodiscard]] inline i32 jsonToInt(const json &value, const i32 fallback = 0) {
+    [[nodiscard]] inline auto jsonToInt(const json &value, const i32 fallback = 0) -> i32 {
         if (value.is_number_unsigned()) {
             const auto n = value.get<u64>();
             return n <= static_cast<u64>(INT32_MAX) ? static_cast<i32>(n) : fallback;
@@ -113,7 +114,7 @@ namespace insoulforge {
         return fallback;
     }
 
-    [[nodiscard]] inline i64 jsonToInt64(const json &value, const i64 fallback = 0) {
+    [[nodiscard]] inline auto jsonToInt64(const json &value, const i64 fallback = 0) -> i64 {
         if (value.is_number_unsigned()) {
             const auto n = value.get<u64>();
             return n <= static_cast<u64>(INT64_MAX) ? static_cast<i64>(n) : fallback;
@@ -133,7 +134,7 @@ namespace insoulforge {
     }
 
     /// @brief 数值/字符串 → u64（字符串按十进制解析；缺失/空/null/负数/浮点一律返回 fallback）
-    [[nodiscard]] inline u64 jsonToUInt64(const json &value, const u64 fallback = 0) {
+    [[nodiscard]] inline auto jsonToUInt64(const json &value, const u64 fallback = 0) -> u64 {
         if (value.is_number_unsigned())
             return value.get<u64>();
         if (value.is_number_integer()) {
@@ -145,7 +146,7 @@ namespace insoulforge {
         return fallback;
     }
 
-    [[nodiscard]] inline f64 jsonToDouble(const json &value, const f64 fallback = 0.0) {
+    [[nodiscard]] inline auto jsonToDouble(const json &value, const f64 fallback = 0.0) -> f64 {
         if (value.is_number())
             return value.get<f64>();
         if (value.is_string()) {
@@ -158,7 +159,7 @@ namespace insoulforge {
         return fallback;
     }
 
-    [[nodiscard]] inline bool jsonToBool(const json &value, const bool fallback = false) {
+    [[nodiscard]] inline auto jsonToBool(const json &value, const bool fallback = false) -> bool {
         if (value.is_boolean())
             return value.get<bool>();
         if (value.is_number())
@@ -175,27 +176,27 @@ namespace insoulforge {
 
     // ==================== 按键宽容取值（键缺失/类型不符/非对象时返回 fallback，等价 JsonCpp get） ====================
 
-    [[nodiscard]] inline std::string getStr(const json &value, const char *key, std::string fallback = {}) {
+    [[nodiscard]] inline auto getStr(const json &value, const char *key, std::string fallback = {}) -> std::string {
         return jsonToString(atOrNull(value, key), std::move(fallback));
     }
 
-    [[nodiscard]] inline i32 getInt(const json &value, const char *key, const i32 fallback = 0) {
+    [[nodiscard]] inline auto getInt(const json &value, const char *key, const i32 fallback = 0) -> i32 {
         return jsonToInt(atOrNull(value, key), fallback);
     }
 
-    [[nodiscard]] inline i64 getInt64(const json &value, const char *key, const i64 fallback = 0) {
+    [[nodiscard]] inline auto getInt64(const json &value, const char *key, const i64 fallback = 0) -> i64 {
         return jsonToInt64(atOrNull(value, key), fallback);
     }
 
-    [[nodiscard]] inline u64 getUInt(const json &value, const char *key, const u64 fallback = 0) {
+    [[nodiscard]] inline auto getUInt(const json &value, const char *key, const u64 fallback = 0) -> u64 {
         return jsonToUInt64(atOrNull(value, key), fallback);
     }
 
-    [[nodiscard]] inline f64 getDouble(const json &value, const char *key, const f64 fallback = 0.0) {
+    [[nodiscard]] inline auto getDouble(const json &value, const char *key, const f64 fallback = 0.0) -> f64 {
         return jsonToDouble(atOrNull(value, key), fallback);
     }
 
-    [[nodiscard]] inline bool getBool(const json &value, const char *key, const bool fallback = false) {
+    [[nodiscard]] inline auto getBool(const json &value, const char *key, const bool fallback = false) -> bool {
         return jsonToBool(atOrNull(value, key), fallback);
     }
 
@@ -203,7 +204,7 @@ namespace insoulforge {
 
     /// @brief 解析请求体为 JSON 对象（等价 req->getJsonObject()，直接走 nlohmann 不经 JsonCpp）
     /// @return 请求体缺失、解析失败或不是对象时返回 nullopt
-    [[nodiscard]] inline std::optional<json> parseJsonBody(const drogon::HttpRequestPtr &req) {
+    [[nodiscard]] inline auto parseJsonBody(const drogon::HttpRequestPtr &req) -> std::optional<json> {
         if (!req)
             return std::nullopt;
         json parsed;
@@ -213,7 +214,7 @@ namespace insoulforge {
     }
 
     /// @brief 构造 JSON HTTP 响应（替代 HttpResponse::newHttpJsonResponse(Json::Value)）
-    [[nodiscard]] inline drogon::HttpResponsePtr jsonResponse(const json &value) {
+    [[nodiscard]] inline auto jsonResponse(const json &value) -> drogon::HttpResponsePtr {
         auto resp = drogon::HttpResponse::newHttpResponse();
         resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
         resp->setBody(dumpJson(value));

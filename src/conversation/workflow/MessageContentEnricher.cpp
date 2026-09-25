@@ -18,13 +18,13 @@ namespace insoulforge::MessageContentEnricher {
         constexpr size_t kMinRecallChars = 3;
 
         /// @brief 计算 UTF-8 代码点数量
-        [[nodiscard]] size_t utf8Length(const std::string &text) {
-            return static_cast<size_t>(std::ranges::count_if(
-              text, [](const char character) { return (static_cast<unsigned char>(character) & 0xC0U) != 0x80U; }));
+        [[nodiscard]] auto utf8Length(const std::string &text) -> size_t {
+            return static_cast<size_t>(std::ranges::count_if(text,
+              [](const char character) -> bool { return (static_cast<unsigned char>(character) & 0xC0U) != 0x80U; }));
         }
     } // namespace
 
-    drogon::Task<json> enrichImages(json message, const u64 sessionId) {
+    auto enrichImages(json message, const u64 sessionId) -> drogon::Task<json> {
         if (!message.is_object()) {
             co_return message;
         }
@@ -61,7 +61,7 @@ namespace insoulforge::MessageContentEnricher {
         co_return message;
     }
 
-    drogon::Task<json> injectMemories(json message, const u64 sessionId) {
+    auto injectMemories(json message, const u64 sessionId) -> drogon::Task<json> {
         const std::string query = MessageRecord::extractRecallText(message);
         if (utf8Length(query) <= kMinRecallChars) {
             co_return message;

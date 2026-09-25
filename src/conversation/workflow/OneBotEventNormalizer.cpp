@@ -12,22 +12,22 @@ namespace insoulforge::OneBotEventNormalizer {
         std::atomic nextSyntheticMessageId{9'100'000'000LL};
 
         /// @brief 为缺少消息 ID 的通知事件生成进程内唯一 ID
-        [[nodiscard]] i64 makeSyntheticMessageId() { return nextSyntheticMessageId.fetch_add(1); }
+        [[nodiscard]] auto makeSyntheticMessageId() -> i64 { return nextSyntheticMessageId.fetch_add(1); }
 
         /// @brief 将 OneBot Unix 时间戳转换为统一记录的本地时间字符串
-        [[nodiscard]] std::string normalizeTime(const json &body) {
+        [[nodiscard]] auto normalizeTime(const json &body) -> std::string {
             const i64 timestamp = getInt64(body, "time");
             return timestamp > 0 ? formatUnixTime(timestamp) : currentDateTime();
         }
 
         /// @brief 读取昵称，缺失时使用统一占位值
-        [[nodiscard]] std::string displayName(const json &source) {
+        [[nodiscard]] auto displayName(const json &source) -> std::string {
             const std::string name = getStr(source, "nickname", getStr(source, "name"));
             return name.empty() ? "未知" : name;
         }
 
         /// @brief 从 @ 段生成统一目标对象
-        [[nodiscard]] json normalizeAtTarget(const json &data) {
+        [[nodiscard]] auto normalizeAtTarget(const json &data) -> json {
             const std::string qq = jsonToString(atOrNull(data, "qq"));
             if (parseUInt64(qq) == 0) {
                 return {{"kind", "all"}};
@@ -41,8 +41,8 @@ namespace insoulforge::OneBotEventNormalizer {
         }
 
         /// @brief 追加一个普通 OneBot 消息段，并返回其引用回复 ID（若存在）
-        [[nodiscard]] std::optional<std::string> appendMessageSegment(
-          const json &source, json &segments, json &images, const u64 selfId) {
+        [[nodiscard]] auto appendMessageSegment(const json &source, json &segments, json &images, const u64 selfId)
+          -> std::optional<std::string> {
             const std::string type = getStr(source, "type");
             const json &data = atOrNull(source, "data");
             if (type == "text") {
@@ -92,15 +92,15 @@ namespace insoulforge::OneBotEventNormalizer {
         }
 
         /// @brief 初始化统一记录的公共元数据字段
-        [[nodiscard]] json createRecord(
-          const json &body, const u64 senderId, const std::string &senderName, const i64 messageId) {
+        [[nodiscard]] auto createRecord(
+          const json &body, const u64 senderId, const std::string &senderName, const i64 messageId) -> json {
             return {{"time", normalizeTime(body)}, {"sender", {{"name", senderName}, {"qq", std::to_string(senderId)}}},
               {"message_id", std::to_string(messageId)}, {"segments", json::array()}};
         }
 
         /// @brief 从原始上报提取统一会话 ID
         /// @details 群聊以群号为 ID；私聊以用户 QQ 号加私聊标志位，避免与群号冲突。
-        [[nodiscard]] u64 extractSessionId(const json &body, const u64 senderId) {
+        [[nodiscard]] auto extractSessionId(const json &body, const u64 senderId) -> u64 {
             if (const u64 groupId = getUInt(body, "group_id"); groupId != 0) {
                 return groupId;
             }
@@ -112,7 +112,7 @@ namespace insoulforge::OneBotEventNormalizer {
         }
 
         /// @brief 归一化普通消息上报
-        [[nodiscard]] std::optional<json> normalizeMessage(const json &body) {
+        [[nodiscard]] auto normalizeMessage(const json &body) -> std::optional<json> {
             const u64 senderId = getUInt(atOrNull(body, "sender"), "user_id", getUInt(body, "user_id"));
             const i64 messageId = getInt64(body, "message_id");
             if (senderId == 0 || messageId == 0) {
@@ -143,7 +143,7 @@ namespace insoulforge::OneBotEventNormalizer {
         }
 
         /// @brief 归一化拍一拍通知
-        [[nodiscard]] std::optional<json> normalizePokeNotice(const json &body) {
+        [[nodiscard]] auto normalizePokeNotice(const json &body) -> std::optional<json> {
             const u64 actorId = getUInt(body, "user_id");
             const u64 targetId = getUInt(body, "target_id");
             if (actorId == 0 || targetId == 0) {
@@ -163,7 +163,7 @@ namespace insoulforge::OneBotEventNormalizer {
         }
 
         /// @brief 归一化群成员变动通知
-        [[nodiscard]] std::optional<json> normalizeMembershipNotice(const json &body) {
+        [[nodiscard]] auto normalizeMembershipNotice(const json &body) -> std::optional<json> {
             const u64 memberId = getUInt(body, "user_id");
             if (memberId == 0 || getUInt(body, "group_id") == 0) {
                 return std::nullopt;
@@ -185,7 +185,7 @@ namespace insoulforge::OneBotEventNormalizer {
         }
     } // namespace
 
-    std::optional<json> normalize(json body) {
+    auto normalize(json body) -> std::optional<json> {
         std::optional<json> record;
         if (getStr(body, "post_type") == "message") {
             record = normalizeMessage(body);

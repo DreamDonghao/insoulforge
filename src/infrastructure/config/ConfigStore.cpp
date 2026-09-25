@@ -18,21 +18,21 @@ namespace insoulforge::ConfigStore {
             bool initialized = false;
         };
 
-        ConfigFileState &state() {
+        auto state() -> ConfigFileState & {
             static ConfigFileState instance;
             return instance;
         }
 
-        json defaultChatConfig(const i32 maxTokens, const f64 temperature, const f64 topP) {
+        auto defaultChatConfig(const i32 maxTokens, const f64 temperature, const f64 topP) -> json {
             return {{"apiKey", ""}, {"baseUrl", ""}, {"path", "/chat/completions"}, {"model", ""},
               {"maxTokens", maxTokens}, {"temperature", temperature}, {"topP", topP}, {"reasoningEffort", ""}};
         }
 
-        json defaultEmbeddingConfig() {
+        auto defaultEmbeddingConfig() -> json {
             return {{"apiKey", ""}, {"baseUrl", ""}, {"path", "/embeddings"}, {"model", ""}};
         }
 
-        json defaultConfig() {
+        auto defaultConfig() -> json {
             return {
               {"llm", {{"router", defaultChatConfig(100, 0.3, 0.9)}, {"executor", defaultChatConfig(150, 0.7, 0.9)},
                         {"executorThinking", defaultChatConfig(512, 0.7, 0.9)},
@@ -47,14 +47,14 @@ namespace insoulforge::ConfigStore {
                   {"longTermInjectThreshold", 0.45}}}};
         }
 
-        bool compatibleType(const json &value, const json &defaultValue) {
+        auto compatibleType(const json &value, const json &defaultValue) -> bool {
             if (defaultValue.is_number())
                 return value.is_number();
             return value.type() == defaultValue.type();
         }
 
         /// @brief 用默认结构修复缺失或类型不兼容的字段，保留未知字段以兼容后续版本。
-        bool applyDefaults(json &config, const json &defaults) {
+        auto applyDefaults(json &config, const json &defaults) -> bool {
             bool changed = false;
             for (const auto &[key, defaultValue]: defaults.items()) {
                 auto value = config.find(key);
@@ -71,7 +71,7 @@ namespace insoulforge::ConfigStore {
         }
 
         /// @brief 将早期配置文件字段迁移为当前命名与结构。
-        bool migrateLegacyFields(json &config) {
+        auto migrateLegacyFields(json &config) -> bool {
             bool changed = false;
             changed = config.erase("version") > 0;
             const auto llm = config.find("llm");
@@ -130,7 +130,7 @@ namespace insoulforge::ConfigStore {
             initialize();
         }
 
-        json getSection(const std::string_view section) {
+        auto getSection(const std::string_view section) -> json {
             ensureInitialized();
             auto &fileState = state();
             std::scoped_lock lock(fileState.mutex);
@@ -198,7 +198,7 @@ namespace insoulforge::ConfigStore {
         }
     }
 
-    json getLLMConfig(const std::string &name) {
+    auto getLLMConfig(const std::string &name) -> json {
         const json llm = getSection("llm");
         const auto it = llm.find(name);
         return it == llm.end() ? json{} : *it;
@@ -221,16 +221,16 @@ namespace insoulforge::ConfigStore {
         Logger::info(0, "Config", fmt::format("LLM 配置已保存: {}", name));
     }
 
-    json getAllLLMConfigs() { return getSection("llm"); }
+    auto getAllLLMConfigs() -> json { return getSection("llm"); }
 
-    json getQQConfig() { return getSection("qq"); }
+    auto getQQConfig() -> json { return getSection("qq"); }
 
     void saveQQConfig(const json &config) {
         saveSection("qq", config);
         Logger::info(0, "Config", fmt::format("QQ Bot 配置已保存"));
     }
 
-    json getMemoryConfig() { return getSection("memory"); }
+    auto getMemoryConfig() -> json { return getSection("memory"); }
 
     void saveMemoryConfig(const json &config) {
         saveSection("memory", config);

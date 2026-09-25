@@ -23,9 +23,11 @@ namespace insoulforge::ConversationMaintenanceService {
         MemoryMaintenanceService::setSummaryCompletedCallback(std::move(callback));
     }
 
-    bool hasPendingMemorySummary(const u64 sessionId) { return MemoryMaintenanceStore::hasUnfinished(sessionId); }
+    auto hasPendingMemorySummary(const u64 sessionId) -> bool {
+        return MemoryMaintenanceStore::hasUnfinished(sessionId);
+    }
 
-    std::optional<size_t> takeCompletedMemorySummary(const u64 sessionId) {
+    auto takeCompletedMemorySummary(const u64 sessionId) -> std::optional<size_t> {
         return MemoryMaintenanceStore::takeCompleted(sessionId);
     }
 

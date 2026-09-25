@@ -54,7 +54,7 @@ namespace insoulforge {
         std::string qqWebSocketHost;
         std::string botName{"机器人"};
 
-        static Config &instance();
+        static auto instance() -> Config &;
 
         /// @brief 从全局配置文件加载运行时配置。
         void loadFromStorage();

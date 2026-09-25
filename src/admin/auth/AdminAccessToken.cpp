@@ -26,12 +26,12 @@ namespace insoulforge {
             std::mutex mutex;
         };
 
-        TokenState &state() {
+        auto state() -> TokenState & {
             static TokenState instance;
             return instance;
         }
 
-        std::string encodeHex(const std::array<unsigned char, 32> &bytes) {
+        auto encodeHex(const std::array<unsigned char, 32> &bytes) -> std::string {
             std::string value;
             value.reserve(bytes.size() * 2);
             for (const unsigned char byte: bytes) {
@@ -42,12 +42,12 @@ namespace insoulforge {
             return value;
         }
 
-        bool equalsToken(const std::string_view candidate, const std::string &expected) {
+        auto equalsToken(const std::string_view candidate, const std::string &expected) -> bool {
             return candidate.size() == expected.size() &&
                    CRYPTO_memcmp(candidate.data(), expected.data(), expected.size()) == 0;
         }
 
-        std::vector<std::string> localIpv4Addresses() {
+        auto localIpv4Addresses() -> std::vector<std::string> {
             std::vector<std::string> addresses{"127.0.0.1"};
             std::unordered_set<std::string> knownAddresses{addresses.begin(), addresses.end()};
 
@@ -87,7 +87,7 @@ namespace insoulforge {
         value = encodeHex(bytes);
     }
 
-    std::vector<std::string> AdminAccessToken::loginUrls(const u16 port) {
+    auto AdminAccessToken::loginUrls(const u16 port) -> std::vector<std::string> {
         std::vector<std::string> urls;
         for (const auto &address: localIpv4Addresses()) {
             urls.push_back(fmt::format("http://{}:{}/index.html#token={}", address, port, token()));
@@ -95,17 +95,17 @@ namespace insoulforge {
         return urls;
     }
 
-    std::string AdminAccessToken::token() {
+    auto AdminAccessToken::token() -> std::string {
         auto &[value, mutex] = state();
         std::scoped_lock lock(mutex);
         return value;
     }
 
-    bool AdminAccessToken::isAuthorized(const drogon::HttpRequestPtr &request) {
+    auto AdminAccessToken::isAuthorized(const drogon::HttpRequestPtr &request) -> bool {
         return request && matches(request->getCookie(std::string(cookieName_)));
     }
 
-    bool AdminAccessToken::matches(const std::string_view token) {
+    auto AdminAccessToken::matches(const std::string_view token) -> bool {
         auto &[value, mutex] = state();
         std::scoped_lock lock(mutex);
         return !value.empty() && equalsToken(token, value);

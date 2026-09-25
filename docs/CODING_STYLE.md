@@ -41,6 +41,11 @@
 
 `.clang-format` 是唯一格式化来源。当前项目基于 LLVM 风格，使用 4 空格缩进和 120 列行宽；不要在代码中手工对齐来对抗格式化工具。
 
+非 `void` 函数的声明和定义使用后置返回类型，例如 `auto loadConfig() -> Config`、`auto isEnabled() const -> bool`；
+返回 `void` 的普通函数保留 `void saveConfig()`，不写成 `auto saveConfig() -> void`。
+项目的 `.clang-tidy` 启用了 `modernize-use-trailing-return-type`，用于提示并修复可转换的签名；该检查不会转换返回 `void` 的普通函数。
+`clang-format` 只调整排版，不会改写返回类型的位置。第三方框架固定签名及工具无法安全转换的写法保持原样。
+
 包含顺序如下，每组之间保留一个空行：
 
 1. C++ 标准库头文件。

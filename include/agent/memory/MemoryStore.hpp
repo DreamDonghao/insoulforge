@@ -13,7 +13,7 @@
 
 /// @brief 短期记忆存储
 namespace insoulforge::MemoryStore {
-    [[nodiscard]] std::string getShortTermMemory(u64 sessionId);
+    [[nodiscard]] auto getShortTermMemory(u64 sessionId) -> std::string;
 
     void updateShortTermMemory(u64 sessionId, const std::string &memory);
 
