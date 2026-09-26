@@ -47,6 +47,22 @@ npm run type-check
 
 测试尚不能覆盖的行为，请在 Pull Request 中明确说明手动验证方式和剩余风险。
 
+## 分支命名
+
+默认分支为 `main`。每项独立改动从最新 `main` 创建主题分支，使用 `<类别>/<简短描述>` 格式；描述使用小写英文和连字符，说明具体改动，不使用 Issue 标题或人名代替。
+
+| 类别       | 用途                     | 示例                        |
+|------------|--------------------------|-----------------------------|
+| `feat`     | 新功能或现有功能扩展     | `feat/message-recall`       |
+| `fix`      | 缺陷修复                 | `fix/websocket-reconnect`   |
+| `refactor` | 不改变外部行为的代码整理 | `refactor/workflow-state`   |
+| `docs`     | 仅文档修改               | `docs/contribution-guide`   |
+| `test`     | 仅测试补充或调整         | `test/message-contract`     |
+| `build`    | 构建、依赖或 CI 调整     | `build/docker-dependencies` |
+| `chore`    | 不属于以上类别的维护工作 | `chore/cleanup-assets`      |
+
+分支类别与主要改动的提交类型保持一致，例如 `feat/message-recall` 分支中的功能提交使用 `feat(...)`。配套的测试或文档提交按实际内容选择类型；修复与功能混合时，按主要目标命名，无关改动应拆到不同分支。
+
 ## 代码要求
 
 - 遵循[编码规范](docs/CODING_STYLE.md)，尤其是命名、`clang-format`、AAA 类型推导、Doxygen 注释和 `drogon::Task` 协程参数规则。
@@ -57,15 +73,36 @@ npm run type-check
 
 ## 提交信息
 
-提交信息使用 Conventional Commits 风格，范围使用受影响模块的小写名称，摘要使用简洁中文且不加句号：
+提交信息使用 Conventional Commits 风格，格式如下：
+
+```text
+<类型>(<范围>): <简短摘要>
+
+<可选正文：说明改动原因、关键做法及兼容性影响>
+
+<可选脚注：关联 Issue 或标明破坏性变更>
+```
+
+- 类型与上文分支分类一致：`feat`、`fix`、`refactor`、`docs`、`test`、`build`、`chore`。仅调整 CI 流程可用 `ci`，仅优化性能可用 `perf`。
+- 范围写受影响模块的小写名称，例如 `media`、`workflow`、`onebot`；跨模块且无法确定主要模块时可省略范围。
+- 摘要用简洁中文描述实际变化，不写空泛的“更新代码”，末尾不加句号。
+- 改动原因或兼容性影响无法从标题看出时，空一行写正文；正文可用条目列出要点，不重复标题。
+- 破坏性变更在类型或范围后加 `!`，并在脚注用 `BREAKING CHANGE: ` 说明迁移方式。
+
+例如：
 
 ```text
 feat(media): 支持图片描述缓存过期清理
-fix(scheduler): 修复定时任务异常延迟触发
-docs(contributing): 补充外部贡献流程
+
+- 清理超过十天未使用的缓存记录
+- 缓存命中时更新最后使用时间
 ```
 
-常用类型为 `feat`、`fix`、`refactor`、`docs`、`test`、`build` 和 `chore`。一次提交应保持可构建；无关格式化应单独提交。
+```text
+fix(scheduler): 修复定时任务异常延迟触发
+```
+
+一次提交只处理一个明确目的并保持可构建；无关格式化应单独提交。
 
 ## Pull Request
 
