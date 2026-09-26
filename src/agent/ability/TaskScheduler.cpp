@@ -1,7 +1,5 @@
 /// @file TaskScheduler.cpp
 /// @brief 定时任务调度器 - 实现
-/// @author donghao
-/// @date 2026-08-27
 
 #include <infrastructure/NumericTypes.hpp>
 

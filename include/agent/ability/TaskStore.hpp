@@ -1,7 +1,5 @@
 /// @file TaskStore.hpp
 /// @brief 定时任务存储
-/// @author donghao
-/// @date 2026-08-30
 /// @details 表：scheduled_tasks（提醒类定时任务）
 
 #pragma once

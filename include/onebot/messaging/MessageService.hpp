@@ -1,9 +1,6 @@
 /// @file MessageService.hpp
-/// @brief QQ 消息服务 - 消息发送与处理
-/// @details 封装 QQ 消息的发送和处理逻辑（OneBot 协议交互见 OneBotClient）：
-///          - 群消息/私聊消息发送（发送成功后由工作流记录并推送）
-///          - @格式转换：convertAtToCQCode()
-///          - 会话名称获取：fetchAndUpdateSessionName()
+/// @brief QQ 消息发送与会话名称查询
+/// @details 通过 OneBotClient 发送群聊和私聊消息；发送成功后将助手消息写入工作流。
 
 #pragma once
 
@@ -13,7 +10,7 @@
 #include <optional>
 #include <string>
 
-/// @brief 消息服务 - 封装 QQ 消息发送逻辑，对接 OneBot API
+/// @brief 封装消息发送、@转换和会话名称更新
 namespace insoulforge::MessageService {
     /// @brief 将文本中的@格式转换为 CQ 码
     /// @param text 原始文本（可能包含 @昵称 或 @[QQ:xxx] 格式）
@@ -27,7 +24,7 @@ namespace insoulforge::MessageService {
     auto sendGroupMsg(u64 groupId, std::string message) -> drogon::Task<std::optional<u64>>;
 
     /// @brief 发送私聊消息
-    /// @param userId 用户QQ号
+    /// @param userId 用户 QQ 号
     /// @param message 消息内容
     /// @return 发送成功返回 message_id，失败返回 nullopt（已记日志）
     auto sendPrivateMsg(u64 userId, std::string message) -> drogon::Task<std::optional<u64>>;

@@ -1,7 +1,5 @@
 /// @file SessionStore.cpp
-/// @brief 会话（群）配置与启用状态存储 - 实现
-/// @author donghao
-/// @date 2026-08-30
+/// @brief 会话统计与启用状态的数据库实现
 
 #include <infrastructure/NumericTypes.hpp>
 

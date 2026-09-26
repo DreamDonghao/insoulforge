@@ -1,7 +1,5 @@
 /// @file PromptStore.cpp
 /// @brief 提示词存储 - 实现
-/// @author donghao
-/// @date 2026-08-30
 
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>

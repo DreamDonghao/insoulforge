@@ -1,12 +1,6 @@
 /// @file LlmClient.hpp
-/// @brief API 客户端 - LLM API 请求封装
-/// @date 2026-04-02
-/// @details 封装 LLM API 请求与用量统计：
-///          - Chat 请求体构建与响应校验：buildChatRequestBody() / validChatJson()
-///          - Chat completion 请求（带重试）：requestChat()
-///          - LLM 请求：requestLLM()
-///          - Embedding 请求：requestEmbedding()
-///          - 缓存命中率日志：logUsage()
+/// @brief 大模型与向量模型的 API 请求
+/// @details 封装 OpenAI 兼容接口的请求、响应校验和用量记录。
 
 #pragma once
 
@@ -24,7 +18,7 @@ namespace insoulforge {
     struct LLMModelParams;
 } // namespace insoulforge
 
-/// @brief API 客户端 - 封装 LLM API 请求与用量统计
+/// @brief 发起模型请求并记录用量
 namespace insoulforge::LlmClient {
     /// @brief 判断 API 配置是否具备发起请求所需的地址、路径和模型名。
     [[nodiscard]] auto isConfigured(const LLMApiConfig &api) -> bool;
@@ -56,8 +50,8 @@ namespace insoulforge::LlmClient {
     /// @param temperature 温度参数
     /// @param top_p Top-P 采样参数
     /// @param max_tokens 最大 token 数
-    /// @param role
-    /// @param sessionId
+    /// @param role 用量记录中的角色，默认 memory
+    /// @param sessionId 关联日志的会话 ID；缺省时按全局请求记录
     /// @param timeoutSeconds 请求超时秒数；后台维护任务默认 180 秒
     /// @return 响应文本，失败返回 std::nullopt
     auto requestLLM(json messages, f64 temperature = 1.35, f64 top_p = 0.92, i32 max_tokens = 1024,
@@ -68,13 +62,13 @@ namespace insoulforge::LlmClient {
     /// @param responseJson API 返回的完整 JSON
     /// @param model 模型名
     /// @param role 角色名（router/executor/executorThinking/memory/image/embedding）
-    /// @param sessionId
+    /// @param sessionId 关联日志的会话 ID；缺省时按全局请求记录
     void logUsage(const json &responseJson, const std::string &model, const std::string &role,
       std::optional<u64> sessionId = std::nullopt);
 
     /// @brief 请求 Embedding API（使用 Embedding 配置）
     /// @param text 待向量化的文本
-    /// @param sessionId
+    /// @param sessionId 关联日志的会话 ID；缺省时按全局请求记录
     /// @return 向量，未配置或失败返回 std::nullopt
     auto requestEmbedding(std::string text, std::optional<u64> sessionId = std::nullopt)
       -> drogon::Task<std::optional<std::vector<f32>>>;

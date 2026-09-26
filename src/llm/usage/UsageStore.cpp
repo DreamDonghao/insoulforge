@@ -1,7 +1,5 @@
 /// @file UsageStore.cpp
 /// @brief LLM 用量统计存储 - 实现
-/// @author donghao
-/// @date 2026-08-30
 
 #include <infrastructure/NumericTypes.hpp>
 

@@ -1,7 +1,5 @@
 /// @file JsonUtil.hpp
 /// @brief JSON 工具 - 基于 nlohmann/json 的统一封装
-/// @author donghao
-/// @date 2026-09-02
 /// @details 项目统一 JSON 类型与工具函数：
 ///          - 类型别名：json = nlohmann::ordered_json（键按插入顺序保存与序列化）
 ///          - 解析：parseJson() / tryParseJson()

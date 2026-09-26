@@ -21,7 +21,7 @@ namespace insoulforge {
         const std::regex atPattern(R"(@\[.*?(\d{5,11}).*?\])");
         result = std::regex_replace(result, atPattern, "[CQ:at,qq=$1]");
 
-        // 2. 模糊格式 @昵称 → 查找昵称映射
+        // 按已知昵称查找 @目标。
         auto nameToQQ = QQNameDirectory::nameToQQMap();
 
         // 按昵称长度降序排序，避免短昵称先匹配
@@ -39,7 +39,7 @@ namespace insoulforge {
                                                  result[endPos] != '_' && result[endPos] != '-');
 
                 if (isComplete) {
-                    // 检查是否已经是CQ码的一部分（避免重复转换）
+                    // 跳过已经转换的 CQ 码。
                     if (pos >= 4 && result.substr(pos - 4, 4) == "qq=") {
                         pos = endPos;
                         continue;

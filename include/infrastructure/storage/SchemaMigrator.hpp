@@ -1,7 +1,5 @@
 /// @file SchemaMigrator.hpp
 /// @brief 数据库 Schema 版本迁移
-/// @author donghao
-/// @date 2026-08-30
 /// @details 基于 PRAGMA user_version 的版本迁移：
 ///          - 版本号存于 SQLite 的 user_version
 ///          - 每个版本迁移是一个有序步骤，启动时从当前版本逐个执行到最新版本

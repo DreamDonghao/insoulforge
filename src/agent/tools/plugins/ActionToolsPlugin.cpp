@@ -242,13 +242,13 @@ namespace insoulforge {
                 Logger::info(sessionId, "Sticker",
                   fmt::format("save_sticker: message_id={} image_index={} file={}", messageId, imageIndex, file));
 
-                // Step 1: 尝试 get_image 拿容器内路径（商城表情会失败/超时）
+                // 优先获取容器内的图片路径；商城表情可能无法通过 get_image 获取。
                 std::string containerPath;
                 if (const auto path = co_await OneBotClient::getImage(file, sessionId)) {
                     containerPath = *path;
                 }
 
-                // Step 2: get_image 失败则回退到 download_file（URL 下载进容器）
+                // 获取路径失败时，通过 URL 将图片下载到容器内。
                 if (containerPath.empty()) {
                     if (url.empty()) {
                         co_return std::string("获取图片失败，请确认图片仍可访问");
@@ -261,7 +261,7 @@ namespace insoulforge {
                     }
                 }
 
-                // Step 3: 记录保存前的 res_id 集合，用于保存后定位新表情
+                // 记录已有表情的 res_id，以便保存后找出新表情。
                 ToolRuntime::invalidateFavoriteEmojiCache();
                 std::set<std::string> beforeIds;
                 for (const auto &e: co_await ToolRuntime::fetchFavoriteEmojis(sessionId)) {
@@ -270,12 +270,12 @@ namespace insoulforge {
                     }
                 }
 
-                // Step 4: add_custom_face 保存为收藏表情
+                // 将图片保存为 QQ 收藏表情。
                 if (!co_await OneBotClient::addCustomFace(containerPath, sessionId)) {
                     co_return std::string("保存为收藏表情失败");
                 }
 
-                // Step 5: 定位新表情并设置描述
+                // 找到新增的表情并设置描述。
                 ToolRuntime::invalidateFavoriteEmojiCache();
                 json newItem;
                 for (const auto &e: co_await ToolRuntime::fetchFavoriteEmojis(sessionId)) {

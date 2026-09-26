@@ -1,7 +1,5 @@
 /// @file PromptService.hpp
 /// @brief 提示词服务 - 动态加载与管理 LLM 提示词
-/// @author donghao
-/// @date 2026-04-02
 /// @details 从数据库加载和管理提示词，支持：
 ///          - 运行时动态修改提示词
 ///          - 占位符替换（如 {botName}）

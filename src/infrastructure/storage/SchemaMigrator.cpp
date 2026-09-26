@@ -1,7 +1,5 @@
 /// @file SchemaMigrator.cpp
 /// @brief 数据库 Schema 版本迁移 - 实现
-/// @author donghao
-/// @date 2026-08-30
 
 #include <infrastructure/NumericTypes.hpp>
 

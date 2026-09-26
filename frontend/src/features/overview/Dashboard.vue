@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 /**
  * @file Dashboard.vue
- * @brief 首页仪表盘 - bento 布局，各模块按需占位，填满整页
+ * @brief 展示机器人状态、OneBot 连接、模型配置与近期用量
  */
 import {computed, inject, onMounted, onUnmounted, ref, type Ref} from 'vue'
 import type {LLMConfig, QQConfig} from '../../vite-env'

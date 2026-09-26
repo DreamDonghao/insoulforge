@@ -1,7 +1,5 @@
 /// @file AffinityStore.hpp
 /// @brief 好感度存储
-/// @author donghao
-/// @date 2026-08-31
 /// @details 表：group_affinity（每个会话独立维护 QQ 号 → 好感度映射，取值范围 [-100, 100]）
 
 #pragma once

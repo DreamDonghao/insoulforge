@@ -1,7 +1,5 @@
 /// @file ChatRecordStore.cpp
 /// @brief 聊天记录存储 - 实现
-/// @author donghao
-/// @date 2026-08-30
 
 #include <infrastructure/NumericTypes.hpp>
 

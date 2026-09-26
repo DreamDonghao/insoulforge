@@ -1,5 +1,5 @@
 /// @file WebSocketManager.cpp
-/// @brief WebSocket 连接管理器 - 实现
+/// @brief 管理后台消息推送连接的实现
 
 #include <infrastructure/NumericTypes.hpp>
 
@@ -53,16 +53,15 @@ namespace insoulforge {
         msg["data"]["timestamp"] = currentDateTime();
         const std::string jsonStr = dumpJson(msg);
 
-        // 发送给订阅该群的连接
+        // 先通知订阅当前会话的连接。
         if (m_subscriptions.contains(sessionId)) {
             for (const auto &conn: m_subscriptions[sessionId]) {
                 conn->send(jsonStr);
             }
         }
 
-        // 也发送给未订阅特定群的连接（订阅所有群）
+        // 未设置任何会话订阅的连接接收全部消息。
         for (const auto &conn: m_connections) {
-            // 如果连接没有订阅任何群，发送所有消息
             bool hasSubscription = false;
             for (const auto &subscribers: m_subscriptions | std::views::values) {
                 if (subscribers.contains(conn)) {

@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 /**
  * @file UsageStats.vue
- * @brief 用量统计 - 概览 → 角色用量 → 每日趋势 → 调用明细
+ * @brief 展示模型用量概览、角色分布、每日趋势和调用明细
  */
 import {computed, inject, onMounted, onUnmounted, ref, type Ref} from 'vue'
 

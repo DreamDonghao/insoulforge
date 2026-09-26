@@ -1,13 +1,7 @@
 /// @file TaskScheduler.hpp
-/// @brief 定时任务调度器 - 小根堆 + 独立等待线程
-/// @author donghao
-/// @date 2026-08-27
-/// @details LLM 通过 create_scheduled_task 工具创建任务后的完整链路：
-///          - 任务先落库（用户请求的原始时间为准），再入堆参与调度
-///          - 到点前提前 kFireLead 触发（补偿一次回复的生成耗时），把任务包装成
-///            OneBot 格式系统消息，直接交给正常 Router/Executor 管线生成回复
-///          - 每日任务（isDaily）触发后不结束，自动推进到次日同一时刻重新入堆，直到被取消
-///          - 重启时从数据库恢复全部 pending 任务；已过期的任务照常触发并标注延时
+/// @brief 定时任务的持久化与触发调度
+/// @details 新任务先写入数据库，再加入内存时间堆；独立线程等待并向消息工作流投递系统事件。
+///          每日任务在触发后安排下一次执行；重启时恢复尚未完成的任务。
 #pragma once
 
 #include <agent/ability/TaskStore.hpp>

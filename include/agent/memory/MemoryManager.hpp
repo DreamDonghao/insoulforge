@@ -1,9 +1,6 @@
 /// @file MemoryManager.hpp
-/// @brief 短期记忆管理器 - 群聊记忆存储与检索
-/// @author donghao
-/// @date 2026-04-02
-/// @details 管理单个群组的短期记忆，支持存储、更新和检索操作。
-///          短期记忆以纯文本形式存储，每行一条记忆条目。
+/// @brief 读取单个会话的短期记忆
+/// @details 从 MemoryStore 读取短期记忆，供 Agent 构建上下文使用。
 
 #pragma once
 
@@ -11,12 +8,10 @@
 #include <string>
 
 namespace insoulforge {
-    /// @brief 短期记忆管理类
-    /// @details 管理单个群组的短期记忆，每行一条记忆条目。
-    ///          用于 LLM 上下文中提供记忆信息。
+    /// @brief 指向单个会话短期记忆的读取适配器
     class MemoryManager {
     public:
-        /// @brief 构造函数
+        /// @brief 绑定会话 ID
         /// @param sessionId 会话 ID（私聊会话带标志位）
         explicit MemoryManager(u64 sessionId);
 
@@ -25,6 +20,6 @@ namespace insoulforge {
         [[nodiscard]] auto getMemory() const -> std::string;
 
     private:
-        u64 m_sessionId; ///< 群号
+        u64 m_sessionId; ///< 群号或带私聊标志位的用户 QQ 号
     };
 } // namespace insoulforge

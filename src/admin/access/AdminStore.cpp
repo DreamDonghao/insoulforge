@@ -1,7 +1,5 @@
 /// @file AdminStore.cpp
 /// @brief 管理员存储 - 实现
-/// @author donghao
-/// @date 2026-08-30
 
 #include <infrastructure/NumericTypes.hpp>
 

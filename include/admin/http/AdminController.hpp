@@ -1,7 +1,5 @@
 /// @file AdminController.hpp
 /// @brief 管理后台 REST API 控制器
-/// @author donghao
-/// @date 2026-04-02
 
 #pragma once
 
@@ -12,15 +10,7 @@
 
 namespace insoulforge {
     /// @brief 管理后台 REST API 控制器
-    /// @details 提供 Web 管理界面的所有 API 接口，包括：
-    ///          - LLM 配置管理
-    ///          - 提示词管理
-    ///          - 表情库管理
-    ///          - 管理员管理
-    ///          - 启用群管理
-    ///          - 知识库配置
-    ///          - 聊天记录查看
-    ///          - 记忆系统配置
+    /// @details 提供管理后台的认证、配置、会话、工具、用量和运行诊断接口。
     class AdminController : public drogon::HttpController<AdminController> {
     public:
         METHOD_LIST_BEGIN
@@ -213,13 +203,13 @@ namespace insoulforge {
 
         /// @brief 修改收藏表情描述（调用 NapCat set_custom_face_desc）
         /// @param req body: {emoji_id, res_id, md5, desc}
-        /// @param callback
+        /// @param callback HTTP 响应回调
         auto updateEmojiDesc(drogon::HttpRequestPtr req,
           std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         /// @brief 获取 Token 用量统计
-        /// @param req query: days（可选，默认30）
-        /// @param callback
+        /// @param req HTTP 请求，days 查询参数可选，默认 30 天
+        /// @param callback HTTP 响应回调
         auto getUsage(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const
           -> drogon::Task<>;
 
@@ -228,8 +218,8 @@ namespace insoulforge {
           -> drogon::Task<>;
 
         /// @brief 查询最近的 HTTP 请求记录（含完整请求/响应体）
-        /// @param req query: afterId / limit（可选）
-        /// @param callback
+        /// @param req HTTP 请求，可选 afterId 和 limit 查询参数
+        /// @param callback HTTP 响应回调
         auto getHttpTraces(drogon::HttpRequestPtr req,
           std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
@@ -282,46 +272,46 @@ namespace insoulforge {
 
         /// @brief 添加全局 QQ 黑名单项。
         /// @param req HTTP 请求，body 包含 qq。
-        /// @param callback
+        /// @param callback HTTP 响应回调
         auto addBlacklistEntry(drogon::HttpRequestPtr req,
           std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         /// @brief 移除全局 QQ 黑名单项。
-        /// @param req
-        /// @param callback
+        /// @param req HTTP 请求
+        /// @param callback HTTP 响应回调
         /// @param qq 要移除的 QQ 号。
         auto removeBlacklistEntry(drogon::HttpRequestPtr req,
           std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &qq) const -> drogon::Task<>;
 
-        // ============== 启用群 ==============
+        // ============== 会话启用状态 ==============
 
-        /// @brief 获取启用群列表
+        /// @brief 获取已登记的会话及其启用状态
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
         auto getGroups(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const
           -> drogon::Task<>;
 
-        /// @brief 启用群
+        /// @brief 登记并启用会话
         /// @param req HTTP 请求，body 包含 sessionId
         /// @param callback HTTP 响应回调
         auto enableSession(drogon::HttpRequestPtr req,
           std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
-        /// @brief 切换群启用/禁用状态
+        /// @brief 切换会话启用状态
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
         /// @param sessionId 会话 ID（私聊会话带标志位）
         auto toggleSession(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback,
           const std::string &sessionId) const -> drogon::Task<>;
 
-        /// @brief 删除群（从数据库移除）
+        /// @brief 从启用列表移除会话
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
         /// @param sessionId 会话 ID（私聊会话带标志位）
         auto removeSession(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback,
           const std::string &sessionId) const -> drogon::Task<>;
 
-        /// @brief 刷新群名称
+        /// @brief 刷新会话名称
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
         /// @param sessionId 会话 ID（私聊会话带标志位）
@@ -329,7 +319,7 @@ namespace insoulforge {
           std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &sessionId) const
           -> drogon::Task<>;
 
-        /// @brief 批量刷新所有群名称
+        /// @brief 批量刷新已登记会话的名称
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
         auto refreshAllSessionNames(drogon::HttpRequestPtr req,
@@ -337,13 +327,13 @@ namespace insoulforge {
 
         // ============== 聊天记录 ==============
 
-        /// @brief 获取所有有聊天记录的群列表
+        /// @brief 获取有聊天记录的会话列表
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
         auto getChatSessions(drogon::HttpRequestPtr req,
           std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
-        /// @brief 获取群聊天记录
+        /// @brief 获取指定会话的聊天记录
         /// @param req HTTP 请求，可选 limit 参数
         /// @param callback HTTP 响应回调
         /// @param sessionId 会话 ID（私聊会话带标志位）
@@ -364,7 +354,7 @@ namespace insoulforge {
         auto deleteChatRecord(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback,
           const std::string &recordId) const -> drogon::Task<>;
 
-        /// @brief 清空群的所有聊天记录
+        /// @brief 清空指定会话的聊天记录
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
         /// @param sessionId 会话 ID（私聊会话带标志位）
@@ -372,16 +362,16 @@ namespace insoulforge {
           std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &sessionId) const
           -> drogon::Task<>;
 
-        // ============== 群记忆 ==============
+        // ============== 会话记忆 ==============
 
-        /// @brief 获取群短期记忆
+        /// @brief 获取会话短期记忆
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
         /// @param sessionId 会话 ID（私聊会话带标志位）
         auto getSessionMemory(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback,
           const std::string &sessionId) const -> drogon::Task<>;
 
-        /// @brief 更新群记忆
+        /// @brief 更新会话短期记忆
         /// @param req HTTP 请求，body 包含 memory
         /// @param callback HTTP 响应回调
         /// @param sessionId 会话 ID（私聊会话带标志位）

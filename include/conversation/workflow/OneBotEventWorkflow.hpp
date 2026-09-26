@@ -14,10 +14,9 @@
 
 namespace insoulforge {
     /// @brief OneBot 入站事件处理工作流
-    /// @details 单例按会话维护两级事件驱动队列：预处理阶段完成图片/GIF 识别、记忆召回、入库与快照；
-    ///          回复阶段消费快照并调用 Router、Executor 和发送服务。队列为空时对应 drain 协程立即退出，
-    ///          不使用轮询或空转等待。运行时消息上下文仅来自 MessageList，数据库只承担启动恢复与正常退出
-    ///          时的持久化职责。
+    /// @details 每个会话串行预处理入站消息；回复处理同一时间只运行一轮。预处理完成后，
+    ///          回复阶段从 MessageList 读取快照并调用 Router、Executor 和发送服务。
+    ///          空闲时协程退出，不轮询。数据库中的聊天记录用于启动恢复和正常退出时保存消息列表。
     class OneBotEventWorkflow {
     public:
         /// @brief 获取进程内唯一的工作流
@@ -32,8 +31,8 @@ namespace insoulforge {
         /// @brief 接收发送服务已确认投递的机器人消息
         /// @param sessionId 所属会话 ID
         /// @param message 完整助手消息 JSON
-        /// @details 发送服务完成写入后调用；消息会进入所属会话的内存列表并向管理后台推送完整记录。
-        /// @note 线程安全。函数完成时消息已写入内存列表；触发的记忆总结任务已持久化并异步执行。
+        /// @details OneBot 确认发送成功后调用；消息会进入内存列表并推送给管理后台。
+        /// @note 线程安全。函数完成时消息已写入内存列表；若触发记忆总结，任务已持久化并交给异步消费者。
         void appendDeliveredAssistantMessage(u64 sessionId, json message);
 
         /// @brief 获取运行中会话的完整消息列表快照
@@ -44,7 +43,7 @@ namespace insoulforge {
 
         /// @brief 将 OneBot 上报事件加入处理流程
         /// @param body 已通过 HTTP JSON 校验的 OneBot 事件对象
-        /// @details 归一化后仅执行入队操作；队列从空闲变为非空时启动对应会话的预处理协程。
+        /// @details 归一化并检查机器人状态、发送者后入队；会话尚无预处理任务时启动协程。
         /// @note 线程安全。函数返回仅表示事件已被接受或丢弃，不表示图片识别、回复或记忆维护已经完成。
         void enqueueOneBotEvent(json body);
 

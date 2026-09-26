@@ -1,7 +1,5 @@
 /// @file LongTermMemoryStore.hpp
 /// @brief 长期记忆存储
-/// @author donghao
-/// @date 2026-09-01
 /// @details 表：long_term_memory（记忆内容 + embedding 向量 BLOB，检索为暴力余弦）
 
 #pragma once
