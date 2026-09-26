@@ -12,8 +12,8 @@
 
 #include <infrastructure/NumericTypes.hpp>
 
-#include <admin/AdminStore.hpp>
-#include <admin/auth/AdminAccessToken.hpp>
+#include <admin/access/AdminStore.hpp>
+#include <admin/access/AdminAccessToken.hpp>
 #include <admin/http/AdminResponse.hpp>
 #include <agent/ability/TaskScheduler.hpp>
 #include <agent/runtime/AgentSystem.hpp>
@@ -25,7 +25,7 @@
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <media/ImageDescriptionStore.hpp>
-#include <onebot/OneBotWebSocketClient.hpp>
+#include <onebot/transport/OneBotWebSocketClient.hpp>
 #include <poll.h>
 #include <unistd.h>
 

@@ -5,7 +5,7 @@
 #include <infrastructure/NumericTypes.hpp>
 
 #include <agent/tools/ToolRuntime.hpp>
-#include <onebot/OneBotClient.hpp>
+#include <onebot/transport/OneBotClient.hpp>
 
 namespace insoulforge {
     namespace {

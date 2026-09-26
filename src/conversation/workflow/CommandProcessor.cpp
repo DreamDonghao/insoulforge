@@ -3,15 +3,15 @@
 
 #include <infrastructure/NumericTypes.hpp>
 
-#include <admin/AdminStore.hpp>
-#include <admin/BlacklistStore.hpp>
+#include <admin/access/AdminStore.hpp>
+#include <admin/access/BlacklistStore.hpp>
 #include <agent/tools/ToolRuntime.hpp>
 #include <conversation/message/MessageRecord.hpp>
 #include <conversation/message/SessionId.hpp>
 #include <conversation/session/SessionConfigManager.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <media/ImageDescriptionStore.hpp>
-#include <onebot/OneBotClient.hpp>
+#include <onebot/transport/OneBotClient.hpp>
 
 namespace insoulforge::CommandProcessor {
     namespace {

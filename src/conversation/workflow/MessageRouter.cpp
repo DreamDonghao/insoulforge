@@ -8,7 +8,7 @@
 #include <conversation/workflow/MessageRouter.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <llm/LlmClient.hpp>
-#include <llm/PromptService.hpp>
+#include <llm/prompts/PromptService.hpp>
 
 namespace insoulforge::MessageRouter {
     namespace {

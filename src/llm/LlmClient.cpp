@@ -4,12 +4,12 @@
 
 #include <infrastructure/NumericTypes.hpp>
 
-#include <admin/realtime/WebSocketManager.hpp>
+#include <admin/events/WebSocketManager.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/http/HttpUtil.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <llm/LlmClient.hpp>
-#include <llm/UsageStore.hpp>
+#include <llm/usage/UsageStore.hpp>
 
 namespace insoulforge {
     namespace {

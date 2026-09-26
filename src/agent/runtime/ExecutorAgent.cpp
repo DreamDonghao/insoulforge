@@ -12,7 +12,7 @@
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <llm/LlmClient.hpp>
-#include <llm/PromptService.hpp>
+#include <llm/prompts/PromptService.hpp>
 
 namespace insoulforge::ExecutorAgent {
     namespace {

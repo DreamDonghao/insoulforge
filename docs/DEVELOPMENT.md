@@ -128,10 +128,14 @@ insoulforge/
 │   │   ├── ability/          # 定时任务及其存储
 │   │   ├── memory/           # Agent 记忆的查询、召回与存储
 │   │   ├── runtime/          # AgentSystem / ExecutorAgent / AgentTypes
-│   │   └── tools/            # 工具运行时、插件与工具存储
-│   ├── admin/                # 后台认证、HTTP、实时 WebSocket 与后台数据
-│   │   ├── auth/             # 管理后台访问令牌与会话 Cookie
-│   │   └── http/             # 管理 API 控制器与响应工具
+│   │   └── tools/            # 工具运行时、插件、自定义工具与表情缓存
+│   │       ├── custom/       # 自定义工具执行与存储
+│   │       └── plugins/      # 内置工具插件
+│   ├── admin/                # 管理后台接口与实时推送
+│   │   ├── access/           # 管理员、黑名单、访问令牌与会话 Cookie
+│   │   ├── events/           # 管理后台状态推送
+│   │   ├── http/             # 管理 API 控制器与响应工具
+│   │   └── logging/          # 实时日志推送
 │   ├── conversation/
 │   │   ├── history/          # 聊天记录及其存储
 │   │   ├── maintenance/      # 派生状态维护任务协调、记忆维护与好感度维护
@@ -139,12 +143,18 @@ insoulforge/
 │   │   ├── session/          # 会话配置、存储与昵称目录
 │   │   └── workflow/         # OneBot 消息处理工作流
 │   ├── infrastructure/       # NumericTypes.hpp、配置、数据库、日志、HTTP 与共享工具
-│   ├── llm/                  # LLM 客户端、提示词与用量存储
+│   ├── llm/                  # LLM 客户端
+│   │   ├── prompts/         # 提示词管理与存储
+│   │   └── usage/           # 模型调用用量存储
 │   ├── media/                # 图片/GIF 识别与描述缓存
-│   └── onebot/               # OneBot 客户端、消息发送与 HTTP 入口
+│   └── onebot/               # OneBot 接入
+│       ├── messaging/       # 消息发送
+│       └── transport/       # HTTP 事件入口与 WebSocket/API 客户端
 ├── src/                      # 源文件（按相同模块镜像组织，入口为 main.cpp）
 ├── frontend/                 # Vue 3 + Vite + TypeScript 管理后台
-│   └── src/components/       # 13 个功能组件（Dashboard、LLM配置、提示词、自定义工具、表情库、管理员、群管理、运行日志、请求调试、记忆与上下文、OneBot配置、用量统计、关于）
+│   └── src/
+│       ├── components/      # 跨页面复用的 UI 组件
+│       └── features/        # 按访问、会话、LLM、OneBot、工具、诊断与概览归类的页面
 ├── agentTools/               # 自定义工具的 JSON 配置（random / get_time / get_weather / search_web）
 └── docs/                     # 文档
 ```
@@ -387,7 +397,7 @@ Schema 中写清楚触发条件与边界。需要调整同类别展示位置时�
 
 ### 添加前端页面
 
-1. 在 `frontend/src/components/` 新建 Vue 组件
+1. 在 `frontend/src/features/<功能模块>/` 新建页面；仅通用 UI 组件放在 `frontend/src/components/`
 2. 在 `frontend/src/App.vue` 注册导航
 3. API 请求路径以 `/admin/api` 开头（dev 模式自动代理到后端）
 

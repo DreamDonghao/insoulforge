@@ -8,19 +8,19 @@ import {useToast} from './composables/useToast'
 import type {QQConfig as QQConfigType} from './vite-env.d'
 
 import NavIcon from './components/NavIcon.vue'
-import Dashboard from './components/Dashboard.vue'
-import LLMConfig from './components/LLMConfig.vue'
-import PromptEditor from './components/PromptEditor.vue'
-import EmojiManager from './components/EmojiManager.vue'
-import AdminManager from './components/AdminManager.vue'
-import GroupManager from './components/GroupManager.vue'
-import MemoryConfig from './components/MemoryConfig.vue'
-import QQConfigVue from './components/QQConfig.vue'
-import CustomTools from './components/CustomTools.vue'
-import UsageStats from './components/UsageStats.vue'
-import LogViewer from './components/LogViewer.vue'
-import RequestDebug from './components/RequestDebug.vue'
-import About from './components/About.vue'
+import Dashboard from './features/overview/Dashboard.vue'
+import About from './features/overview/About.vue'
+import AccessManager from './features/access/AccessManager.vue'
+import GroupManager from './features/conversation/GroupManager.vue'
+import MemoryConfig from './features/conversation/MemoryConfig.vue'
+import LLMConfig from './features/llm/LLMConfig.vue'
+import PromptEditor from './features/llm/PromptEditor.vue'
+import UsageStats from './features/llm/UsageStats.vue'
+import OneBotConfig from './features/onebot/OneBotConfig.vue'
+import CustomTools from './features/tools/CustomTools.vue'
+import EmojiManager from './features/tools/EmojiManager.vue'
+import LogViewer from './features/diagnostics/LogViewer.vue'
+import RequestDebug from './features/diagnostics/RequestDebug.vue'
 
 interface NavItem {
   key: string
@@ -410,12 +410,12 @@ onMounted(async () => {
       <PromptEditor v-else-if="currentView === 'prompts'"/>
       <CustomTools v-else-if="currentView === 'customTools'"/>
       <EmojiManager v-else-if="currentView === 'emojis'"/>
-      <AdminManager v-else-if="currentView === 'admins'"/>
+      <AccessManager v-else-if="currentView === 'admins'"/>
       <GroupManager v-else-if="currentView === 'groups'"/>
       <LogViewer v-else-if="currentView === 'logs'"/>
       <RequestDebug v-else-if="currentView === 'requestDebug'"/>
       <MemoryConfig v-else-if="currentView === 'memoryConfig'"/>
-      <QQConfigVue v-else-if="currentView === 'qqConfig'"/>
+      <OneBotConfig v-else-if="currentView === 'qqConfig'"/>
       <UsageStats v-else-if="currentView === 'usage'"/>
       <About v-else-if="currentView === 'about'"/>
     </div>

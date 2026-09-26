@@ -6,7 +6,7 @@
 
 #include <agent/tools/ToolPluginCatalog.hpp>
 #include <agent/tools/ToolRuntime.hpp>
-#include <agent/tools/ToolStore.hpp>
+#include <agent/tools/custom/ToolStore.hpp>
 #include <include/agent/tools/ToolRegistry.hpp>
 #include <infrastructure/logging/Logger.hpp>
 
