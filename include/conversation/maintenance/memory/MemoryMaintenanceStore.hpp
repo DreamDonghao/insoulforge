@@ -3,11 +3,12 @@
 
 #pragma once
 
-#include <infrastructure/JsonUtil.hpp>
-#include <infrastructure/NumericTypes.hpp>
 #include <optional>
 #include <string>
 #include <vector>
+
+#include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
     /// @brief 等待维护的记忆总结批次

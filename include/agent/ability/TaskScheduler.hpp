@@ -4,15 +4,16 @@
 ///          每日任务在触发后安排下一次执行；重启时恢复尚未完成的任务。
 #pragma once
 
-#include <agent/ability/TaskStore.hpp>
 #include <atomic>
 #include <condition_variable>
-#include <infrastructure/NumericTypes.hpp>
 #include <mutex>
 #include <optional>
 #include <queue>
 #include <set>
 #include <thread>
+
+#include <agent/ability/TaskStore.hpp>
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
     /// @brief 定时任务调度器

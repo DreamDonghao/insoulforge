@@ -3,13 +3,12 @@
 
 #pragma once
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <deque>
 #include <mutex>
 #include <optional>
 
 #include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
     /// @brief 一批待提取记忆的消息及其只读上下文

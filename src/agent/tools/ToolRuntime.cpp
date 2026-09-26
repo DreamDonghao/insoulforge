@@ -2,12 +2,11 @@
 /// @brief 工具运行时的插件装配与自定义工具加载
 
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <agent/tools/ToolPluginCatalog.hpp>
 #include <agent/tools/ToolRuntime.hpp>
 #include <agent/tools/custom/ToolStore.hpp>
 #include <include/agent/tools/ToolRegistry.hpp>
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/logging/Logger.hpp>
 
 namespace insoulforge {

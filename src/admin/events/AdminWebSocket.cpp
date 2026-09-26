@@ -1,6 +1,5 @@
-#include <infrastructure/NumericTypes.hpp>
-
 #include <admin/events/AdminWebSocket.hpp>
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/logging/Logger.hpp>
 
 using namespace insoulforge;

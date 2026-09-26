@@ -4,8 +4,9 @@
 
 #pragma once
 #include <shared_mutex>
-#include <sqlite3.h>
 #include <string>
+
+#include <sqlite3.h>
 
 namespace insoulforge {
     /// @brief SQLite 数据库连接管理类

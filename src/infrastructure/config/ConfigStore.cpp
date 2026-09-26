@@ -1,12 +1,11 @@
 /// @file ConfigStore.cpp
 /// @brief 全局配置文件存储 - 实现
 
-#include <infrastructure/NumericTypes.hpp>
+#include <fstream>
 
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/ConfigStore.hpp>
 #include <infrastructure/logging/Logger.hpp>
-
-#include <fstream>
 
 
 namespace insoulforge::ConfigStore {

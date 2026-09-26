@@ -1,9 +1,8 @@
 /// @file ToolStore.cpp
 /// @brief 自定义工具存储 - 实现
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <agent/tools/custom/ToolStore.hpp>
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>

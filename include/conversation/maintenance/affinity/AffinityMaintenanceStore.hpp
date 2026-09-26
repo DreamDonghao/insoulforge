@@ -3,14 +3,12 @@
 
 #pragma once
 
-#include <infrastructure/NumericTypes.hpp>
-
-#include <cstdint>
 #include <optional>
 #include <utility>
 #include <vector>
 
 #include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
     /// @brief 等待好感度评估的消息批次

@@ -1,7 +1,13 @@
 /// @file MessageContractTests.cpp
 /// @brief 消息链路的契约测试
 
-#include <infrastructure/NumericTypes.hpp>
+#include <iostream>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+#include <drogon/utils/coroutine.h>
 
 #include <agent/memory/LongTermMemoryStore.hpp>
 #include <agent/memory/MemoryStore.hpp>
@@ -17,21 +23,13 @@
 #include <conversation/workflow/MessageList.hpp>
 #include <conversation/workflow/MessageRouter.hpp>
 #include <conversation/workflow/OneBotEventNormalizer.hpp>
-#include <cstddef>
-#include <drogon/utils/coroutine.h>
-#include <exception>
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/config/ConfigStore.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/SchemaMigrator.hpp>
-#include <iostream>
 #include <llm/usage/UsageStore.hpp>
 #include <media/ImageDescriptionStore.hpp>
-#include <stdexcept>
-#include <string>
-#include <string_view>
-#include <utility>
-#include <vector>
 
 namespace {
     using insoulforge::i32;

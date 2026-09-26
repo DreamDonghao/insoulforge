@@ -8,8 +8,9 @@
 
 #pragma once
 
-#include <infrastructure/NumericTypes.hpp>
 #include <sqlite3.h>
+
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
     /// @brief Schema 版本迁移器

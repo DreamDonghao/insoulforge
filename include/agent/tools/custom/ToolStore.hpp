@@ -4,9 +4,10 @@
 
 #pragma once
 
-#include <infrastructure/NumericTypes.hpp>
 #include <string>
 #include <vector>
+
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
     /// @brief 自定义工具存储

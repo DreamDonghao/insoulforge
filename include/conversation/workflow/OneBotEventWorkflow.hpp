@@ -3,14 +3,16 @@
 
 #pragma once
 
-#include <conversation/workflow/SessionWorkflowState.hpp>
-#include <drogon/utils/coroutine.h>
-#include <infrastructure/JsonUtil.hpp>
-#include <infrastructure/NumericTypes.hpp>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <unordered_map>
+
+#include <drogon/utils/coroutine.h>
+
+#include <conversation/workflow/SessionWorkflowState.hpp>
+#include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
     /// @brief OneBot 入站事件处理工作流

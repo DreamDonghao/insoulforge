@@ -5,8 +5,10 @@
 
 #pragma once
 
-#include <drogon/utils/coroutine.h>
 #include <functional>
+
+#include <drogon/utils/coroutine.h>
+
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
 

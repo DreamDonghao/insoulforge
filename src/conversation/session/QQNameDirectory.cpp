@@ -1,11 +1,10 @@
 /// @file QQNameDirectory.cpp
 /// @brief 运行时 QQ 昵称目录实现
 
-#include <infrastructure/NumericTypes.hpp>
+#include <shared_mutex>
 
 #include <conversation/session/QQNameDirectory.hpp>
-
-#include <shared_mutex>
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge::QQNameDirectory {
     namespace {

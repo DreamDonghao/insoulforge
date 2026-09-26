@@ -2,9 +2,8 @@
 /// @brief QQ 收藏表情查询与缓存实现
 
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <agent/tools/ToolRuntime.hpp>
+#include <infrastructure/NumericTypes.hpp>
 #include <onebot/transport/OneBotClient.hpp>
 
 namespace insoulforge {

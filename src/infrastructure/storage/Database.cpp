@@ -2,10 +2,12 @@
 /// @brief SQLite 数据库连接管理 - 实现
 
 #include <filesystem>
+
+#include <spdlog/spdlog.h>
+
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/SchemaMigrator.hpp>
-#include <spdlog/spdlog.h>
 
 namespace insoulforge {
     auto Database::instance() -> Database & {

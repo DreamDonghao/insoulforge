@@ -5,16 +5,15 @@
 
 #pragma once
 
-#include <infrastructure/NumericTypes.hpp>
-
-#include <cstdint>
-#include <drogon/HttpClient.h>
-#include <drogon/utils/coroutine.h>
 #include <optional>
 #include <string>
 #include <string_view>
 
+#include <drogon/HttpClient.h>
+#include <drogon/utils/coroutine.h>
+
 #include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge::HttpUtil {
     /// @brief 发送 HTTP 请求，记录请求内容与异常

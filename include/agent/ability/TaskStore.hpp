@@ -4,10 +4,10 @@
 
 #pragma once
 
-#include <cstdint>
-#include <infrastructure/NumericTypes.hpp>
 #include <string>
 #include <vector>
+
+#include <infrastructure/NumericTypes.hpp>
 
 /// @brief 定时任务存储
 namespace insoulforge::TaskStore {

@@ -1,23 +1,22 @@
 /// @file AdminAccessToken.cpp
 /// @brief 管理后台启动令牌与会话认证实现
 
-#include <infrastructure/NumericTypes.hpp>
-
-#include <admin/access/AdminAccessToken.hpp>
-
-#include <fmt/format.h>
-#include <openssl/crypto.h>
-#include <openssl/rand.h>
-
-#include <arpa/inet.h>
 #include <array>
-#include <ifaddrs.h>
 #include <mutex>
-#include <net/if.h>
 #include <stdexcept>
 #include <string>
 #include <unordered_set>
 #include <utility>
+
+#include <arpa/inet.h>
+#include <fmt/format.h>
+#include <ifaddrs.h>
+#include <net/if.h>
+#include <openssl/crypto.h>
+#include <openssl/rand.h>
+
+#include <admin/access/AdminAccessToken.hpp>
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
     namespace {

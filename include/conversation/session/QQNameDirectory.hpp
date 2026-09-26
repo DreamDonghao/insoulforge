@@ -3,9 +3,10 @@
 
 #pragma once
 
-#include <infrastructure/NumericTypes.hpp>
 #include <string>
 #include <unordered_map>
+
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge::QQNameDirectory {
     /// @brief 记录 OneBot 上报中观察到的 QQ 昵称

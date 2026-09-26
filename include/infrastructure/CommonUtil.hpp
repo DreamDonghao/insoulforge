@@ -10,10 +10,12 @@
 
 #include <cctype>
 #include <charconv>
+#include <chrono>
 #include <optional>
 #include <string_view>
 
 #include <drogon/drogon.h>
+#include <fmt/chrono.h>
 
 #include <infrastructure/NumericTypes.hpp>
 
@@ -50,9 +52,6 @@
 [[nodiscard]] inline auto parseUInt64(std::string_view s, insoulforge::u64 fallback = 0) -> insoulforge::u64 {
     return tryParseUInt64(s).value_or(fallback);
 }
-
-#include <chrono>
-#include <fmt/chrono.h>
 
 /// @brief time_t 转本地 std::tm（各平台的安全转换）
 inline auto localTime(const std::time_t t) -> std::tm {

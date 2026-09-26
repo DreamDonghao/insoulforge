@@ -1,9 +1,8 @@
 /// @file BlacklistStore.cpp
 /// @brief 全局 QQ 黑名单持久化实现
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <admin/access/BlacklistStore.hpp>
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>

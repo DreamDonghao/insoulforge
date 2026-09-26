@@ -1,9 +1,8 @@
 /// @file ToolRegistry.cpp
 /// @brief 工具注册中心 - 实现
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <include/agent/tools/ToolRegistry.hpp>
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/logging/Logger.hpp>
 
 using insoulforge::json;

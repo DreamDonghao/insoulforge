@@ -1,18 +1,17 @@
 /// @file ImageDescriptionService.cpp
 /// @brief 图片与动图的视觉描述服务实现
 
-#include <infrastructure/NumericTypes.hpp>
-
-#include <media/ImageDescriptionService.hpp>
-
 #include <gif_lib.h>
+#include <openssl/sha.h>
+#include <png.h>
+
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/http/HttpUtil.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <llm/LlmClient.hpp>
+#include <media/ImageDescriptionService.hpp>
 #include <media/ImageDescriptionStore.hpp>
-#include <openssl/sha.h>
-#include <png.h>
 
 namespace insoulforge::ImageDescriptionService {
     namespace {

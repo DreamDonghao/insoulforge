@@ -1,13 +1,14 @@
 /// @file LogBuffer.cpp
 /// @brief 运行日志内存缓冲区与查询服务 - 实现
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <filesystem>
-#include <fmt/format.h>
 #include <fstream>
-#include <infrastructure/logging/LogBuffer.hpp>
 #include <ranges>
+
+#include <fmt/format.h>
+
+#include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/logging/LogBuffer.hpp>
 
 namespace insoulforge {
     namespace {

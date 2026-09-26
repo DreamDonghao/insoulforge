@@ -4,7 +4,7 @@ BasedOnStyle: LLVM
 AccessModifierOffset: -4
 AlignConsecutiveAssignments: false
 AlignConsecutiveDeclarations: false
-AlignAfterOpenBracket: DontAlign
+AlignAfterOpenBracket: false
 AlignOperands: Align
 AlignTrailingComments: false
 AlwaysBreakTemplateDeclarations: Yes
@@ -31,14 +31,17 @@ BreakConstructorInitializersBeforeComma: false
 ColumnLimit: 120
 ConstructorInitializerAllOnOneLineOrOnePerLine: false
 ContinuationIndentWidth: 2
+IncludeBlocks: Regroup
 IncludeCategories:
-  - Regex: '^<.*'
+  - Regex: '^<(algorithm|array|atomic|cctype|charconv|chrono|concepts|condition_variable|coroutine|cstddef|cstdint|deque|exception|filesystem|format|fstream|functional|iomanip|iostream|map|memory|mutex|optional|queue|random|ranges|set|shared_mutex|stdexcept|string|string_view|system_error|thread|tuple|unordered_map|unordered_set|utility|vector)>$'
     Priority: 1
-  - Regex: '^".*'
-    Priority: 2
-  - Regex: '.*'
+  - Regex: '^<(admin|agent|conversation|infrastructure|llm|media|onebot|include)/'
     Priority: 3
-IncludeIsMainRegex: '([-_](test|unittest))?$'
+  - Regex: '^<.*'
+    Priority: 2
+  - Regex: '^".*'
+    Priority: 3
+IncludeIsMainRegex: '$^'
 IndentCaseLabels: true
 IndentWidth: 4
 InsertNewlineAtEOF: true

@@ -1,13 +1,12 @@
 /// @file MessageService.cpp
 /// @brief OneBot 消息服务 - 实现
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <conversation/message/MessageRecord.hpp>
 #include <conversation/message/SessionId.hpp>
 #include <conversation/session/QQNameDirectory.hpp>
 #include <conversation/session/SessionStore.hpp>
 #include <conversation/workflow/OneBotEventWorkflow.hpp>
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <onebot/messaging/MessageService.hpp>

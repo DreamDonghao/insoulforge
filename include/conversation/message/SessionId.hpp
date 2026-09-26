@@ -3,10 +3,10 @@
 
 #pragma once
 
-#include <cstdint>
-#include <infrastructure/NumericTypes.hpp>
 #include <string>
 #include <utility>
+
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge::SessionId {
     /// @brief 系统定时任务使用的虚拟发送者 QQ 号

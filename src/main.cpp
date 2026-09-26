@@ -3,24 +3,24 @@
 /// @details 依次初始化日志、访问令牌、配置文件、数据库和 Agent，随后启动 OneBot 连接、
 ///          定时任务调度器与管理后台。控制台输入 exit 可正常关闭服务并保存消息列表。
 
-#include <infrastructure/NumericTypes.hpp>
+#include <poll.h>
+#include <unistd.h>
 
-#include <admin/access/AdminStore.hpp>
 #include <admin/access/AdminAccessToken.hpp>
+#include <admin/access/AdminStore.hpp>
 #include <admin/http/AdminResponse.hpp>
 #include <agent/ability/TaskScheduler.hpp>
 #include <agent/runtime/AgentSystem.hpp>
 #include <conversation/session/QQNameDirectory.hpp>
 #include <conversation/session/SessionStore.hpp>
 #include <conversation/workflow/OneBotEventWorkflow.hpp>
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/config/ConfigStore.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <media/ImageDescriptionStore.hpp>
 #include <onebot/transport/OneBotWebSocketClient.hpp>
-#include <poll.h>
-#include <unistd.h>
 
 auto main() -> int {
     using namespace insoulforge;

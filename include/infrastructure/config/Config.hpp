@@ -2,8 +2,9 @@
 /// @brief 全局配置管理
 #pragma once
 
-#include <infrastructure/NumericTypes.hpp>
 #include <string>
+
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
     /// @brief 单个模型服务的连接与身份信息

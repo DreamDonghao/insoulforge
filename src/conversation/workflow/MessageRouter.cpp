@@ -1,11 +1,10 @@
 /// @file MessageRouter.cpp
 /// @brief 基于完整消息快照的 Router 实现
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <conversation/message/MessageRecord.hpp>
 #include <conversation/message/SessionId.hpp>
 #include <conversation/workflow/MessageRouter.hpp>
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <llm/LlmClient.hpp>
 #include <llm/prompts/PromptService.hpp>

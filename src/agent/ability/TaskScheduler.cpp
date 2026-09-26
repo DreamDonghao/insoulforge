@@ -1,11 +1,10 @@
 /// @file TaskScheduler.cpp
 /// @brief 定时任务调度器 - 实现
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <conversation/message/SessionId.hpp>
 #include <conversation/workflow/OneBotEventWorkflow.hpp>
 #include <include/agent/ability/TaskScheduler.hpp>
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 

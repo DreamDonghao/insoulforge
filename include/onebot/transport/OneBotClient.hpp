@@ -6,12 +6,13 @@
 
 #pragma once
 
-#include <drogon/utils/coroutine.h>
-#include <infrastructure/NumericTypes.hpp>
 #include <optional>
 #include <string>
 
+#include <drogon/utils/coroutine.h>
+
 #include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/NumericTypes.hpp>
 
 /// @brief OneBot API 客户端
 /// @details 根据 OneBot 配置，通过 HTTP 或 WebSocket 与 OneBot 实现通信。

@@ -3,14 +3,14 @@
 
 #pragma once
 
-#include <infrastructure/NumericTypes.hpp>
-
-#include <conversation/workflow/MessageList.hpp>
-#include <infrastructure/JsonUtil.hpp>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <queue>
+
+#include <conversation/workflow/MessageList.hpp>
+#include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
     /// @brief 管理单个会话的工作流队列及其消费者状态

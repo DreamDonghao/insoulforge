@@ -1,11 +1,12 @@
 /// @file PromptService.cpp
 /// @brief 提示词服务 - 实现
 
+#include <spdlog/spdlog.h>
+
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <llm/prompts/PromptService.hpp>
 #include <llm/prompts/PromptStore.hpp>
-#include <spdlog/spdlog.h>
 
 namespace insoulforge {
     void PromptService::initialize() {

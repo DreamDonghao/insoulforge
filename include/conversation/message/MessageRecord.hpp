@@ -5,11 +5,12 @@
 
 #pragma once
 
-#include <infrastructure/JsonUtil.hpp>
-#include <infrastructure/NumericTypes.hpp>
 #include <optional>
 #include <string>
 #include <string_view>
+
+#include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge::MessageRecord {
     /// @brief 图片的 OneBot 获取信息

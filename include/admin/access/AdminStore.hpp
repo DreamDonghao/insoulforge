@@ -4,8 +4,9 @@
 
 #pragma once
 
-#include <infrastructure/NumericTypes.hpp>
 #include <vector>
+
+#include <infrastructure/NumericTypes.hpp>
 
 
 /// @brief 管理员存储

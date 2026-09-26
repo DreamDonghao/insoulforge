@@ -2,7 +2,6 @@
 /// @brief HTTP 请求工具 - 实现
 
 #include <infrastructure/NumericTypes.hpp>
-
 #include <infrastructure/http/HttpTrace.hpp>
 #include <infrastructure/http/HttpUtil.hpp>
 #include <infrastructure/logging/Logger.hpp>

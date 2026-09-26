@@ -3,8 +3,9 @@
 
 #pragma once
 
-#include <admin/events/WebSocketManager.hpp>
 #include <drogon/WebSocketController.h>
+
+#include <admin/events/WebSocketManager.hpp>
 
 namespace insoulforge {
     /// @brief 管理后台 WebSocket 控制器

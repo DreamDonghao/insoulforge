@@ -2,21 +2,19 @@
 /// @brief OneBot 正向 WebSocket 连接管理器
 #pragma once
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <coroutine>
-#include <cstdint>
-#include <drogon/WebSocketClient.h>
-#include <drogon/utils/coroutine.h>
 #include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
-#include <utility>
 #include <vector>
 
+#include <drogon/WebSocketClient.h>
+#include <drogon/utils/coroutine.h>
+
 #include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
     /// @brief 管理到 OneBot 实现的唯一 WebSocket 连接

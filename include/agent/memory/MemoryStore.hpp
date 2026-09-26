@@ -4,9 +4,9 @@
 
 #pragma once
 
-#include <cstdint>
-#include <infrastructure/NumericTypes.hpp>
 #include <string>
+
+#include <infrastructure/NumericTypes.hpp>
 
 
 /// @brief 短期记忆存储

@@ -3,11 +3,9 @@
 
 #pragma once
 
-#include <infrastructure/NumericTypes.hpp>
-
-#include <cstdint>
 
 #include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge::ConversationMaintenanceStore {
     /// @brief 原子创建同一消息批次的全部派生状态维护任务

@@ -4,8 +4,9 @@
 
 #pragma once
 
-#include <infrastructure/NumericTypes.hpp>
 #include <string>
+
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
     /// @brief 指向单个会话短期记忆的读取适配器

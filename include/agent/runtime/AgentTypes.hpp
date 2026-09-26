@@ -7,11 +7,13 @@
 #pragma once
 
 #include <array>
-#include <fmt/core.h>
 #include <format>
-#include <infrastructure/NumericTypes.hpp>
 #include <string>
 #include <string_view>
+
+#include <fmt/core.h>
+
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
     /// @brief Router Agent 决策结果（合并了规划功能）

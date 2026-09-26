@@ -1,14 +1,13 @@
 /// @file CommandProcessor.cpp
 /// @brief 消息工作流的管理命令处理实现
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <admin/access/AdminStore.hpp>
 #include <admin/access/BlacklistStore.hpp>
 #include <agent/tools/ToolRuntime.hpp>
 #include <conversation/message/MessageRecord.hpp>
 #include <conversation/message/SessionId.hpp>
 #include <conversation/session/SessionConfigManager.hpp>
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <media/ImageDescriptionStore.hpp>
 #include <onebot/transport/OneBotClient.hpp>

@@ -1,18 +1,19 @@
 /// @file Logger.cpp
 /// @brief 统一运行日志入口 - 实现
 
-#include <infrastructure/NumericTypes.hpp>
-
-#include <admin/logging/LogWebSocketManager.hpp>
 #include <algorithm>
 #include <filesystem>
+
 #include <fmt/chrono.h>
 #include <fmt/format.h>
-#include <infrastructure/logging/LogBuffer.hpp>
-#include <infrastructure/logging/Logger.hpp>
 #include <spdlog/async.h>
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
+
+#include <admin/logging/LogWebSocketManager.hpp>
+#include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/logging/LogBuffer.hpp>
+#include <infrastructure/logging/Logger.hpp>
 
 namespace insoulforge {
     namespace {

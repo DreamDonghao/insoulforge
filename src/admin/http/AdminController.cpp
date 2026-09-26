@@ -1,8 +1,7 @@
-#include <infrastructure/NumericTypes.hpp>
-
+#include "onebot/messaging/MessageService.hpp"
+#include <admin/access/AdminAccessToken.hpp>
 #include <admin/access/AdminStore.hpp>
 #include <admin/access/BlacklistStore.hpp>
-#include <admin/access/AdminAccessToken.hpp>
 #include <admin/http/AdminController.hpp>
 #include <admin/http/AdminResponse.hpp>
 #include <agent/memory/LongTermMemoryStore.hpp>
@@ -17,6 +16,7 @@
 #include <conversation/session/SessionStore.hpp>
 #include <conversation/workflow/OneBotEventWorkflow.hpp>
 #include <include/agent/ability/TaskScheduler.hpp>
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/config/ConfigStore.hpp>
 #include <infrastructure/http/HttpTrace.hpp>
@@ -24,8 +24,6 @@
 #include <llm/usage/UsageStore.hpp>
 #include <onebot/transport/OneBotClient.hpp>
 #include <onebot/transport/OneBotWebSocketClient.hpp>
-
-#include "onebot/messaging/MessageService.hpp"
 
 using namespace insoulforge;
 using namespace drogon;

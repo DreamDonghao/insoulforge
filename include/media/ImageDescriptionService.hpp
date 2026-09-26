@@ -3,10 +3,12 @@
 
 #pragma once
 
-#include <drogon/utils/coroutine.h>
-#include <infrastructure/NumericTypes.hpp>
 #include <optional>
 #include <string>
+
+#include <drogon/utils/coroutine.h>
+
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
     /// @brief 图片视觉描述结果

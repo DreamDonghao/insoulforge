@@ -3,12 +3,11 @@
 
 #pragma once
 
-#include <infrastructure/NumericTypes.hpp>
-
-#include <agent/runtime/AgentTypes.hpp>
 #include <drogon/utils/coroutine.h>
 
+#include <agent/runtime/AgentTypes.hpp>
 #include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge::MessageRouter {
     /// @brief 判断是否应回复指定触发消息并生成回复策略
