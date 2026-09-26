@@ -1,7 +1,5 @@
 /// @file ToolStore.cpp
 /// @brief 自定义工具存储 - 实现
-/// @author donghao
-/// @date 2026-08-30
 
 #include <infrastructure/NumericTypes.hpp>
 

@@ -1,9 +1,6 @@
 /// @file LongTermMemory.hpp
 /// @brief 长期记忆服务
-/// @author donghao
-/// @date 2026-09-01
-/// @details 本地长期记忆存取（SQLite 向量检索，embedding 走 OpenAI 兼容 API）：
-///          - 记忆检索：searchMemory()
+/// @details 将查询文本向量化，再从 SQLite 中检索相似记忆；写入由记忆维护任务负责。
 
 #pragma once
 
@@ -12,7 +9,7 @@
 #include <optional>
 #include <string>
 
-/// @brief 长期记忆服务 - 封装记忆的向量化写入与相似度检索
+/// @brief 按语义检索当前会话的长期记忆
 namespace insoulforge::LongTermMemory {
     /// @brief 检索长期记忆（余弦相似度 topK）
     /// @param query 查询文本

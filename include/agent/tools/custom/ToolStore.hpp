@@ -1,7 +1,5 @@
 /// @file ToolStore.hpp
 /// @brief 自定义工具存储
-/// @author donghao
-/// @date 2026-08-30
 /// @details 表：custom_tools（工具定义与脚本）、settings（Python 解释器路径）
 
 #pragma once
@@ -16,13 +14,13 @@ namespace insoulforge {
         /// @brief 自定义工具结构
         struct CustomTool {
             i32 id = 0;
-            std::string name; // 工具名，如 "search_web"
-            std::string description; // 给LLM看的描述
-            std::string parameters; // JSON Schema (字符串形式)
-            std::string executorType; // "python" | "http"
-            std::string executorConfig; // JSON 配置 (http用)
-            std::string scriptContent; // Python脚本内容 (python用)
-            std::string readme; // Markdown 说明文档（作者、用法、联系方式等）
+            std::string name; ///< 工具名，如 search_web
+            std::string description; ///< 提供给模型的工具说明
+            std::string parameters; ///< JSON Schema 字符串
+            std::string executorType; ///< python 或 http
+            std::string executorConfig; ///< HTTP 执行配置 JSON
+            std::string scriptContent; ///< Python 脚本内容
+            std::string readme; ///< 面向管理员的 Markdown 说明
             bool enabled = true;
         };
 
@@ -47,10 +45,10 @@ namespace insoulforge {
         /// @brief 检查工具名是否已存在
         [[nodiscard]] auto hasCustomTool(const std::string &name) -> bool;
 
-        /// @brief 获取自定义工具Python解释器路径
+        /// @brief 获取自定义工具使用的 Python 解释器路径
         [[nodiscard]] auto getCustomToolPython() -> std::string;
 
-        /// @brief 设置自定义工具Python解释器路径
+        /// @brief 设置自定义工具使用的 Python 解释器路径
         void setCustomToolPython(const std::string &pythonPath);
     } // namespace ToolStore
 } // namespace insoulforge

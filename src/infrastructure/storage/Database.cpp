@@ -1,7 +1,5 @@
 /// @file Database.cpp
 /// @brief SQLite 数据库连接管理 - 实现
-/// @author donghao
-/// @date 2026-04-02
 
 #include <filesystem>
 #include <infrastructure/logging/Logger.hpp>

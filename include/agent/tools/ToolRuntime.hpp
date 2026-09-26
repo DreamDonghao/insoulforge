@@ -1,7 +1,5 @@
 /// @file ToolRuntime.hpp
 /// @brief 工具运行时门面
-/// @author donghao
-/// @date 2026-04-02
 /// @details 聚合内置/自定义工具加载，以及自定义工具执行与 QQ 收藏表情支持。
 
 #pragma once

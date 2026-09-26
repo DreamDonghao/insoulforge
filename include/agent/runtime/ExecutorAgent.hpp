@@ -1,9 +1,5 @@
 /// @file ExecutorAgent.hpp
-/// @brief Executor Agent - 执行层（生成回复）
-/// @details 负责：
-///          - 根据 RouterDecision 的策略生成回复
-///          - 调用工具获取信息
-///          - 使用 Agent 模式让 LLM 生成最终回复
+/// @brief 根据 Router 策略调用模型和工具，生成本轮回复决策
 
 #pragma once
 #include <agent/memory/MemoryManager.hpp>
@@ -13,8 +9,7 @@
 #include <optional>
 
 namespace insoulforge::ExecutorAgent {
-    /// @brief Executor Agent - 执行回复生成
-
+    /// @brief 执行层的回复生成接口
     /// @brief 清理模型输出中的工具调用标签等污染内容
     /// @param text 原始内容
     /// @return 清理后的内容
@@ -25,7 +20,7 @@ namespace insoulforge::ExecutorAgent {
     /// @param memory 记忆管理器
     /// @param decision Router 的决策结果（包含回复策略）
     /// @param messageSnapshot 本轮冻结的完整消息快照，工具可读取未投影的媒体来源
-    /// @return 回复内容
+    /// @return 回复或不回复的决策；模型请求失败且无法形成决策时返回空值
     [[nodiscard]] auto execute(const ChatRecordManager &chatRecords, const MemoryManager &memory,
       RouterDecision decision, json messageSnapshot = {}) -> drogon::Task<std::optional<ReplyDecision>>;
 } // namespace insoulforge::ExecutorAgent

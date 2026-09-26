@@ -125,7 +125,7 @@ namespace insoulforge::HttpUtil {
             co_return std::nullopt;
         }
 
-        // 非 2xx（如 DNS 解析失败、连接被拒等）同样把地址打出来，方便定位
+        // HTTP 错误带上目标地址；DNS 和连接异常在前面的异常分支处理。
         if (resp->getStatusCode() >= drogon::k400BadRequest) {
             Logger::warn(sessionId.value_or(0), tag,
               fmt::format("HTTP 响应异常: status={} ({} {}{})", static_cast<i32>(resp->getStatusCode()),

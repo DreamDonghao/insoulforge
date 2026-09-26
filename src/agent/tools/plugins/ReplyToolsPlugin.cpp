@@ -42,7 +42,7 @@ namespace insoulforge {
           },
           ToolCategory::REPLY);
 
-        // reply_with_quote - 引用回复（REPLY，直接发送）
+        // reply_with_quote 生成引用回复决策，由工作流负责发送。
         const json quoteReplyParams = json::parse(R"json({
             "type": "object",
             "properties": {

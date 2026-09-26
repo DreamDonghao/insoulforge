@@ -1,7 +1,5 @@
 /// @file TaskStore.cpp
 /// @brief 定时任务存储 - 实现
-/// @author donghao
-/// @date 2026-08-30
 
 #include <infrastructure/NumericTypes.hpp>
 

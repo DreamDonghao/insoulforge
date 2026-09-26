@@ -15,8 +15,8 @@
 
 namespace insoulforge {
     /// @brief 管理后台的进程内访问令牌。
-    /// @details 每次程序启动生成新的高熵令牌。令牌仅输出至服务日志中的自动登录链接，不写入配置、
-    ///          数据库或前端；登录成功后以 HttpOnly Cookie 维持当前浏览器会话。
+    /// @details 每次程序启动生成新的随机令牌，启动日志会输出令牌及自动登录链接。
+    ///          令牌不写入配置或数据库；登录成功后以 HttpOnly Cookie 维持浏览器会话。
     class AdminAccessToken {
     public:
         /// @brief 生成本次进程有效的访问令牌。

@@ -1,7 +1,5 @@
 /// @file PromptStore.hpp
 /// @brief 提示词存储
-/// @author donghao
-/// @date 2026-08-30
 /// @details 表：prompts（可编辑的系统提示词模板）
 
 #pragma once

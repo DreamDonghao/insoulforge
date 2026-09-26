@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 /**
  * @file AccessManager.vue
- * @brief 管理员管理组件
+ * @brief 管理机器人管理员与全局 QQ 黑名单
  */
 import {inject, onMounted, ref, type Ref} from 'vue'
 import type {Admin, ApiResponse, BlacklistEntry} from '../../vite-env'

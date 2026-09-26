@@ -1,7 +1,5 @@
 /// @file AdminWebSocket.hpp
 /// @brief 管理后台 WebSocket 控制器
-/// @author donghao
-/// @date 2026-04-02
 
 #pragma once
 

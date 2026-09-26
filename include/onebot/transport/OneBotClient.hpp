@@ -1,6 +1,5 @@
 /// @file OneBotClient.hpp
 /// @brief OneBot API 客户端 - 统一封装对 QQ 客户端(NapCat)的调用
-/// @date 2026-08-31
 /// @details 所有与 QQ 客户端的交互统一走这里：
 ///          - callApi() 通用调用：按配置使用 HTTP 或 WebSocket、携带 accessToken、校验 status=ok、记录失败日志
 ///          - 按操作封装的类型化方法（发消息、禁言、戳一拍、表情管理等）

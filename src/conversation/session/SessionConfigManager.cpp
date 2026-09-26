@@ -1,5 +1,5 @@
 /// @file SessionConfigManager.cpp
-/// @brief 群组配置管理器 - 实现
+/// @brief 会话消息统计接口的实现
 
 #include <infrastructure/NumericTypes.hpp>
 

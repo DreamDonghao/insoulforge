@@ -1,7 +1,5 @@
 /// @file AdminControllerSettingsAndTools.cpp
 /// @brief 管理后台 REST API 控制器 - 模型与提示词设置、自定义工具接口
-/// @author donghao
-/// @date 2026-09-01
 
 #include <infrastructure/NumericTypes.hpp>
 

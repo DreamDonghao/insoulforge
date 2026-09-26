@@ -1,9 +1,6 @@
 /// @file Database.hpp
 /// @brief SQLite 数据库连接管理
-/// @author donghao
-/// @date 2026-04-02
-/// @details 仅负责数据库连接的生命周期（打开、迁移、关闭），
-///          各领域的数据访问由 storage/ 下的 Store 类承担
+/// @details 管理数据库连接的打开、迁移和关闭；各功能模块的 Store 负责具体读写。
 
 #pragma once
 #include <shared_mutex>

@@ -1,14 +1,7 @@
 /// @file main.cpp
 /// @brief 程序入口 - insoulforge 主程序
-/// @author donghao
-/// @date 2026-04-02
-/// @details 初始化并启动 QQ 群聊机器人服务：
-///          - 日志系统初始化：控制台 + 滚动文件（Logger::init）
-///          - 数据库初始化：SQLite 持久化存储
-///          - 配置加载：从数据库读取 LLM、知识库、QQ Bot 配置
-///          - Agent 系统初始化：注册内置工具和自定义工具
-///          - HTTP 服务启动：监听 7778 端口，提供管理界面和 API
-///          支持通过输入 "quit" 命令优雅退出
+/// @details 依次初始化日志、访问令牌、配置文件、数据库和 Agent，随后启动 OneBot 连接、
+///          定时任务调度器与管理后台。控制台输入 exit 可正常关闭服务并保存消息列表。
 
 #include <infrastructure/NumericTypes.hpp>
 
@@ -58,8 +51,7 @@ auto main() -> int {
           fmt::format("系统初始化完成 | enabled_sessions={} | admins={}", std::ssize(SessionStore::getEnabledGroups()),
             std::ssize(AdminStore::getAdmins())));
 
-        // 启动服务
-        // 启动控制台命令线程
+        // 使用短时 poll，以便收到退出请求后命令线程能够及时结束。
         std::jthread commandThread([](const std::stop_token &stopToken) -> void {
             std::string command;
             while (!stopToken.stop_requested()) {

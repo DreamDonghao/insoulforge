@@ -25,8 +25,8 @@ namespace insoulforge {
     };
 
     /// @brief 管理一个会话的完整消息列表
-    /// @details 列表是该会话 Router、Executor 与工具的唯一运行时消息读源。数据库只用于启动恢复和
-    ///          异常退出兜底；每次更新生成独立 JSON 值快照，不会被后续消息修改。
+    /// @details 列表是该会话 Router、Executor 与工具的运行时消息来源。启动时从数据库恢复，
+    ///          正常退出时写回数据库；每次更新返回独立快照，不受后续消息影响。
     class MessageList {
     public:
         /// @brief 从数据库恢复一个统一会话的最近完整消息
@@ -35,10 +35,10 @@ namespace insoulforge {
 
         /// @brief 追加完整消息并生成冻结快照
         /// @param message 完整消息 JSON；内部不会保留工作流专用 `session_id`
-        /// @return 成功插入时返回受限快照与可能产生的记忆总结批次；相同非空消息 ID 已存在时返回空值
+        /// @return 插入成功时返回模型窗口内的快照和可能触发的总结批次；非空消息 ID 重复时返回空值
         [[nodiscard]] auto append(json message) -> std::optional<MessageListAppendResult>;
 
-        /// @brief 应用已经成功完成的记忆总结，并删除其对应的最旧消息
+        /// @brief 删除已完成总结的消息前缀
         /// @return 删除后若再次达到阈值，返回下一批待持久化的总结任务
         /// @note 线程安全。只删除已由记忆任务成功提交的批次，不会删除总结中的消息。
         [[nodiscard]] auto removeCompletedSummaryMessages() -> std::optional<MemorySummaryBatch>;

@@ -24,7 +24,7 @@
 
 namespace insoulforge {
     namespace {
-        /// @brief 判断消息是否可在已有回复任务时继续排队
+        /// @brief 判断已有回复任务时是否保留该消息作为下一轮触发目标
         [[nodiscard]] auto shouldQueueWhileReplying(const json &message) -> bool {
             return MessageRecord::isSystem(message) ||
                    MessageRecord::mentions(message, Config::instance().selfQQNumber);
@@ -42,7 +42,7 @@ namespace insoulforge {
         }
 
         /// @brief 将已插入的完整消息记录推送至管理后台，推送失败不得影响消息工作流
-        /// @param sessionId
+        /// @param sessionId 所属会话 ID
         /// @param message 已写入消息列表的完整消息
         void pushRecordedMessage(const u64 sessionId, const json &message) {
             try {
@@ -136,11 +136,9 @@ namespace insoulforge {
 
     auto OneBotEventWorkflow::getOrCreateSessionState(const u64 sessionId) -> std::shared_ptr<SessionWorkflowState> {
         std::lock_guard lock(m_sessionsMutex);
-        // 以有会话工作流状态则直接返回
         if (const auto found = m_sessions.find(sessionId); found != m_sessions.end()) {
             return found->second;
         }
-        // 没有则创建新的会话工作流状态并返回
         auto state = std::make_shared<SessionWorkflowState>(sessionId);
         m_sessions.emplace(sessionId, state);
         return state;
@@ -174,9 +172,8 @@ namespace insoulforge {
     }
 
     void OneBotEventWorkflow::enqueueOneBotEvent(json body) {
-        // 格式化 OneBot 上报原始内容
+        // 将上报转换为统一消息，再按会话进入预处理队列。
         auto normalizedMessage = OneBotEventNormalizer::normalize(std::move(body));
-        // 格式化失败或机器人没有启动则终止
         if (!normalizedMessage || MessageRecord::isAssistant(*normalizedMessage) ||
             !AgentSystem::instance().isReady()) {
             return;
@@ -202,16 +199,16 @@ namespace insoulforge {
             auto currentMessage = json(std::move(*nextMessage));
 
             try {
-                if (!SessionConfigManager::contains(sessionId)) { // 没有群聊配置则生成
+                if (!SessionConfigManager::contains(sessionId)) {
                     SessionConfigManager::addConfig(sessionId);
                 }
-                if (CommandProcessor::isCommand(currentMessage)) { // 命令消息进入命令分支
+                if (CommandProcessor::isCommand(currentMessage)) {
                     Logger::info(
                       sessionId, "Command", fmt::format("执行: {}", MessageRecord::extractText(currentMessage)));
                     co_await executeCommand(currentMessage);
                     continue;
                 }
-                if (!SessionStore::isSessionEnabled(sessionId)) { // 未启用该群聊则退出
+                if (!SessionStore::isSessionEnabled(sessionId)) {
                     continue;
                 }
 
@@ -222,16 +219,14 @@ namespace insoulforge {
                 currentMessage = co_await MessageContentEnricher::injectMemories(std::move(currentMessage), sessionId);
                 currentMessage.erase("session_id");
 
-                // 插入消息列表
                 const auto update = sessionState->messageList()->append(std::move(currentMessage));
-                if (!update) { // 插入失败则退出
+                if (!update) {
                     continue;
                 }
 
-                // 推送到管理后台
                 pushRecordedMessage(sessionId, update->messageSnapshot.back());
 
-                if (update->summaryBatch) { // 达到触发消息持久化配置的情况则进行
+                if (update->summaryBatch) {
                     scheduleConversationMaintenance(sessionId, sessionState->messageList(), *update->summaryBatch);
                 }
 

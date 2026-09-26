@@ -1,4 +1,8 @@
 <script lang="ts" setup>
+/**
+ * @file LogViewer.vue
+ * @brief 按会话、等级和关键词查询日志，并接收实时日志
+ */
 import {computed, inject, nextTick, onMounted, onUnmounted, ref} from 'vue'
 import type {Group, LogEntry, LogQueryResult} from '../../vite-env.d'
 

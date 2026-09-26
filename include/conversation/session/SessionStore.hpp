@@ -1,7 +1,5 @@
 /// @file SessionStore.hpp
-/// @brief 会话（群）配置与启用状态存储
-/// @author donghao
-/// @date 2026-08-30
+/// @brief 群聊与私聊的统计、启用状态和名称存储
 /// @details 表：group_config（消息统计）、enabled_groups（启用状态与群名称）
 
 #pragma once
@@ -18,7 +16,7 @@ namespace insoulforge {
         u64 allMesCount = 0; ///< 已完成主处理的入站消息总数
     };
 
-    /// @brief 会话（群）配置与启用状态存储
+    /// @brief 会话统计与启用状态的数据库接口
     /// @details 统计数据写入 `group_config`；会话启用状态及显示名称写入 `enabled_groups`。
     ///          未存在启用状态记录的会话视为未启用。
     namespace SessionStore {

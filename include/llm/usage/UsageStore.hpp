@@ -1,7 +1,5 @@
 /// @file UsageStore.hpp
 /// @brief LLM 用量统计存储
-/// @author donghao
-/// @date 2026-08-30
 /// @details 表：llm_usage（每次 LLM 调用的 token 用量明细）
 
 #pragma once

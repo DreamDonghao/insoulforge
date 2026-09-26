@@ -1,7 +1,5 @@
 /// @file AffinityStore.cpp
 /// @brief 好感度存储 - 实现
-/// @author donghao
-/// @date 2026-08-31
 
 #include <infrastructure/NumericTypes.hpp>
 

@@ -8,7 +8,7 @@
 #include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
-    /// @brief 提示词中完整保留的最近记录条数（更早记录简化处理；召回缓存按此长度对齐淘汰）
+    /// @brief Agent 上下文中完整保留的最近记录条数；更早的记录会截短文本
     inline constexpr size_t kRecentRecordCount = 12;
 
     /// @brief Agent 会话记录快照
@@ -24,7 +24,7 @@ namespace insoulforge {
         [[nodiscard]] auto getSessionId() const -> u64;
 
         /// @brief 获取冻结的聊天记录（旧→新）
-        /// @return 聊天记录队列
+        /// @return 独立的记录副本，按时间从早到晚排列
         [[nodiscard]] auto getRecords() const -> std::deque<json>;
 
     private:

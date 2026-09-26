@@ -1,7 +1,5 @@
 /// @file OneBotHttpEventController.hpp
 /// @brief OneBot HTTP 事件入口控制器
-/// @author donghao
-/// @date 2026-04-02
 
 #pragma once
 
@@ -9,7 +7,7 @@
 #include <drogon/utils/coroutine.h>
 
 namespace insoulforge {
-    /// @brief OneBot 消息 HTTP 入口控制器
+    /// @brief OneBot 事件的 HTTP 入口
     /// @details 只负责 OneBot 请求解析与确认，业务处理委托给 OneBotEventWorkflow。
     class OneBotHttpEventController : public drogon::HttpController<OneBotHttpEventController> {
     public:

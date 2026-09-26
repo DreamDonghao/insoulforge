@@ -1,7 +1,5 @@
 /// @file MemoryStore.cpp
 /// @brief 短期记忆存储 - 实现
-/// @author donghao
-/// @date 2026-08-30
 
 #include <infrastructure/NumericTypes.hpp>
 
@@ -17,7 +15,6 @@ namespace insoulforge::MemoryStore {
         return stmt.step() ? stmt.getText(0) : "";
     }
 
-    // upsert 而非 REPLACE：手动编辑记忆(后台)时不能重置水位线
     void updateShortTermMemory(const u64 sessionId, const std::string &memory) {
         const auto &db = Database::instance();
         std::unique_lock lock(db.mutex());

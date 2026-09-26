@@ -1,7 +1,5 @@
 /// @file ToolRegistry.hpp
 /// @brief 工具注册中心 - Agent 工具的分类管理与执行
-/// @author donghao
-/// @date 2026-03-28
 /// @details 提供工具的注册、管理和执行功能：
 ///          - 分类管理：REPLY（回复工具）、INFORMATION（信息工具）、ACTION（动作工具）
 ///          - 工具执行：支持异步执行和上下文传递

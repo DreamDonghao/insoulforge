@@ -1,7 +1,5 @@
 /// @file MemoryMaintenanceService.hpp
 /// @brief 记忆维护协调服务
-/// @author donghao
-/// @date 2026-04-02
 /// @details 消费 `memory_maintenance_jobs` 中持久化的总结批次，提取并整理短期、长期记忆。
 ///          每个会话串行处理；结果与任务完成状态在同一事务中提交，进程重启后可继续未完成任务。
 

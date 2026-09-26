@@ -6,6 +6,7 @@
 #include <string>
 
 namespace insoulforge {
+    /// @brief 单个模型服务的连接与身份信息
     struct LLMApiConfig {
         std::string apiKey;
         std::string baseUrl;
@@ -14,6 +15,7 @@ namespace insoulforge {
         std::string reasoningEffort; // "none"/"medium"/"high"，空串表示不发送
     };
 
+    /// @brief Chat 模型的生成参数；向量模型不使用这些字段
     struct LLMModelParams {
         i32 maxTokens = 1024;
         // 用 f64 保证 JSON 序列化输出 0.7 而非 0.699999988079071
@@ -21,6 +23,8 @@ namespace insoulforge {
         f64 topP = 0.9;
     };
 
+    /// @brief 进程内生效的全局配置
+    /// @details 启动时从 config.json 加载。管理后台保存配置时会更新对应字段。
     class Config {
     public:
         // Agent 配置
@@ -42,14 +46,14 @@ namespace insoulforge {
         i32 memoryExtractMaxTokens = 4000; // 记忆提取 LLM 调用的 maxTokens
         i32 routerWindowTriggerCount = 20; // Router 子窗口触发条数（批量滑动）
         i32 routerWindowKeepCount = 10; // Router 子窗口保留条数
-        i32 shortTermMemoryMax = 15;
+        i32 shortTermMemoryMax = 15; // 注入上下文的短期记忆条数上限
         f64 longTermRecallThreshold = 0.65; // 长期记忆召回合并的相似度阈值（独立于 recall_memory 的 0.3）
         f64 longTermInjectThreshold = 0.45; // 长期记忆被动注入提示词的相似度阈值（消息入库时逐条召回）
 
         // QQ Bot 配置
         std::string accessToken;
         u64 selfQQNumber = 0;
-        std::string oneBotTransport = "http";
+        std::string oneBotTransport = "http"; // http 或 websocket；同一时刻只使用一种
         std::string qqHttpHost;
         std::string qqWebSocketHost;
         std::string botName{"机器人"};

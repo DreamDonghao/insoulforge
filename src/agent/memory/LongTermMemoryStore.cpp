@@ -1,7 +1,5 @@
 /// @file LongTermMemoryStore.cpp
 /// @brief 长期记忆存储 - 实现
-/// @author donghao
-/// @date 2026-09-01
 
 
 #include <infrastructure/NumericTypes.hpp>

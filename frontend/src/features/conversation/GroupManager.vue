@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 /**
  * @file GroupManager.vue
- * @brief 群管理组件 - 群启用状态、群记忆与聊天记录
+ * @brief 管理群聊和私聊的启用状态、记录、记忆与定时任务
  */
 import {computed, inject, nextTick, onMounted, onUnmounted, ref, type Ref, watch} from 'vue'
 import type {
@@ -20,7 +20,7 @@ const qqConfig = inject<QQConfig>('qqConfig')
 const wsConnected = inject<Ref<boolean>>('wsConnected') as Ref<boolean>
 const wsObj = inject<{ get: () => WebSocket | null }>('ws')
 
-// 群列表
+// 会话列表
 const groups: Ref<(Group & { enabled?: boolean })[]> = ref([])
 const loading: Ref<boolean> = ref(false)
 const newGroupId: Ref<number | undefined> = ref(undefined)
@@ -132,7 +132,7 @@ const toggleGroup = async (groupId: string): Promise<void> => {
   }
 }
 
-// 删除群
+// 从管理列表移除会话
 const removeGroup = async (groupId: string): Promise<void> => {
   if (!confirm('确定要删除该会话吗？聊天记录将保留。')) return
   const resp = await fetch(`/admin/api/group/${groupId}`, {method: 'DELETE'})
@@ -143,7 +143,7 @@ const removeGroup = async (groupId: string): Promise<void> => {
   }
 }
 
-// 刷新所有群名称
+// 刷新已登记会话的名称
 const refreshAllGroupNames = async (): Promise<void> => {
   const resp = await fetch('/admin/api/groups/refresh-names', {method: 'POST'})
   const data = await resp.json()
@@ -241,7 +241,7 @@ const deleteRecord = async (recordId: number): Promise<void> => {
   }
 }
 
-// 清空群聊天记录
+// 清空当前会话的聊天记录
 const clearGroupRecords = async (): Promise<void> => {
   if (!selectedGroup.value) return
   if (!confirm('确定清空该群的所有聊天记录？此操作不可恢复！')) return

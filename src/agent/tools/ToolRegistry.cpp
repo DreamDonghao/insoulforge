@@ -1,7 +1,5 @@
 /// @file ToolRegistry.cpp
 /// @brief 工具注册中心 - 实现
-/// @author donghao
-/// @date 2026-03-28
 
 #include <infrastructure/NumericTypes.hpp>
 

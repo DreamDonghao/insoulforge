@@ -24,8 +24,8 @@ namespace insoulforge {
         std::optional<u64> sessionId;
     };
 
-    /// @brief 保存最近 N 条经过 HttpUtil 的完整请求/响应，供管理后台查询
-    /// @details 仅存内存，重启清空；status 为 0 表示请求未得到响应（超时/异常）
+    /// @brief 保存最近 50 条经过 HttpUtil 的请求和响应，供后台调试
+    /// @details 每条请求体和响应体最多保留 1 MiB；仅存内存，重启清空。status 为 0 表示未得到响应。
     class HttpTrace {
     public:
         static auto instance() -> HttpTrace &;

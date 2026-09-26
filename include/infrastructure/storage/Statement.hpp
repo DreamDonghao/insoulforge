@@ -1,7 +1,5 @@
 /// @file Statement.hpp
 /// @brief SQLite Statement RAII 封装
-/// @author donghao
-/// @date 2026-08-30
 
 #pragma once
 
