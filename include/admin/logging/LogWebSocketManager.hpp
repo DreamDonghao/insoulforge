@@ -3,15 +3,17 @@
 
 #pragma once
 
-#include <drogon/WebSocketConnection.h>
-#include <infrastructure/JsonUtil.hpp>
-#include <infrastructure/NumericTypes.hpp>
-#include <infrastructure/logging/LogBuffer.hpp>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+
+#include <drogon/WebSocketConnection.h>
+
+#include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/logging/LogBuffer.hpp>
 
 namespace insoulforge {
     /// @brief 一个日志连接的过滤条件；空值表示不过滤该字段

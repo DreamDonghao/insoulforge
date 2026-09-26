@@ -1,11 +1,9 @@
 /// @file LongTermMemory.cpp
 /// @brief 长期记忆服务 - 实现
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <agent/memory/LongTermMemory.hpp>
-
 #include <agent/memory/LongTermMemoryStore.hpp>
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <llm/LlmClient.hpp>
 

@@ -4,11 +4,11 @@
 
 #pragma once
 
-#include <cstdint>
-#include <infrastructure/NumericTypes.hpp>
 #include <string>
 #include <tuple>
 #include <vector>
+
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
     /// @brief 会话配置结构

@@ -3,13 +3,12 @@
 
 #pragma once
 
-#include <infrastructure/NumericTypes.hpp>
-
-#include <cstdint>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
+
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
     struct HttpTraceEntry {

@@ -1,9 +1,8 @@
 /// @file SessionStore.cpp
 /// @brief 会话统计与启用状态的数据库实现
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <conversation/session/SessionStore.hpp>
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>

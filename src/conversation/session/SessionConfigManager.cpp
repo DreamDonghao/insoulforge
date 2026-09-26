@@ -1,9 +1,8 @@
 /// @file SessionConfigManager.cpp
 /// @brief 会话消息统计接口的实现
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <conversation/session/SessionConfigManager.hpp>
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
     auto SessionConfigManager::getConfig(const u64 sessionId) -> SessionConfig {

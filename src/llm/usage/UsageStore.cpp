@@ -1,9 +1,8 @@
 /// @file UsageStore.cpp
 /// @brief LLM 用量统计存储 - 实现
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 

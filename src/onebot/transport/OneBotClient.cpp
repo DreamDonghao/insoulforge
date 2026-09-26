@@ -2,7 +2,6 @@
 /// @brief OneBot API 客户端实现
 
 #include <infrastructure/NumericTypes.hpp>
-
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/http/HttpUtil.hpp>
 #include <infrastructure/logging/Logger.hpp>

@@ -3,15 +3,14 @@
 
 #pragma once
 
-#include <infrastructure/NumericTypes.hpp>
+#include <string>
+#include <string_view>
+#include <vector>
 
 #include <drogon/HttpRequest.h>
 #include <drogon/HttpResponse.h>
 
-#include <cstdint>
-#include <string>
-#include <string_view>
-#include <vector>
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
     /// @brief 管理后台的进程内访问令牌。

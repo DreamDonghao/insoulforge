@@ -3,9 +3,10 @@
 
 #pragma once
 
-#include <infrastructure/NumericTypes.hpp>
 #include <string>
 #include <string_view>
+
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
     /// @brief 负责控制台、滚动文件、内存查询和后台实时推送的全局日志系统

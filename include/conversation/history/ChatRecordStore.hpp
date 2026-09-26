@@ -4,11 +4,12 @@
 
 #pragma once
 
-#include <infrastructure/JsonUtil.hpp>
-#include <infrastructure/NumericTypes.hpp>
 #include <optional>
 #include <string>
 #include <vector>
+
+#include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/NumericTypes.hpp>
 
 
 /// @brief 聊天记录存储

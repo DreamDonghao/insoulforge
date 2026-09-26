@@ -1,10 +1,8 @@
 /// @file ConversationMaintenanceStore.cpp
 /// @brief 会话派生状态维护任务的原子持久化边界实现
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <conversation/maintenance/ConversationMaintenanceStore.hpp>
-
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 

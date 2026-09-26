@@ -1,12 +1,11 @@
 /// @file AffinityMaintenanceService.cpp
 /// @brief 基于持久化消息批次的好感度维护实现
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <conversation/maintenance/affinity/AffinityMaintenanceService.hpp>
 #include <conversation/maintenance/affinity/AffinityMaintenanceStore.hpp>
 #include <conversation/message/MessageRecord.hpp>
 #include <conversation/message/SessionId.hpp>
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <llm/LlmClient.hpp>

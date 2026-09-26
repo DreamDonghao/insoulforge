@@ -4,6 +4,7 @@
 #pragma once
 
 #include <drogon/utils/coroutine.h>
+
 #include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge::AffinityMaintenanceService {

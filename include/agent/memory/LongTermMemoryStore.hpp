@@ -4,10 +4,10 @@
 
 #pragma once
 
-#include <cstdint>
-#include <infrastructure/NumericTypes.hpp>
 #include <string>
 #include <vector>
+
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
     /// @brief 长期记忆条目（管理端展示用）

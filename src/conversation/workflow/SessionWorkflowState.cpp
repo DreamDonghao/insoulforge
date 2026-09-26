@@ -1,9 +1,8 @@
 /// @file SessionWorkflowState.cpp
 /// @brief 单个会话的消息工作流并发状态实现
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <conversation/workflow/SessionWorkflowState.hpp>
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
     SessionWorkflowState::SessionWorkflowState(const u64 sessionId) :

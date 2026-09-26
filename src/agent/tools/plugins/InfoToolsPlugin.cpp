@@ -1,8 +1,6 @@
 /// @file InfoToolsPlugin.cpp
 /// @brief 信息工具插件实现（INFORMATION，查询数据、获取答案，不产生副作用）
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <agent/ability/TaskStore.hpp>
 #include <agent/memory/LongTermMemory.hpp>
 #include <agent/tools/ToolArgument.hpp>
@@ -10,6 +8,7 @@
 #include <agent/tools/plugins/InfoToolsPlugin.hpp>
 #include <conversation/message/SessionId.hpp>
 #include <include/agent/tools/ToolRegistry.hpp>
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <llm/LlmClient.hpp>

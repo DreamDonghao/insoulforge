@@ -4,9 +4,9 @@
 
 #pragma once
 
-#include <cstdint>
-#include <infrastructure/NumericTypes.hpp>
 #include <unordered_map>
+
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
     /// @brief 好感度存储

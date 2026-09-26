@@ -7,13 +7,15 @@
 
 #pragma once
 
-#include <drogon/utils/coroutine.h>
 #include <functional>
-#include <infrastructure/JsonUtil.hpp>
-#include <infrastructure/NumericTypes.hpp>
 #include <map>
 #include <string>
 #include <vector>
+
+#include <drogon/utils/coroutine.h>
+
+#include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
     /// @brief 单次工具调用的执行环境（随调用显式传参，无共享状态）

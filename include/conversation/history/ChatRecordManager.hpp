@@ -4,6 +4,7 @@
 #pragma once
 
 #include <deque>
+
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
 

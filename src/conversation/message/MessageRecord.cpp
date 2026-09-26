@@ -1,12 +1,10 @@
 /// @file MessageRecord.cpp
 /// @brief 聊天记录富内容的构造、兼容与投影实现
 
-#include <infrastructure/NumericTypes.hpp>
-
+#include "conversation/message/SessionId.hpp"
 #include <conversation/message/MessageRecord.hpp>
 #include <conversation/session/QQNameDirectory.hpp>
-
-#include "conversation/message/SessionId.hpp"
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge::MessageRecord {
     namespace {

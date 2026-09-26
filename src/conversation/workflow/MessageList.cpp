@@ -2,11 +2,10 @@
 /// @brief 单会话完整消息列表实现
 
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <conversation/history/ChatRecordStore.hpp>
 #include <conversation/maintenance/ConversationMaintenanceService.hpp>
 #include <conversation/workflow/MessageList.hpp>
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 
 namespace insoulforge {

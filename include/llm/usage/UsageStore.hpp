@@ -4,9 +4,10 @@
 
 #pragma once
 
+#include <string>
+
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
-#include <string>
 
 
 /// @brief LLM 用量统计存储

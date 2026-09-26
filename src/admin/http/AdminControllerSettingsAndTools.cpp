@@ -1,13 +1,12 @@
 /// @file AdminControllerSettingsAndTools.cpp
 /// @brief 管理后台 REST API 控制器 - 模型与提示词设置、自定义工具接口
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <admin/http/AdminController.hpp>
 #include <admin/http/AdminResponse.hpp>
 #include <agent/tools/ToolRuntime.hpp>
 #include <agent/tools/custom/ToolStore.hpp>
 #include <include/agent/tools/ToolRegistry.hpp>
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/config/ConfigStore.hpp>
 #include <infrastructure/logging/Logger.hpp>

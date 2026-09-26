@@ -1,9 +1,10 @@
 /// @file LogWebSocketManager.cpp
 /// @brief 运行日志 WebSocket 管理器 - 实现
 
+#include <vector>
+
 #include <admin/logging/LogWebSocketManager.hpp>
 #include <infrastructure/JsonUtil.hpp>
-#include <vector>
 
 namespace insoulforge {
     auto LogWebSocketManager::instance() -> LogWebSocketManager & {

@@ -1,8 +1,6 @@
 /// @file ActionToolsPlugin.cpp
 /// @brief 动作工具插件实现（ACTION，执行操作、产生副作用）
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <agent/runtime/ExecutorAgent.hpp>
 #include <agent/tools/ToolArgument.hpp>
 #include <agent/tools/ToolRuntime.hpp>
@@ -14,6 +12,7 @@
 #include <conversation/workflow/OneBotEventWorkflow.hpp>
 #include <include/agent/ability/TaskScheduler.hpp>
 #include <include/agent/tools/ToolRegistry.hpp>
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <onebot/messaging/MessageService.hpp>

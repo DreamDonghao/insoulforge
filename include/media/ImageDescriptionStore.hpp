@@ -3,9 +3,10 @@
 
 #pragma once
 
-#include <infrastructure/NumericTypes.hpp>
 #include <optional>
 #include <string>
+
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
     /// @brief 已缓存的图片视觉描述

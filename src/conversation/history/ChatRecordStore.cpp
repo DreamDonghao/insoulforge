@@ -1,9 +1,8 @@
 /// @file ChatRecordStore.cpp
 /// @brief 聊天记录存储 - 实现
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <conversation/history/ChatRecordStore.hpp>
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>

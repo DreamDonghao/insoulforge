@@ -4,10 +4,12 @@
 
 #pragma once
 
-#include <drogon/utils/coroutine.h>
-#include <infrastructure/NumericTypes.hpp>
 #include <optional>
 #include <string>
+
+#include <drogon/utils/coroutine.h>
+
+#include <infrastructure/NumericTypes.hpp>
 
 /// @brief 按语义检索当前会话的长期记忆
 namespace insoulforge::LongTermMemory {

@@ -4,15 +4,15 @@
 
 #pragma once
 
-#include <drogon/WebSocketConnection.h>
-#include <infrastructure/NumericTypes.hpp>
-#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 
+#include <drogon/WebSocketConnection.h>
+
 #include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
     /// @brief 管理后台 WebSocket 连接与会话订阅

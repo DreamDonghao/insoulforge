@@ -1,11 +1,10 @@
 /// @file OneBotEventNormalizer.cpp
 /// @brief OneBot 上报事件到统一消息记录的转换实现
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <conversation/message/SessionId.hpp>
 #include <conversation/session/QQNameDirectory.hpp>
 #include <conversation/workflow/OneBotEventNormalizer.hpp>
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge::OneBotEventNormalizer {
     namespace {

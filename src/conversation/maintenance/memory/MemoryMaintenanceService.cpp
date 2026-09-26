@@ -1,13 +1,12 @@
 /// @file MemoryMaintenanceService.cpp
 /// @brief 持久化记忆维护任务的协调实现
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <agent/memory/LongTermMemoryStore.hpp>
 #include <agent/memory/MemoryStore.hpp>
 #include <conversation/maintenance/memory/MemoryMaintenanceService.hpp>
 #include <conversation/maintenance/memory/MemoryMaintenanceStore.hpp>
 #include <conversation/message/MessageRecord.hpp>
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <llm/LlmClient.hpp>

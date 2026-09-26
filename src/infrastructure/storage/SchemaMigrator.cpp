@@ -1,9 +1,8 @@
 /// @file SchemaMigrator.cpp
 /// @brief 数据库 Schema 版本迁移 - 实现
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/SchemaMigrator.hpp>
 #include <infrastructure/storage/Statement.hpp>

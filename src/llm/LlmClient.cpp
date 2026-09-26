@@ -2,9 +2,8 @@
 /// @brief API 客户端 - 实现
 
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <admin/events/WebSocketManager.hpp>
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/http/HttpUtil.hpp>
 #include <infrastructure/logging/Logger.hpp>

@@ -4,15 +4,16 @@
 #pragma once
 
 #include <concepts>
-#include <cstdint>
-#include <infrastructure/NumericTypes.hpp>
-#include <infrastructure/logging/Logger.hpp>
-#include <sqlite3.h>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include <sqlite3.h>
+
+#include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/logging/Logger.hpp>
 
 namespace insoulforge {
     /// @brief 数据库错误异常

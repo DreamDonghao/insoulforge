@@ -4,11 +4,12 @@
 
 #pragma once
 
-#include <cstdint>
-#include <drogon/utils/coroutine.h>
-#include <infrastructure/NumericTypes.hpp>
 #include <optional>
 #include <string>
+
+#include <drogon/utils/coroutine.h>
+
+#include <infrastructure/NumericTypes.hpp>
 
 /// @brief 封装消息发送、@转换和会话名称更新
 namespace insoulforge::MessageService {

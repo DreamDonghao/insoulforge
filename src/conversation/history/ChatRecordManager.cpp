@@ -1,9 +1,8 @@
 /// @file ChatRecordManager.cpp
 /// @brief Agent 会话记录快照适配器实现
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <conversation/history/ChatRecordManager.hpp>
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
     ChatRecordManager::ChatRecordManager(const u64 sessionId, std::deque<json> records) :

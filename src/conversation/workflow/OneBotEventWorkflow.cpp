@@ -1,8 +1,6 @@
 /// @file OneBotEventWorkflow.cpp
 /// @brief OneBot 入站事件处理工作流实现
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <admin/access/BlacklistStore.hpp>
 #include <admin/events/WebSocketManager.hpp>
 #include <agent/runtime/AgentSystem.hpp>
@@ -17,6 +15,7 @@
 #include <conversation/workflow/MessageRouter.hpp>
 #include <conversation/workflow/OneBotEventNormalizer.hpp>
 #include <conversation/workflow/OneBotEventWorkflow.hpp>
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>

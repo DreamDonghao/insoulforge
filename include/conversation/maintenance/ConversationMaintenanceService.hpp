@@ -3,13 +3,11 @@
 
 #pragma once
 
-#include <infrastructure/NumericTypes.hpp>
-
-#include <cstdint>
 #include <functional>
 #include <optional>
 
 #include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge::ConversationMaintenanceService {
     /// @brief 原子持久化一批会话派生状态维护任务并启动消费者

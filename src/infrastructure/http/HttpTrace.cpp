@@ -1,12 +1,12 @@
 /// @file HttpTrace.cpp
 /// @brief HTTP 请求完整内容内存缓存 - 实现
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <chrono>
-#include <infrastructure/http/HttpTrace.hpp>
 #include <iomanip>
 #include <ranges>
+
+#include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/http/HttpTrace.hpp>
 
 namespace insoulforge {
     namespace {

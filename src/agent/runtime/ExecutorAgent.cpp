@@ -1,14 +1,13 @@
 /// @file ExecutorAgent.cpp
 /// @brief Executor Agent - 实现
 
-#include <infrastructure/NumericTypes.hpp>
-
 #include <agent/runtime/ExecutorAgent.hpp>
 #include <conversation/maintenance/affinity/AffinityStore.hpp>
 #include <conversation/message/MessageRecord.hpp>
 #include <conversation/message/SessionId.hpp>
 #include <conversation/session/SessionStore.hpp>
 #include <include/agent/tools/ToolRegistry.hpp>
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <llm/LlmClient.hpp>

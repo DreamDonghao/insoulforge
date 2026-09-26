@@ -2,11 +2,13 @@
 /// @brief 根据 Router 策略调用模型和工具，生成本轮回复决策
 
 #pragma once
+#include <optional>
+
+#include <drogon/utils/coroutine.h>
+
 #include <agent/memory/MemoryManager.hpp>
 #include <agent/runtime/AgentTypes.hpp>
 #include <conversation/history/ChatRecordManager.hpp>
-#include <drogon/utils/coroutine.h>
-#include <optional>
 
 namespace insoulforge::ExecutorAgent {
     /// @brief 执行层的回复生成接口

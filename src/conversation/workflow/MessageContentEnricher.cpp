@@ -2,11 +2,11 @@
 /// @brief 统一消息的媒体与长期记忆富化实现
 
 
-#include <infrastructure/NumericTypes.hpp>
+#include <fmt/format.h>
 
 #include <agent/memory/LongTermMemoryStore.hpp>
 #include <conversation/message/MessageRecord.hpp>
-#include <fmt/format.h>
+#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <llm/LlmClient.hpp>
