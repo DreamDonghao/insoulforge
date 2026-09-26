@@ -3,7 +3,7 @@
 
 #include <infrastructure/NumericTypes.hpp>
 
-#include <admin/realtime/LogWebSocketManager.hpp>
+#include <admin/logging/LogWebSocketManager.hpp>
 #include <algorithm>
 #include <filesystem>
 #include <fmt/chrono.h>

@@ -3,8 +3,8 @@
 
 #include <infrastructure/NumericTypes.hpp>
 
-#include <admin/BlacklistStore.hpp>
-#include <admin/realtime/WebSocketManager.hpp>
+#include <admin/access/BlacklistStore.hpp>
+#include <admin/events/WebSocketManager.hpp>
 #include <agent/runtime/AgentSystem.hpp>
 #include <agent/runtime/ExecutorAgent.hpp>
 #include <conversation/history/ChatRecordStore.hpp>
@@ -20,7 +20,7 @@
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
-#include <onebot/MessageService.hpp>
+#include <onebot/messaging/MessageService.hpp>
 
 namespace insoulforge {
     namespace {

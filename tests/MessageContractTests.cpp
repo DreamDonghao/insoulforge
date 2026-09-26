@@ -25,7 +25,7 @@
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/SchemaMigrator.hpp>
 #include <iostream>
-#include <llm/UsageStore.hpp>
+#include <llm/usage/UsageStore.hpp>
 #include <media/ImageDescriptionStore.hpp>
 #include <stdexcept>
 #include <string>

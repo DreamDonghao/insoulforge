@@ -3,7 +3,7 @@
 
 #include <agent/runtime/AgentSystem.hpp>
 #include <agent/tools/ToolRuntime.hpp>
-#include <llm/PromptService.hpp>
+#include <llm/prompts/PromptService.hpp>
 
 namespace insoulforge {
     auto AgentSystem::instance() -> AgentSystem & {

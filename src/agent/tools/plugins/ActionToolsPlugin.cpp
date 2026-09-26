@@ -16,8 +16,8 @@
 #include <include/agent/tools/ToolRegistry.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
-#include <onebot/MessageService.hpp>
-#include <onebot/OneBotClient.hpp>
+#include <onebot/messaging/MessageService.hpp>
+#include <onebot/transport/OneBotClient.hpp>
 
 namespace insoulforge {
     auto ActionToolsPlugin::id() const noexcept -> std::string_view { return "builtin.action"; }
