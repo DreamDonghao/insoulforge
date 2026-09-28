@@ -28,6 +28,7 @@
 #include <infrastructure/config/ConfigStore.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/SchemaMigrator.hpp>
+#include <llm/JevClient.hpp>
 #include <llm/usage/UsageStore.hpp>
 #include <media/ImageDescriptionStore.hpp>
 
@@ -194,6 +195,48 @@ namespace {
         check(queuedMention.shouldReply, "queued bot mention replies despite trailing assistant message", kTestName);
 
         config.selfQQNumber = originalSelfId;
+    }
+
+    void testJevClientChoiceAndConfidenceParsing() {
+        constexpr std::string_view kTestName = "jev client choice and confidence parsing";
+        const std::vector<std::string_view> validLabels{"skip", "reply", "unclear"};
+
+        const insoulforge::json ok = {
+          {"model", "typesafe/jev-1.13"},
+          {"answers", {{"action", {{"choice", "reply"}, {"confidence", 0.82}}}}},
+        };
+        const auto choice = insoulforge::JevClient::readChoice(ok, "action", validLabels);
+        check(choice.has_value() && *choice == "reply", "reads winning choice label", kTestName);
+        const auto confidence = insoulforge::JevClient::readConfidence(ok, "action");
+        check(confidence.has_value() && *confidence > 0.81 && *confidence < 0.83, "reads confidence", kTestName);
+
+        check(!insoulforge::JevClient::readChoice(ok, "missing", validLabels).has_value(),
+          "unknown question name yields nullopt", kTestName);
+        check(!insoulforge::JevClient::readChoice(insoulforge::json{{"answers", insoulforge::json::object()}},
+                 "action", validLabels)
+                 .has_value(),
+          "empty answers yields nullopt", kTestName);
+        check(!insoulforge::JevClient::readChoice(insoulforge::json::object(), "action", validLabels).has_value(),
+          "missing answers yields nullopt", kTestName);
+        check(!insoulforge::JevClient::readChoice(
+                 insoulforge::json{{"answers", {{"action", {{"choice", 42}}}}}}, "action", validLabels)
+                 .has_value(),
+          "wrong answer type yields nullopt", kTestName);
+        check(!insoulforge::JevClient::readChoice(
+                 insoulforge::json{{"answers", {{"action", {{"choice", "other"}}}}}}, "action", validLabels)
+                 .has_value(),
+          "label outside valid set yields nullopt", kTestName);
+
+        check(!insoulforge::JevClient::readConfidence(
+                 insoulforge::json{{"answers", {{"action", {{"choice", "reply"}, {"confidence", 1.5}}}}}}, "action")
+                 .has_value(),
+          "out of range confidence yields nullopt", kTestName);
+        check(!insoulforge::JevClient::readConfidence(
+                 insoulforge::json{{"answers", {{"action", {{"choice", "reply"}}}}}}, "action")
+                 .has_value(),
+          "missing confidence yields nullopt", kTestName);
+        check(!insoulforge::JevClient::readConfidence(insoulforge::json::object(), "action").has_value(),
+          "missing answers yields nullopt for confidence", kTestName);
     }
 
     void testRouterWindowStartIndexIsBatchedNotSliding() {
@@ -474,6 +517,7 @@ auto main() -> int {
     testNewWorkflowDetectsCommands();
     testMessageRecordSemanticQueries();
     testNewWorkflowRouterHardRules();
+    testJevClientChoiceAndConfidenceParsing();
     testRouterWindowStartIndexIsBatchedNotSliding();
     testMessageRecordProjectionHidesImageSources();
     testAssistantStickerRecordKeepsOnlyName();
