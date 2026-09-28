@@ -196,6 +196,31 @@ namespace {
         config.selfQQNumber = originalSelfId;
     }
 
+    void testRouterWindowStartIndexIsBatchedNotSliding() {
+        constexpr std::string_view kTestName = "router window start index is batched not sliding";
+        auto &config = insoulforge::Config::instance();
+        const i32 originalTrigger = config.routerWindowTriggerCount;
+        const i32 originalKeep = config.routerWindowKeepCount;
+        config.routerWindowTriggerCount = 20;
+        config.routerWindowKeepCount = 10;
+
+        // keep=10, slide=10 时窗口大小 = 10 + size % 10，因此 size 为 10 的整数倍时窗口收回到 keep。
+        // 以下用例锁住窗口的周期性：同一批次内起始下标保持不变，跨批次边界时前缀前移。
+        check(insoulforge::MessageRouter::windowStartIndex(30) == 20,
+          "window resets to keep at period boundary", kTestName);
+        check(insoulforge::MessageRouter::windowStartIndex(35) == 20,
+          "window grows within a period", kTestName);
+        check(insoulforge::MessageRouter::windowStartIndex(39) == 20,
+          "window keeps a stable prefix within a period", kTestName);
+        check(insoulforge::MessageRouter::windowStartIndex(40) == 30,
+          "next period starts a new prefix", kTestName);
+        check(insoulforge::MessageRouter::windowStartIndex(5) == 0,
+          "short snapshot starts at zero", kTestName);
+
+        config.routerWindowTriggerCount = originalTrigger;
+        config.routerWindowKeepCount = originalKeep;
+    }
+
     void testMessageRecordProjectionHidesImageSources() {
         constexpr std::string_view kTestName = "message record projection";
         const insoulforge::json record = {
@@ -449,6 +474,7 @@ auto main() -> int {
     testNewWorkflowDetectsCommands();
     testMessageRecordSemanticQueries();
     testNewWorkflowRouterHardRules();
+    testRouterWindowStartIndexIsBatchedNotSliding();
     testMessageRecordProjectionHidesImageSources();
     testAssistantStickerRecordKeepsOnlyName();
     testSchemaMigration();
