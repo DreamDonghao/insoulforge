@@ -31,11 +31,25 @@ namespace insoulforge::ConfigStore {
             return {{"apiKey", ""}, {"baseUrl", ""}, {"path", "/embeddings"}, {"model", ""}};
         }
 
+        /// @brief Jev（System One）路由优先判断的默认配置
+        /// @details 默认指向 OpenRouter decisions 端点：baseUrl + path 经
+        ///          HttpUtil::normalizeTarget() 合并为实际请求 host https://openrouter.ai
+        ///          + path /api/alpha/decisions。该端点是 TypeSafe 原生 schema 的纯
+        ///          passthrough，直连 TypeSafe 只需改 baseUrl/path 两个配置值，代码无
+        ///          需任何 provider 分支。apiKey 默认空串：JevClient::isConfigured 额外
+        ///          校验 apiKey。默认配置下地址/路径/模型名均非空，缺少该校验时空 apiKey
+        ///          被判为“已配置”，请求以 401 结束。
+        auto defaultJevConfig() -> json {
+            return {{"apiKey", ""}, {"baseUrl", "https://openrouter.ai/api/alpha"}, {"path", "/decisions"},
+              {"model", "~typesafe/jev-latest"}};
+        }
+
         auto defaultConfig() -> json {
             return {
               {"llm", {{"router", defaultChatConfig(100, 0.3, 0.9)}, {"executor", defaultChatConfig(150, 0.7, 0.9)},
                         {"executorThinking", defaultChatConfig(512, 0.7, 0.9)},
-                        {"image", defaultChatConfig(1024, 0.7, 0.9)}, {"embedding", defaultEmbeddingConfig()}}},
+                        {"image", defaultChatConfig(1024, 0.7, 0.9)}, {"embedding", defaultEmbeddingConfig()},
+                        {"jev", defaultJevConfig()}}},
               {"qq", {{"accessToken", ""}, {"selfQQNumber", 0}, {"oneBotTransport", "websocket"},
                        {"qqHttpHost", "http://127.0.0.1:3000"}, {"qqWebSocketHost", "ws://127.0.0.1:3001"},
                        {"botName", "机器人"}}},
@@ -209,7 +223,7 @@ namespace insoulforge::ConfigStore {
         persistedConfig.erase("name");
         persistedConfig["topP"] = getDouble(config, "topP", getDouble(config, "top_P", 0.9));
         persistedConfig.erase("top_P");
-        if (name == "embedding") {
+        if (name == "embedding" || name == "jev") {
             persistedConfig.erase("maxTokens");
             persistedConfig.erase("temperature");
             persistedConfig.erase("topP");
