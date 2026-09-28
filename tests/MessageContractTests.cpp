@@ -197,6 +197,22 @@ namespace {
         config.selfQQNumber = originalSelfId;
     }
 
+    void testClassifyJevChoice() {
+        constexpr std::string_view kTestName = "classify jev choice";
+        using Action = insoulforge::RouterDecision::Action;
+
+        const auto skip = insoulforge::MessageRouter::classifyJevChoice("skip");
+        check(skip.has_value() && *skip == Action::SKIP, "skip label maps to SKIP", kTestName);
+        const auto reply = insoulforge::MessageRouter::classifyJevChoice("reply");
+        check(reply.has_value() && *reply == Action::REPLY, "reply label maps to REPLY", kTestName);
+        check(!insoulforge::MessageRouter::classifyJevChoice("unclear").has_value(),
+          "unclear label falls back to nullopt", kTestName);
+        check(!insoulforge::MessageRouter::classifyJevChoice("other").has_value(),
+          "unknown label falls back to nullopt", kTestName);
+        check(!insoulforge::MessageRouter::classifyJevChoice("").has_value(),
+          "empty label falls back to nullopt", kTestName);
+    }
+
     void testJevClientChoiceAndConfidenceParsing() {
         constexpr std::string_view kTestName = "jev client choice and confidence parsing";
         const std::vector<std::string_view> validLabels{"skip", "reply", "unclear"};
@@ -517,6 +533,7 @@ auto main() -> int {
     testNewWorkflowDetectsCommands();
     testMessageRecordSemanticQueries();
     testNewWorkflowRouterHardRules();
+    testClassifyJevChoice();
     testJevClientChoiceAndConfidenceParsing();
     testRouterWindowStartIndexIsBatchedNotSliding();
     testMessageRecordProjectionHidesImageSources();

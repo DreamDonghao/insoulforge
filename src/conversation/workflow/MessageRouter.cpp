@@ -27,6 +27,13 @@ namespace insoulforge::MessageRouter {
     }
 
     namespace {
+        /// @brief Jev action choice 的 label 常量，集中定义一处以避免字符串双写
+        /// @details 供构建 criteria 与读取胜出 label 两处共用；kJevActionUnclear 本票
+        ///          暂未使用，留作接入时（接入 route() 分支、构建 criteria）共用。
+        constexpr std::string_view kJevActionSkip = "skip";
+        constexpr std::string_view kJevActionReply = "reply";
+        [[maybe_unused]] constexpr std::string_view kJevActionUnclear = "unclear";
+
         [[nodiscard]] auto makeDecision(const RouterDecision::Action action, std::string reason,
           const i32 maxLength = 25, const bool priority = false) -> RouterDecision {
             return {.action = action,
@@ -138,6 +145,17 @@ namespace insoulforge::MessageRouter {
             return decision;
         }
     } // namespace
+
+    auto classifyJevChoice(const std::string_view label) -> std::optional<RouterDecision::Action> {
+        if (label == kJevActionReply) {
+            return RouterDecision::Action::REPLY;
+        }
+        if (label == kJevActionSkip) {
+            return RouterDecision::Action::SKIP;
+        }
+        // unclear 或其余任何未知取值（含空串）均视为弃权，交由 LLM 兜底判定。
+        return std::nullopt;
+    }
 
     auto route(const u64 sessionId, const std::string_view triggerMessageId, const json &snapshot)
       -> drogon::Task<RouterDecision> {
