@@ -12,7 +12,7 @@ namespace insoulforge::JevClient {
     namespace {
         /// @brief Jev 请求超时（秒）
         /// @details 显著短于 LlmClient 的 90s：优先路径失败后还要走兜底，
-        ///          超时过长会把最坏延迟拖到不可接受。
+        ///          10s 上限为兜底留出延迟预算。
         constexpr f64 kJevTimeoutSeconds = 10.0;
 
         /// @brief 日志中错误响应体的截断长度
