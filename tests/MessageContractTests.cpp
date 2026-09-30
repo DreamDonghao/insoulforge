@@ -16,7 +16,6 @@
 
 #include <agent/memory/LongTermMemoryStore.hpp>
 #include <agent/memory/MemoryStore.hpp>
-#include <chrono>
 #include <conversation/history/ChatRecordStore.hpp>
 #include <conversation/maintenance/ConversationMaintenanceStore.hpp>
 #include <conversation/maintenance/affinity/AffinityMaintenanceStore.hpp>

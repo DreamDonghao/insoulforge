@@ -1,6 +1,8 @@
 /// @file JevClient.cpp
 /// @brief Jev（TypeSafe AI System One）客户端 - 实现
 
+#include <algorithm>
+
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/http/HttpUtil.hpp>
