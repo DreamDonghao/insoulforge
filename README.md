@@ -245,7 +245,8 @@ Git 忽略，Docker 部署时通过 `./data:/app/data` 挂载即可持久化。
 
 项目由 [DreamDonghao](https://github.com/DreamDonghao) 发起，感谢所有参与开发和改进的贡献者。
 
-[![Contributors](https://contrib.nn.ci/api?repo=DreamDonghao/insoulforge&v=2)](https://github.com/DreamDonghao/insoulforge/graphs/contributors)
+[![Contributors](https://contrib.rocks/image?repo=DreamDonghao/insoulforge)](https://github.com/DreamDonghao/insoulforge/graphs/contributors)
+
 ---
 
 ## 📄 许可证
