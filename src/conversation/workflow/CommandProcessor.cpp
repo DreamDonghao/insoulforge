@@ -93,7 +93,8 @@ namespace insoulforge::CommandProcessor {
             co_return "InSoulForge\n"
                       "基于 Agent 架构，支持自定义角色、长期记忆、多工具调用\n\n"
                       "项目地址: https://github.com/DreamDonghao/insoulforge\n"
-                      "作者: DreamDonghao\n"
+                      "项目发起人: DreamDonghao\n"
+                      "贡献者: https://github.com/DreamDonghao/insoulforge/graphs/contributors\n"
                       "许可证: AGPL-3.0-only";
         }
         if (!hasPermission) {

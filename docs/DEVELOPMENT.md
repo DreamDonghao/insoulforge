@@ -187,7 +187,9 @@ OneBotEventWorkflow::enqueueOneBotEvent
     │ @机器人和系统任务在已有回复时排队；普通消息记为 AgentBusy，不再发起第二次请求
     ▼
 MessageRouter
-    │ 从冻结快照投影路由上下文；硬规则优先，必要时调用 Router 模型
+    │ 从冻结快照投影路由上下文；先执行硬规则
+    │ 群聊可选走 Jev；低置信度、不明确或失败时调用 Router LLM
+    │ 私聊直接使用原有 Router LLM 路径
     │ 输出 RouterDecision：SKIP / REPLY + 策略（语气、长度）
     ▼
 ExecutorAgent
@@ -220,6 +222,13 @@ MessageService → OneBot API
   `flushToStorage()` 覆盖持久化恢复副本。
 - 拍一拍、入群、退群均归一化为类型化消息段：`poke`、`member_event`。拍一拍不再按参与者区分，所有拍一拍通知均与普通消息一样交由
   Router 决策。
+- Router 的空快照、找不到触发消息、系统任务、@机器人和群聊刷屏/短文本规则先于 Jev；只有剩余群聊消息才进入 Jev。
+  Jev 与原有 Router LLM 共用窗口起点和机器人静默状态计算，不修改冻结快照。Jev 使用压平的消息段，并保留
+  `message_id` / `reply_to` 供引用关系判断。
+- Jev 一次请求给出 `action`、`tone` 和 `maxLength`。仅当 `answers.action.choice` 为 `reply` / `skip` 且
+  `answers.action.confidence` 有效并达到 `jevMinConfidence` 时采纳；`unclear`、低置信度、响应异常或请求失败均交给原有
+  Router LLM。`probabilities.reply` 不是当前阈值的比较对象。Jev 请求超时为 10 秒；Router LLM 兜底仍保留原有
+  fail-open 行为。
 - 预处理、路由、执行或发送的异常均限制在当前消息或当前回复任务内，不能使同会话队列停滞。工作流不使用轮询或忙等待。
 
 新增主处理步骤时，先确定其属于消息预处理阶段还是回复阶段，再在 `OneBotEventWorkflow` 的对应队列处理函数中调用一个职责单一的组件。
@@ -276,14 +285,17 @@ MessageService → OneBot API
 
 ### 配置系统
 
-`ConfigStore` 将 LLM API 配置（router / executor / executorThinking / image / embedding，每组独立配置 model /
-endpoint 等参数，可选 `reasoningEffort`）、QQ Bot 配置和记忆参数统一写入 `data/config.json`。启动时若文件不存在则创建默认配置；若
+`ConfigStore` 将 LLM API 配置（router / jev / executor / executorThinking / image / embedding）、QQ Bot 配置和记忆参数统一写入
+`data/config.json`。聊天模型可设置 `maxTokens`、`temperature`、`topP` 和 `reasoningEffort`；Embedding 与 Jev 不使用这些采样参数。
+Jev 默认指向 OpenRouter Decisions API，API Key 默认为空，因此默认不启用；其 `minConfidence` 默认 0.6，限制在 0～1，
+可在管理后台修改并即时更新运行时配置。启动时若文件不存在则创建默认配置；若
 JSON 损坏则备份为 `config.json.broken.<时间戳>` 后重建；缺失或类型不匹配的字段会补默认值并回写。管理后台保存时先写入临时文件，再原子替换原文件。
 
 `Config` 单例在启动期从该文件加载运行时副本。提示词由 `PromptService` 管理（`executor_system` /
 `router_system`），支持 `{botName}` 占位符，修改后写回数据库。
 
-**用量统计**：每次 LLM 调用通过 `LlmClient::logUsage` 记录模型与 token 用量，后台"用量统计"页读取 `/admin/api/usage` 展示。
+**用量统计**：聊天模型与 Jev 调用通过 `LlmClient::logUsage` 记录模型与 token 用量；Jev 客户端先将
+`input_tokens` / `output_tokens` 映射到现有记账字段，角色记为 `jev`。后台「用量统计」页读取 `/admin/api/usage` 展示。
 
 ### 数据库
 

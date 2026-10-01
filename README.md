@@ -7,7 +7,7 @@ QQ 交流群：1097487360
 ## ✨ 特性
 
 - **Web 管理后台** - 可视化查看与配置
-- **智能对话** - Router + Executor 两阶段决策，按会话生成稳定上下文快照并自主判断是否回复
+- **智能对话** - Jev 可选地优先判断群聊是否回复，低置信度时由 Router LLM 兜底，再由 Executor 生成回复
 - **好感度** - 可以根据对话自动调整对某人的好感度
 - **图片识别** - 可单独配置视觉模型识别图片与 GIF 动图，媒体哈希缓存避免重复请求
 - **自定义角色** - 可设置 Bot 的提示词来定制人设和性格
@@ -91,8 +91,8 @@ Docker 默认桥接网络中，容器无法枚举宿主机局域网地址；可�
     - Bot 名称
 
 2. **LLM 配置** - 配置模型 API
-    - 支持 Router、Executor、Executor 思考、Image 与 Embedding 分别配置
-    - 兼容 OpenAI API 格式
+    - Router、Executor、Executor 思考和 Image 使用兼容 OpenAI 的聊天接口；Embedding 使用向量接口
+    - 可选配置 Jev 决策接口，用于群聊优先路由
 
 3. **启用群聊** - 添加要启用的 QQ 群或用户
 
@@ -143,11 +143,19 @@ Docker 默认桥接网络中，容器无法枚举宿主机局域网地址；可�
 
 | 模型         | 用途                                        | 建议配置              |
 |--------------|---------------------------------------------|-----------------------|
-| Router       | 快速路由决策                                | 轻量模型，低温度      |
-| Executor     | 生成回复                                    | 主力模型，较高温度    |
+| Router       | Jev 不可用或判定不确定时的回复决策          | 轻量聊天模型，低温度  |
+| Jev          | 群聊消息的优先回复决策（可选）              | Decisions API         |
+| Executor     | 生成回复                                    | 主力聊天模型          |
 | Executor思考 | `deep_think` 工具使用的深度思考模型（可选） | 推理模型，如 DeepSeek |
-| Image        | 图片内容识别                                | 多模态模型            |
+| Image        | 图片内容识别                                | 多模态聊天模型        |
 | Embedding    | 长期记忆向量化与检索（可选）                | 向量模型              |
+
+**Jev 路由**：在「LLM 配置 → Jev」填写 API Key、Base URL、Path 和 Model 后启用；默认地址为
+`https://openrouter.ai/api/alpha`、路径为 `/decisions`、模型为 `~typesafe/jev-latest`。Jev 使用
+Decisions API，并非 OpenAI 兼容的聊天接口。默认 API Key 为空，因此不启用 Jev，原有 Router 行为不变。
+Jev 只处理通过硬规则的群聊消息；私聊、@机器人和系统任务沿用原有处理。Jev 返回的
+`answers.action.confidence` 低于「最低置信度」（默认 0.60）、缺失或无效，或判断结果为 `unclear`、请求失败时，
+再调用 Router LLM。这里比较的是 `confidence`，不是 `probabilities.reply`；保存阈值后立即生效。
 
 全局运行配置保存在 `data/config.json`，包括 LLM、OneBot 与记忆参数。文件不存在时程序会写入默认内容；缺失或类型错误的字段会在启动时自动修复。配置文件已被
 Git 忽略，Docker 部署时通过 `./data:/app/data` 挂载即可持久化。
@@ -228,10 +236,16 @@ Git 忽略，Docker 部署时通过 `./data:/app/data` 挂载即可持久化。
 
 ## 🛠️ 开发者指南
 
-本项目使用 **C++ **实现，Web页面使用**Vue3**
+本项目使用 **C++** 实现，Web 页面使用 **Vue 3**。
 
-本地构建、架构和调试见[开发文档](./docs/DEVELOPMENT.md)；提交 Issue 或 Pull Request
-前请阅读[参与贡献指南](./CONTRIBUTING.md)。
+本地构建、架构和调试见 [开发文档](./docs/DEVELOPMENT.md)；提交 Issue 或 Pull Request
+前请阅读 [参与贡献指南](./CONTRIBUTING.md)。
+
+## 贡献者
+
+项目由 [DreamDonghao](https://github.com/DreamDonghao) 发起，感谢所有参与开发和改进的贡献者。
+
+[![Contributors](https://contrib.nn.ci/api?repo=DreamDonghao/insoulforge)](https://github.com/DreamDonghao/insoulforge/graphs/contributors)
 
 ---
 
@@ -240,7 +254,3 @@ Git 忽略，Docker 部署时通过 `./data:/app/data` 挂载即可持久化。
 本项目采用标准 [GNU Affero General Public License v3.0](https://www.gnu.org/licenses/agpl-3.0.html)（`AGPL-3.0-only`）开源。
 
 详见 [LICENSE](LICENSE)。
-
----
-
-Made with by [DreamDonghao](https://github.com/DreamDonghao)
