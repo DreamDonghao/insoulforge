@@ -1,6 +1,8 @@
 /// @file AdminControllerSettingsAndTools.cpp
 /// @brief 管理后台 REST API 控制器 - 模型与提示词设置、自定义工具接口
 
+#include <cmath>
+
 #include <admin/http/AdminController.hpp>
 #include <admin/http/AdminResponse.hpp>
 #include <agent/tools/ToolRuntime.hpp>
@@ -33,6 +35,14 @@ auto AdminController::saveLLMConfig(
     }
 
     const std::string name = getStr(*body, "name");
+    if (name == "jev" && body->contains("minConfidence")) {
+        const json &value = (*body)["minConfidence"];
+        const f64 confidence = jsonToDouble(value, -1.0);
+        if (!value.is_number() || !std::isfinite(confidence) || confidence < 0.0 || confidence > 1.0) {
+            callback(jsonResponse(AdminResponse::errorJson("Jev 置信度阈值必须在 0 到 1 之间")));
+            co_return;
+        }
+    }
     ConfigStore::saveLLMConfig(name, *body);
 
     // 更新内存中的配置
@@ -53,6 +63,8 @@ auto AdminController::saveLLMConfig(
         .defaultMaxTokens = 512},
       ConfigTarget{.name = "image", .api = &config.image, .params = &config.imageParams, .defaultMaxTokens = 1024},
       ConfigTarget{.name = "embedding", .api = &config.embedding, .params = nullptr, .defaultMaxTokens = 0},
+      // Jev 同 embedding 一样无采样参数，补进目标列表使保存后即时生效，无需重启。
+      ConfigTarget{.name = "jev", .api = &config.jev, .params = nullptr, .defaultMaxTokens = 0},
     };
 
     if (const auto it = std::ranges::find(targets, name, &ConfigTarget::name); it != targets.end()) {
@@ -66,6 +78,9 @@ auto AdminController::saveLLMConfig(
             it->params->maxTokens = getInt(*body, "maxTokens", it->defaultMaxTokens);
             it->params->temperature = getDouble(*body, "temperature", 0.7);
             it->params->topP = getDouble(*body, "topP", getDouble(*body, "top_P", 0.9));
+        }
+        if (name == "jev") {
+            config.jevMinConfidence = getDouble(ConfigStore::getLLMConfig("jev"), "minConfidence", 0.6);
         }
     }
 

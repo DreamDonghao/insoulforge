@@ -2,6 +2,8 @@
 /// @brief 消息链路的契约测试
 
 #include <iostream>
+#include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -28,6 +30,7 @@
 #include <infrastructure/config/ConfigStore.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/SchemaMigrator.hpp>
+#include <llm/JevClient.hpp>
 #include <llm/usage/UsageStore.hpp>
 #include <media/ImageDescriptionStore.hpp>
 
@@ -196,12 +199,132 @@ namespace {
         config.selfQQNumber = originalSelfId;
     }
 
+    void testJevUnconfiguredFallsBackToExistingBehavior() {
+        constexpr std::string_view kTestName = "jev unconfigured falls back to existing behavior";
+        auto &database = insoulforge::Database::instance();
+        database.initialize(":memory:");
+        auto &config = insoulforge::Config::instance();
+        const auto originalJev = config.jev;
+        const auto originalRouter = config.router;
+        config.jev = {};
+        config.router = {};
+
+        const insoulforge::json plainSnapshot = insoulforge::json::array({{{"message_id", "plain"},
+          {"sender", {{"qq", "11"}}},
+          {"segments",
+            insoulforge::json::array({{{"type", "text"}, {"text", "今天天气的大家都在干什么"}}})}}});
+        const auto fallback = drogon::sync_wait(insoulforge::MessageRouter::route(100, "plain", plainSnapshot));
+        check(fallback.shouldReply, "unconfigured jev falls back to existing fail-open path", kTestName);
+        check(fallback.reason == "Router 请求失败", "fallback reason is unchanged", kTestName);
+
+        config.jev = originalJev;
+        config.router = originalRouter;
+        database.close();
+    }
+
+    void testClassifyJevChoice() {
+        constexpr std::string_view kTestName = "classify jev choice";
+        using Action = insoulforge::RouterDecision::Action;
+
+        const auto skip = insoulforge::MessageRouter::classifyJevChoice("skip", 0.9, 0.6);
+        check(skip.has_value() && *skip == Action::SKIP, "skip label maps to SKIP", kTestName);
+        const auto reply = insoulforge::MessageRouter::classifyJevChoice("reply", 0.9, 0.6);
+        check(reply.has_value() && *reply == Action::REPLY, "reply label maps to REPLY", kTestName);
+        check(!insoulforge::MessageRouter::classifyJevChoice("skip", 0.59, 0.6).has_value(),
+          "low-confidence skip falls back", kTestName);
+        check(!insoulforge::MessageRouter::classifyJevChoice("reply", 0.59, 0.6).has_value(),
+          "low-confidence reply falls back", kTestName);
+        check(!insoulforge::MessageRouter::classifyJevChoice("skip", std::nullopt, 0.6).has_value(),
+          "missing confidence falls back", kTestName);
+        check(!insoulforge::MessageRouter::classifyJevChoice("reply", std::numeric_limits<double>::quiet_NaN(), 0.6)
+                 .has_value(),
+          "non-finite confidence falls back", kTestName);
+        check(insoulforge::MessageRouter::classifyJevChoice("reply", 0.6, 0.6) == Action::REPLY,
+          "threshold confidence is accepted", kTestName);
+        check(!insoulforge::MessageRouter::classifyJevChoice("skip", 0.7, 0.8).has_value(),
+          "configured threshold controls fallback", kTestName);
+        check(!insoulforge::MessageRouter::classifyJevChoice("unclear", 0.9, 0.6).has_value(),
+          "unclear label falls back to nullopt", kTestName);
+        check(!insoulforge::MessageRouter::classifyJevChoice("other", 0.9, 0.6).has_value(),
+          "unknown label falls back to nullopt", kTestName);
+        check(!insoulforge::MessageRouter::classifyJevChoice("", 0.9, 0.6).has_value(), "empty label falls back to nullopt",
+          kTestName);
+    }
+
+    void testJevClientChoiceAndConfidenceParsing() {
+        constexpr std::string_view kTestName = "jev client choice and confidence parsing";
+        const std::vector<std::string_view> validLabels{"skip", "reply", "unclear"};
+
+        const insoulforge::json ok = {
+          {"model", "typesafe/jev-1.13"},
+          {"answers", {{"action", {{"choice", "reply"}, {"confidence", 0.82}}}}},
+        };
+        const auto choice = insoulforge::JevClient::readChoice(ok, "action", validLabels);
+        check(choice.has_value() && *choice == "reply", "reads winning choice label", kTestName);
+        const auto confidence = insoulforge::JevClient::readConfidence(ok, "action");
+        check(confidence.has_value() && *confidence > 0.81 && *confidence < 0.83, "reads confidence", kTestName);
+
+        check(!insoulforge::JevClient::readChoice(ok, "missing", validLabels).has_value(),
+          "unknown question name yields nullopt", kTestName);
+        check(!insoulforge::JevClient::readChoice(insoulforge::json{{"answers", insoulforge::json::object()}},
+                 "action", validLabels)
+                 .has_value(),
+          "empty answers yields nullopt", kTestName);
+        check(!insoulforge::JevClient::readChoice(insoulforge::json::object(), "action", validLabels).has_value(),
+          "missing answers yields nullopt", kTestName);
+        check(!insoulforge::JevClient::readChoice(
+                 insoulforge::json{{"answers", {{"action", {{"choice", 42}}}}}}, "action", validLabels)
+                 .has_value(),
+          "wrong answer type yields nullopt", kTestName);
+        check(!insoulforge::JevClient::readChoice(
+                 insoulforge::json{{"answers", {{"action", {{"choice", "other"}}}}}}, "action", validLabels)
+                 .has_value(),
+          "label outside valid set yields nullopt", kTestName);
+
+        check(!insoulforge::JevClient::readConfidence(
+                 insoulforge::json{{"answers", {{"action", {{"choice", "reply"}, {"confidence", 1.5}}}}}}, "action")
+                 .has_value(),
+          "out of range confidence yields nullopt", kTestName);
+        check(!insoulforge::JevClient::readConfidence(
+                 insoulforge::json{{"answers", {{"action", {{"choice", "reply"}}}}}}, "action")
+                 .has_value(),
+          "missing confidence yields nullopt", kTestName);
+        check(!insoulforge::JevClient::readConfidence(insoulforge::json::object(), "action").has_value(),
+          "missing answers yields nullopt for confidence", kTestName);
+    }
+
+    void testRouterWindowStartIndexIsBatchedNotSliding() {
+        constexpr std::string_view kTestName = "router window start index is batched not sliding";
+        auto &config = insoulforge::Config::instance();
+        const i32 originalTrigger = config.routerWindowTriggerCount;
+        const i32 originalKeep = config.routerWindowKeepCount;
+        config.routerWindowTriggerCount = 20;
+        config.routerWindowKeepCount = 10;
+
+        // keep=10, slide=10 时窗口大小 = 10 + size % 10，因此 size 为 10 的整数倍时窗口收回到 keep。
+        // 以下用例锁住窗口的周期性：同一批次内起始下标保持不变，跨批次边界时前缀前移。
+        check(insoulforge::MessageRouter::windowStartIndex(30) == 20,
+          "window resets to keep at period boundary", kTestName);
+        check(insoulforge::MessageRouter::windowStartIndex(35) == 20,
+          "window grows within a period", kTestName);
+        check(insoulforge::MessageRouter::windowStartIndex(39) == 20,
+          "window keeps a stable prefix within a period", kTestName);
+        check(insoulforge::MessageRouter::windowStartIndex(40) == 30,
+          "next period starts a new prefix", kTestName);
+        check(insoulforge::MessageRouter::windowStartIndex(5) == 0,
+          "short snapshot starts at zero", kTestName);
+
+        config.routerWindowTriggerCount = originalTrigger;
+        config.routerWindowKeepCount = originalKeep;
+    }
+
     void testMessageRecordProjectionHidesImageSources() {
         constexpr std::string_view kTestName = "message record projection";
         const insoulforge::json record = {
           {"time", "2026-09-07 17:22:05"},
           {"sender", {{"name", "Alice"}, {"qq", "11"}}},
           {"message_id", "7"},
+          {"reply_to", "6"},
           {"segments", {{{"type", "text"}, {"text", "看这张图"}}, {{"type", "image"}, {"image_index", 0}}}},
           {"assets", {{"images", {{{"recognition_status", "succeeded"}, {"description", "一只蓝色的猫"},
                                    {"source", {{"file", "cat.jpg"}, {"url", "https://example.com/cat.jpg"}}}}}}}},
@@ -210,6 +333,7 @@ namespace {
 
         const insoulforge::json projected = insoulforge::MessageRecord::projectForAgent(record);
         check(!projected.contains("assets"), "agent projection excludes assets", kTestName);
+        check(projected["reply_to"] == "6", "agent projection retains quoted message ID", kTestName);
         check(projected["segments"][1]["image_index"] == 0, "image index remains stable", kTestName);
         check(
           projected["segments"][1]["description"] == "一只蓝色的猫", "image description remains visible", kTestName);
@@ -350,10 +474,22 @@ namespace {
         insoulforge::ConfigStore::saveLLMConfig(
           "image", {{"apiKey", "key"}, {"baseUrl", "https://example.com"}, {"path", "/v1/chat/completions"},
                      {"model", "vision-model"}, {"maxTokens", 1536}, {"temperature", 0.4}, {"topP", 0.8},
-                     {"reasoningEffort", ""}});
+                     {"reasoningEffort", ""}, {"minConfidence", 0.2}});
+        check(!insoulforge::ConfigStore::getLLMConfig("image").contains("minConfidence"),
+          "Jev threshold is not stored with other models", kTestName);
         insoulforge::Config::instance().loadFromStorage();
         check(insoulforge::Config::instance().imageParams.maxTokens == 1536, "loads configured image max tokens",
           kTestName);
+
+        insoulforge::ConfigStore::saveLLMConfig("jev", {{"apiKey", "key"}, {"baseUrl", "https://example.com"},
+          {"path", "/decisions"}, {"model", "jev-model"}, {"minConfidence", 0.8}});
+        insoulforge::Config::instance().loadFromStorage();
+        check(insoulforge::Config::instance().jevMinConfidence == 0.8,
+          "loads configured Jev confidence threshold", kTestName);
+        insoulforge::ConfigStore::saveLLMConfig("jev", {{"apiKey", "key"}, {"baseUrl", "https://example.com"},
+          {"path", "/decisions"}, {"model", "jev-model"}});
+        check(insoulforge::ConfigStore::getLLMConfig("jev")["minConfidence"] == 0.8,
+          "saving Jev without a threshold keeps the previous value", kTestName);
         database.close();
     }
 
@@ -449,6 +585,10 @@ auto main() -> int {
     testNewWorkflowDetectsCommands();
     testMessageRecordSemanticQueries();
     testNewWorkflowRouterHardRules();
+    testJevUnconfiguredFallsBackToExistingBehavior();
+    testClassifyJevChoice();
+    testJevClientChoiceAndConfidenceParsing();
+    testRouterWindowStartIndexIsBatchedNotSliding();
     testMessageRecordProjectionHidesImageSources();
     testAssistantStickerRecordKeepsOnlyName();
     testSchemaMigration();

@@ -19,6 +19,7 @@ export interface LLMConfig {
     temperature: number
     topP: number
     reasoningEffort: string
+    minConfidence?: number
 }
 
 export interface MemoryConfig {
