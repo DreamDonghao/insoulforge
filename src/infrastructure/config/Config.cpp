@@ -45,6 +45,7 @@ namespace insoulforge {
         loadLLMConfig("executorThinking", executorThinking, &executorThinkingParams);
         loadLLMConfig("image", image, &imageParams);
         loadLLMConfig("embedding", embedding);
+        loadLLMConfig("jev", jev);
 
         // 加载记忆配置
         if (const auto memCfg = ConfigStore::getMemoryConfig(); !memCfg.is_null()) {

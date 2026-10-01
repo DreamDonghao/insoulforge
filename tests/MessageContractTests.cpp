@@ -1,12 +1,17 @@
 /// @file MessageContractTests.cpp
 /// @brief 消息链路的契约测试
 
+#include <chrono>
+#include <cstdlib>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
+#include <drogon/HttpAppFramework.h>
 #include <drogon/utils/coroutine.h>
 
 #include <agent/memory/LongTermMemoryStore.hpp>
@@ -28,6 +33,7 @@
 #include <infrastructure/config/ConfigStore.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/SchemaMigrator.hpp>
+#include <llm/JevClient.hpp>
 #include <llm/usage/UsageStore.hpp>
 #include <media/ImageDescriptionStore.hpp>
 
@@ -194,6 +200,211 @@ namespace {
         check(queuedMention.shouldReply, "queued bot mention replies despite trailing assistant message", kTestName);
 
         config.selfQQNumber = originalSelfId;
+    }
+
+    void testJevUnconfiguredFallsBackToExistingBehavior() {
+
+        auto &database = insoulforge::Database::instance();
+        database.initialize(":memory:");
+
+        constexpr std::string_view kTestName = "jev unconfigured falls back to existing behavior";
+        // 测试进程不加载配置，config.jev 全空，JevClient::isConfigured 为 false，全程不发网络。
+        // 未配置环境下兜底返回 REPLY "Router 请求失败"（fail-open），断言按此方向写。
+        const insoulforge::json plainSnapshot = insoulforge::json::array({{{"message_id", "plain"},
+          {"sender", {{"qq", "11"}}},
+          {"segments",
+            insoulforge::json::array({{{"type", "text"}, {"text", "今天天气的大家都在干什么"}}})}}});
+        const auto fallback = drogon::sync_wait(insoulforge::MessageRouter::route(100, "plain", plainSnapshot));
+        check(fallback.shouldReply, "unconfigured jev falls back to existing fail-open path", kTestName);
+        check(fallback.reason == "Router 请求失败", "fallback reason is unchanged", kTestName);
+    }
+
+    /// @brief 读取 mock 服务地址；未设置环境变量时返回 nullopt
+    /// @details Jev 优先路径的用例要发真实 HTTP，依赖外部 mock 进程。默认构建不跑
+    ///          该用例，ctest 在无 mock 环境下保持零网络。
+    std::optional<std::string> jevMockBaseUrl() {
+        const char *raw = std::getenv("INSOULFORGE_JEV_MOCK_BASE_URL");
+        if (raw == nullptr || *raw == '\0') {
+            return std::nullopt;
+        }
+        return std::string(raw);
+    }
+
+    /// @brief 在后台线程跑 drogon 事件循环，析构时停循环并 join
+    /// @details HttpUtil::send() 经 drogon::HttpClient::newHttpClient() 创建客户端，该客户端
+    ///          绑定 app() 的事件循环；循环未运行时请求不会被派发。主线程用
+    ///          drogon::sync_wait() 驱动协程，网络 IO 在本线程的循环上完成。
+    class ScopedDrogonLoop {
+    public:
+        ScopedDrogonLoop() {
+            m_thread = std::thread([] { drogon::app().run(); });
+            while (!drogon::app().getLoop()->isRunning()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+        }
+
+        ScopedDrogonLoop(const ScopedDrogonLoop &) = delete;
+        ScopedDrogonLoop &operator=(const ScopedDrogonLoop &) = delete;
+        ScopedDrogonLoop(ScopedDrogonLoop &&) = delete;
+        ScopedDrogonLoop &operator=(ScopedDrogonLoop &&) = delete;
+
+        ~ScopedDrogonLoop() {
+            drogon::app().quit();
+            if (m_thread.joinable()) {
+                m_thread.join();
+            }
+        }
+
+    private:
+        std::thread m_thread;
+    };
+
+    /// @brief 路由一条普通群消息，指定 mock 的响应路径
+    /// @param mockBaseUrl mock 服务地址
+    /// @param path mock 路径，决定本次返回的 action
+    /// @details 快照只含一条非 @提及、非系统、超过 2 个字的群消息，以绕过全部 5 条
+    ///          硬规则，进入 Jev 优先分支。
+    insoulforge::RouterDecision routeViaMockJev(const std::string &mockBaseUrl, const std::string &path) {
+        auto &config = insoulforge::Config::instance();
+        config.jev.baseUrl = mockBaseUrl;
+        config.jev.path = path;
+        config.jev.model = "typesafe/jev-1.13";
+        config.jev.apiKey = "mock-key"; // isConfigured 要求四者均非空
+
+        const insoulforge::json snapshot = insoulforge::json::array({{{"message_id", "p1"},
+          {"sender", {{"qq", "11"}, {"name", "Alice"}}},
+          {"segments", insoulforge::json::array({{{"type", "text"}, {"text", "大家周末都去哪玩"}}})}}});
+        return drogon::sync_wait(insoulforge::MessageRouter::route(100, "p1", snapshot));
+    }
+
+    /// @brief Jev 优先路径的端到端用例（需外部 mock 进程）
+    /// @details 路径与响应的对应关系定义在 tests/mock/jev_mock_server.py，两者同时修改。
+    ///          本用例走真实 HTTP 与真实计费写库，故需先建内存库。
+    void testRouteWithMockJev() {
+        constexpr std::string_view kTestName = "route with mock jev";
+        const auto mockBaseUrl = jevMockBaseUrl();
+        if (!mockBaseUrl) {
+            std::cout << "[SKIP] " << kTestName << ": INSOULFORGE_JEV_MOCK_BASE_URL 未设置\n";
+            return;
+        }
+
+        auto &config = insoulforge::Config::instance();
+        const insoulforge::LLMApiConfig originalJev = config.jev;
+        const u64 originalSelfId = config.selfQQNumber;
+        config.selfQQNumber = 42;
+
+        // JevClient::requestSystemOne() 成功后走 logUsage()，写入 llm_usage 表
+        auto &database = insoulforge::Database::instance();
+        database.initialize(":memory:");
+
+        const ScopedDrogonLoop loop;
+
+        const auto reply = routeViaMockJev(*mockBaseUrl, "/reply");
+        check(reply.shouldReply, "jev reply label yields REPLY", kTestName);
+        check(reply.reason == "Jev 优先判定", "jev decision carries its own reason", kTestName);
+        check(reply.tone == "serious", "jev tone label maps into decision", kTestName);
+        check(reply.maxLength == 50, "jev maxLength label parses to integer", kTestName);
+        check(!reply.isPrivate, "group session type is applied", kTestName);
+
+        const auto skip = routeViaMockJev(*mockBaseUrl, "/skip");
+        check(!skip.shouldReply, "jev skip label yields SKIP", kTestName);
+        check(skip.reason == "Jev 优先判定", "jev skip carries the jev reason", kTestName);
+
+        // unclear / 非 200 / answers 为空 三条路径均转入 LLM 兜底；测试环境未配置 router
+        // 模型，兜底请求失败后 fail-open 返回 REPLY "Router 请求失败"。
+        for (const std::string_view path: {"/unclear", "/error", "/malformed"}) {
+            const auto fallback = routeViaMockJev(*mockBaseUrl, std::string(path));
+            check(fallback.reason == "Router 请求失败",
+              "jev abstention falls back to the LLM path", kTestName);
+            check(fallback.shouldReply, "fallback keeps fail-open semantics", kTestName);
+        }
+
+        config.jev = originalJev;
+        config.selfQQNumber = originalSelfId;
+        database.close();
+    }
+
+    void testClassifyJevChoice() {
+        constexpr std::string_view kTestName = "classify jev choice";
+        using Action = insoulforge::RouterDecision::Action;
+
+        const auto skip = insoulforge::MessageRouter::classifyJevChoice("skip");
+        check(skip.has_value() && *skip == Action::SKIP, "skip label maps to SKIP", kTestName);
+        const auto reply = insoulforge::MessageRouter::classifyJevChoice("reply");
+        check(reply.has_value() && *reply == Action::REPLY, "reply label maps to REPLY", kTestName);
+        check(!insoulforge::MessageRouter::classifyJevChoice("unclear").has_value(),
+          "unclear label falls back to nullopt", kTestName);
+        check(!insoulforge::MessageRouter::classifyJevChoice("other").has_value(),
+          "unknown label falls back to nullopt", kTestName);
+        check(!insoulforge::MessageRouter::classifyJevChoice("").has_value(),
+          "empty label falls back to nullopt", kTestName);
+    }
+
+    void testJevClientChoiceAndConfidenceParsing() {
+        constexpr std::string_view kTestName = "jev client choice and confidence parsing";
+        const std::vector<std::string_view> validLabels{"skip", "reply", "unclear"};
+
+        const insoulforge::json ok = {
+          {"model", "typesafe/jev-1.13"},
+          {"answers", {{"action", {{"choice", "reply"}, {"confidence", 0.82}}}}},
+        };
+        const auto choice = insoulforge::JevClient::readChoice(ok, "action", validLabels);
+        check(choice.has_value() && *choice == "reply", "reads winning choice label", kTestName);
+        const auto confidence = insoulforge::JevClient::readConfidence(ok, "action");
+        check(confidence.has_value() && *confidence > 0.81 && *confidence < 0.83, "reads confidence", kTestName);
+
+        check(!insoulforge::JevClient::readChoice(ok, "missing", validLabels).has_value(),
+          "unknown question name yields nullopt", kTestName);
+        check(!insoulforge::JevClient::readChoice(insoulforge::json{{"answers", insoulforge::json::object()}},
+                 "action", validLabels)
+                 .has_value(),
+          "empty answers yields nullopt", kTestName);
+        check(!insoulforge::JevClient::readChoice(insoulforge::json::object(), "action", validLabels).has_value(),
+          "missing answers yields nullopt", kTestName);
+        check(!insoulforge::JevClient::readChoice(
+                 insoulforge::json{{"answers", {{"action", {{"choice", 42}}}}}}, "action", validLabels)
+                 .has_value(),
+          "wrong answer type yields nullopt", kTestName);
+        check(!insoulforge::JevClient::readChoice(
+                 insoulforge::json{{"answers", {{"action", {{"choice", "other"}}}}}}, "action", validLabels)
+                 .has_value(),
+          "label outside valid set yields nullopt", kTestName);
+
+        check(!insoulforge::JevClient::readConfidence(
+                 insoulforge::json{{"answers", {{"action", {{"choice", "reply"}, {"confidence", 1.5}}}}}}, "action")
+                 .has_value(),
+          "out of range confidence yields nullopt", kTestName);
+        check(!insoulforge::JevClient::readConfidence(
+                 insoulforge::json{{"answers", {{"action", {{"choice", "reply"}}}}}}, "action")
+                 .has_value(),
+          "missing confidence yields nullopt", kTestName);
+        check(!insoulforge::JevClient::readConfidence(insoulforge::json::object(), "action").has_value(),
+          "missing answers yields nullopt for confidence", kTestName);
+    }
+
+    void testRouterWindowStartIndexIsBatchedNotSliding() {
+        constexpr std::string_view kTestName = "router window start index is batched not sliding";
+        auto &config = insoulforge::Config::instance();
+        const i32 originalTrigger = config.routerWindowTriggerCount;
+        const i32 originalKeep = config.routerWindowKeepCount;
+        config.routerWindowTriggerCount = 20;
+        config.routerWindowKeepCount = 10;
+
+        // keep=10, slide=10 时窗口大小 = 10 + size % 10，因此 size 为 10 的整数倍时窗口收回到 keep。
+        // 以下用例锁住窗口的周期性：同一批次内起始下标保持不变，跨批次边界时前缀前移。
+        check(insoulforge::MessageRouter::windowStartIndex(30) == 20,
+          "window resets to keep at period boundary", kTestName);
+        check(insoulforge::MessageRouter::windowStartIndex(35) == 20,
+          "window grows within a period", kTestName);
+        check(insoulforge::MessageRouter::windowStartIndex(39) == 20,
+          "window keeps a stable prefix within a period", kTestName);
+        check(insoulforge::MessageRouter::windowStartIndex(40) == 30,
+          "next period starts a new prefix", kTestName);
+        check(insoulforge::MessageRouter::windowStartIndex(5) == 0,
+          "short snapshot starts at zero", kTestName);
+
+        config.routerWindowTriggerCount = originalTrigger;
+        config.routerWindowKeepCount = originalKeep;
     }
 
     void testMessageRecordProjectionHidesImageSources() {
@@ -449,6 +660,11 @@ auto main() -> int {
     testNewWorkflowDetectsCommands();
     testMessageRecordSemanticQueries();
     testNewWorkflowRouterHardRules();
+    testJevUnconfiguredFallsBackToExistingBehavior();
+    testRouteWithMockJev();
+    testClassifyJevChoice();
+    testJevClientChoiceAndConfidenceParsing();
+    testRouterWindowStartIndexIsBatchedNotSliding();
     testMessageRecordProjectionHidesImageSources();
     testAssistantStickerRecordKeepsOnlyName();
     testSchemaMigration();
