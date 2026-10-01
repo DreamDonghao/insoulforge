@@ -39,6 +39,7 @@ namespace insoulforge {
         LLMModelParams imageParams;
         LLMApiConfig embedding; // Embedding 模型配置（长期记忆向量化）
         LLMApiConfig jev; // Jev（System One）路由优先判断模型配置；无对应 LLMModelParams，Jev 不接受采样参数
+        f64 jevMinConfidence = 0.6; // 低于此置信度时交由 Router LLM 判断
 
         // 记忆配置
         i32 contextWindowLimit = 100; // Router、Executor 实际可见的最近消息上限

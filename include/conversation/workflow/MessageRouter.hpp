@@ -3,8 +3,9 @@
 
 #pragma once
 
-#include <drogon/utils/coroutine.h>
 #include <optional>
+
+#include <drogon/utils/coroutine.h>
 
 #include <agent/runtime/AgentTypes.hpp>
 #include <infrastructure/JsonUtil.hpp>
@@ -22,12 +23,11 @@ namespace insoulforge::MessageRouter {
 
     /// @brief 把 Jev action choice 的胜出 label 映射为路由动作
     /// @param label Jev choice 答案的胜出 label（skip / reply / unclear）
-    /// @return skip/reply 返回对应动作；unclear 或未知 label（含空串）返回
-    ///         std::nullopt 以触发 LLM 兜底
-    /// @details choice 没有官方 no-match 概念，故用显式 unclear label 表达弃权，
-    ///          不引入 confidence 数值闸门。纯函数、零阈值常量，仅依赖 label，
-    ///          独立导出以支持无网络的离线测试。
-    [[nodiscard]] auto classifyJevChoice(const std::string_view label) -> std::optional<RouterDecision::Action>;
+    /// @param confidence Jev 返回的有效置信度；缺失时不采纳 Jev 决策
+    /// @param minConfidence 配置的最低置信度
+    /// @return 达到阈值的 skip/reply 返回对应动作；否则交给 LLM 判断
+    [[nodiscard]] auto classifyJevChoice(std::string_view label, std::optional<double> confidence, f64 minConfidence)
+      -> std::optional<RouterDecision::Action>;
 
     /// @brief 计算 Router 上下文窗口的起始下标
     /// @param snapshotSize 完整快照的消息条数

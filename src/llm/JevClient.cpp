@@ -2,6 +2,7 @@
 /// @brief Jev（TypeSafe AI System One）客户端 - 实现
 
 #include <algorithm>
+#include <cmath>
 
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
@@ -12,23 +13,14 @@
 
 namespace insoulforge::JevClient {
     namespace {
-        /// @brief Jev 请求超时（秒）
-        /// @details 显著短于 LlmClient 的 90s：优先路径失败后还要走兜底，
-        ///          10s 上限为兜底留出延迟预算。
+        /// @brief Jev 请求超时（秒），为 LLM 兜底预留时间。
         constexpr f64 kJevTimeoutSeconds = 10.0;
 
         /// @brief 日志中错误响应体的截断长度
         constexpr size_t kErrorBodyMaxChars = 500;
 
-        /// @brief 从响应中取出指定问题名对应的 answer 对象
-        /// @return answer 非对象或问题名不存在时返回 null
         [[nodiscard]] auto findAnswer(const json &response, const std::string &questionName) -> const json & {
-            const json &answers = atOrNull(response, "answers");
-            if (!answers.is_object()) {
-                static const json kNull;
-                return kNull;
-            }
-            return atOrNull(answers, questionName.c_str());
+            return atOrNull(atOrNull(response, "answers"), questionName.c_str());
         }
     } // namespace
 
@@ -43,12 +35,8 @@ namespace insoulforge::JevClient {
             co_return std::nullopt;
         }
 
-        json body;
-        body["state"] = std::move(state);
-        body["model"] = api.model;
-        body["questions"] = std::move(questions);
+        json body{{"state", std::move(state)}, {"model", api.model}, {"questions", std::move(questions)}};
 
-        // 不重试：jev API调用不涉及retry
         const auto resp =
           co_await HttpUtil::send("Jev", api.baseUrl, api.path, drogon::Post, std::move(body), api.apiKey,
             kJevTimeoutSeconds, sessionId);
@@ -76,13 +64,11 @@ namespace insoulforge::JevClient {
             co_return std::nullopt;
         }
 
-        // 用量记账：将jev模型response中有关计费的字段映射到现有计费逻辑的字段集中避免现有字段集膨胀
+        // Jev 与聊天模型的用量字段不同，只转换记账所需的字段。
         const i32 inputTokens = getInt(atOrNull(parsed, "usage"), "input_tokens");
         const i32 outputTokens = getInt(atOrNull(parsed, "usage"), "output_tokens");
-        json usageForAccounting = parsed;
-        usageForAccounting["usage"] = {{"prompt_tokens", inputTokens}, {"completion_tokens", outputTokens},
-          {"total_tokens", inputTokens + outputTokens}};
-        // 记账用响应回传的真实 model 版本，而非配置里可能是别名的模型名。
+        const json usageForAccounting = {{"usage", {{"prompt_tokens", inputTokens}, {"completion_tokens", outputTokens},
+                                                     {"total_tokens", inputTokens + outputTokens}}}};
         LlmClient::logUsage(usageForAccounting, getStr(parsed, "model", api.model), "jev", sessionId);
 
         co_return parsed;
@@ -92,10 +78,7 @@ namespace insoulforge::JevClient {
       const json &response, const std::string &questionName, const std::vector<std::string_view> &validLabels)
       -> std::optional<std::string> {
         const json &answer = findAnswer(response, questionName);
-        if (!answer.is_object() || !answer.contains("choice")) {
-            return std::nullopt;
-        }
-        const json &choiceValue = answer["choice"];
+        const json &choiceValue = atOrNull(answer, "choice");
         if (!choiceValue.is_string()) {
             return std::nullopt;
         }
@@ -111,15 +94,12 @@ namespace insoulforge::JevClient {
 
     auto readConfidence(const json &response, const std::string &questionName) -> std::optional<double> {
         const json &answer = findAnswer(response, questionName);
-        if (!answer.is_object() || !answer.contains("confidence")) {
-            return std::nullopt;
-        }
-        const json &confidenceValue = answer["confidence"];
+        const json &confidenceValue = atOrNull(answer, "confidence");
         if (!confidenceValue.is_number()) {
             return std::nullopt;
         }
         const f64 confidence = confidenceValue.get<double>();
-        if (confidence < 0.0 || confidence > 1.0) {
+        if (!std::isfinite(confidence) || confidence < 0.0 || confidence > 1.0) {
             return std::nullopt;
         }
         return confidence;

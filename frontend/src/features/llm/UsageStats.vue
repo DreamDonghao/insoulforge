@@ -65,6 +65,7 @@ const fmtPct = (n: number): string => n.toFixed(1) + '%'
 
 const roleLabels: Record<string, string> = {
   router: 'Router',
+  jev: 'Jev',
   executor: 'Executor',
   executorThinking: 'Executor思考',
   memory: 'Memory',

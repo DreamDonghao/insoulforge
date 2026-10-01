@@ -1,6 +1,8 @@
 /// @file ConfigStore.cpp
 /// @brief 全局配置文件存储 - 实现
 
+#include <algorithm>
+#include <cmath>
 #include <fstream>
 
 #include <infrastructure/NumericTypes.hpp>
@@ -31,17 +33,10 @@ namespace insoulforge::ConfigStore {
             return {{"apiKey", ""}, {"baseUrl", ""}, {"path", "/embeddings"}, {"model", ""}};
         }
 
-        /// @brief Jev（System One）路由优先判断的默认配置
-        /// @details 默认指向 OpenRouter decisions 端点：baseUrl + path 经
-        ///          HttpUtil::normalizeTarget() 合并为实际请求 host https://openrouter.ai
-        ///          + path /api/alpha/decisions。该端点是 TypeSafe 原生 schema 的纯
-        ///          passthrough，直连 TypeSafe 只需改 baseUrl/path 两个配置值，代码无
-        ///          需任何 provider 分支。apiKey 默认空串：JevClient::isConfigured 额外
-        ///          校验 apiKey。默认配置下地址/路径/模型名均非空，缺少该校验时空 apiKey
-        ///          被判为“已配置”，请求以 401 结束。
+        /// @brief 默认使用 OpenRouter Decisions API；密钥留空时不启用 Jev。
         auto defaultJevConfig() -> json {
             return {{"apiKey", ""}, {"baseUrl", "https://openrouter.ai/api/alpha"}, {"path", "/decisions"},
-              {"model", "~typesafe/jev-latest"}};
+              {"model", "~typesafe/jev-latest"}, {"minConfidence", 0.6}};
         }
 
         auto defaultConfig() -> json {
@@ -102,7 +97,7 @@ namespace insoulforge::ConfigStore {
                     modelConfig.erase("top_P");
                     changed = true;
                 }
-                if (entry.key() == "embedding") {
+                if (entry.key() == "embedding" || entry.key() == "jev") {
                     changed = modelConfig.erase("maxTokens") > 0 || changed;
                     changed = modelConfig.erase("temperature") > 0 || changed;
                     changed = modelConfig.erase("topP") > 0 || changed;
@@ -221,13 +216,21 @@ namespace insoulforge::ConfigStore {
         json llm = getSection("llm");
         json persistedConfig = config;
         persistedConfig.erase("name");
-        persistedConfig["topP"] = getDouble(config, "topP", getDouble(config, "top_P", 0.9));
         persistedConfig.erase("top_P");
         if (name == "embedding" || name == "jev") {
             persistedConfig.erase("maxTokens");
             persistedConfig.erase("temperature");
             persistedConfig.erase("topP");
             persistedConfig.erase("reasoningEffort");
+            if (name == "jev") {
+                const f64 confidence = getDouble(config, "minConfidence", getDouble(atOrNull(llm, "jev"), "minConfidence", 0.6));
+                persistedConfig["minConfidence"] = std::isfinite(confidence) ? std::clamp(confidence, 0.0, 1.0) : 0.6;
+            }
+        } else {
+            persistedConfig["topP"] = getDouble(config, "topP", getDouble(config, "top_P", 0.9));
+        }
+        if (name != "jev") {
+            persistedConfig.erase("minConfidence");
         }
         llm[name] = std::move(persistedConfig);
         saveSection("llm", std::move(llm));

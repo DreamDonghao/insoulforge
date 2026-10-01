@@ -1,6 +1,8 @@
 /// @file Config.cpp
 /// @brief 全局配置管理 - 实现
 
+#include <cmath>
+
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/config/ConfigStore.hpp>
 #include <infrastructure/logging/Logger.hpp>
@@ -46,6 +48,11 @@ namespace insoulforge {
         loadLLMConfig("image", image, &imageParams);
         loadLLMConfig("embedding", embedding);
         loadLLMConfig("jev", jev);
+        const f64 configuredJevConfidence = getDouble(ConfigStore::getLLMConfig("jev"), "minConfidence", 0.6);
+        jevMinConfidence = std::isfinite(configuredJevConfidence) && configuredJevConfidence >= 0.0 &&
+                             configuredJevConfidence <= 1.0
+                             ? configuredJevConfidence
+                             : 0.6;
 
         // 加载记忆配置
         if (const auto memCfg = ConfigStore::getMemoryConfig(); !memCfg.is_null()) {
