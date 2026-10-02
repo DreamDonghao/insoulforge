@@ -22,6 +22,8 @@
     --text-primary: #1d222c;
     --text-secondary: #5d6776;
     --text-light: #99a2b0;
+    --selection-bg: #c7d2fe;
+    --selection-text: #1d222c;
 
     /* 边框 */
     --border: #e5e8ee;
@@ -87,6 +89,8 @@
     --text-primary: #e7eaf1;
     --text-secondary: #9aa3b4;
     --text-light: #5f6879;
+    --selection-bg: #4f5bb8;
+    --selection-text: #ffffff;
 
     --border: rgba(255, 255, 255, 0.08);
     --border-strong: rgba(255, 255, 255, 0.15);
@@ -142,7 +146,8 @@ body {
 }
 
 ::selection {
-    background: var(--primary-soft);
+    background: var(--selection-bg);
+    color: var(--selection-text);
 }
 
 code {
