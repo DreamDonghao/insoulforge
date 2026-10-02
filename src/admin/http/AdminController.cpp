@@ -760,9 +760,6 @@ auto AdminController::saveMemoryConfig(HttpRequestPtr req, std::function<void(co
     if (getInt(*body, "memorySummaryContextCount") < 0) {
         (*body)["memorySummaryContextCount"] = Config::instance().memorySummaryContextCount;
     }
-    if (getInt(*body, "memoryExtractMaxTokens") <= 0) {
-        (*body)["memoryExtractMaxTokens"] = Config::instance().memoryExtractMaxTokens;
-    }
     // Router 子窗口校验: 保留条数必须小于触发条数
     if (getInt(*body, "routerWindowTriggerCount") <= 0) {
         (*body)["routerWindowTriggerCount"] = Config::instance().routerWindowTriggerCount;
@@ -788,7 +785,6 @@ auto AdminController::saveMemoryConfig(HttpRequestPtr req, std::function<void(co
     config.memorySummaryTriggerCount = getInt(*body, "memorySummaryTriggerCount");
     config.memorySummaryBatchSize = getInt(*body, "memorySummaryBatchSize");
     config.memorySummaryContextCount = getInt(*body, "memorySummaryContextCount");
-    config.memoryExtractMaxTokens = getInt(*body, "memoryExtractMaxTokens");
     config.routerWindowTriggerCount = getInt(*body, "routerWindowTriggerCount");
     config.routerWindowKeepCount = getInt(*body, "routerWindowKeepCount");
     config.shortTermMemoryMax = getInt(*body, "shortTermMemoryMax");

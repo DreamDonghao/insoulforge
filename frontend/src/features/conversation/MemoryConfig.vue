@@ -13,7 +13,6 @@ const memoryConfig = reactive<MemoryConfig>({
   memorySummaryTriggerCount: 100,
   memorySummaryBatchSize: 50,
   memorySummaryContextCount: 10,
-  memoryExtractMaxTokens: 4000,
   routerWindowTriggerCount: 20,
   routerWindowKeepCount: 10,
   shortTermMemoryMax: 15,
@@ -83,13 +82,6 @@ const saveMemoryConfig = async (): Promise<void> => {
           <label class="form-label">总结补充上下文条数</label>
           <input v-model="memoryConfig.memorySummaryContextCount" class="form-input" min="0" type="number">
           <p class="form-hint">仅帮助理解被总结消息的后续语境，不会被提取或删除</p>
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">记忆提取 maxTokens</label>
-          <input v-model="memoryConfig.memoryExtractMaxTokens" class="form-input" type="number">
-          <p class="form-hint">记忆提取 LLM 调用的输出 token 上限</p>
         </div>
       </div>
       <div class="form-row">

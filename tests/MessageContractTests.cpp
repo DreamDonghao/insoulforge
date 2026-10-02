@@ -1,6 +1,9 @@
 /// @file MessageContractTests.cpp
 /// @brief 消息链路的契约测试
 
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <optional>
@@ -452,6 +455,25 @@ namespace {
         database.close();
     }
 
+    void testMemoryModelConfigMigration() {
+        constexpr std::string_view kTestName = "memory model config migration";
+        const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
+        const auto path = std::filesystem::temp_directory_path() /
+                          ("insoulforge-memory-config-test-" + std::to_string(suffix) + ".json");
+        {
+            std::ofstream output(path);
+            output << R"({"llm":{"executor":{"apiKey":"old-key","baseUrl":"https://old.example.com/v1","path":"/chat/completions","model":"old-model","maxTokens":150,"temperature":0.7,"topP":0.9,"reasoningEffort":""}},"memory":{"memoryExtractMaxTokens":8192}})";
+        }
+        insoulforge::ConfigStore::initialize(path.string());
+        const auto memory = insoulforge::ConfigStore::getLLMConfig("memory");
+        check(memory.value("model", "") == "old-model", "inherits executor model", kTestName);
+        check(memory.value("maxTokens", 0) == 8192, "preserves old memory token limit", kTestName);
+        check(memory.value("temperature", 0.0) == 0.4, "preserves extraction sampling temperature", kTestName);
+        check(!insoulforge::ConfigStore::getMemoryConfig().contains("memoryExtractMaxTokens"),
+          "removes legacy token field", kTestName);
+        std::filesystem::remove(path);
+    }
+
     void testImageDescriptionCacheStore() {
         constexpr std::string_view kTestName = "image description cache store";
         auto &database = insoulforge::Database::instance();
@@ -480,6 +502,18 @@ namespace {
         insoulforge::Config::instance().loadFromStorage();
         check(insoulforge::Config::instance().imageParams.maxTokens == 1536, "loads configured image max tokens",
           kTestName);
+
+        insoulforge::ConfigStore::saveLLMConfig("memory", {{"apiKey", "memory-key"},
+          {"baseUrl", "https://memory.example.com/v1"}, {"path", "/chat/completions"},
+          {"model", "memory-model"}, {"maxTokens", 2048}, {"temperature", 0.4}, {"topP", 0.9},
+          {"reasoningEffort", "none"}});
+        insoulforge::Config::instance().loadFromStorage();
+        check(insoulforge::Config::instance().memory.model == "memory-model",
+          "loads independent memory model", kTestName);
+        check(insoulforge::Config::instance().memoryParams.maxTokens == 2048,
+          "loads independent memory token limit", kTestName);
+        check(insoulforge::Config::instance().memory.reasoningEffort == "none",
+          "loads memory reasoning effort", kTestName);
 
         insoulforge::ConfigStore::saveLLMConfig("jev", {{"apiKey", "key"}, {"baseUrl", "https://example.com"},
           {"path", "/decisions"}, {"model", "jev-model"}, {"minConfidence", 0.8}});
@@ -594,6 +628,7 @@ auto main() -> int {
     testSchemaMigration();
     testMemoryMaintenanceStore();
     testConversationMaintenanceStore();
+    testMemoryModelConfigMigration();
     testImageDescriptionCacheStore();
     testUsageSummaryUsesLatestRoleModel();
     testMessageListSnapshotsAndPersistence();

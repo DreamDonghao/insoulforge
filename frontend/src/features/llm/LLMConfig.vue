@@ -8,22 +8,24 @@ import type {ApiResponse, LLMConfig} from '../../vite-env'
 
 const showToast = inject<(msg: string, isError?: boolean) => void>('showToast')
 
-const llmNames = ['router', 'jev', 'executor', 'executorThinking', 'image', 'embedding']
+const llmNames = ['router', 'jev', 'executor', 'executorThinking', 'image', 'memory', 'embedding']
 const llmLabels: Record<string, string> = {
   router: 'Router',
   jev: 'Jev',
   executor: 'Executor',
   executorThinking: 'Executor思考',
   image: 'Image',
+  memory: 'Memory',
   embedding: 'Embedding'
 }
-// 各配置的实际用途（与后端代码一致；requestLLM 统一走 executor 配置）
+// 各配置的实际用途（与后端代码一致）
 const llmUsages: Record<string, string> = {
   router: '用途：Jev 未配置、结果不确定或请求失败时的回复决策',
   jev: '用途：群聊的优先回复决策；低置信度时由 Router 再判断',
-  executor: '用途：回复生成、记忆提取、好感度评分（三者共用此模型）',
+  executor: '用途：回复生成与好感度评分',
   executorThinking: '用途：深度思考模式的分析阶段（最终执行仍走 Executor）',
   image: '用途：图片识别与描述',
+  memory: '用途：记忆提取与整理',
   embedding: '用途：长期记忆向量化（记忆写入与检索时计算文本向量）'
 }
 const selectedLLM: Ref<string> = ref('router')

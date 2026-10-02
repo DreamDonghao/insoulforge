@@ -278,7 +278,7 @@ MessageService → OneBot API
   召回相似长期记忆，用于合并、去重和替换。embedding 完成后，在同一事务中更新短期记忆、写入长期记忆、删除被取代条目并确认任务完成。只有该任务成功并确认后，
   `MessageList` 才删除对应的最旧前缀。
 - **好感度维护**：`AffinityMaintenanceService` 消费同一待总结批次，但独立评估、重试和恢复；任务完成时以事务应用分数并删除任务，避免重试重复叠加。
-- 记忆提取与合并复用 executor 模型（`LlmClient::requestLLM`）；向量化使用独立 embedding 配置（
+- 记忆提取与整理使用独立 memory 模型（`LlmClient::requestMemory`）；向量化使用独立 embedding 配置（
   `LlmClient::requestEmbedding`）。`recall_memory` 工具按余弦相似度（阈值 0.3）检索长期记忆，Router 另有
   `routerWindowTriggerCount` / `routerWindowKeepCount` 子窗口参数。
 - **被动召回**：消息预处理阶段从文本段和成功图片描述构建查询，命中结果直接写入当前完整消息的 `memories` 字段；该字段随快照进入
@@ -287,7 +287,7 @@ MessageService → OneBot API
 
 ### 配置系统
 
-`ConfigStore` 将 LLM API 配置（router / jev / executor / executorThinking / image / embedding）、QQ Bot 配置和记忆参数统一写入
+`ConfigStore` 将 LLM API 配置（router / jev / executor / executorThinking / image / memory / embedding）、QQ Bot 配置和记忆参数统一写入
 `data/config.json`。聊天模型可设置 `maxTokens`、`temperature`、`topP` 和 `reasoningEffort`；Embedding 与 Jev 不使用这些采样参数。
 Jev 默认指向 OpenRouter Decisions API，API Key 默认为空，因此默认不启用；其 `minConfidence` 默认 0.6，限制在 0～1，
 可在管理后台修改并即时更新运行时配置。启动时若文件不存在则创建默认配置；若

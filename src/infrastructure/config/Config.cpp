@@ -10,7 +10,7 @@
 namespace insoulforge {
     namespace {
         /// @brief 从配置文件加载单个 LLM 配置
-        /// @param name 配置名（router/executor/executorThinking/image）
+        /// @param name 配置名（router/executor/executorThinking/image/memory 等）
         /// @param apiConfig 输出的 API 配置
         /// @param modelParams 模型参数（可为 nullptr，表示不加载）
         void loadLLMConfig(
@@ -46,6 +46,7 @@ namespace insoulforge {
         loadLLMConfig("executor", executor, &executorParams);
         loadLLMConfig("executorThinking", executorThinking, &executorThinkingParams);
         loadLLMConfig("image", image, &imageParams);
+        loadLLMConfig("memory", memory, &memoryParams);
         loadLLMConfig("embedding", embedding);
         loadLLMConfig("jev", jev);
         const f64 configuredJevConfidence = getDouble(ConfigStore::getLLMConfig("jev"), "minConfidence", 0.6);
@@ -60,7 +61,6 @@ namespace insoulforge {
             memorySummaryTriggerCount = getInt(memCfg, "memorySummaryTriggerCount");
             memorySummaryBatchSize = getInt(memCfg, "memorySummaryBatchSize");
             memorySummaryContextCount = getInt(memCfg, "memorySummaryContextCount");
-            memoryExtractMaxTokens = getInt(memCfg, "memoryExtractMaxTokens");
             routerWindowTriggerCount = getInt(memCfg, "routerWindowTriggerCount");
             routerWindowKeepCount = getInt(memCfg, "routerWindowKeepCount");
             shortTermMemoryMax = getInt(memCfg, "shortTermMemoryMax");

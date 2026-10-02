@@ -43,14 +43,15 @@ namespace insoulforge::ConfigStore {
             return {
               {"llm", {{"router", defaultChatConfig(100, 0.3, 0.9)}, {"executor", defaultChatConfig(150, 0.7, 0.9)},
                         {"executorThinking", defaultChatConfig(512, 0.7, 0.9)},
-                        {"image", defaultChatConfig(1024, 0.7, 0.9)}, {"embedding", defaultEmbeddingConfig()},
+                        {"image", defaultChatConfig(1024, 0.7, 0.9)}, {"memory", defaultChatConfig(4000, 0.4, 0.9)},
+                        {"embedding", defaultEmbeddingConfig()},
                         {"jev", defaultJevConfig()}}},
               {"qq", {{"accessToken", ""}, {"selfQQNumber", 0}, {"oneBotTransport", "websocket"},
                        {"qqHttpHost", "http://127.0.0.1:3000"}, {"qqWebSocketHost", "ws://127.0.0.1:3001"},
                        {"botName", "机器人"}}},
               {"memory",
                 {{"contextWindowLimit", 100}, {"memorySummaryTriggerCount", 100}, {"memorySummaryBatchSize", 50},
-                  {"memorySummaryContextCount", 10}, {"memoryExtractMaxTokens", 4000}, {"routerWindowTriggerCount", 20},
+                  {"memorySummaryContextCount", 10}, {"routerWindowTriggerCount", 20},
                   {"routerWindowKeepCount", 10}, {"shortTermMemoryMax", 15}, {"longTermRecallThreshold", 0.65},
                   {"longTermInjectThreshold", 0.45}}}};
         }
@@ -82,9 +83,26 @@ namespace insoulforge::ConfigStore {
         auto migrateLegacyFields(json &config) -> bool {
             bool changed = false;
             changed = config.erase("version") > 0;
-            const auto llm = config.find("llm");
+            auto llm = config.find("llm");
             if (llm == config.end() || !llm->is_object())
                 return false;
+
+            if (!llm->contains("memory")) {
+                json memoryConfig = llm->value("executor", defaultChatConfig(4000, 0.4, 0.9));
+                if (!memoryConfig.is_object()) {
+                    memoryConfig = defaultChatConfig(4000, 0.4, 0.9);
+                }
+                const json &legacyMemory = atOrNull(config, "memory");
+                const i32 maxTokens = getInt(legacyMemory, "memoryExtractMaxTokens", 4000);
+                memoryConfig["maxTokens"] = maxTokens > 0 ? maxTokens : 4000;
+                memoryConfig["temperature"] = 0.4;
+                memoryConfig["topP"] = 0.9;
+                (*llm)["memory"] = std::move(memoryConfig);
+                changed = true;
+            }
+            if (auto memory = config.find("memory"); memory != config.end() && memory->is_object()) {
+                changed = memory->erase("memoryExtractMaxTokens") > 0 || changed;
+            }
 
             for (auto &entry: llm->items()) {
                 auto &modelConfig = entry.value();
