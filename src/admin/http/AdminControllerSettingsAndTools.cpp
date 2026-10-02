@@ -62,6 +62,7 @@ auto AdminController::saveLLMConfig(
         .params = &config.executorThinkingParams,
         .defaultMaxTokens = 512},
       ConfigTarget{.name = "image", .api = &config.image, .params = &config.imageParams, .defaultMaxTokens = 1024},
+      ConfigTarget{.name = "memory", .api = &config.memory, .params = &config.memoryParams, .defaultMaxTokens = 4000},
       ConfigTarget{.name = "embedding", .api = &config.embedding, .params = nullptr, .defaultMaxTokens = 0},
       // Jev 同 embedding 一样无采样参数，补进目标列表使保存后即时生效，无需重启。
       ConfigTarget{.name = "jev", .api = &config.jev, .params = nullptr, .defaultMaxTokens = 0},

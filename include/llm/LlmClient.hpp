@@ -45,7 +45,7 @@ namespace insoulforge::LlmClient {
       const LLMModelParams &params, json messages, json tools = {}, u64 sessionId = 0)
       -> drogon::Task<std::optional<json>>;
 
-    /// @brief 请求 LLM API（使用 Executor 配置）
+    /// @brief 请求 LLM API（使用 Executor 配置；好感度维护等调用方使用）
     /// @param messages 消息列表
     /// @param temperature 温度参数
     /// @param top_p Top-P 采样参数
@@ -57,6 +57,9 @@ namespace insoulforge::LlmClient {
     auto requestLLM(json messages, f64 temperature = 1.35, f64 top_p = 0.92, i32 max_tokens = 1024,
       std::string role = "memory", std::optional<u64> sessionId = std::nullopt, f64 timeoutSeconds = 180.0)
       -> drogon::Task<std::optional<std::string>>;
+
+    /// @brief 使用独立的 Memory 模型配置进行记忆提取和整理。
+    auto requestMemory(json messages, u64 sessionId) -> drogon::Task<std::optional<std::string>>;
 
     /// @brief 从 API 响应中提取 usage 信息并输出缓存命中率日志
     /// @param responseJson API 返回的完整 JSON

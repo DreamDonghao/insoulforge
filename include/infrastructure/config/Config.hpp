@@ -37,6 +37,8 @@ namespace insoulforge {
         LLMModelParams executorThinkingParams;
         LLMApiConfig image;
         LLMModelParams imageParams;
+        LLMApiConfig memory; // 记忆提取与整理模型配置
+        LLMModelParams memoryParams;
         LLMApiConfig embedding; // Embedding 模型配置（长期记忆向量化）
         LLMApiConfig jev; // Jev（System One）路由优先判断模型配置；无对应 LLMModelParams，Jev 不接受采样参数
         f64 jevMinConfidence = 0.6; // 低于此置信度时交由 Router LLM 判断
@@ -46,7 +48,6 @@ namespace insoulforge {
         i32 memorySummaryTriggerCount = 100; // 达到该条数时创建一批记忆总结任务
         i32 memorySummaryBatchSize = 50; // 每批实际总结并在成功后删除的最旧消息数
         i32 memorySummaryContextCount = 10; // 仅供总结理解上下文、不参与提取的后续消息数
-        i32 memoryExtractMaxTokens = 4000; // 记忆提取 LLM 调用的 maxTokens
         i32 routerWindowTriggerCount = 20; // Router 子窗口触发条数（批量滑动）
         i32 routerWindowKeepCount = 10; // Router 子窗口保留条数
         i32 shortTermMemoryMax = 15; // 注入上下文的短期记忆条数上限

@@ -95,7 +95,7 @@ namespace insoulforge {
             return parsed;
         }
 
-        auto extractMemories(std::string records, std::string context, const i32 maxTokens, const u64 sessionId)
+        auto extractMemories(std::string records, std::string context, const u64 sessionId)
           -> drogon::Task<std::optional<std::vector<std::string>>> {
             const json messages = json::array({
               {{"role", "system"}, {"content", R"(你是一个【群聊记忆提取器】。从群聊记录中提取值得记住的信息。
@@ -109,9 +109,8 @@ namespace insoulforge {
                 {"content", "=== 待提取消息 ===\n" + std::move(records) + "\n=== 补充上下文（不得提取） ===\n" +
                               std::move(context) + "\n\n请输出提取结果 JSON："}},
             });
-            const auto parsed =
-              parseLlmJson(co_await LlmClient::requestLLM(messages, 0.4f, 0.9f, maxTokens, "memory", sessionId),
-                "记忆提取", sessionId);
+            const auto parsed = parseLlmJson(co_await LlmClient::requestMemory(messages, sessionId),
+              "记忆提取", sessionId);
             if (!parsed) {
                 co_return std::nullopt;
             }
@@ -204,8 +203,7 @@ namespace insoulforge {
                               numberedLines(newMemories) + "\n=== 召回的长期记忆 ===\n" + recalledText +
                               "\n请输出整理结果 JSON："}},
             });
-            const auto parsed = parseLlmJson(
-              co_await LlmClient::requestLLM(messages, 0.3f, 0.9f, config.memoryExtractMaxTokens, "memory", sessionId),
+            const auto parsed = parseLlmJson(co_await LlmClient::requestMemory(messages, sessionId),
               "记忆整理", sessionId);
             if (!parsed || !atOrNull(*parsed, "shortTerm").is_array()) {
                 Logger::warn(sessionId, "Memory", fmt::format("记忆整理: 输出缺少 shortTerm 数组"));
@@ -288,7 +286,7 @@ namespace insoulforge {
             }
             projectRecordsForMemory(contextRecords);
             const auto extracted = co_await extractMemories(formatRecordsText(records),
-              formatRecordsText(contextRecords), config.memoryExtractMaxTokens, job.sessionId);
+              formatRecordsText(contextRecords), job.sessionId);
             if (!extracted) {
                 co_return false;
             }

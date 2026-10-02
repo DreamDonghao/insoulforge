@@ -28,10 +28,8 @@ namespace insoulforge {
         auto isRetryableStatus(const i32 status) -> bool { return status == 503 || status == 429 || status == 500; }
 
         /// @brief 通用 API 请求函数
-        auto requestStr(json messages, std::string base_url, std::string path, std::string api_key, std::string model,
-          const f64 temperature, const f64 top_p, const i32 max_tokens, std::string role,
+        auto requestStr(json messages, LLMApiConfig api, LLMModelParams params, std::string role,
           const std::optional<u64> sessionId, const f64 timeoutSeconds) -> drogon::Task<std::optional<std::string>> {
-            const LLMApiConfig api{.apiKey = api_key, .baseUrl = base_url, .path = path, .model = model};
             if (!LlmClient::isConfigured(api)) {
                 if (sessionId) {
                     Logger::warn(*sessionId, "LLM", fmt::format("未配置服务地址、请求路径或模型名，跳过请求"));
@@ -40,10 +38,9 @@ namespace insoulforge {
                 }
                 co_return std::nullopt;
             }
-            const LLMModelParams params{.maxTokens = max_tokens, .temperature = temperature, .topP = top_p};
             json body = LlmClient::buildChatRequestBody(api, params, std::move(messages));
-            const auto resp = co_await HttpUtil::send("LLM", std::move(base_url), std::move(path), drogon::Post,
-              std::move(body), std::move(api_key), timeoutSeconds, sessionId);
+            const auto resp = co_await HttpUtil::send("LLM", api.baseUrl, api.path, drogon::Post,
+              std::move(body), api.apiKey, timeoutSeconds, sessionId);
             if (!resp) {
                 co_return std::nullopt;
             }
@@ -60,7 +57,7 @@ namespace insoulforge {
                 co_return std::nullopt;
             }
 
-            LlmClient::logUsage(*respJson, model, role, sessionId);
+            LlmClient::logUsage(*respJson, api.model, role, sessionId);
 
             // validChatJson 已校验 choices 为非空数组
             const json &message = atOrNull((*respJson)["choices"][0], "message");
@@ -143,9 +140,15 @@ namespace insoulforge {
       std::string role, const std::optional<u64> sessionId, const f64 timeoutSeconds)
       -> drogon::Task<std::optional<std::string>> {
         const auto &config = Config::instance();
-        co_return co_await requestStr(std::move(messages), config.executor.baseUrl, config.executor.path,
-          config.executor.apiKey, config.executor.model, temperature, top_p, max_tokens, std::move(role), sessionId,
+        const LLMModelParams params{.maxTokens = max_tokens, .temperature = temperature, .topP = top_p};
+        co_return co_await requestStr(std::move(messages), config.executor, params, std::move(role), sessionId,
           timeoutSeconds);
+    }
+
+    auto LlmClient::requestMemory(json messages, const u64 sessionId)
+      -> drogon::Task<std::optional<std::string>> {
+        const auto &config = Config::instance();
+        co_return co_await requestStr(std::move(messages), config.memory, config.memoryParams, "memory", sessionId, 180.0);
     }
 
     auto LlmClient::requestEmbedding(std::string text, const std::optional<u64> sessionId)

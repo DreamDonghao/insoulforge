@@ -27,7 +27,6 @@ export interface MemoryConfig {
     memorySummaryTriggerCount: number
     memorySummaryBatchSize: number
     memorySummaryContextCount: number
-    memoryExtractMaxTokens: number
     routerWindowTriggerCount: number
     routerWindowKeepCount: number
     shortTermMemoryMax: number
