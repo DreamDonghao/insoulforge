@@ -11,16 +11,6 @@
 namespace insoulforge {
     namespace {
         constexpr size_t kMaxEntries = 50;
-        constexpr size_t kMaxBodySize = 1024 * 1024; // 单条请求/响应体上限
-
-        auto capBody(std::string body) -> std::string {
-            if (body.size() > kMaxBodySize) {
-                body.resize(kMaxBodySize);
-                body += "…(超出上限截断)";
-            }
-            return body;
-        }
-
         auto formatNow() -> std::string {
             const auto time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
             std::tm localTime{};
@@ -42,9 +32,6 @@ namespace insoulforge {
 
     void HttpTrace::append(HttpTraceEntry entry) {
         entry.timestamp = formatNow();
-        entry.requestBody = capBody(std::move(entry.requestBody));
-        entry.responseBody = capBody(std::move(entry.responseBody));
-
         std::lock_guard lock(m_mutex);
         entry.id = m_nextId++;
         if (m_entries.size() >= kMaxEntries) {
@@ -65,6 +52,17 @@ namespace insoulforge {
                 break;
         }
         return result;
+    }
+
+    auto HttpTrace::find(const u64 id) const -> std::optional<HttpTraceEntry> {
+        std::lock_guard lock(m_mutex);
+        for (const auto &entry: m_entries | std::views::reverse) {
+            if (entry.id == id)
+                return entry;
+            if (entry.id < id)
+                break;
+        }
+        return std::nullopt;
     }
 
     auto HttpTrace::size() const -> size_t {
