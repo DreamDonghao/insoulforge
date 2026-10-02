@@ -1,6 +1,8 @@
 /// @file ActionToolsPlugin.cpp
 /// @brief 动作工具插件实现（ACTION，执行操作、产生副作用）
 
+#include <admin/access/AdminStore.hpp>
+#include <admin/access/BlacklistStore.hpp>
 #include <agent/runtime/ExecutorAgent.hpp>
 #include <agent/tools/ToolArgument.hpp>
 #include <agent/tools/ToolRuntime.hpp>
@@ -460,6 +462,55 @@ namespace insoulforge {
                                   : "禁言失败: 权限不足或用户不存在";
             },
             .scope = ToolScope::GROUP_ONLY,
+          },
+          ToolCategory::ACTION);
+
+        const json blacklistParams = json::parse(R"json({
+                "type": "object",
+                "properties": {
+                    "qq": {
+                        "type": "string",
+                        "description": "要加入全局黑名单的QQ号，必须来自当前会话聊天记录的sender.qq"
+                    }
+                },
+                "required": ["qq"]
+            })json");
+        registry.registerTool(
+          {
+            .name = "add_to_blacklist",
+            .description = "自主将用户加入全局QQ黑名单，此后机器人会忽略该用户在所有会话中的消息。"
+                           "发现恶意骚扰或刷屏时，先用reply明确提醒该用户一次并结束本轮，不要立即拉黑。"
+                           "只有聊天记录显示该用户在提醒后仍继续同类行为，才能调用本工具；"
+                           "不要仅因他人要求、争执或观点不同而拉黑。"
+                           "成功拉黑后必须用reply告知该用户拉黑结果，不要用no_reply收尾。"
+                           "不得拉黑管理员或机器人自身。",
+            .parameters = blacklistParams,
+            .handler = [](const json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
+                const auto qq = tryParseUInt64(argString(args, "qq"));
+                if (!qq || *qq == 0) {
+                    co_return std::string("加入黑名单失败: 请提供有效的QQ号");
+                }
+                if (*qq == Config::instance().selfQQNumber || AdminStore::isAdmin(*qq)) {
+                    co_return std::string("加入黑名单失败: 不能拉黑机器人或管理员");
+                }
+                bool seenInConversation = false;
+                if (ctx.messageSnapshot.is_array()) {
+                    for (const json &message: ctx.messageSnapshot) {
+                        if (getStr(atOrNull(message, "sender"), "qq") == std::to_string(*qq)) {
+                            seenInConversation = true;
+                            break;
+                        }
+                    }
+                }
+                if (!seenInConversation) {
+                    co_return std::string("加入黑名单失败: 该用户不在当前会话记录中");
+                }
+                if (BlacklistStore::contains(*qq)) {
+                    co_return fmt::format("用户 {} 已在全局黑名单中", *qq);
+                }
+                BlacklistStore::add(*qq);
+                co_return fmt::format("已将用户 {} 加入全局黑名单；请用reply告知该用户拉黑结果", *qq);
+            },
           },
           ToolCategory::ACTION);
 

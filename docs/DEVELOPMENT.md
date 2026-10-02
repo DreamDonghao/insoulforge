@@ -240,8 +240,8 @@ MessageService → OneBot API
     - `REPLY`：回复工具（`reply` / `no_reply` / `reply_with_quote`），调用后结束本轮处理
     - `INFORMATION`：信息工具（`recall_memory` / `list_stickers` / `deep_think` / `list_scheduled_tasks`），获取数据
     - `ACTION`：动作工具（`send_face` / `send_image` / `send_sticker` / `save_sticker` / `rename_sticker` /
-      `reply_and_continue` / `delete_sticker` / `at_user` / `ban_user` / `send_poke` / `recall_message` /
-      `create_scheduled_task` / `cancel_scheduled_task`），执行操作
+      `reply_and_continue` / `delete_sticker` / `at_user` / `ban_user` / `add_to_blacklist` / `send_poke` /
+      `recall_message` / `create_scheduled_task` / `cancel_scheduled_task`），执行操作
 - 内置工具分为 `builtin.reply`、`builtin.info`、`builtin.action` 三个 `ToolPlugin` 实现，注册代码按类别拆分在
   `src/agent/tools/plugins/ReplyToolsPlugin.cpp` / `InfoToolsPlugin.cpp` / `ActionToolsPlugin.cpp`。`ToolPluginCatalog`
   显式组合并加载
@@ -262,6 +262,8 @@ MessageService → OneBot API
 - `send_sticker` 与 `reply_and_continue` 通过 `MessageService` 直接发送，成功后自动写入聊天记录并推送
   WebSocket；主流程只负责发送最终文字回复。
 - `deep_think` 是信息工具，不是全局思考模式。Executor 只在复杂问题需要额外推理时调用，工具结果再回到 Executor 组织成聊天回复。
+- `add_to_blacklist` 复用全局黑名单存储；仅接受当前会话快照中的发送者 QQ 号，并拒绝管理员与机器人自身。
+  工具描述要求先提醒、无效后拉黑并告知用户，但提醒状态未单独持久化，后端不强制校验提醒是否发生。
 
 ### 会话派生状态维护
 
