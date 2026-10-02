@@ -101,7 +101,7 @@ namespace insoulforge {
             messages.push_back(item);
 
             const auto deltas = parseAffinityDeltas(
-              co_await LlmClient::requestLLM(std::move(messages), 0.3f, 0.9f, 256, "affinity", job.sessionId),
+              co_await LlmClient::requestMaintenance(std::move(messages), job.sessionId, "affinity", 256),
               job.sessionId);
             if (!deltas) {
                 co_return false;
