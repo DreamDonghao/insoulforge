@@ -95,10 +95,48 @@ const shortUrl = (url: string): string => url.replace(/^https?:\/\//, '')
 const copyText = async (text: string, label: string): Promise<void> => {
   if (!text) return
   try {
-    await navigator.clipboard.writeText(text)
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text)
+        showToast?.(`${label}已复制`)
+        return
+      } catch {
+        // HTTP 页面或浏览器权限限制下，尝试传统复制接口。
+      }
+    }
+
+    const input = document.createElement('textarea')
+    input.value = text
+    input.style.position = 'fixed'
+    input.style.opacity = '0'
+    document.body.appendChild(input)
+    try {
+      input.focus()
+      input.select()
+      if (!document.execCommand('copy')) throw new Error('copy failed')
+    } finally {
+      input.remove()
+    }
     showToast?.(`${label}已复制`)
   } catch {
     showToast?.('复制失败', true)
+  }
+}
+
+const downloadTrace = async (id: number): Promise<void> => {
+  try {
+    const response = await fetch(`/admin/api/http-traces/download?id=${id}`)
+    if (!response.ok) throw new Error('download failed')
+    const url = URL.createObjectURL(await response.blob())
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `http-trace-${id}.json`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 0)
+  } catch {
+    showToast?.('下载失败，记录可能已被清除', true)
   }
 }
 
@@ -195,6 +233,8 @@ onUnmounted(() => window.clearInterval(timer))
             <span :class="['chip', statusClass(selected.status)]">{{ statusText(selected.status) }}</span>
             <span>{{ selected.method }} {{ selected.url }}</span>
             <span>· {{ sessionLabel(selected.groupId) }} · #{{ selected.id }} · {{ selected.timestamp }}</span>
+            <button class="btn btn-secondary btn-sm download-button" type="button"
+                    @click="downloadTrace(selected.id)">下载原始记录</button>
           </div>
           <section class="body-section">
             <div class="body-header">
@@ -283,6 +323,10 @@ onUnmounted(() => window.clearInterval(timer))
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.download-button {
+  margin-left: auto;
 }
 
 .tid {

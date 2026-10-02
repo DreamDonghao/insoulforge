@@ -165,6 +165,35 @@ auto AdminController::getHttpTraces(HttpRequestPtr req, std::function<void(const
     co_return;
 }
 
+auto AdminController::downloadHttpTrace(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
+  -> Task<> {
+    const auto id = tryParseUInt64(req->getParameter("id"));
+    if (!id || *id == 0) {
+        auto response = jsonResponse(AdminResponse::failJson("无效的请求记录 ID"));
+        response->setStatusCode(k400BadRequest);
+        callback(response);
+        co_return;
+    }
+
+    const auto entry = HttpTrace::instance().find(*id);
+    if (!entry) {
+        auto response = jsonResponse(AdminResponse::failJson("请求记录不存在或已被清除"));
+        response->setStatusCode(k404NotFound);
+        callback(response);
+        co_return;
+    }
+
+    const json document = {
+      {"id", entry->id}, {"timestamp", entry->timestamp}, {"tag", entry->tag}, {"method", entry->method},
+      {"url", entry->url}, {"status", entry->status}, {"requestBody", entry->requestBody},
+      {"responseBody", entry->responseBody},
+      {"sessionId", entry->sessionId ? json(std::to_string(*entry->sessionId)) : json(nullptr)}};
+    auto response = jsonResponse(document);
+    response->addHeader("Content-Disposition", "attachment; filename=\"http-trace-" + std::to_string(*id) + ".json\"");
+    callback(response);
+    co_return;
+}
+
 auto AdminController::clearHttpTraces(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
   -> Task<> {
     HttpTrace::instance().clear();

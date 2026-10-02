@@ -45,6 +45,8 @@ namespace insoulforge {
         // HTTP 请求调试（最近请求的完整请求/响应体）
         ADD_METHOD_TO(AdminController::getHttpTraces, "/admin/api/http-traces", drogon::Get);
 
+        ADD_METHOD_TO(AdminController::downloadHttpTrace, "/admin/api/http-traces/download", drogon::Get);
+
         ADD_METHOD_TO(AdminController::clearHttpTraces, "/admin/api/http-traces", drogon::Delete);
 
         // 运行信息（启动时间/运行时长）
@@ -221,6 +223,10 @@ namespace insoulforge {
         /// @param req HTTP 请求，可选 afterId 和 limit 查询参数
         /// @param callback HTTP 响应回调
         auto getHttpTraces(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
+
+        /// @brief 下载指定记录的原始请求体和响应体（JSON 字符串字段，不重新格式化报文）。
+        auto downloadHttpTrace(drogon::HttpRequestPtr req,
           std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         /// @brief 清空 HTTP 请求记录

@@ -24,7 +24,7 @@ namespace insoulforge {
     };
 
     /// @brief 保存最近 50 条经过 HttpUtil 的请求和响应，供后台调试
-    /// @details 每条请求体和响应体最多保留 1 MiB；仅存内存，重启清空。status 为 0 表示未得到响应。
+    /// @details 原样保存报文，仅存内存，重启清空。status 为 0 表示未得到响应。
     class HttpTrace {
     public:
         static auto instance() -> HttpTrace &;
@@ -33,6 +33,9 @@ namespace insoulforge {
 
         /// @brief 按 id 降序取记录（id > afterId，最多 limit 条）
         [[nodiscard]] auto query(u64 afterId, size_t limit) const -> std::vector<HttpTraceEntry>;
+
+        /// @brief 按 ID 获取单条记录；记录被清空或淘汰时返回空。
+        [[nodiscard]] auto find(u64 id) const -> std::optional<HttpTraceEntry>;
 
         [[nodiscard]] auto size() const -> size_t;
 
