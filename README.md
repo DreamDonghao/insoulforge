@@ -152,7 +152,7 @@ Docker 默认桥接网络中，容器无法枚举宿主机局域网地址；可�
 | Executor     | 生成回复                                    | 主力聊天模型          |
 | Executor思考 | `deep_think` 工具使用的深度思考模型（可选） | 推理模型，如 DeepSeek |
 | Image        | 图片内容识别                                | 多模态聊天模型        |
-| Memory       | 记忆提取与整理                              | 聊天模型              |
+| Memory       | 记忆提取、整理与好感度评分                  | 聊天模型              |
 | Embedding    | 长期记忆向量化与检索（可选）                | 向量模型              |
 
 **Jev 路由**：在「LLM 配置 → Jev」填写 API Key、Base URL、Path 和 Model 后启用；默认地址为

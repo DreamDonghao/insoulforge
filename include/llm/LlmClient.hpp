@@ -45,21 +45,11 @@ namespace insoulforge::LlmClient {
       const LLMModelParams &params, json messages, json tools = {}, u64 sessionId = 0)
       -> drogon::Task<std::optional<json>>;
 
-    /// @brief 请求 LLM API（使用 Executor 配置；好感度维护等调用方使用）
-    /// @param messages 消息列表
-    /// @param temperature 温度参数
-    /// @param top_p Top-P 采样参数
-    /// @param max_tokens 最大 token 数
-    /// @param role 用量记录中的角色，默认 memory
-    /// @param sessionId 关联日志的会话 ID；缺省时按全局请求记录
-    /// @param timeoutSeconds 请求超时秒数；后台维护任务默认 180 秒
-    /// @return 响应文本，失败返回 std::nullopt
-    auto requestLLM(json messages, f64 temperature = 1.35, f64 top_p = 0.92, i32 max_tokens = 1024,
-      std::string role = "memory", std::optional<u64> sessionId = std::nullopt, f64 timeoutSeconds = 180.0)
-      -> drogon::Task<std::optional<std::string>>;
-
-    /// @brief 使用独立的 Memory 模型配置进行记忆提取和整理。
-    auto requestMemory(json messages, u64 sessionId) -> drogon::Task<std::optional<std::string>>;
+    /// @brief 使用 Memory 模型配置执行记忆或好感度维护请求。
+    /// @param usageRole 用量记录中的角色（memory 或 affinity）。
+    /// @param maxTokens 单次请求的输出上限；未指定时使用 Memory 模型配置。
+    auto requestMaintenance(json messages, u64 sessionId, std::string usageRole = "memory",
+      std::optional<i32> maxTokens = std::nullopt) -> drogon::Task<std::optional<std::string>>;
 
     /// @brief 从 API 响应中提取 usage 信息并输出缓存命中率日志
     /// @param responseJson API 返回的完整 JSON

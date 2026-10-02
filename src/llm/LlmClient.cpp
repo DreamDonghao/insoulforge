@@ -136,19 +136,15 @@ namespace insoulforge {
         }
     } // namespace LlmClient
 
-    auto LlmClient::requestLLM(json messages, const f64 temperature, const f64 top_p, const i32 max_tokens,
-      std::string role, const std::optional<u64> sessionId, const f64 timeoutSeconds)
+    auto LlmClient::requestMaintenance(
+      json messages, const u64 sessionId, std::string usageRole, const std::optional<i32> maxTokens)
       -> drogon::Task<std::optional<std::string>> {
         const auto &config = Config::instance();
-        const LLMModelParams params{.maxTokens = max_tokens, .temperature = temperature, .topP = top_p};
-        co_return co_await requestStr(std::move(messages), config.executor, params, std::move(role), sessionId,
-          timeoutSeconds);
-    }
-
-    auto LlmClient::requestMemory(json messages, const u64 sessionId)
-      -> drogon::Task<std::optional<std::string>> {
-        const auto &config = Config::instance();
-        co_return co_await requestStr(std::move(messages), config.memory, config.memoryParams, "memory", sessionId, 180.0);
+        auto params = config.memoryParams;
+        if (maxTokens) {
+            params.maxTokens = *maxTokens;
+        }
+        co_return co_await requestStr(std::move(messages), config.memory, params, std::move(usageRole), sessionId, 180.0);
     }
 
     auto LlmClient::requestEmbedding(std::string text, const std::optional<u64> sessionId)
