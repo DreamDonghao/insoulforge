@@ -80,13 +80,14 @@ const toggleBotStatus = async (): Promise<void> => {
 }
 
 // ---- LLM 模型（与运行时配置一一对应）----
-const llmOrder = ['router', 'jev', 'executor', 'executorThinking', 'image', 'memory', 'embedding'] as const
+const llmOrder = ['router', 'jev', 'executor', 'executorThinking', 'image', 'imageGeneration', 'memory', 'embedding'] as const
 const llmLabels: Record<string, string> = {
   router: 'Router',
   jev: 'Jev',
   executor: '回复生成',
   executorThinking: '深度思考',
   image: '图片识别',
+  imageGeneration: '图片生成',
   memory: '记忆维护',
   embedding: '向量化'
 }
@@ -96,6 +97,7 @@ const roleColors: Record<string, string> = {
   executor: 'var(--neon-cyan)',
   executorThinking: 'var(--neon-pink)',
   image: 'var(--success)',
+  imageGeneration: 'var(--neon-cyan)',
   memory: 'var(--primary)',
   embedding: 'var(--warning)'
 }

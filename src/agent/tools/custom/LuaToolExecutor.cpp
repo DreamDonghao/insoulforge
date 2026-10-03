@@ -343,8 +343,9 @@ namespace insoulforge::LuaToolExecutor {
                 } else {
                     const auto result = AsyncTaskManager::instance().start(sessionId, description,
                       [script = source, payload = request.value("payload", json::object()),
-                        sessionId]() mutable -> drogon::Task<std::string> {
-                          return execute(std::move(script), std::move(payload), sessionId, true);
+                        sessionId]() mutable -> drogon::Task<AsyncTaskManager::Result> {
+                          auto content = co_await execute(std::move(script), std::move(payload), sessionId, true);
+                          co_return AsyncTaskManager::Result{.content = std::move(content)};
                       });
                     std::string state;
                     switch (result.status) {

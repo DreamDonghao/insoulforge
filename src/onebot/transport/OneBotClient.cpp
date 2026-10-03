@@ -56,15 +56,21 @@ namespace insoulforge::OneBotClient {
         /// @brief 发送消息的公共实现（群聊/私聊共用，仅 API 名与目标字段不同）
         auto sendMessage(std::string api, std::string targetKey, const u64 targetId, std::string message,
           const std::optional<u64> sessionId) -> drogon::Task<std::optional<u64>> {
+            const bool isBase64Image = message.starts_with("[CQ:image,file=base64://");
             json params;
             params[targetKey] = targetId;
             params["message"] = message;
             params["auto_escape"] = false;
+            if (isBase64Image) {
+                params["timeout"] = 120000; // NapCat 发送确认超时，单位毫秒。
+            }
 
-            const auto resp = co_await callApi("[Msg]", std::move(api), std::move(params), sessionId);
+            const auto resp = co_await callApi("[Msg]", std::move(api), std::move(params), sessionId,
+              isBase64Image ? 150.0 : 30.0);
             if (!resp) {
                 Logger::error(sessionId.value_or(0), "OneBot",
-                  fmt::format("发送消息错误: msgLen={}, preview={}", message.size(), message.substr(0, 200)));
+                  fmt::format("发送消息错误: msgLen={}, preview={}", message.size(),
+                    isBase64Image ? "[图片数据已省略]" : message.substr(0, 200)));
                 co_return std::nullopt;
             }
             co_return jsonToUInt64(atOrNull(atOrNull(*resp, "data"), "message_id"));

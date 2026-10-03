@@ -46,14 +46,15 @@ namespace insoulforge {
         loadLLMConfig("executor", executor, &executorParams);
         loadLLMConfig("executorThinking", executorThinking, &executorThinkingParams);
         loadLLMConfig("image", image, &imageParams);
+        loadLLMConfig("imageGeneration", imageGeneration);
         loadLLMConfig("memory", memory, &memoryParams);
         loadLLMConfig("embedding", embedding);
         loadLLMConfig("jev", jev);
         const f64 configuredJevConfidence = getDouble(ConfigStore::getLLMConfig("jev"), "minConfidence", 0.6);
-        jevMinConfidence = std::isfinite(configuredJevConfidence) && configuredJevConfidence >= 0.0 &&
-                             configuredJevConfidence <= 1.0
-                             ? configuredJevConfidence
-                             : 0.6;
+        jevMinConfidence =
+          std::isfinite(configuredJevConfidence) && configuredJevConfidence >= 0.0 && configuredJevConfidence <= 1.0
+            ? configuredJevConfidence
+            : 0.6;
 
         // 加载记忆配置
         if (const auto memCfg = ConfigStore::getMemoryConfig(); !memCfg.is_null()) {

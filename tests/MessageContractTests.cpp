@@ -13,12 +13,14 @@
 #include <vector>
 
 #include <drogon/utils/coroutine.h>
+#include <openssl/evp.h>
 
 #include <agent/ability/AsyncTaskManager.hpp>
 #include <agent/memory/LongTermMemoryStore.hpp>
 #include <agent/memory/MemoryStore.hpp>
 #include <agent/tools/ToolRegistry.hpp>
 #include <agent/tools/custom/LuaToolExecutor.hpp>
+#include <agent/tools/plugins/ActionToolsPlugin.hpp>
 #include <conversation/history/ChatRecordStore.hpp>
 #include <conversation/maintenance/ConversationMaintenanceStore.hpp>
 #include <conversation/maintenance/affinity/AffinityMaintenanceStore.hpp>
@@ -35,11 +37,15 @@
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/config/ConfigStore.hpp>
+#include <infrastructure/http/HttpUtil.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/SchemaMigrator.hpp>
 #include <llm/JevClient.hpp>
 #include <llm/usage/UsageStore.hpp>
+#include <media/CharacterImageStore.hpp>
+#include <media/ImageDescriptionService.hpp>
 #include <media/ImageDescriptionStore.hpp>
+#include <media/ImageGenerationService.hpp>
 
 namespace {
     using insoulforge::i32;
@@ -202,6 +208,26 @@ namespace {
         const auto queuedMention =
           drogon::sync_wait(insoulforge::MessageRouter::route(100, "mention", assistantAfterMention));
         check(queuedMention.shouldReply, "queued bot mention replies despite trailing assistant message", kTestName);
+
+        const auto systemEvent = insoulforge::OneBotEventNormalizer::normalize({{"post_type", "message"},
+          {"message_type", "group"}, {"group_id", 100}, {"self_id", 42}, {"message_id", 1'790'000'000'000'001LL},
+          {"sender", {{"user_id", insoulforge::SessionId::kSystemAccountId}, {"nickname", "系统异步任务"}}},
+          {"message", insoulforge::json::array({{{"type", "text"}, {"data", {{"text", "任务完成"}}}}})}});
+        check(systemEvent && insoulforge::MessageRecord::isSystem(*systemEvent),
+          "async task event normalizes as a system message", kTestName);
+        if (systemEvent) {
+            const auto systemSnapshot = insoulforge::json::array({*systemEvent});
+            const auto systemDecision =
+              drogon::sync_wait(insoulforge::MessageRouter::route(100, "1790000000000001", systemSnapshot));
+            check(systemDecision.shouldReply && systemDecision.isPriority,
+              "async task result triggers a priority reply", kTestName);
+        }
+        const auto privateSystemEvent = insoulforge::OneBotEventNormalizer::normalize({{"post_type", "message"},
+          {"message_type", "private"}, {"user_id", 11}, {"self_id", 42}, {"message_id", 1'790'000'000'000'002LL},
+          {"sender", {{"user_id", insoulforge::SessionId::kSystemAccountId}, {"nickname", "系统异步任务"}}},
+          {"message", insoulforge::json::array({{{"type", "text"}, {"data", {{"text", "任务失败"}}}}})}});
+        check(privateSystemEvent && (*privateSystemEvent)["session_id"] == insoulforge::SessionId::fromPrivateUser(11),
+          "async task result reaches the original private session", kTestName);
 
         config.selfQQNumber = originalSelfId;
     }
@@ -375,6 +401,20 @@ namespace {
           !record.dump().contains("https://example.com/sticker.jpg"), "sticker record excludes CQ source", kTestName);
     }
 
+    void testGeneratedImageRecordKeepsDescription() {
+        constexpr std::string_view kTestName = "generated image record";
+        const auto record =
+          insoulforge::MessageRecord::createAssistantGeneratedImageRecord("Bot(我)", 8, "画面中有一只白猫坐在窗边。");
+        const auto projected = insoulforge::MessageRecord::projectForAgent(record);
+        check(record["segments"].size() == 1 && record["segments"][0]["type"] == "image",
+          "sent image remains an image segment", kTestName);
+        check(projected["segments"][0]["description"] == "画面中有一只白猫坐在窗边。",
+          "model sees the visual description", kTestName);
+        check(insoulforge::MessageRecord::extractRecallText(record).find("白猫") != std::string::npos,
+          "visual description is available to memory recall", kTestName);
+        check(!record.dump().contains("base64://"), "record excludes image transport data", kTestName);
+    }
+
     void testSchemaMigration() {
         constexpr std::string_view kTestName = "schema migration";
         sqlite3 *db = nullptr;
@@ -472,6 +512,90 @@ namespace {
         registry.unregisterPlugin("contract.plugin");
     }
 
+    void testCharacterImageStore() {
+        constexpr std::string_view kTestName = "character image storage";
+        constexpr std::string_view encoded =
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9d1QAAAABJRU5ErkJggg==";
+        std::string image(encoded.size() / 4 * 3, '\0');
+        const i32 decoded = EVP_DecodeBlock(reinterpret_cast<unsigned char *>(image.data()),
+          reinterpret_cast<const unsigned char *>(encoded.data()), static_cast<i32>(encoded.size()));
+        check(decoded > 0, "test PNG decodes", kTestName);
+        image.resize(static_cast<size_t>(decoded) - 2);
+
+        check(insoulforge::ImageDescriptionService::staticImageMimeType(image) == "image/png",
+          "valid PNG is recognized", kTestName);
+        check(insoulforge::ImageDescriptionService::staticImageDataUrl(image).value_or("").starts_with(
+                "data:image/png;base64,"),
+          "data URL retains MIME type", kTestName);
+        check(!insoulforge::ImageDescriptionService::staticImageMimeType(image.substr(0, image.size() - 12)),
+          "truncated PNG is rejected", kTestName);
+        check(!insoulforge::ImageDescriptionService::staticImageMimeType("GIF89a"), "GIF is rejected", kTestName);
+
+        const auto originalPath = std::filesystem::current_path();
+        const auto testPath =
+          std::filesystem::temp_directory_path() /
+          ("insoulforge-character-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        std::filesystem::create_directories(testPath);
+        std::filesystem::current_path(testPath);
+        check(!insoulforge::CharacterImageStore::load(), "initially empty", kTestName);
+        check(!insoulforge::CharacterImageStore::save(image), "upload succeeds", kTestName);
+        const auto stored = insoulforge::CharacterImageStore::load();
+        check(stored && stored->bytes == image && stored->mimeType == "image/png", "saved bytes persist", kTestName);
+        check(insoulforge::CharacterImageStore::save("invalid").has_value(), "invalid replacement rejected", kTestName);
+        check(insoulforge::CharacterImageStore::load() && insoulforge::CharacterImageStore::load()->bytes == image,
+          "failed replacement preserves original", kTestName);
+        check(
+          insoulforge::CharacterImageStore::save(std::string(insoulforge::CharacterImageStore::kMaxImageBytes + 1, 'x'))
+            .has_value(),
+          "oversized image rejected", kTestName);
+        check(insoulforge::CharacterImageStore::remove(), "delete succeeds", kTestName);
+        check(!insoulforge::CharacterImageStore::load(), "deleted image is absent", kTestName);
+        std::filesystem::current_path(originalPath);
+        std::filesystem::remove_all(testPath);
+    }
+
+    void testHttpTraceImageRedaction() {
+        constexpr std::string_view kTestName = "HTTP image trace redaction";
+        const auto imageData = std::string("data:image/png;base64,") + std::string(2048, 'A');
+        insoulforge::json request = {{"model", "image-model"}, {"prompt", "画出你自己"}, {"size", "1024x1024"}};
+        request["input_references"] =
+          insoulforge::json::array({{{"type", "image_url"}, {"image_url", {{"url", imageData}}}}});
+        const auto redacted = insoulforge::HttpUtil::redactImagePayloads(request);
+        check(redacted["prompt"] == "画出你自己" && redacted["size"] == "1024x1024",
+          "prompt and dimensions remain visible", kTestName);
+        check(redacted["input_references"][0]["image_url"]["url"] == "[图片数据已省略]", "only image URL is redacted",
+          kTestName);
+        check(
+          request["input_references"][0]["image_url"]["url"] == imageData, "actual request stays unchanged", kTestName);
+
+        const insoulforge::json response = {
+          {"created", 123}, {"data", {{{"revised_prompt", "保留这段描述"}, {"b64_json", std::string(2048, 'A')}}}}};
+        const auto redactedResponse = insoulforge::HttpUtil::redactImagePayloads(response);
+        check(redactedResponse["data"][0]["revised_prompt"] == "保留这段描述", "response metadata remains visible",
+          kTestName);
+        check(redactedResponse["data"][0]["b64_json"] == "[图片数据已省略]", "response image is redacted", kTestName);
+    }
+
+    void testCharacterImageToolRequiresUpload() {
+        constexpr std::string_view kTestName = "self image tool reference";
+        auto &registry = insoulforge::ToolRegistry::instance();
+        check(registry.registerPlugin("contract.character-image",
+                [](insoulforge::ToolRegistry &staged) { insoulforge::ActionToolsPlugin{}.registerTools(staged); }),
+          "action tools register", kTestName);
+        const auto oldConfig = insoulforge::Config::instance().imageGeneration;
+        auto &api = insoulforge::Config::instance().imageGeneration;
+        api.apiKey = "test";
+        api.baseUrl = "https://example.com";
+        api.path = "/images";
+        api.model = "test";
+        const auto result = drogon::sync_wait(registry.executeTool(
+          "generate_image", {{"prompt", "画出你自己"}, {"use_self_reference", true}}, {.sessionId = 123}));
+        check(result.find("尚未在管理后台上传") != std::string::npos, "missing image rejects before task starts",
+          kTestName);
+        api = oldConfig;
+        registry.unregisterPlugin("contract.character-image");
+    }
+
     void testMemoryMaintenanceStore() {
         constexpr std::string_view kTestName = "memory maintenance store";
         auto &database = insoulforge::Database::instance();
@@ -538,6 +662,11 @@ namespace {
               << R"({"llm":{"executor":{"apiKey":"old-key","baseUrl":"https://old.example.com/v1","path":"/chat/completions","model":"old-model","maxTokens":150,"temperature":0.7,"topP":0.9,"reasoningEffort":""}},"memory":{"memoryExtractMaxTokens":8192}})";
         }
         insoulforge::ConfigStore::initialize(path.string());
+        const auto defaultGeneration = insoulforge::ConfigStore::getLLMConfig("imageGeneration");
+        check(defaultGeneration.value("baseUrl", "") == "https://api.openai.com/v1",
+          "creates official image generation URL default", kTestName);
+        check(defaultGeneration.value("model", "") == "gpt-image-2.5-flare",
+          "creates official image generation model default", kTestName);
         const auto memory = insoulforge::ConfigStore::getLLMConfig("memory");
         check(memory.value("model", "") == "old-model", "inherits executor model", kTestName);
         check(memory.value("maxTokens", 0) == 8192, "preserves old memory token limit", kTestName);
@@ -577,6 +706,15 @@ namespace {
           kTestName);
 
         insoulforge::ConfigStore::saveLLMConfig(
+          "imageGeneration", {{"apiKey", "image-key"}, {"baseUrl", "https://example.com/v1"},
+                               {"path", "/images/generations"}, {"model", "test-image"}, {"maxTokens", 100}});
+        check(!insoulforge::ConfigStore::getLLMConfig("imageGeneration").contains("maxTokens"),
+          "image generation does not persist chat parameters", kTestName);
+        insoulforge::Config::instance().loadFromStorage();
+        check(insoulforge::Config::instance().imageGeneration.model == "test-image", "loads image generation model",
+          kTestName);
+
+        insoulforge::ConfigStore::saveLLMConfig(
           "memory", {{"apiKey", "memory-key"}, {"baseUrl", "https://memory.example.com/v1"},
                       {"path", "/chat/completions"}, {"model", "memory-model"}, {"maxTokens", 2048},
                       {"temperature", 0.4}, {"topP", 0.9}, {"reasoningEffort", "none"}});
@@ -599,6 +737,31 @@ namespace {
         check(insoulforge::ConfigStore::getLLMConfig("jev")["minConfidence"] == 0.8,
           "saving Jev without a threshold keeps the previous value", kTestName);
         database.close();
+    }
+
+    void testImageGenerationResponse() {
+        constexpr std::string_view kTestName = "image generation response";
+        const auto urlImage = insoulforge::ImageGenerationService::imageCode(
+          {{"data", {{{"url", "https://example.com/image.png?a=1&b=2"}}}}});
+        check(urlImage && urlImage->message == "[CQ:image,file=https://example.com/image.png?a=1&amp;b=2]" &&
+                urlImage->source == "https://example.com/image.png?a=1&b=2",
+          "escapes URL for OneBot CQ", kTestName);
+        const auto dataUrlImage =
+          insoulforge::ImageGenerationService::imageCode({{"data", {{{"url", "data:image/png;base64,aGVsbG8="}}}}});
+        check(dataUrlImage && dataUrlImage->message == "[CQ:image,file=base64://aGVsbG8=]" &&
+                dataUrlImage->source == "base64://aGVsbG8=",
+          "accepts base64 data URL", kTestName);
+        const auto rawUrlImage = insoulforge::ImageGenerationService::imageCode({{"data", {{{"url", "aGVsbG8="}}}}});
+        check(rawUrlImage && rawUrlImage->message == "[CQ:image,file=base64://aGVsbG8=]",
+          "accepts raw base64 URL field", kTestName);
+        const auto base64Image =
+          insoulforge::ImageGenerationService::imageCode({{"data", {{{"b64_json", "aGVsbG8="}}}}});
+        check(base64Image && base64Image->message == "[CQ:image,file=base64://aGVsbG8=]", "accepts base64 image",
+          kTestName);
+        check(!insoulforge::ImageGenerationService::imageCode({{"data", {{{"b64_json", "bad!"}}}}}),
+          "rejects malformed base64", kTestName);
+        check(!insoulforge::ImageGenerationService::imageCode({{"data", insoulforge::json::array()}}),
+          "rejects missing images", kTestName);
     }
 
     void testUsageSummaryUsesLatestRoleModel() {
@@ -693,9 +856,9 @@ namespace {
         insoulforge::Config::instance().loadFromStorage();
 
         auto &tasks = insoulforge::AsyncTaskManager::instance();
-        const auto delayedResult = []() -> drogon::Task<std::string> {
+        const auto delayedResult = []() -> drogon::Task<insoulforge::AsyncTaskManager::Result> {
             co_await drogon::sleepCoro(drogon::app().getLoop(), 60.0);
-            co_return "unused";
+            co_return insoulforge::AsyncTaskManager::Result{.content = "unused"};
         };
         const auto first = tasks.start(100, "测试任务", delayedResult);
         const auto busy = tasks.start(100, "重复任务", delayedResult);
@@ -741,13 +904,18 @@ auto main() -> int {
     testRouterWindowStartIndexIsBatchedNotSliding();
     testMessageRecordProjectionHidesImageSources();
     testAssistantStickerRecordKeepsOnlyName();
+    testGeneratedImageRecordKeepsDescription();
     testSchemaMigration();
     testLuaToolExecutor();
     testToolRegistryReload();
+    testCharacterImageStore();
+    testHttpTraceImageRedaction();
+    testCharacterImageToolRequiresUpload();
     testMemoryMaintenanceStore();
     testConversationMaintenanceStore();
     testMemoryModelConfigMigration();
     testImageDescriptionCacheStore();
+    testImageGenerationResponse();
     testUsageSummaryUsesLatestRoleModel();
     testMessageListSnapshotsAndPersistence();
     testAsyncTaskSessionExclusivity();

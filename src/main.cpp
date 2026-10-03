@@ -105,6 +105,9 @@ auto main() -> int {
           });
 
         drogon::app().addListener("0.0.0.0", 7778);
+        // 角色形象图允许 8 MiB；为 multipart 边界和表单头预留空间。
+        drogon::app().setClientMaxBodySize(10U * 1024U * 1024U);
+        drogon::app().setClientMaxMemoryBodySize(10U * 1024U * 1024U);
         drogon::app().setDocumentRoot("public");
         Logger::info(0, "Main", "HTTP 服务启动 | port=7778");
 

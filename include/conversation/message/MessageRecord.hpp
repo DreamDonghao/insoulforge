@@ -30,6 +30,10 @@ namespace insoulforge::MessageRecord {
     /// @details 收藏表情仅记录 `sticker.name`；普通 CQ 图片只保留图片动作，不保存外部 URL。
     [[nodiscard]] auto createAssistantRecord(std::string senderName, u64 messageId, const std::string &content) -> json;
 
+    /// @brief 创建已发送成功的生成图片记录，只保存图片描述，不保存传输用 URL/base64
+    [[nodiscard]] auto createAssistantGeneratedImageRecord(
+      std::string senderName, u64 messageId, const std::string &description) -> json;
+
     /// @brief 按段出现顺序拼接记录中的文本内容
     /// @param record 统一聊天记录
     /// @return 所有 `text` 段拼接后的文本；无段时兼容旧版 `text` 字段

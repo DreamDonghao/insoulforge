@@ -209,6 +209,14 @@ namespace insoulforge::MessageRecord {
         return record;
     }
 
+    auto createAssistantGeneratedImageRecord(
+      std::string senderName, const u64 messageId, const std::string &description) -> json {
+        auto record = createAssistantRecord(std::move(senderName), messageId, "[CQ:image]");
+        record["segments"][0]["recognition_status"] = "generated";
+        record["segments"][0]["description"] = description;
+        return record;
+    }
+
     auto extractText(const json &record) -> std::string {
         std::string text;
         const json &segments = atOrNull(record, "segments");
@@ -301,7 +309,8 @@ namespace insoulforge::MessageRecord {
         for (const json projected = projectForAgent(record); const auto &segment: atOrNull(projected, "segments")) {
             if (const std::string type = getStr(segment, "type"); type == "text") {
                 text += getStr(segment, "text");
-            } else if (type == "image" && getStr(segment, "recognition_status") == "succeeded") {
+            } else if (type == "image" && (getStr(segment, "recognition_status") == "succeeded" ||
+                                            getStr(segment, "recognition_status") == "generated")) {
                 if (const std::string description = getStr(segment, "description"); !description.empty()) {
                     if (!text.empty()) {
                         text += '\n';

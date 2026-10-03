@@ -8,13 +8,14 @@ import type {ApiResponse, LLMConfig} from '../../vite-env'
 
 const showToast = inject<(msg: string, isError?: boolean) => void>('showToast')
 
-const llmNames = ['router', 'jev', 'executor', 'executorThinking', 'image', 'memory', 'embedding']
+const llmNames = ['router', 'jev', 'executor', 'executorThinking', 'image', 'imageGeneration', 'memory', 'embedding']
 const llmLabels: Record<string, string> = {
   router: 'Router',
   jev: 'Jev',
   executor: 'Executor',
   executorThinking: 'Executor思考',
   image: 'Image',
+  imageGeneration: '图片生成',
   memory: 'Memory',
   embedding: 'Embedding'
 }
@@ -25,6 +26,7 @@ const llmUsages: Record<string, string> = {
   executor: '用途：回复生成',
   executorThinking: '用途：深度思考模式的分析阶段（最终执行仍走 Executor）',
   image: '用途：图片识别与描述',
+  imageGeneration: '用途：异步文生图，生成完成后直接发送到会话',
   memory: '用途：记忆提取、整理与好感度评分',
   embedding: '用途：长期记忆向量化（记忆写入与检索时计算文本向量）'
 }
@@ -118,7 +120,7 @@ const saveLLMConfig = async (): Promise<void> => {
           <input v-model="llmConfig.model" class="form-input" placeholder="gpt-4" type="text">
         </div>
       </div>
-      <div v-if="selectedLLM !== 'embedding' && selectedLLM !== 'jev'" class="form-row">
+      <div v-if="selectedLLM !== 'embedding' && selectedLLM !== 'jev' && selectedLLM !== 'imageGeneration'" class="form-row">
         <div class="form-group">
           <label class="form-label">Max Tokens</label>
           <input v-model.number="llmConfig.maxTokens" class="form-input" type="number">
@@ -139,7 +141,7 @@ const saveLLMConfig = async (): Promise<void> => {
           <p class="form-hint">低于此值时由 Router LLM 判断，默认 0.60</p>
         </div>
       </div>
-      <div v-if="selectedLLM !== 'embedding' && selectedLLM !== 'jev'" class="form-row">
+      <div v-if="selectedLLM !== 'embedding' && selectedLLM !== 'jev' && selectedLLM !== 'imageGeneration'" class="form-row">
         <div class="form-group">
           <label class="form-label">Reasoning Effort（Gemma等模型专用）</label>
           <select v-model="llmConfig.reasoningEffort" class="form-input">

@@ -9,6 +9,7 @@
 namespace insoulforge::HttpUtil {
     namespace {
         constexpr size_t kBodyLogMax = 400; // 日志中请求体截断长度
+        constexpr std::string_view kImageOmitted = "[图片数据已省略]";
 
         auto methodName(const drogon::HttpMethod m) -> const char * {
             switch (m) {
@@ -64,19 +65,54 @@ namespace insoulforge::HttpUtil {
         }
     } // namespace
 
+    auto redactImagePayloads(const json &value) -> json {
+        if (value.is_object()) {
+            auto result = json::object();
+            for (const auto &[key, item]: value.items()) {
+                if (key == "b64_json" && item.is_string()) {
+                    result[key] = std::string(kImageOmitted);
+                } else {
+                    result[key] = redactImagePayloads(item);
+                }
+            }
+            return result;
+        }
+        if (value.is_array()) {
+            auto result = json::array();
+            for (const auto &item: value) {
+                result.push_back(redactImagePayloads(item));
+            }
+            return result;
+        }
+        if (value.is_string()) {
+            const auto &content = value.get_ref<const std::string &>();
+            if (content.find(";base64,") != std::string::npos || content.starts_with("base64://") ||
+                (content.size() > 1024 && content.size() % 4 == 0 &&
+                  content.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=") ==
+                    std::string::npos)) {
+                return std::string(kImageOmitted);
+            }
+        }
+        return value;
+    }
+
     auto send(const std::string_view tag, std::string baseUrl, std::string path, const drogon::HttpMethod method,
-      json body, std::string bearerToken, const f64 timeout, std::optional<u64> sessionId)
+      json body, std::string bearerToken, const f64 timeout, std::optional<u64> sessionId, const bool traceResponse)
       -> drogon::Task<std::optional<drogon::HttpResponsePtr>> {
         normalizeTarget(baseUrl, path);
-        // 请求体完整序列化一次，供请求调试记录和实际请求共用；运行日志不记录正常请求细节。
+        // 实际请求保留原始 JSON；调试记录只省略其中的图片数据。
         auto bodyText = body.is_null() ? std::string{} : dumpJson(body);
-        const auto bodyLog = truncate(bodyText, kBodyLogMax);
+        const bool containsImageData =
+          bodyText.find(";base64,") != std::string::npos || bodyText.find("base64://") != std::string::npos;
+        const auto traceBodyText = containsImageData ? dumpJson(redactImagePayloads(body)) : bodyText;
+        const auto bodyLog = truncate(traceBodyText, kBodyLogMax);
 
         HttpTraceEntry trace;
         trace.tag = std::string(tag);
         trace.method = methodName(method);
         trace.url = baseUrl + path;
         trace.sessionId = sessionId;
+        trace.requestBody = traceBodyText;
 
         drogon::HttpClientPtr client;
         try {
@@ -101,8 +137,6 @@ namespace insoulforge::HttpUtil {
         if (!bearerToken.empty()) {
             req->addHeader("Authorization", "Bearer " + bearerToken);
         }
-        trace.requestBody = std::move(bodyText);
-
         const auto finishTrace = [&](const i32 statusCode, std::string responseBody) -> void {
             trace.status = statusCode;
             trace.responseBody = std::move(responseBody);
@@ -131,7 +165,14 @@ namespace insoulforge::HttpUtil {
                 methodName(method), baseUrl, path));
         }
 
-        finishTrace(static_cast<i32>(resp->getStatusCode()), std::string{resp->body()});
+        if (traceResponse) {
+            finishTrace(static_cast<i32>(resp->getStatusCode()), std::string{resp->body()});
+        } else {
+            json responseJson;
+            finishTrace(static_cast<i32>(resp->getStatusCode()), tryParseJson(resp->body(), responseJson)
+                                                                   ? dumpJson(redactImagePayloads(responseJson))
+                                                                   : "[非 JSON 响应已省略]");
+        }
 
         co_return resp;
     }

@@ -33,6 +33,11 @@ namespace insoulforge::ConfigStore {
             return {{"apiKey", ""}, {"baseUrl", ""}, {"path", "/embeddings"}, {"model", ""}};
         }
 
+        auto defaultImageGenerationConfig() -> json {
+            return {{"apiKey", ""}, {"baseUrl", "https://api.openai.com/v1"}, {"path", "/images/generations"},
+              {"model", "gpt-image-2.5-flare"}};
+        }
+
         /// @brief 默认使用 OpenRouter Decisions API；密钥留空时不启用 Jev。
         auto defaultJevConfig() -> json {
             return {{"apiKey", ""}, {"baseUrl", "https://openrouter.ai/api/alpha"}, {"path", "/decisions"},
@@ -41,19 +46,18 @@ namespace insoulforge::ConfigStore {
 
         auto defaultConfig() -> json {
             return {
-              {"llm", {{"router", defaultChatConfig(100, 0.3, 0.9)}, {"executor", defaultChatConfig(150, 0.7, 0.9)},
-                        {"executorThinking", defaultChatConfig(512, 0.7, 0.9)},
-                        {"image", defaultChatConfig(1024, 0.7, 0.9)}, {"memory", defaultChatConfig(4000, 0.4, 0.9)},
-                        {"embedding", defaultEmbeddingConfig()},
-                        {"jev", defaultJevConfig()}}},
+              {"llm",
+                {{"router", defaultChatConfig(100, 0.3, 0.9)}, {"executor", defaultChatConfig(150, 0.7, 0.9)},
+                  {"executorThinking", defaultChatConfig(512, 0.7, 0.9)}, {"image", defaultChatConfig(1024, 0.7, 0.9)},
+                  {"imageGeneration", defaultImageGenerationConfig()}, {"memory", defaultChatConfig(4000, 0.4, 0.9)},
+                  {"embedding", defaultEmbeddingConfig()}, {"jev", defaultJevConfig()}}},
               {"qq", {{"accessToken", ""}, {"selfQQNumber", 0}, {"oneBotTransport", "websocket"},
                        {"qqHttpHost", "http://127.0.0.1:3000"}, {"qqWebSocketHost", "ws://127.0.0.1:3001"},
                        {"botName", "机器人"}}},
               {"memory",
                 {{"contextWindowLimit", 100}, {"memorySummaryTriggerCount", 100}, {"memorySummaryBatchSize", 50},
-                  {"memorySummaryContextCount", 10}, {"routerWindowTriggerCount", 20},
-                  {"routerWindowKeepCount", 10}, {"shortTermMemoryMax", 15}, {"longTermRecallThreshold", 0.65},
-                  {"longTermInjectThreshold", 0.45}}}};
+                  {"memorySummaryContextCount", 10}, {"routerWindowTriggerCount", 20}, {"routerWindowKeepCount", 10},
+                  {"shortTermMemoryMax", 15}, {"longTermRecallThreshold", 0.65}, {"longTermInjectThreshold", 0.45}}}};
         }
 
         auto compatibleType(const json &value, const json &defaultValue) -> bool {
@@ -115,7 +119,7 @@ namespace insoulforge::ConfigStore {
                     modelConfig.erase("top_P");
                     changed = true;
                 }
-                if (entry.key() == "embedding" || entry.key() == "jev") {
+                if (entry.key() == "embedding" || entry.key() == "jev" || entry.key() == "imageGeneration") {
                     changed = modelConfig.erase("maxTokens") > 0 || changed;
                     changed = modelConfig.erase("temperature") > 0 || changed;
                     changed = modelConfig.erase("topP") > 0 || changed;
@@ -235,13 +239,14 @@ namespace insoulforge::ConfigStore {
         json persistedConfig = config;
         persistedConfig.erase("name");
         persistedConfig.erase("top_P");
-        if (name == "embedding" || name == "jev") {
+        if (name == "embedding" || name == "jev" || name == "imageGeneration") {
             persistedConfig.erase("maxTokens");
             persistedConfig.erase("temperature");
             persistedConfig.erase("topP");
             persistedConfig.erase("reasoningEffort");
             if (name == "jev") {
-                const f64 confidence = getDouble(config, "minConfidence", getDouble(atOrNull(llm, "jev"), "minConfidence", 0.6));
+                const f64 confidence =
+                  getDouble(config, "minConfidence", getDouble(atOrNull(llm, "jev"), "minConfidence", 0.6));
                 persistedConfig["minConfidence"] = std::isfinite(confidence) ? std::clamp(confidence, 0.0, 1.0) : 0.6;
             }
         } else {

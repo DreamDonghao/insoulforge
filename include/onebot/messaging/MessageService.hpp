@@ -22,13 +22,17 @@ namespace insoulforge::MessageService {
     /// @param groupId 群号
     /// @param message 消息内容
     /// @return 发送成功返回 message_id，失败返回 nullopt（已记日志）
-    auto sendGroupMsg(u64 groupId, std::string message) -> drogon::Task<std::optional<u64>>;
+    /// @param imageDescription 可选的图片描述；仅在图片发送成功时写入助手消息记录
+    auto sendGroupMsg(u64 groupId, std::string message, std::optional<std::string> imageDescription = std::nullopt)
+      -> drogon::Task<std::optional<u64>>;
 
     /// @brief 发送私聊消息
     /// @param userId 用户 QQ 号
     /// @param message 消息内容
     /// @return 发送成功返回 message_id，失败返回 nullopt（已记日志）
-    auto sendPrivateMsg(u64 userId, std::string message) -> drogon::Task<std::optional<u64>>;
+    /// @param imageDescription 可选的图片描述；仅在图片发送成功时写入助手消息记录
+    auto sendPrivateMsg(u64 userId, std::string message, std::optional<std::string> imageDescription = std::nullopt)
+      -> drogon::Task<std::optional<u64>>;
 
     /// @brief 获取并更新会话名称（群聊为群名，私聊为 QQ 昵称）
     /// @param sessionId 会话 ID（私聊带标志位）

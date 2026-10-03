@@ -5,6 +5,7 @@
 
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
 
@@ -17,9 +18,14 @@ namespace insoulforge {
     /// @details 工具调用只负责启动任务；任务结果由管理器发送，不占用当前 Executor 回复流程。
     class AsyncTaskManager {
     public:
-        /// @brief 返回要直接发送给原会话的内容；抛异常或返回空字符串表示任务失败
+        struct Result {
+            std::string content; ///< 要直接发送给原会话的内容
+            std::optional<std::string> imageDescription; ///< 发送图片时写入上下文的视觉描述
+        };
+
+        /// @brief 返回要发送的结果；抛异常或内容为空表示任务失败
         /// @note 处理器在后台协程中运行，不得捕获短生命周期对象的引用。
-        using Handler = std::function<drogon::Task<std::string>()>;
+        using Handler = std::function<drogon::Task<Result>()>;
 
         /// @brief 启动请求的结果；Busy 时 taskId 为当前会话正在执行的任务编号
         struct StartResult {
