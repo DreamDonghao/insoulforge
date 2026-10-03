@@ -5,6 +5,7 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include <drogon/utils/coroutine.h>
 
@@ -20,6 +21,12 @@ namespace insoulforge {
     };
 
     namespace ImageDescriptionService {
+        /// @brief 判断字节是否为受支持的静态图片，返回实际 MIME 类型。
+        [[nodiscard]] auto staticImageMimeType(std::string_view bytes) -> std::optional<std::string_view>;
+
+        /// @brief 将已校验的静态图片编码为图片接口使用的 data URL。
+        [[nodiscard]] auto staticImageDataUrl(std::string_view bytes) -> std::optional<std::string>;
+
         /// @brief 按需下载静态图片并编码为图生图接口可用的 base64 data URL。
         [[nodiscard]] auto referenceDataUrl(std::string sourceUrl, u64 sessionId)
           -> drogon::Task<std::optional<std::string>>;

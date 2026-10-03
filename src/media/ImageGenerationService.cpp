@@ -85,10 +85,10 @@ namespace insoulforge::ImageGenerationService {
 
         json request = {{"model", config.model}, {"prompt", std::move(prompt)}, {"size", std::move(size)}};
         if (referenceDataUrl) {
-            request["input_references"] = json::array(
-              {{{"type", "image_url"}, {"image_url", {{"url", std::move(*referenceDataUrl)}}}}});
+            request["input_references"] =
+              json::array({{{"type", "image_url"}, {"image_url", {{"url", std::move(*referenceDataUrl)}}}}});
         }
-        // 响应可能包含数十 MB 的 b64_json，不保存在请求调试记录中。
+        // 响应可能包含数十 MB 的图片数据；调试记录只保留非图片字段。
         const auto response = co_await HttpUtil::send("ImageGeneration", config.baseUrl, config.path, drogon::Post,
           request, config.apiKey, 180.0, sessionId, false);
         if (!response || (*response)->getStatusCode() != drogon::k200OK) {

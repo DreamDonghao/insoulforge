@@ -147,7 +147,7 @@ insoulforge/
 │   ├── llm/                  # LLM 客户端
 │   │   ├── prompts/         # 提示词管理与存储
 │   │   └── usage/           # 模型调用用量存储
-│   ├── media/                # 图片/GIF 识别与描述缓存
+│   ├── media/                # 图片/GIF 识别、描述缓存与角色参考图
 │   └── onebot/               # OneBot 接入
 │       ├── messaging/       # 消息发送
 │       └── transport/       # HTTP 事件入口与 WebSocket/API 客户端
@@ -301,6 +301,7 @@ MessageService → OneBot API
 
 `ConfigStore` 将 LLM API 配置（router / jev / executor / executorThinking / image / imageGeneration / memory / embedding）、QQ Bot 配置和记忆参数统一写入
 `data/config.json`。聊天模型可设置 `maxTokens`、`temperature`、`topP` 和 `reasoningEffort`；Embedding、Jev 与图片生成不使用这些采样参数。
+后台上传的角色参考图单独保存在 `data/character-image`，不写入配置或公开静态目录；部署时沿用现有 `data/` 持久化挂载。
 Jev 默认指向 OpenRouter Decisions API，API Key 默认为空，因此默认不启用；其 `minConfidence` 默认 0.6，限制在 0～1，
 可在管理后台修改并即时更新运行时配置。启动时若文件不存在则创建默认配置；若
 JSON 损坏则备份为 `config.json.broken.<时间戳>` 后重建；缺失或类型不匹配的字段会补默认值并回写。管理后台保存时先写入临时文件，再原子替换原文件。

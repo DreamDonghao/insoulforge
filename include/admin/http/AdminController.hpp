@@ -31,6 +31,13 @@ namespace insoulforge {
 
         ADD_METHOD_TO(AdminController::savePrompt, "/admin/api/prompt", drogon::Post);
 
+        // AI 角色形象参考图
+        ADD_METHOD_TO(AdminController::getCharacterImage, "/admin/api/character-image", drogon::Get);
+
+        ADD_METHOD_TO(AdminController::saveCharacterImage, "/admin/api/character-image", drogon::Post);
+
+        ADD_METHOD_TO(AdminController::deleteCharacterImage, "/admin/api/character-image", drogon::Delete);
+
         // 表情包库（QQ 收藏表情）
         ADD_METHOD_TO(AdminController::getEmojis, "/admin/api/emojis", drogon::Get);
 
@@ -42,7 +49,7 @@ namespace insoulforge {
         // 运行日志
         ADD_METHOD_TO(AdminController::getLogs, "/admin/api/logs", drogon::Get);
 
-        // HTTP 请求调试（最近请求的完整请求/响应体）
+        // HTTP 请求调试（最近请求/响应；图片数据会被省略）
         ADD_METHOD_TO(AdminController::getHttpTraces, "/admin/api/http-traces", drogon::Get);
 
         ADD_METHOD_TO(AdminController::downloadHttpTrace, "/admin/api/http-traces/download", drogon::Get);
@@ -194,6 +201,16 @@ namespace insoulforge {
         /// @param callback HTTP 响应回调
         auto savePrompt(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const
           -> drogon::Task<>;
+
+        /// @brief 读取、上传或删除 AI 绘制自身形象时使用的参考图。
+        auto getCharacterImage(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
+
+        auto saveCharacterImage(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
+
+        auto deleteCharacterImage(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         // ============== 表情库 ==============
 

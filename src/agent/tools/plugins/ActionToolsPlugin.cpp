@@ -23,6 +23,7 @@
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
+#include <media/CharacterImageStore.hpp>
 #include <media/ImageDescriptionService.hpp>
 #include <media/ImageGenerationService.hpp>
 #include <onebot/messaging/MessageService.hpp>
@@ -40,20 +41,28 @@ namespace insoulforge {
         }
 
         auto startImageTask(const u64 sessionId, std::string prompt, std::string size,
-          std::optional<std::string> referenceUrl = std::nullopt) -> std::string {
+          std::optional<std::string> referenceUrl = std::nullopt,
+          std::optional<std::string> referenceDataUrl = std::nullopt) -> std::string {
             const auto [status, taskId] =
               AsyncTaskManager::instance().start(sessionId, referenceUrl ? "编辑图片" : "生成图片",
-                [sessionId, prompt = std::move(prompt), size = std::move(size),
-                  referenceUrl = std::move(referenceUrl)]() -> drogon::Task<AsyncTaskManager::Result> {
-                    std::optional<std::string> referenceDataUrl;
+                [sessionId, prompt = std::move(prompt), size = std::move(size), referenceUrl = std::move(referenceUrl),
+                  referenceDataUrl = std::move(referenceDataUrl)]() mutable -> drogon::Task<AsyncTaskManager::Result> {
+                    const bool useSelfReference = referenceDataUrl.has_value();
                     if (referenceUrl) {
                         referenceDataUrl = co_await ImageDescriptionService::referenceDataUrl(*referenceUrl, sessionId);
                         if (!referenceDataUrl) {
                             throw std::runtime_error("原图下载失败或格式不受支持，请重新发送静态图片");
                         }
                     }
-                    auto [message, source] =
-                      co_await ImageGenerationService::generate(prompt, size, sessionId, std::move(referenceDataUrl));
+                    std::string generationPrompt = prompt;
+                    if (useSelfReference) {
+                        generationPrompt = "请以输入的角色参考图片为人物形象依据，保持角色可辨认的外观特征。"
+                                           "除非画面要求明确提出修改，否则发型、发色、耳朵、服饰等以参考图为准，"
+                                           "不要根据文字重新设计角色。请按以下画面要求生成：" +
+                                           prompt;
+                    }
+                    auto [message, source] = co_await ImageGenerationService::generate(
+                      std::move(generationPrompt), size, sessionId, std::move(referenceDataUrl));
                     std::string description = "依据生成提示词：" + prompt;
                     try {
                         if (const auto recognized =
@@ -87,11 +96,19 @@ namespace insoulforge {
           {
             .name = "generate_image",
             .description = "根据用户明确提出的画面要求异步生成一张图片。工具立即返回任务状态，图片生成完成后"
-                           "会自动发送到当前会话，不要再调用 reply 发送图片。一次会话同时只能生成一张。",
+                           "会自动发送到当前会话，不要再调用 reply 发送图片。绘制你自己的角色形象时，"
+                           "将 use_self_reference 设为 true，以后台上传的角色图为准；prompt 只描述用户要求的"
+                           "场景、动作、表情等变化，不重复编造参考图中已有的外观设定。其他画面不要设置此参数。"
+                           "一次会话同时只能生成一张。",
             .parameters = json{{"type", "object"},
-              {"properties", {{"prompt", {{"type", "string"}, {"description", "具体的画面描述"}}},
-                               {"size", {{"type", "string"},
-                                          {"description", "图片尺寸，格式为宽x高，如 1024x1024；默认 2048x2048"}}}}},
+              {"properties",
+                {{"prompt", {{"type", "string"},
+                              {"description", "画面要求；使用角色参考图时只写场景、动作等变化，不重复描述原有外观"}}},
+                  {"size",
+                    {{"type", "string"}, {"description", "图片尺寸，格式为宽x高，如 1024x1024；默认 2048x2048"}}},
+                  {"use_self_reference",
+                    {{"type", "boolean"},
+                      {"description", "画面主体是你自己时设为 true，引用后台上传的角色形象图；默认 false"}}}}},
               {"required", {"prompt"}}},
             .handler = [](const json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
                 const auto prompt = trim(argString(args, "prompt"));
@@ -106,7 +123,18 @@ namespace insoulforge {
                   api.apiKey.empty() || api.baseUrl.empty() || api.path.empty() || api.model.empty()) {
                     co_return std::string("图片生成接口尚未配置完整。");
                 }
-                co_return startImageTask(ctx.sessionId, prompt, *size);
+                std::optional<std::string> referenceDataUrl;
+                if (getBool(args, "use_self_reference")) {
+                    const auto image = CharacterImageStore::load();
+                    if (!image) {
+                        co_return std::string("尚未在管理后台上传角色形象图，无法按自身形象生图。请先上传后重试。");
+                    }
+                    referenceDataUrl = ImageDescriptionService::staticImageDataUrl(image->bytes);
+                    if (!referenceDataUrl) {
+                        co_return std::string("角色形象图格式无效，请在管理后台重新上传。");
+                    }
+                }
+                co_return startImageTask(ctx.sessionId, prompt, *size, std::nullopt, std::move(referenceDataUrl));
             },
           },
           ToolCategory::ACTION);

@@ -13,12 +13,14 @@
 #include <vector>
 
 #include <drogon/utils/coroutine.h>
+#include <openssl/evp.h>
 
 #include <agent/ability/AsyncTaskManager.hpp>
 #include <agent/memory/LongTermMemoryStore.hpp>
 #include <agent/memory/MemoryStore.hpp>
 #include <agent/tools/ToolRegistry.hpp>
 #include <agent/tools/custom/LuaToolExecutor.hpp>
+#include <agent/tools/plugins/ActionToolsPlugin.hpp>
 #include <conversation/history/ChatRecordStore.hpp>
 #include <conversation/maintenance/ConversationMaintenanceStore.hpp>
 #include <conversation/maintenance/affinity/AffinityMaintenanceStore.hpp>
@@ -35,10 +37,13 @@
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/config/ConfigStore.hpp>
+#include <infrastructure/http/HttpUtil.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/SchemaMigrator.hpp>
 #include <llm/JevClient.hpp>
 #include <llm/usage/UsageStore.hpp>
+#include <media/CharacterImageStore.hpp>
+#include <media/ImageDescriptionService.hpp>
 #include <media/ImageDescriptionStore.hpp>
 #include <media/ImageGenerationService.hpp>
 
@@ -507,6 +512,90 @@ namespace {
         registry.unregisterPlugin("contract.plugin");
     }
 
+    void testCharacterImageStore() {
+        constexpr std::string_view kTestName = "character image storage";
+        constexpr std::string_view encoded =
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9d1QAAAABJRU5ErkJggg==";
+        std::string image(encoded.size() / 4 * 3, '\0');
+        const i32 decoded = EVP_DecodeBlock(reinterpret_cast<unsigned char *>(image.data()),
+          reinterpret_cast<const unsigned char *>(encoded.data()), static_cast<i32>(encoded.size()));
+        check(decoded > 0, "test PNG decodes", kTestName);
+        image.resize(static_cast<size_t>(decoded) - 2);
+
+        check(insoulforge::ImageDescriptionService::staticImageMimeType(image) == "image/png",
+          "valid PNG is recognized", kTestName);
+        check(insoulforge::ImageDescriptionService::staticImageDataUrl(image).value_or("").starts_with(
+                "data:image/png;base64,"),
+          "data URL retains MIME type", kTestName);
+        check(!insoulforge::ImageDescriptionService::staticImageMimeType(image.substr(0, image.size() - 12)),
+          "truncated PNG is rejected", kTestName);
+        check(!insoulforge::ImageDescriptionService::staticImageMimeType("GIF89a"), "GIF is rejected", kTestName);
+
+        const auto originalPath = std::filesystem::current_path();
+        const auto testPath =
+          std::filesystem::temp_directory_path() /
+          ("insoulforge-character-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        std::filesystem::create_directories(testPath);
+        std::filesystem::current_path(testPath);
+        check(!insoulforge::CharacterImageStore::load(), "initially empty", kTestName);
+        check(!insoulforge::CharacterImageStore::save(image), "upload succeeds", kTestName);
+        const auto stored = insoulforge::CharacterImageStore::load();
+        check(stored && stored->bytes == image && stored->mimeType == "image/png", "saved bytes persist", kTestName);
+        check(insoulforge::CharacterImageStore::save("invalid").has_value(), "invalid replacement rejected", kTestName);
+        check(insoulforge::CharacterImageStore::load() && insoulforge::CharacterImageStore::load()->bytes == image,
+          "failed replacement preserves original", kTestName);
+        check(
+          insoulforge::CharacterImageStore::save(std::string(insoulforge::CharacterImageStore::kMaxImageBytes + 1, 'x'))
+            .has_value(),
+          "oversized image rejected", kTestName);
+        check(insoulforge::CharacterImageStore::remove(), "delete succeeds", kTestName);
+        check(!insoulforge::CharacterImageStore::load(), "deleted image is absent", kTestName);
+        std::filesystem::current_path(originalPath);
+        std::filesystem::remove_all(testPath);
+    }
+
+    void testHttpTraceImageRedaction() {
+        constexpr std::string_view kTestName = "HTTP image trace redaction";
+        const auto imageData = std::string("data:image/png;base64,") + std::string(2048, 'A');
+        insoulforge::json request = {{"model", "image-model"}, {"prompt", "画出你自己"}, {"size", "1024x1024"}};
+        request["input_references"] =
+          insoulforge::json::array({{{"type", "image_url"}, {"image_url", {{"url", imageData}}}}});
+        const auto redacted = insoulforge::HttpUtil::redactImagePayloads(request);
+        check(redacted["prompt"] == "画出你自己" && redacted["size"] == "1024x1024",
+          "prompt and dimensions remain visible", kTestName);
+        check(redacted["input_references"][0]["image_url"]["url"] == "[图片数据已省略]", "only image URL is redacted",
+          kTestName);
+        check(
+          request["input_references"][0]["image_url"]["url"] == imageData, "actual request stays unchanged", kTestName);
+
+        const insoulforge::json response = {
+          {"created", 123}, {"data", {{{"revised_prompt", "保留这段描述"}, {"b64_json", std::string(2048, 'A')}}}}};
+        const auto redactedResponse = insoulforge::HttpUtil::redactImagePayloads(response);
+        check(redactedResponse["data"][0]["revised_prompt"] == "保留这段描述", "response metadata remains visible",
+          kTestName);
+        check(redactedResponse["data"][0]["b64_json"] == "[图片数据已省略]", "response image is redacted", kTestName);
+    }
+
+    void testCharacterImageToolRequiresUpload() {
+        constexpr std::string_view kTestName = "self image tool reference";
+        auto &registry = insoulforge::ToolRegistry::instance();
+        check(registry.registerPlugin("contract.character-image",
+                [](insoulforge::ToolRegistry &staged) { insoulforge::ActionToolsPlugin{}.registerTools(staged); }),
+          "action tools register", kTestName);
+        const auto oldConfig = insoulforge::Config::instance().imageGeneration;
+        auto &api = insoulforge::Config::instance().imageGeneration;
+        api.apiKey = "test";
+        api.baseUrl = "https://example.com";
+        api.path = "/images";
+        api.model = "test";
+        const auto result = drogon::sync_wait(registry.executeTool(
+          "generate_image", {{"prompt", "画出你自己"}, {"use_self_reference", true}}, {.sessionId = 123}));
+        check(result.find("尚未在管理后台上传") != std::string::npos, "missing image rejects before task starts",
+          kTestName);
+        api = oldConfig;
+        registry.unregisterPlugin("contract.character-image");
+    }
+
     void testMemoryMaintenanceStore() {
         constexpr std::string_view kTestName = "memory maintenance store";
         auto &database = insoulforge::Database::instance();
@@ -819,6 +908,9 @@ auto main() -> int {
     testSchemaMigration();
     testLuaToolExecutor();
     testToolRegistryReload();
+    testCharacterImageStore();
+    testHttpTraceImageRedaction();
+    testCharacterImageToolRequiresUpload();
     testMemoryMaintenanceStore();
     testConversationMaintenanceStore();
     testMemoryModelConfigMigration();

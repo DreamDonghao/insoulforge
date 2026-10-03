@@ -55,7 +55,7 @@ namespace insoulforge::ImageDescriptionService {
         }
 
         /// @brief 通过文件魔数判断媒体格式
-        [[nodiscard]] auto detectMedia(const std::string &bytes) -> std::optional<std::pair<std::string, bool>> {
+        [[nodiscard]] auto detectMedia(const std::string_view bytes) -> std::optional<std::pair<std::string, bool>> {
             if (bytes.size() >= 6 && (bytes.starts_with("GIF87a") || bytes.starts_with("GIF89a")))
                 return std::pair{"image/gif", true};
             if (bytes.size() >= 8 && std::memcmp(bytes.data(), "\x89PNG\r\n\x1a\n", 8) == 0)
@@ -362,12 +362,47 @@ namespace insoulforge::ImageDescriptionService {
         }
     } // namespace
 
+    auto staticImageMimeType(const std::string_view bytes) -> std::optional<std::string_view> {
+        const auto format = detectMedia(bytes);
+        if (!format || format->second) {
+            return std::nullopt;
+        }
+        if (format->first == "image/png") {
+            if (bytes.size() < 45 || std::memcmp(bytes.data() + bytes.size() - 12, "\0\0\0\0IEND", 8) != 0) {
+                return std::nullopt;
+            }
+            return "image/png";
+        }
+        if (format->first == "image/jpeg") {
+            if (bytes.size() < 4 || static_cast<u8>(bytes[bytes.size() - 2]) != 0xFF ||
+                static_cast<u8>(bytes.back()) != 0xD9) {
+                return std::nullopt;
+            }
+            return "image/jpeg";
+        }
+        if (bytes.size() < 20) {
+            return std::nullopt;
+        }
+        const u32 riffSize = static_cast<u8>(bytes[4]) | static_cast<u32>(static_cast<u8>(bytes[5])) << 8U |
+                             static_cast<u32>(static_cast<u8>(bytes[6])) << 16U |
+                             static_cast<u32>(static_cast<u8>(bytes[7])) << 24U;
+        return riffSize == bytes.size() - 8 ? std::optional<std::string_view>{"image/webp"} : std::nullopt;
+    }
+
+    auto staticImageDataUrl(const std::string_view bytes) -> std::optional<std::string> {
+        const auto mimeType = staticImageMimeType(bytes);
+        if (!mimeType) {
+            return std::nullopt;
+        }
+        return "data:" + std::string(*mimeType) + ";base64," + base64Encode(bytes);
+    }
+
     auto referenceDataUrl(std::string sourceUrl, const u64 sessionId) -> drogon::Task<std::optional<std::string>> {
         const auto media = co_await download(std::move(sourceUrl), sessionId, kMaxDownloadBytes);
         if (!media || media->isGif) {
             co_return std::nullopt;
         }
-        co_return "data:" + media->mimeType + ";base64," + base64Encode(media->bytes);
+        co_return staticImageDataUrl(media->bytes);
     }
 
     auto describe(std::string sourceUrl, const u64 sessionId) -> drogon::Task<std::optional<ImageDescriptionResult>> {

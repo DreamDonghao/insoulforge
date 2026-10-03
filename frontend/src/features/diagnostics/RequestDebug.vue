@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 /**
  * @file RequestDebug.vue
- * @brief 请求调试 - 查看最近 HTTP 请求的完整请求/响应体
+ * @brief 请求调试 - 查看最近 HTTP 请求与响应（图片数据会被省略）
  */
 import {computed, inject, onMounted, onUnmounted, ref} from 'vue'
 import type {HttpTraceEntry, HttpTraceListResult} from '../../vite-env.d'
