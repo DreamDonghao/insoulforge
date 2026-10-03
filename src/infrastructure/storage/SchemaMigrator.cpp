@@ -123,7 +123,7 @@ namespace insoulforge {
         name TEXT UNIQUE NOT NULL,
         description TEXT NOT NULL,
         parameters TEXT,
-        executor_type TEXT NOT NULL CHECK(executor_type IN ('python', 'http')),
+        executor_type TEXT NOT NULL CHECK(executor_type IN ('python', 'http', 'lua')),
         executor_config TEXT,
         script_content TEXT,
         readme TEXT,
@@ -463,6 +463,25 @@ namespace insoulforge {
             Logger::info(0, "Storage", "执行迁移: 新增全局 QQ 黑名单");
             execAll(db, v11Tables);
         }
+
+        void migrateV11ToV12(sqlite3 *db) {
+            Logger::info(0, "Storage", "执行迁移: 自定义工具支持 Lua 执行器");
+            execSQL(db, R"(CREATE TABLE custom_tools_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                description TEXT NOT NULL,
+                parameters TEXT,
+                executor_type TEXT NOT NULL CHECK(executor_type IN ('python', 'http', 'lua')),
+                executor_config TEXT,
+                script_content TEXT,
+                readme TEXT,
+                enabled INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ))");
+            execSQL(db, "INSERT INTO custom_tools_new SELECT * FROM custom_tools");
+            execSQL(db, "DROP TABLE custom_tools");
+            execSQL(db, "ALTER TABLE custom_tools_new RENAME TO custom_tools");
+        }
     } // namespace
 
     namespace SchemaMigrator {
@@ -493,6 +512,7 @@ namespace insoulforge {
               &migrateV8ToV9, // 记忆任务完成后再删除消息列表前缀
               &migrateV9ToV10, // 好感度维护任务与记忆维护任务解耦
               &migrateV10ToV11, // 新增全局 QQ 黑名单
+              &migrateV11ToV12, // 自定义工具增加 Lua 执行器
             };
 
             for (i32 v = version; v < kLatestVersion; ++v) {

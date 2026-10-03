@@ -6,7 +6,7 @@ RUN ln -fs /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential cmake ninja-build git ca-certificates \
         libsqlite3-dev libspdlog-dev libfmt-dev libjsoncpp-dev nlohmann-json3-dev \
-        zlib1g-dev libssl-dev uuid-dev libgif-dev libpng-dev \
+        zlib1g-dev libssl-dev uuid-dev libgif-dev libpng-dev liblua5.4-dev \
         nodejs npm \
     && rm -rf /var/lib/apt/lists/*
 
@@ -39,7 +39,7 @@ FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive TZ=Asia/Shanghai
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates tzdata libsqlite3-0 libjsoncpp25 libssl3t64 libpng16-16 libgif7 \
+        ca-certificates tzdata libsqlite3-0 libjsoncpp25 libssl3t64 libpng16-16 libgif7 liblua5.4-0 \
     && rm -rf /var/lib/apt/lists/* \
     && ln -fs /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 

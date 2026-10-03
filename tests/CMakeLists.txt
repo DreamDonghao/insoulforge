@@ -6,7 +6,8 @@ add_executable(insoulforge_message_contract_tests EXCLUDE_FROM_ALL
 target_compile_features(insoulforge_message_contract_tests PRIVATE cxx_std_23)
 target_include_directories(insoulforge_message_contract_tests PRIVATE
         ${PROJECT_SOURCE_DIR}
-        ${PROJECT_SOURCE_DIR}/include)
+        ${PROJECT_SOURCE_DIR}/include
+        ${LUA_INCLUDE_DIR})
 target_link_libraries(insoulforge_message_contract_tests PRIVATE
         Drogon::Drogon
         spdlog::spdlog_header_only
@@ -14,7 +15,8 @@ target_link_libraries(insoulforge_message_contract_tests PRIVATE
         SQLite3_lib
         OpenSSL::Crypto
         PNG::PNG
-        ${GIFLIB_LIBRARY})
+        ${GIFLIB_LIBRARY}
+        ${LUA_LIBRARIES})
 
 if (nlohmann_json_FOUND)
     target_link_libraries(insoulforge_message_contract_tests PRIVATE nlohmann_json::nlohmann_json)

@@ -9,6 +9,7 @@
 
 #include <functional>
 #include <map>
+#include <shared_mutex>
 #include <string>
 #include <vector>
 
@@ -107,6 +108,7 @@ namespace insoulforge {
         // 名称全局唯一，杜绝自定义工具覆盖内置工具后出现定义与执行不一致。
         std::map<std::string, RegisteredTool> m_tools;
         std::map<std::string, std::vector<std::string>> m_pluginTools;
+        mutable std::shared_mutex m_mutex;
         std::string m_activePluginId;
         bool m_pluginRegistrationFailed = false;
 

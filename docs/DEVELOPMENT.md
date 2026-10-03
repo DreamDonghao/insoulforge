@@ -16,6 +16,7 @@
 | SQLite3、spdlog、fmt、OpenSSL | 开发包                                         | 存储、日志、格式化、加密                               |
 | nlohmann-json                 | 头文件或 CMake 包                              | JSON；CMake 找不到包时会直接查找头文件                 |
 | libpng、giflib                | 开发包                                         | 图片与 GIF 解码                                        |
+| Lua                          | 5.4 或更新的兼容版本                          | 进程内自定义工具执行器                                 |
 
 `ninja` 不是必需依赖，但与 Dockerfile 一致，推荐作为 CMake 生成器使用。
 
@@ -27,7 +28,7 @@
 sudo apt update && sudo apt install -y \
     build-essential cmake ninja-build git ca-certificates \
     libsqlite3-dev libspdlog-dev libfmt-dev libjsoncpp-dev nlohmann-json3-dev \
-    zlib1g-dev libssl-dev uuid-dev libgif-dev libpng-dev \
+    zlib1g-dev libssl-dev uuid-dev libgif-dev libpng-dev liblua5.4-dev \
     nodejs npm
 ```
 
@@ -55,7 +56,7 @@ Ubuntu 22.04 默认编译器不满足本项目的 C++23 / `<format>` 要求。�
 ### macOS（Homebrew）
 
 ```bash
-brew install cmake drogon spdlog fmt nlohmann-json sqlite3 openssl brotli libpng giflib node
+brew install cmake drogon spdlog fmt nlohmann-json sqlite3 openssl brotli libpng giflib lua node
 ```
 
 Homebrew 的 `drogon` 会提供 CMake 包。若 CMake 找不到 OpenSSL、SQLite3 等 Homebrew 前缀下的依赖，请在配置时传入对应的
@@ -249,7 +250,7 @@ MessageService → OneBot API
   全局唯一，冲突时拒绝注册，避免自定义工具覆盖内置工具后出现定义与执行不一致。
 - 工具定义按“类别 → `promptOrder` → 工具名”稳定排序，避免重启或自定义工具刷新后改变 provider 的 prompt cache
   和模型偏好。私聊请求会在注入前排除 `GROUP_ONLY` 工具（当前为 `at_user`、`ban_user`、`send_poke`）。
-- 自定义工具（Python 脚本 / HTTP 接口）存储于数据库，启动及后台刷新时加载；Python 工具通过 `sys.argv[1]` 传入参数 JSON 文件路径
+- 自定义工具（Lua / Python / HTTP）存储于数据库，启动及后台刷新时加载；Python 工具通过 `sys.argv[1]` 传入参数 JSON 文件路径。Lua 工具每次调用创建独立状态，宿主操作由协程桥接，详见 [TOOLS.md](./TOOLS.md)
 - 拍一拍、撤回、引用回复、表情包收发、定时任务均由上述工具实现，由 Executor 根据上下文自动决策调用；天气、搜索、随机数、时间等能力来自
   `agentTools/` 目录的可导入自定义工具
 
@@ -396,6 +397,12 @@ Schema 中写清楚触发条件与边界。需要调整同类别展示位置时�
   "readme": "# 工具说明\n作者、用法、联系方式等"
 }
 ```
+
+### 添加自定义工具（Lua）
+
+管理后台选择 Lua 类型，填写 JSON Schema 和脚本，定义 `run(args, ctx)` 返回工具结果字符串。脚本可调用
+`bot.send_message(text)` 和 `bot.start_task(description, payload)`；后台任务另定义 `background(payload, ctx)`。
+详情和返回结构见 [TOOLS.md](./TOOLS.md)。测试接口模拟宿主操作，保存前校验脚本；新脚本无需重新编译或重启程序。
 
 ### 添加管理 API
 
