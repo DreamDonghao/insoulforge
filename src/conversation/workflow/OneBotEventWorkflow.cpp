@@ -120,6 +120,18 @@ namespace insoulforge {
         }
     }
 
+    void OneBotEventWorkflow::appendSystemStatusMessage(const u64 sessionId, json message) {
+        const auto sessionState = getOrCreateSessionState(sessionId);
+        const auto update = sessionState->messageList()->append(std::move(message));
+        if (!update) {
+            return;
+        }
+        pushRecordedMessage(sessionId, update->messageSnapshot.back());
+        if (update->summaryBatch) {
+            scheduleConversationMaintenance(sessionId, sessionState->messageList(), *update->summaryBatch);
+        }
+    }
+
     auto OneBotEventWorkflow::getSessionMessages(const u64 sessionId) -> std::optional<json> {
         std::shared_ptr<SessionWorkflowState> sessionState;
         {

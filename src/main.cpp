@@ -9,6 +9,7 @@
 #include <admin/access/AdminAccessToken.hpp>
 #include <admin/access/AdminStore.hpp>
 #include <admin/http/AdminResponse.hpp>
+#include <agent/ability/AsyncTaskManager.hpp>
 #include <agent/ability/TaskScheduler.hpp>
 #include <agent/runtime/AgentSystem.hpp>
 #include <conversation/session/QQNameDirectory.hpp>
@@ -119,9 +120,10 @@ auto main() -> int {
         commandThread.request_stop();
         commandThread.join();
 
-        // 先停调度线程再关库，避免触发中的任务写已关闭的数据库
+        // 先停止任务来源并记录未完成的后台任务，再持久化消息列表、关闭数据库。
         TaskScheduler::instance().stop();
         OneBotWebSocketClient::instance().stop();
+        AsyncTaskManager::instance().stop();
         OneBotEventWorkflow::instance().flushMessageListsToStorage();
         database.close();
         Logger::info(0, "Main", "系统正常退出");

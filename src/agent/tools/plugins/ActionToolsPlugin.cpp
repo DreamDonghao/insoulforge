@@ -3,6 +3,7 @@
 
 #include <admin/access/AdminStore.hpp>
 #include <admin/access/BlacklistStore.hpp>
+#include <agent/ability/AsyncTaskManager.hpp>
 #include <agent/runtime/ExecutorAgent.hpp>
 #include <agent/tools/ToolArgument.hpp>
 #include <agent/tools/ToolRuntime.hpp>
@@ -25,6 +26,32 @@ namespace insoulforge {
 
     /// @brief 注册动作执行工具（ACTION，执行操作、产生副作用）
     void ActionToolsPlugin::registerTools(ToolRegistry &registry) const {
+
+        // 演示工具只验证后台启动、会话互斥和独立发送；实际能力需提供自己的处理器。
+        registry.registerTool(
+          {
+            .name = "demo_async_task",
+            .description = "仅供明确测试异步任务功能时使用。启动一个约3秒后向当前会话发送完成回执的演示任务；"
+                           "不是生图或其它实际业务能力。已有任务运行时返回其编号。",
+            .parameters = json{{"type", "object"}, {"properties", json::object()}},
+            .handler = [](const json, const ToolCallContext ctx) -> drogon::Task<std::string> {
+                const auto [status, taskId] =
+                  AsyncTaskManager::instance().start(ctx.sessionId, "演示延时任务", []() -> drogon::Task<std::string> {
+                      co_await drogon::sleepCoro(drogon::app().getLoop(), 3.0);
+                      co_return "异步演示任务已完成。";
+                  });
+                switch (status) {
+                    case AsyncTaskManager::StartResult::Status::Started:
+                        co_return fmt::format("演示任务 #{} 已启动，完成后会直接发送到本会话。", taskId);
+                    case AsyncTaskManager::StartResult::Status::Busy:
+                        co_return fmt::format("本会话已有异步任务 #{} 在执行，请等待完成。", taskId);
+                    case AsyncTaskManager::StartResult::Status::Stopping:
+                        co_return std::string("程序正在退出，无法启动异步任务。");
+                }
+                co_return std::string("无法启动异步任务。");
+            },
+          },
+          ToolCategory::ACTION);
 
         // send_face
         const json faceParams = json::parse(R"json({

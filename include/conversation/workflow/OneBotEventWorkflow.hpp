@@ -37,6 +37,12 @@ namespace insoulforge {
         /// @note 线程安全。函数完成时消息已写入内存列表；若触发记忆总结，任务已持久化并交给异步消费者。
         void appendDeliveredAssistantMessage(u64 sessionId, json message);
 
+        /// @brief 将后台任务系统状态写入完整消息列表，不触发 Router 或 Executor
+        /// @param sessionId 所属会话 ID
+        /// @param message 已构造好的完整系统消息 JSON
+        /// @note 线程安全。会推送管理后台，并按普通消息参与后续快照与记忆维护。
+        void appendSystemStatusMessage(u64 sessionId, json message);
+
         /// @brief 获取运行中会话的完整消息列表快照
         /// @param sessionId 所属会话 ID
         /// @return 会话已在工作流中初始化时返回完整消息快照，否则返回空值
