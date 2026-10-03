@@ -4,6 +4,7 @@
 
 #include <agent/tools/ToolPluginCatalog.hpp>
 #include <agent/tools/ToolRuntime.hpp>
+#include <agent/tools/custom/LuaToolExecutor.hpp>
 #include <agent/tools/custom/ToolStore.hpp>
 #include <include/agent/tools/ToolRegistry.hpp>
 #include <infrastructure/NumericTypes.hpp>
@@ -46,6 +47,21 @@ namespace insoulforge {
                   },
                 };
             }
+            if (tool.executorType == "lua") {
+                return Tool{
+                  .name = tool.name,
+                  .description = tool.description,
+                  .parameters = std::move(parameters),
+                  .handler = [script = tool.scriptContent](
+                               json args, ToolCallContext context) -> drogon::Task<std::string> {
+                      try {
+                          co_return co_await LuaToolExecutor::execute(script, std::move(args), context.sessionId);
+                      } catch (const std::exception &error) {
+                          co_return std::string("Lua 工具错误: ") + error.what();
+                      }
+                  },
+                };
+            }
             return std::nullopt;
         }
     } // namespace
@@ -61,6 +77,12 @@ namespace insoulforge {
         const bool registered =
           registry.registerPlugin("custom", [&tools, &registeredCount](ToolRegistry &pluginRegistry) -> void {
               for (const auto &tool: tools) {
+                  if (tool.executorType == "lua") {
+                      if (const auto error = LuaToolExecutor::validate(tool.scriptContent)) {
+                          Logger::warn(0, "Tool", fmt::format("跳过无效 Lua 工具 '{}': {}", tool.name, *error));
+                          continue;
+                      }
+                  }
                   auto definition = makeCustomTool(tool, parseCustomToolParameters(tool));
                   if (!definition) {
                       Logger::warn(0, "Tool",

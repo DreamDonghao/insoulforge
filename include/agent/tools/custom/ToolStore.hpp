@@ -18,7 +18,7 @@ namespace insoulforge {
             std::string name; ///< 工具名，如 search_web
             std::string description; ///< 提供给模型的工具说明
             std::string parameters; ///< JSON Schema 字符串
-            std::string executorType; ///< python 或 http
+            std::string executorType; ///< python、http 或 lua
             std::string executorConfig; ///< HTTP 执行配置 JSON
             std::string scriptContent; ///< Python 脚本内容
             std::string readme; ///< 面向管理员的 Markdown 说明

@@ -10,7 +10,7 @@ Executor（`ExecutorAgent`）在单个 Agent 循环中通过工具调用生成�
 | `ACTION`      | `tools/plugins/ActionToolsPlugin.cpp` | 执行操作、产生副作用         |
 
 内置三组分别归属 `builtin.reply`、`builtin.info`、`builtin.action` 插件，由 `ToolPluginCatalog`
-显式加载；自定义工具（Python / HTTP）归属 `custom` 插件并统一注册为 `INFORMATION`。同名工具不能跨插件覆盖；刷新自定义工具只会替换
+显式加载；自定义工具（Lua / Python / HTTP）归属 `custom` 插件并统一注册为 `INFORMATION`。同名工具不能跨插件覆盖；刷新自定义工具只会替换
 `custom` 的工具。
 
 注入顺序固定为“类别 → `promptOrder` → 工具名”，避免重启或刷新后顺序漂移。私聊注入时会排除仅群聊的 `at_user`、`ban_user`、
@@ -93,6 +93,33 @@ Router
 异步任务按会话互斥：同一会话已有任务时返回现有任务编号，不再启动新任务；不同会话可并行。工具调用立即把受理或忙碌状态交回 Executor，是否在当前回复中告知用户仍由模型决定。启动状态只写入消息列表，不单独发送到 QQ；它与失败状态都是系统消息，但不会经过入站队列触发 Router。后台任务完成后通过 `MessageService` 直接向原会话发送结果，发送成功的消息会进入列表；失败时会记录状态并尝试发送简短提示。
 
 `demo_async_task` 已对模型开放，但工具描述限定为明确测试时调用。后台任务只保存在进程内，正常退出会记录中断；异常退出或重启不会恢复、重试，也不能用它替代可恢复的记忆维护任务。
+
+## Lua 自定义工具
+
+后台中每条 Lua 工具记录包含一个脚本，定义 `run(args, ctx)` 并返回字符串。`args` 对应工具参数 JSON；
+`ctx.session_id` 是统一会话 ID 的字符串，`ctx.is_private` 表示私聊。每次调用使用独立 Lua 状态，不保留全局变量。
+
+```lua
+function run(args, ctx)
+    local result = bot.send_message(args.text)
+    if not result.ok then
+        return "发送失败：" .. result.error
+    end
+    return "已发送，消息 ID：" .. result.message_id
+end
+
+function background(payload, ctx)
+    return "后台处理完成：" .. payload.text
+end
+```
+
+`bot.send_message(text)` 会等待 OneBot 发送结果，返回 `{ok=true, message_id="..."}` 或
+`{ok=false, error="..."}`。`bot.start_task(description, payload)` 返回
+`{status="started"|"busy"|"stopping", task_id="..."}`；必须定义 `background(payload, ctx)`，后台返回的字符串由
+`AsyncTaskManager` 发送到原会话。同一会话只运行一个后台任务。测试按钮模拟发送与启动，不产生实际 QQ 消息。
+
+脚本编辑后立即重载；正在执行的调用继续使用启动时的脚本版本。Lua 不开放文件、进程与任意 C++ 对象接口，
+并限制脚本大小、内存、指令数和单次执行时间。这是减少误操作的限制，不是允许不可信用户上传脚本的安全沙箱。
 
 ## 共同模式
 

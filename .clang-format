@@ -33,7 +33,7 @@ ConstructorInitializerAllOnOneLineOrOnePerLine: false
 ContinuationIndentWidth: 2
 IncludeBlocks: Regroup
 IncludeCategories:
-  - Regex: '^<(algorithm|array|atomic|cctype|charconv|chrono|concepts|condition_variable|coroutine|cstddef|cstdint|deque|exception|filesystem|format|fstream|functional|iomanip|iostream|map|memory|mutex|optional|queue|random|ranges|set|shared_mutex|stdexcept|string|string_view|system_error|thread|tuple|unordered_map|unordered_set|utility|vector)>$'
+  - Regex: '^<(algorithm|array|atomic|cctype|charconv|chrono|concepts|condition_variable|coroutine|cstddef|cstdint|cstdlib|deque|exception|filesystem|format|fstream|functional|iomanip|iostream|limits|map|memory|mutex|optional|queue|random|ranges|set|shared_mutex|stdexcept|string|string_view|system_error|thread|tuple|unordered_map|unordered_set|utility|vector)>$'
     Priority: 1
   - Regex: '^<(admin|agent|conversation|infrastructure|llm|media|onebot|include)/'
     Priority: 3

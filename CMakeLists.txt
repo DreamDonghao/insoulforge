@@ -20,6 +20,7 @@ find_package(spdlog REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(PNG REQUIRED)
+find_package(Lua 5.4 REQUIRED)
 
 find_path(GIFLIB_INCLUDE_DIR NAMES gif_lib.h REQUIRED)
 find_library(GIFLIB_LIBRARY NAMES gif REQUIRED)
@@ -84,6 +85,10 @@ target_link_libraries(${PROJECT_NAME}_backend PRIVATE
         ${GIFLIB_LIBRARY}
 )
 target_include_directories(${PROJECT_NAME}_backend PRIVATE ${GIFLIB_INCLUDE_DIR})
+target_include_directories(${PROJECT_NAME}_backend PRIVATE ${LUA_INCLUDE_DIR})
+target_include_directories(${PROJECT_NAME} PRIVATE ${LUA_INCLUDE_DIR})
+target_link_libraries(${PROJECT_NAME}_backend PRIVATE ${LUA_LIBRARIES})
+target_link_libraries(${PROJECT_NAME} PRIVATE ${LUA_LIBRARIES})
 
 # 静态链接 C++ 标准库和 GCC 运行时
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND NOT APPLE)

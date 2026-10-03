@@ -1,6 +1,8 @@
 /// @file ToolRegistry.cpp
 /// @brief 工具注册中心 - 实现
 
+#include <mutex>
+
 #include <include/agent/tools/ToolRegistry.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/logging/Logger.hpp>
@@ -38,46 +40,44 @@ namespace insoulforge {
             Logger::error(0, "Tool", fmt::format("工具插件注册失败：插件 ID、注册函数无效或发生嵌套注册"));
             return false;
         }
-
-        std::vector<RegisteredTool> previousTools;
-        if (const auto previous = m_pluginTools.find(pluginId); previous != m_pluginTools.end()) {
-            previousTools.reserve(previous->second.size());
-            for (const auto &name: previous->second) {
-                if (const auto tool = m_tools.find(name); tool != m_tools.end())
-                    previousTools.push_back(tool->second);
-            }
-        }
-
-        unregisterPlugin(pluginId);
-        m_activePluginId = std::move(pluginId);
-        m_pluginRegistrationFailed = false;
+        ToolRegistry staged;
+        staged.m_activePluginId = pluginId;
         try {
-            registrar(*this);
+            registrar(staged);
         } catch (const std::exception &e) {
-            Logger::error(0, "Tool", fmt::format("工具插件 '{}' 注册异常: {}", m_activePluginId, e.what()));
-            m_pluginRegistrationFailed = true;
+            Logger::error(0, "Tool", fmt::format("工具插件 '{}' 注册异常: {}", pluginId, e.what()));
+            return false;
         } catch (...) {
-            Logger::error(0, "Tool", fmt::format("工具插件 '{}' 注册发生未知异常", m_activePluginId));
-            m_pluginRegistrationFailed = true;
-        }
-
-        const std::string registeredPluginId = std::move(m_activePluginId);
-        if (m_pluginRegistrationFailed) {
-            unregisterPlugin(registeredPluginId);
-            for (const auto &tool: previousTools) {
-                m_tools.insert_or_assign(tool.tool.name, tool);
-                m_pluginTools[registeredPluginId].push_back(tool.tool.name);
-            }
-            Logger::warn(0, "Tool",
-              fmt::format("工具插件 '{}' 注册失败，已恢复此前 {} 个工具", registeredPluginId, previousTools.size()));
-            m_pluginRegistrationFailed = false;
+            Logger::error(0, "Tool", fmt::format("工具插件 '{}' 注册发生未知异常", pluginId));
             return false;
         }
-
+        if (staged.m_pluginRegistrationFailed) {
+            return false;
+        }
+        std::unique_lock lock(m_mutex);
+        for (const auto &[name, tool]: staged.m_tools) {
+            if (const auto existing = m_tools.find(name);
+              existing != m_tools.end() && existing->second.pluginId != pluginId) {
+                Logger::error(0, "Tool",
+                  fmt::format("工具插件 '{}' 与 '{}' 的工具 '{}' 冲突", pluginId, existing->second.pluginId, name));
+                return false;
+            }
+        }
+        if (const auto old = m_pluginTools.find(pluginId); old != m_pluginTools.end()) {
+            for (const auto &name: old->second) {
+                m_tools.erase(name);
+            }
+            m_pluginTools.erase(old);
+        }
+        for (auto &[name, tool]: staged.m_tools) {
+            m_tools.emplace(name, std::move(tool));
+            m_pluginTools[pluginId].push_back(name);
+        }
         return true;
     }
 
     void ToolRegistry::unregisterPlugin(const std::string &pluginId) {
+        std::unique_lock lock(m_mutex);
         const auto it = m_pluginTools.find(pluginId);
         if (it == m_pluginTools.end())
             return;
@@ -87,6 +87,7 @@ namespace insoulforge {
     }
 
     auto ToolRegistry::registerTool(const Tool &tool, const ToolCategory category) -> bool {
+        std::unique_lock lock(m_mutex);
         if (tool.name.empty() || !tool.handler) {
             Logger::error(0, "Tool", fmt::format("工具注册失败：工具名称或处理器为空"));
             if (!m_activePluginId.empty())
@@ -112,6 +113,7 @@ namespace insoulforge {
     }
 
     auto ToolRegistry::getTools(const ToolQuery &query) const -> json {
+        std::shared_lock lock(m_mutex);
         json tools = json::array();
 
         std::vector<const RegisteredTool *> visibleTools;
@@ -136,15 +138,26 @@ namespace insoulforge {
 
     auto ToolRegistry::executeTool(const std::string name, json args, ToolCallContext ctx) const
       -> drogon::Task<std::string> {
-        if (const auto it = m_tools.find(name); it != m_tools.end()) {
-            co_return co_await it->second.tool.handler(std::move(args), std::move(ctx));
+        ToolHandler handler;
+        {
+            std::shared_lock lock(m_mutex);
+            if (const auto it = m_tools.find(name); it != m_tools.end()) {
+                handler = it->second.tool.handler;
+            }
+        }
+        if (handler) {
+            co_return co_await handler(std::move(args), std::move(ctx));
         }
         co_return "工具未找到: " + name;
     }
 
-    auto ToolRegistry::hasTool(const std::string &name) const -> bool { return m_tools.contains(name); }
+    auto ToolRegistry::hasTool(const std::string &name) const -> bool {
+        std::shared_lock lock(m_mutex);
+        return m_tools.contains(name);
+    }
 
     void ToolRegistry::unregisterTool(const std::string &name) {
+        std::unique_lock lock(m_mutex);
         m_tools.erase(name);
         for (auto iterator = m_pluginTools.begin(); iterator != m_pluginTools.end();) {
             auto &names = iterator->second;

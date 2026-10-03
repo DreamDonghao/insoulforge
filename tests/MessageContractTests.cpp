@@ -17,6 +17,8 @@
 #include <agent/ability/AsyncTaskManager.hpp>
 #include <agent/memory/LongTermMemoryStore.hpp>
 #include <agent/memory/MemoryStore.hpp>
+#include <agent/tools/ToolRegistry.hpp>
+#include <agent/tools/custom/LuaToolExecutor.hpp>
 #include <conversation/history/ChatRecordStore.hpp>
 #include <conversation/maintenance/ConversationMaintenanceStore.hpp>
 #include <conversation/maintenance/affinity/AffinityMaintenanceStore.hpp>
@@ -381,6 +383,15 @@ namespace {
             return;
 
         sqlite3_exec(db, "PRAGMA user_version = 6", nullptr, nullptr, nullptr);
+        sqlite3_exec(db,
+          "CREATE TABLE custom_tools (id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, description TEXT NOT NULL, "
+          "parameters TEXT, executor_type TEXT NOT NULL CHECK(executor_type IN ('python', 'http')), "
+          "executor_config TEXT, script_content TEXT, readme TEXT, enabled INTEGER DEFAULT 1, "
+          "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
+          nullptr, nullptr, nullptr);
+        sqlite3_exec(db,
+          "INSERT INTO custom_tools (id, name, description, executor_type) VALUES (7, 'old_tool', 'old', 'python')",
+          nullptr, nullptr, nullptr);
         insoulforge::SchemaMigrator::migrate(db);
         sqlite3_stmt *stmt = nullptr;
         const i32 prepareResult =
@@ -395,7 +406,70 @@ namespace {
           db, "SELECT messages, attempt_count FROM affinity_maintenance_jobs LIMIT 1", -1, &stmt, nullptr);
         check(affinityJobPrepareResult == SQLITE_OK, "migration creates durable affinity maintenance jobs", kTestName);
         sqlite3_finalize(stmt);
+        const i32 oldToolResult = sqlite3_prepare_v2(
+          db, "SELECT id, executor_type FROM custom_tools WHERE name='old_tool'", -1, &stmt, nullptr);
+        check(oldToolResult == SQLITE_OK && sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_int(stmt, 0) == 7,
+          "migration preserves Python tool and ID", kTestName);
+        sqlite3_finalize(stmt);
+        check(sqlite3_exec(db,
+                "INSERT INTO custom_tools (name, description, executor_type) VALUES ('new_tool', 'new', 'lua')",
+                nullptr, nullptr, nullptr) == SQLITE_OK,
+          "migration permits Lua tool", kTestName);
         sqlite3_close(db);
+    }
+
+    void testLuaToolExecutor() {
+        constexpr std::string_view kTestName = "Lua custom tool";
+        constexpr std::string_view script = R"lua(
+            function run(args, ctx)
+                local sent = bot.send_message(args.text)
+                local task = bot.start_task("测试后台任务", {text = args.text})
+                return ctx.session_id .. ":" .. sent.message_id .. ":" .. task.status
+            end
+            function background(payload, ctx)
+                return payload.text .. ":" .. ctx.session_id
+            end
+        )lua";
+        check(!insoulforge::LuaToolExecutor::validate(script), "valid script accepted", kTestName);
+        check(insoulforge::LuaToolExecutor::validate("function other() end").has_value(), "missing run rejected",
+          kTestName);
+        const std::string result = drogon::sync_wait(
+          insoulforge::LuaToolExecutor::execute(std::string(script), {{"text", "你好"}}, 123, false, true));
+        check(result == "123:test-message:started", "host operations resume script", kTestName);
+        const std::string background = drogon::sync_wait(
+          insoulforge::LuaToolExecutor::execute(std::string(script), {{"text", "完成"}}, 123, true, true));
+        check(background == "完成:123", "background entry receives payload", kTestName);
+        try {
+            std::ignore = drogon::sync_wait(insoulforge::LuaToolExecutor::execute(
+              "function run() while true do end end", insoulforge::json::object(), 0, false, true));
+            check(false, "infinite loop rejected", kTestName);
+        } catch (const std::exception &) {
+            check(true, "infinite loop rejected", kTestName);
+        }
+    }
+
+    void testToolRegistryReload() {
+        constexpr std::string_view kTestName = "tool registry reload";
+        auto &registry = insoulforge::ToolRegistry::instance();
+        const auto registerVersion = [&registry](std::string pluginId, std::string result) {
+            return registry.registerPlugin(std::move(pluginId), [&result](insoulforge::ToolRegistry &staged) {
+                staged.registerTool(
+                  {.name = "contract_reload_tool",
+                    .description = "test",
+                    .handler = [result](insoulforge::json, insoulforge::ToolCallContext) -> drogon::Task<std::string> {
+                        co_return result;
+                    }},
+                  insoulforge::ToolCategory::INFORMATION);
+            });
+        };
+        check(registerVersion("contract.plugin", "old"), "initial registration succeeds", kTestName);
+        check(!registerVersion("other.plugin", "conflict"), "cross-plugin name collision fails", kTestName);
+        check(drogon::sync_wait(registry.executeTool("contract_reload_tool", {}, {})) == "old",
+          "failed registration preserves old handler", kTestName);
+        check(registerVersion("contract.plugin", "new"), "reload succeeds", kTestName);
+        check(drogon::sync_wait(registry.executeTool("contract_reload_tool", {}, {})) == "new",
+          "reload replaces handler", kTestName);
+        registry.unregisterPlugin("contract.plugin");
     }
 
     void testMemoryMaintenanceStore() {
@@ -668,6 +742,8 @@ auto main() -> int {
     testMessageRecordProjectionHidesImageSources();
     testAssistantStickerRecordKeepsOnlyName();
     testSchemaMigration();
+    testLuaToolExecutor();
+    testToolRegistryReload();
     testMemoryMaintenanceStore();
     testConversationMaintenanceStore();
     testMemoryModelConfigMigration();

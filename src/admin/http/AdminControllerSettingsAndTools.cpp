@@ -6,6 +6,7 @@
 #include <admin/http/AdminController.hpp>
 #include <admin/http/AdminResponse.hpp>
 #include <agent/tools/ToolRuntime.hpp>
+#include <agent/tools/custom/LuaToolExecutor.hpp>
 #include <agent/tools/custom/ToolStore.hpp>
 #include <include/agent/tools/ToolRegistry.hpp>
 #include <infrastructure/NumericTypes.hpp>
@@ -181,6 +182,16 @@ auto AdminController::addCustomTool(HttpRequestPtr req, std::function<void(const
     tool.readme = getStr(*body, "readme");
     tool.enabled = getBool(*body, "enabled", true);
 
+    if (tool.executorType == "lua") {
+        if (const auto error = LuaToolExecutor::validate(tool.scriptContent)) {
+            callback(jsonResponse(AdminResponse::errorJson(*error)));
+            co_return;
+        }
+    } else if (tool.executorType != "python" && tool.executorType != "http") {
+        callback(jsonResponse(AdminResponse::errorJson("未知的执行类型")));
+        co_return;
+    }
+
     const i32 id = ToolStore::addCustomTool(tool);
 
     // 立即注册到 ToolRegistry
@@ -210,6 +221,16 @@ auto AdminController::updateCustomTool(
     tool.scriptContent = getStr(*body, "scriptContent");
     tool.readme = getStr(*body, "readme");
     tool.enabled = getBool(*body, "enabled", true);
+
+    if (tool.executorType == "lua") {
+        if (const auto error = LuaToolExecutor::validate(tool.scriptContent)) {
+            callback(jsonResponse(AdminResponse::errorJson(*error)));
+            co_return;
+        }
+    } else if (tool.executorType != "python" && tool.executorType != "http") {
+        callback(jsonResponse(AdminResponse::errorJson("未知的执行类型")));
+        co_return;
+    }
 
     ToolStore::updateCustomTool(tool);
 
@@ -294,6 +315,13 @@ auto AdminController::testCustomTool(HttpRequestPtr req, std::function<void(cons
         result = co_await ToolRuntime::executePythonTool(std::move(scriptContent), std::move(testArgs));
     } else if (executorType == "http") {
         result = co_await ToolRuntime::executeHttpTool(std::move(executorConfig), std::move(testArgs), 0);
+    } else if (executorType == "lua") {
+        try {
+            result = co_await LuaToolExecutor::execute(std::move(scriptContent), std::move(testArgs), 0, false, true);
+        } catch (const std::exception &error) {
+            callback(jsonResponse(AdminResponse::errorJson(error.what())));
+            co_return;
+        }
     } else {
         result = "未知的执行类型";
     }
@@ -345,9 +373,9 @@ auto AdminController::exportCustomTool(
 
     const auto &tool = *it;
 
-    // 只支持导出 Python 工具
-    if (tool.executorType != "python") {
-        callback(jsonResponse(AdminResponse::failJson("仅支持导出 Python 类型工具")));
+    // HTTP 配置中可能包含访问令牌，不通过脚本导出接口导出。
+    if (tool.executorType != "python" && tool.executorType != "lua") {
+        callback(jsonResponse(AdminResponse::failJson("仅支持导出脚本类型工具")));
         co_return;
     }
 
@@ -362,6 +390,7 @@ auto AdminController::exportCustomTool(
     exportJson["parameters"] = params;
 
     exportJson["scriptContent"] = tool.scriptContent;
+    exportJson["executorType"] = tool.executorType;
     if (!tool.readme.empty()) {
         exportJson["readme"] = tool.readme;
     }
@@ -396,16 +425,20 @@ auto AdminController::importCustomTool(HttpRequestPtr req, std::function<void(co
     std::string name = getStr(*body, "name");
 
     // 检查是否已存在同名工具
-    if (ToolStore::hasCustomTool(name)) {
+    if (ToolStore::hasCustomTool(name) || ToolRegistry::instance().hasTool(name)) {
         callback(jsonResponse(AdminResponse::failJson("工具名已存在：" + name)));
         co_return;
     }
 
-    // 构建工具对象（强制使用 Python 类型）
+    // 兼容旧版没有 executorType 的 Python 导出文件。
     ToolStore::CustomTool tool;
     tool.name = name;
     tool.description = getStr(*body, "description");
-    tool.executorType = "python";
+    tool.executorType = getStr(*body, "executorType", "python");
+    if (tool.executorType != "python" && tool.executorType != "lua") {
+        callback(jsonResponse(AdminResponse::failJson("仅支持导入 Python 或 Lua 脚本")));
+        co_return;
+    }
 
     // 参数处理
     if (body->contains("parameters")) {
@@ -415,6 +448,12 @@ auto AdminController::importCustomTool(HttpRequestPtr req, std::function<void(co
     }
 
     tool.scriptContent = getStr(*body, "scriptContent");
+    if (tool.executorType == "lua") {
+        if (const auto error = LuaToolExecutor::validate(tool.scriptContent)) {
+            callback(jsonResponse(AdminResponse::failJson(*error)));
+            co_return;
+        }
+    }
     tool.readme = getStr(*body, "readme");
     tool.enabled = true;
 

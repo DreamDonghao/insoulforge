@@ -14,7 +14,7 @@ interface CustomTool {
   name: string
   description: string
   parameters: string
-  executorType: 'python' | 'http'
+  executorType: 'python' | 'http' | 'lua'
   executorConfig: string
   scriptContent: string
   readme: string
@@ -55,6 +55,15 @@ if len(sys.argv) > 1:
 
 result = {"status": "ok", "args": args}
 print(json.dumps(result, ensure_ascii=False))`
+
+const defaultLuaScript = `function run(args, ctx)
+    return "会话 " .. ctx.session_id .. "：" .. (args.text or "你好")
+end
+
+-- 可选：由 bot.start_task(description, payload) 启动后台入口。
+-- function background(payload, ctx)
+--     return "任务完成"
+-- end`
 
 const editTool = reactive<CustomTool>({
   id: 0,
@@ -165,6 +174,17 @@ const closeDialog = (): void => {
   showDialog.value = false
 }
 
+const onExecutorTypeChange = (): void => {
+  if (editTool.executorType === 'lua' &&
+      (editTool.scriptContent === defaultPythonScript || !editTool.scriptContent)) {
+    editTool.scriptContent = defaultLuaScript
+  } else if (editTool.executorType === 'python' &&
+      (editTool.scriptContent === defaultLuaScript || !editTool.scriptContent)) {
+    editTool.scriptContent = defaultPythonScript
+  }
+  resizeAllTextareas()
+}
+
 const saveTool = async (): Promise<void> => {
   if (!editTool.name) {
     showToast!('请填写工具名称', true)
@@ -174,7 +194,7 @@ const saveTool = async (): Promise<void> => {
     showToast!('请填写工具描述', true)
     return
   }
-  if (editTool.executorType === 'python' && !editTool.scriptContent) {
+  if ((editTool.executorType === 'python' || editTool.executorType === 'lua') && !editTool.scriptContent) {
     showToast!('请填写脚本内容', true)
     return
   }
@@ -358,7 +378,7 @@ const testCurrentTool = async (): Promise<void> => {
   }
 }
 
-const dialogWidth = computed(() => editTool.executorType === 'python' ? '900px' : '600px')
+const dialogWidth = computed(() => editTool.executorType === 'http' ? '600px' : '900px')
 
 onMounted(() => {
   loadTools()
@@ -412,7 +432,7 @@ onMounted(() => {
                       @click="toggleTool(tool.id)">
                 {{ tool.enabled ? '禁用' : '启用' }}
               </button>
-              <button v-if="tool.executorType === 'python'" class="btn btn-secondary btn-sm" style="margin-left: 4px;"
+              <button v-if="tool.executorType !== 'http'" class="btn btn-secondary btn-sm" style="margin-left: 4px;"
                       @click="exportTool(tool.id, tool.name)">导出
               </button>
               <button class="btn btn-primary btn-sm" style="margin-left: 4px;" @click="openEditDialog(tool)">编辑
@@ -521,9 +541,10 @@ pip install requests numpy  # 安装需要的包</pre>
             </div>
             <div class="form-group" style="width: 120px;">
               <label class="form-label">执行类型</label>
-              <select v-model="editTool.executorType" class="form-input">
+              <select v-model="editTool.executorType" class="form-input" @change="onExecutorTypeChange">
                 <option value="python">Python</option>
                 <option value="http">HTTP</option>
+                <option value="lua">Lua</option>
               </select>
             </div>
           </div>
@@ -545,6 +566,13 @@ pip install requests numpy  # 安装需要的包</pre>
             <textarea v-model="editTool.scriptContent" class="form-input code-input auto-height" spellcheck="false"
                       @input="autoResize"></textarea>
             <small class="form-hint">参数通过 sys.argv[1] 传入 JSON 文件路径</small>
+          </div>
+
+          <div v-if="editTool.executorType === 'lua'" class="form-group">
+            <label class="form-label">Lua 脚本</label>
+            <textarea v-model="editTool.scriptContent" class="form-input code-input auto-height" spellcheck="false"
+                      @input="autoResize"></textarea>
+            <small class="form-hint">定义 run(args, ctx)；bot.send_message 可等待发送结果，bot.start_task 启动可选的 background 入口。测试不会真正发送。</small>
           </div>
 
           <!-- README 文档 -->
@@ -641,6 +669,11 @@ pip install requests numpy  # 安装需要的包</pre>
 
 .tag-http {
   background: var(--success-btn);
+  color: white;
+}
+
+.tag-lua {
+  background: #5a65aa;
   color: white;
 }
 
