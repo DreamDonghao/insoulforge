@@ -65,12 +65,14 @@ namespace insoulforge::HttpUtil {
     } // namespace
 
     auto send(const std::string_view tag, std::string baseUrl, std::string path, const drogon::HttpMethod method,
-      json body, std::string bearerToken, const f64 timeout, std::optional<u64> sessionId)
+      json body, std::string bearerToken, const f64 timeout, std::optional<u64> sessionId, const bool traceResponse)
       -> drogon::Task<std::optional<drogon::HttpResponsePtr>> {
         normalizeTarget(baseUrl, path);
         // 请求体完整序列化一次，供请求调试记录和实际请求共用；运行日志不记录正常请求细节。
         auto bodyText = body.is_null() ? std::string{} : dumpJson(body);
-        const auto bodyLog = truncate(bodyText, kBodyLogMax);
+        const bool containsImageData =
+          bodyText.find("base64://") != std::string::npos || bodyText.find(";base64,") != std::string::npos;
+        const auto bodyLog = containsImageData ? std::string("[图片数据已省略]") : truncate(bodyText, kBodyLogMax);
 
         HttpTraceEntry trace;
         trace.tag = std::string(tag);
@@ -101,11 +103,11 @@ namespace insoulforge::HttpUtil {
         if (!bearerToken.empty()) {
             req->addHeader("Authorization", "Bearer " + bearerToken);
         }
-        trace.requestBody = std::move(bodyText);
+        trace.requestBody = containsImageData ? "[图片数据已省略]" : std::move(bodyText);
 
         const auto finishTrace = [&](const i32 statusCode, std::string responseBody) -> void {
             trace.status = statusCode;
-            trace.responseBody = std::move(responseBody);
+            trace.responseBody = traceResponse ? std::move(responseBody) : "[图片响应已省略]";
             HttpTrace::instance().append(std::move(trace));
         };
 
@@ -131,7 +133,7 @@ namespace insoulforge::HttpUtil {
                 methodName(method), baseUrl, path));
         }
 
-        finishTrace(static_cast<i32>(resp->getStatusCode()), std::string{resp->body()});
+        finishTrace(static_cast<i32>(resp->getStatusCode()), traceResponse ? std::string{resp->body()} : std::string{});
 
         co_return resp;
     }

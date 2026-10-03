@@ -40,6 +40,7 @@
 #include <llm/JevClient.hpp>
 #include <llm/usage/UsageStore.hpp>
 #include <media/ImageDescriptionStore.hpp>
+#include <media/ImageGenerationService.hpp>
 
 namespace {
     using insoulforge::i32;
@@ -202,6 +203,26 @@ namespace {
         const auto queuedMention =
           drogon::sync_wait(insoulforge::MessageRouter::route(100, "mention", assistantAfterMention));
         check(queuedMention.shouldReply, "queued bot mention replies despite trailing assistant message", kTestName);
+
+        const auto systemEvent = insoulforge::OneBotEventNormalizer::normalize({{"post_type", "message"},
+          {"message_type", "group"}, {"group_id", 100}, {"self_id", 42}, {"message_id", 1'790'000'000'000'001LL},
+          {"sender", {{"user_id", insoulforge::SessionId::kSystemAccountId}, {"nickname", "系统异步任务"}}},
+          {"message", insoulforge::json::array({{{"type", "text"}, {"data", {{"text", "任务完成"}}}}})}});
+        check(systemEvent && insoulforge::MessageRecord::isSystem(*systemEvent),
+          "async task event normalizes as a system message", kTestName);
+        if (systemEvent) {
+            const auto systemSnapshot = insoulforge::json::array({*systemEvent});
+            const auto systemDecision =
+              drogon::sync_wait(insoulforge::MessageRouter::route(100, "1790000000000001", systemSnapshot));
+            check(systemDecision.shouldReply && systemDecision.isPriority,
+              "async task result triggers a priority reply", kTestName);
+        }
+        const auto privateSystemEvent = insoulforge::OneBotEventNormalizer::normalize({{"post_type", "message"},
+          {"message_type", "private"}, {"user_id", 11}, {"self_id", 42}, {"message_id", 1'790'000'000'000'002LL},
+          {"sender", {{"user_id", insoulforge::SessionId::kSystemAccountId}, {"nickname", "系统异步任务"}}},
+          {"message", insoulforge::json::array({{{"type", "text"}, {"data", {{"text", "任务失败"}}}}})}});
+        check(privateSystemEvent && (*privateSystemEvent)["session_id"] == insoulforge::SessionId::fromPrivateUser(11),
+          "async task result reaches the original private session", kTestName);
 
         config.selfQQNumber = originalSelfId;
     }
@@ -375,6 +396,20 @@ namespace {
           !record.dump().contains("https://example.com/sticker.jpg"), "sticker record excludes CQ source", kTestName);
     }
 
+    void testGeneratedImageRecordKeepsDescription() {
+        constexpr std::string_view kTestName = "generated image record";
+        const auto record =
+          insoulforge::MessageRecord::createAssistantGeneratedImageRecord("Bot(我)", 8, "画面中有一只白猫坐在窗边。");
+        const auto projected = insoulforge::MessageRecord::projectForAgent(record);
+        check(record["segments"].size() == 1 && record["segments"][0]["type"] == "image",
+          "sent image remains an image segment", kTestName);
+        check(projected["segments"][0]["description"] == "画面中有一只白猫坐在窗边。",
+          "model sees the visual description", kTestName);
+        check(insoulforge::MessageRecord::extractRecallText(record).find("白猫") != std::string::npos,
+          "visual description is available to memory recall", kTestName);
+        check(!record.dump().contains("base64://"), "record excludes image transport data", kTestName);
+    }
+
     void testSchemaMigration() {
         constexpr std::string_view kTestName = "schema migration";
         sqlite3 *db = nullptr;
@@ -538,6 +573,11 @@ namespace {
               << R"({"llm":{"executor":{"apiKey":"old-key","baseUrl":"https://old.example.com/v1","path":"/chat/completions","model":"old-model","maxTokens":150,"temperature":0.7,"topP":0.9,"reasoningEffort":""}},"memory":{"memoryExtractMaxTokens":8192}})";
         }
         insoulforge::ConfigStore::initialize(path.string());
+        const auto defaultGeneration = insoulforge::ConfigStore::getLLMConfig("imageGeneration");
+        check(defaultGeneration.value("baseUrl", "") == "https://api.openai.com/v1",
+          "creates official image generation URL default", kTestName);
+        check(defaultGeneration.value("model", "") == "gpt-image-2.5-flare",
+          "creates official image generation model default", kTestName);
         const auto memory = insoulforge::ConfigStore::getLLMConfig("memory");
         check(memory.value("model", "") == "old-model", "inherits executor model", kTestName);
         check(memory.value("maxTokens", 0) == 8192, "preserves old memory token limit", kTestName);
@@ -577,6 +617,15 @@ namespace {
           kTestName);
 
         insoulforge::ConfigStore::saveLLMConfig(
+          "imageGeneration", {{"apiKey", "image-key"}, {"baseUrl", "https://example.com/v1"},
+                               {"path", "/images/generations"}, {"model", "test-image"}, {"maxTokens", 100}});
+        check(!insoulforge::ConfigStore::getLLMConfig("imageGeneration").contains("maxTokens"),
+          "image generation does not persist chat parameters", kTestName);
+        insoulforge::Config::instance().loadFromStorage();
+        check(insoulforge::Config::instance().imageGeneration.model == "test-image", "loads image generation model",
+          kTestName);
+
+        insoulforge::ConfigStore::saveLLMConfig(
           "memory", {{"apiKey", "memory-key"}, {"baseUrl", "https://memory.example.com/v1"},
                       {"path", "/chat/completions"}, {"model", "memory-model"}, {"maxTokens", 2048},
                       {"temperature", 0.4}, {"topP", 0.9}, {"reasoningEffort", "none"}});
@@ -599,6 +648,31 @@ namespace {
         check(insoulforge::ConfigStore::getLLMConfig("jev")["minConfidence"] == 0.8,
           "saving Jev without a threshold keeps the previous value", kTestName);
         database.close();
+    }
+
+    void testImageGenerationResponse() {
+        constexpr std::string_view kTestName = "image generation response";
+        const auto urlImage = insoulforge::ImageGenerationService::imageCode(
+          {{"data", {{{"url", "https://example.com/image.png?a=1&b=2"}}}}});
+        check(urlImage && urlImage->message == "[CQ:image,file=https://example.com/image.png?a=1&amp;b=2]" &&
+                urlImage->source == "https://example.com/image.png?a=1&b=2",
+          "escapes URL for OneBot CQ", kTestName);
+        const auto dataUrlImage =
+          insoulforge::ImageGenerationService::imageCode({{"data", {{{"url", "data:image/png;base64,aGVsbG8="}}}}});
+        check(dataUrlImage && dataUrlImage->message == "[CQ:image,file=base64://aGVsbG8=]" &&
+                dataUrlImage->source == "base64://aGVsbG8=",
+          "accepts base64 data URL", kTestName);
+        const auto rawUrlImage = insoulforge::ImageGenerationService::imageCode({{"data", {{{"url", "aGVsbG8="}}}}});
+        check(rawUrlImage && rawUrlImage->message == "[CQ:image,file=base64://aGVsbG8=]",
+          "accepts raw base64 URL field", kTestName);
+        const auto base64Image =
+          insoulforge::ImageGenerationService::imageCode({{"data", {{{"b64_json", "aGVsbG8="}}}}});
+        check(base64Image && base64Image->message == "[CQ:image,file=base64://aGVsbG8=]", "accepts base64 image",
+          kTestName);
+        check(!insoulforge::ImageGenerationService::imageCode({{"data", {{{"b64_json", "bad!"}}}}}),
+          "rejects malformed base64", kTestName);
+        check(!insoulforge::ImageGenerationService::imageCode({{"data", insoulforge::json::array()}}),
+          "rejects missing images", kTestName);
     }
 
     void testUsageSummaryUsesLatestRoleModel() {
@@ -693,9 +767,9 @@ namespace {
         insoulforge::Config::instance().loadFromStorage();
 
         auto &tasks = insoulforge::AsyncTaskManager::instance();
-        const auto delayedResult = []() -> drogon::Task<std::string> {
+        const auto delayedResult = []() -> drogon::Task<insoulforge::AsyncTaskManager::Result> {
             co_await drogon::sleepCoro(drogon::app().getLoop(), 60.0);
-            co_return "unused";
+            co_return insoulforge::AsyncTaskManager::Result{.content = "unused"};
         };
         const auto first = tasks.start(100, "测试任务", delayedResult);
         const auto busy = tasks.start(100, "重复任务", delayedResult);
@@ -741,6 +815,7 @@ auto main() -> int {
     testRouterWindowStartIndexIsBatchedNotSliding();
     testMessageRecordProjectionHidesImageSources();
     testAssistantStickerRecordKeepsOnlyName();
+    testGeneratedImageRecordKeepsDescription();
     testSchemaMigration();
     testLuaToolExecutor();
     testToolRegistryReload();
@@ -748,6 +823,7 @@ auto main() -> int {
     testConversationMaintenanceStore();
     testMemoryModelConfigMigration();
     testImageDescriptionCacheStore();
+    testImageGenerationResponse();
     testUsageSummaryUsesLatestRoleModel();
     testMessageListSnapshotsAndPersistence();
     testAsyncTaskSessionExclusivity();

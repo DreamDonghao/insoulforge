@@ -25,8 +25,9 @@ namespace insoulforge::HttpUtil {
     /// @param bearerToken Bearer 认证 token（空串则不添加 Authorization 头）
     /// @param timeout 超时秒数
     /// @param sessionId 关联的会话 ID；缺省时视为全局请求
+    /// @param traceResponse 是否保留原始响应体；图片等大响应可只记录状态
     /// @return 响应；网络异常（含地址解析失败、超时）返回 std::nullopt
     auto send(std::string_view tag, std::string baseUrl, std::string path, drogon::HttpMethod method, json body,
-      std::string bearerToken, f64 timeout, std::optional<u64> sessionId = std::nullopt)
+      std::string bearerToken, f64 timeout, std::optional<u64> sessionId = std::nullopt, bool traceResponse = true)
       -> drogon::Task<std::optional<drogon::HttpResponsePtr>>;
 } // namespace insoulforge::HttpUtil

@@ -37,6 +37,7 @@ namespace insoulforge {
         LLMModelParams executorThinkingParams;
         LLMApiConfig image;
         LLMModelParams imageParams;
+        LLMApiConfig imageGeneration; // 文生图接口，不使用 Chat 采样参数
         LLMApiConfig memory; // 记忆提取与整理模型配置
         LLMModelParams memoryParams;
         LLMApiConfig embedding; // Embedding 模型配置（长期记忆向量化）

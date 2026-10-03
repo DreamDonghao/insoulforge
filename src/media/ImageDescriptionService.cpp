@@ -2,6 +2,7 @@
 /// @brief 图片与动图的视觉描述服务实现
 
 #include <gif_lib.h>
+#include <openssl/evp.h>
 #include <openssl/sha.h>
 #include <png.h>
 
@@ -16,6 +17,7 @@
 namespace insoulforge::ImageDescriptionService {
     namespace {
         constexpr size_t kMaxDownloadBytes = 8U * 1024U * 1024U;
+        constexpr size_t kMaxGeneratedImageBytes = 24U * 1024U * 1024U;
         constexpr i32 kMaxGifDecodedFrames = 240;
         constexpr i32 kMaxGifSubmittedFrames = 16;
         constexpr i32 kMaxGifDimension = 1024;
@@ -99,7 +101,8 @@ namespace insoulforge::ImageDescriptionService {
         }
 
         /// @brief 下载 URL 的原始媒体字节，不写入 HTTP 跟踪日志以避免二进制内容进入内存日志。
-        auto download(std::string sourceUrl, const u64 sessionId) -> drogon::Task<std::optional<DownloadedMedia>> {
+        auto download(std::string sourceUrl, const u64 sessionId, const size_t maxBytes)
+          -> drogon::Task<std::optional<DownloadedMedia>> {
             static const std::regex urlPattern(R"(^(https?://[^/]+)(/.*)?$)", std::regex::icase);
             std::smatch match;
             if (!std::regex_match(sourceUrl, match, urlPattern)) {
@@ -119,7 +122,7 @@ namespace insoulforge::ImageDescriptionService {
                     co_return std::nullopt;
                 }
                 std::string bytes(response->body());
-                if (bytes.empty() || bytes.size() > kMaxDownloadBytes) {
+                if (bytes.empty() || bytes.size() > maxBytes) {
                     Logger::warn(sessionId, "Media", fmt::format("下载媒体大小无效: {} bytes", bytes.size()));
                     co_return std::nullopt;
                 }
@@ -321,7 +324,51 @@ namespace insoulforge::ImageDescriptionService {
               jsonToString(atOrNull(atOrNull((*parsed)["choices"][0], "message"), "content"));
             co_return description.empty() ? std::nullopt : std::optional{description};
         }
+
+        auto describeMedia(DownloadedMedia media, const u64 sessionId)
+          -> drogon::Task<std::optional<ImageDescriptionResult>> {
+            const auto &config = Config::instance();
+            const std::string hash = sha256(media.bytes);
+            const std::string mediaType = media.isGif ? "gif" : "image";
+            if (const auto cached = ImageDescriptionStore::find(hash, config.image.model, kPromptVersion)) {
+                if (!cached->succeeded)
+                    co_return std::nullopt;
+                co_return ImageDescriptionResult{.contentHash = hash,
+                  .mediaType = mediaType,
+                  .description = cached->description,
+                  .sampledFrameCount = cached->sampledFrameCount};
+            }
+            std::vector<std::string> images;
+            if (media.isGif) {
+                images = extractGifFrames(media.bytes, sessionId);
+            } else {
+                images.push_back("data:" + media.mimeType + ";base64," + base64Encode(media.bytes));
+            }
+            if (images.empty()) {
+                ImageDescriptionStore::upsert(hash, config.image.model, kPromptVersion, mediaType, false, "", 0);
+                co_return std::nullopt;
+            }
+            const auto description = co_await requestVision(images, media.isGif, sessionId);
+            if (!description) {
+                ImageDescriptionStore::upsert(hash, config.image.model, kPromptVersion, mediaType, false, "", 0);
+                co_return std::nullopt;
+            }
+            ImageDescriptionStore::upsert(
+              hash, config.image.model, kPromptVersion, mediaType, true, *description, static_cast<i32>(images.size()));
+            co_return ImageDescriptionResult{.contentHash = hash,
+              .mediaType = mediaType,
+              .description = *description,
+              .sampledFrameCount = static_cast<i32>(images.size())};
+        }
     } // namespace
+
+    auto referenceDataUrl(std::string sourceUrl, const u64 sessionId) -> drogon::Task<std::optional<std::string>> {
+        const auto media = co_await download(std::move(sourceUrl), sessionId, kMaxDownloadBytes);
+        if (!media || media->isGif) {
+            co_return std::nullopt;
+        }
+        co_return "data:" + media->mimeType + ";base64," + base64Encode(media->bytes);
+    }
 
     auto describe(std::string sourceUrl, const u64 sessionId) -> drogon::Task<std::optional<ImageDescriptionResult>> {
         const auto &config = Config::instance();
@@ -329,40 +376,40 @@ namespace insoulforge::ImageDescriptionService {
             Logger::debug(sessionId, "Media", fmt::format("图片识别模型未配置，跳过识别"));
             co_return std::nullopt;
         }
-        const auto media = co_await download(std::move(sourceUrl), sessionId);
+        auto media = co_await download(std::move(sourceUrl), sessionId, kMaxDownloadBytes);
         if (!media) {
             co_return std::nullopt;
         }
-        const std::string hash = sha256(media->bytes);
-        const std::string mediaType = media->isGif ? "gif" : "image";
-        if (const auto cached = ImageDescriptionStore::find(hash, config.image.model, kPromptVersion)) {
-            if (!cached->succeeded)
-                co_return std::nullopt;
-            co_return ImageDescriptionResult{.contentHash = hash,
-              .mediaType = mediaType,
-              .description = cached->description,
-              .sampledFrameCount = cached->sampledFrameCount};
+        co_return co_await describeMedia(std::move(*media), sessionId);
+    }
+
+    auto describeGeneratedImage(std::string source, const u64 sessionId)
+      -> drogon::Task<std::optional<ImageDescriptionResult>> {
+        if (!LlmClient::isConfigured(Config::instance().image))
+            co_return std::nullopt;
+        if (!source.starts_with("base64://")) {
+            auto media = co_await download(std::move(source), sessionId, kMaxGeneratedImageBytes);
+            co_return media ? co_await describeMedia(std::move(*media), sessionId) : std::nullopt;
         }
-        std::vector<std::string> images;
-        if (media->isGif) {
-            images = extractGifFrames(media->bytes, sessionId);
-        } else {
-            images.push_back("data:" + media->mimeType + ";base64," + base64Encode(media->bytes));
-        }
-        if (images.empty()) {
-            ImageDescriptionStore::upsert(hash, config.image.model, kPromptVersion, mediaType, false, "", 0);
+        const std::string_view encoded(source.data() + 9, source.size() - 9);
+        if (encoded.empty() || encoded.size() % 4 != 0 || encoded.size() > kMaxGeneratedImageBytes / 3 * 4 ||
+            encoded.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=") !=
+              std::string_view::npos) {
             co_return std::nullopt;
         }
-        const auto description = co_await requestVision(images, media->isGif, sessionId);
-        if (!description) {
-            ImageDescriptionStore::upsert(hash, config.image.model, kPromptVersion, mediaType, false, "", 0);
+        std::string bytes(encoded.size() / 4 * 3, '\0');
+        const i32 decoded = EVP_DecodeBlock(reinterpret_cast<unsigned char *>(bytes.data()),
+          reinterpret_cast<const unsigned char *>(encoded.data()), static_cast<i32>(encoded.size()));
+        if (decoded < 0) {
             co_return std::nullopt;
         }
-        ImageDescriptionStore::upsert(
-          hash, config.image.model, kPromptVersion, mediaType, true, *description, static_cast<i32>(images.size()));
-        co_return ImageDescriptionResult{.contentHash = hash,
-          .mediaType = mediaType,
-          .description = *description,
-          .sampledFrameCount = static_cast<i32>(images.size())};
+        const size_t padding = static_cast<size_t>(encoded.ends_with("==") ? 2 : encoded.ends_with('=') ? 1 : 0);
+        bytes.resize(static_cast<size_t>(decoded) - padding);
+        const auto format = detectMedia(bytes);
+        if (!format) {
+            co_return std::nullopt;
+        }
+        co_return co_await describeMedia(
+          DownloadedMedia{.bytes = std::move(bytes), .mimeType = format->first, .isGif = format->second}, sessionId);
     }
 } // namespace insoulforge::ImageDescriptionService

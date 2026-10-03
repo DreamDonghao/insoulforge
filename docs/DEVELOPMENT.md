@@ -299,8 +299,8 @@ MessageService → OneBot API
 
 ### 配置系统
 
-`ConfigStore` 将 LLM API 配置（router / jev / executor / executorThinking / image / memory / embedding）、QQ Bot 配置和记忆参数统一写入
-`data/config.json`。聊天模型可设置 `maxTokens`、`temperature`、`topP` 和 `reasoningEffort`；Embedding 与 Jev 不使用这些采样参数。
+`ConfigStore` 将 LLM API 配置（router / jev / executor / executorThinking / image / imageGeneration / memory / embedding）、QQ Bot 配置和记忆参数统一写入
+`data/config.json`。聊天模型可设置 `maxTokens`、`temperature`、`topP` 和 `reasoningEffort`；Embedding、Jev 与图片生成不使用这些采样参数。
 Jev 默认指向 OpenRouter Decisions API，API Key 默认为空，因此默认不启用；其 `minConfidence` 默认 0.6，限制在 0～1，
 可在管理后台修改并即时更新运行时配置。启动时若文件不存在则创建默认配置；若
 JSON 损坏则备份为 `config.json.broken.<时间戳>` 后重建；缺失或类型不匹配的字段会补默认值并回写。管理后台保存时先写入临时文件，再原子替换原文件。

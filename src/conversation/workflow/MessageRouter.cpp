@@ -328,7 +328,7 @@ namespace insoulforge::MessageRouter {
         }
         if (MessageRecord::isSystem(*trigger)) {
             co_return applySessionType(
-              makeDecision(RouterDecision::Action::REPLY, "系统定时任务触发", 100, true), sessionId);
+              makeDecision(RouterDecision::Action::REPLY, "系统消息触发", 100, true), sessionId);
         }
         if (MessageRecord::mentions(*trigger, Config::instance().selfQQNumber)) {
             co_return applySessionType(makeDecision(RouterDecision::Action::REPLY, "用户@提及", 100, true), sessionId);

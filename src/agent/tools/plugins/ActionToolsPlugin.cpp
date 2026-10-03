@@ -1,6 +1,10 @@
 /// @file ActionToolsPlugin.cpp
 /// @brief 动作工具插件实现（ACTION，执行操作、产生副作用）
 
+#include <stdexcept>
+
+#include <regex>
+
 #include <admin/access/AdminStore.hpp>
 #include <admin/access/BlacklistStore.hpp>
 #include <agent/ability/AsyncTaskManager.hpp>
@@ -15,17 +19,152 @@
 #include <conversation/workflow/OneBotEventWorkflow.hpp>
 #include <include/agent/ability/TaskScheduler.hpp>
 #include <include/agent/tools/ToolRegistry.hpp>
+#include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
+#include <media/ImageDescriptionService.hpp>
+#include <media/ImageGenerationService.hpp>
 #include <onebot/messaging/MessageService.hpp>
 #include <onebot/transport/OneBotClient.hpp>
 
 namespace insoulforge {
+    namespace {
+        auto requestedImageSize(const json &args) -> std::optional<std::string> {
+            auto size = trim(argString(args, "size"));
+            if (size.empty()) {
+                size = "2048x2048";
+            }
+            static const std::regex sizePattern{R"([1-9][0-9]{0,4}x[1-9][0-9]{0,4})"};
+            return std::regex_match(size, sizePattern) ? std::optional{std::move(size)} : std::nullopt;
+        }
+
+        auto startImageTask(const u64 sessionId, std::string prompt, std::string size,
+          std::optional<std::string> referenceUrl = std::nullopt) -> std::string {
+            const auto [status, taskId] =
+              AsyncTaskManager::instance().start(sessionId, referenceUrl ? "编辑图片" : "生成图片",
+                [sessionId, prompt = std::move(prompt), size = std::move(size),
+                  referenceUrl = std::move(referenceUrl)]() -> drogon::Task<AsyncTaskManager::Result> {
+                    std::optional<std::string> referenceDataUrl;
+                    if (referenceUrl) {
+                        referenceDataUrl = co_await ImageDescriptionService::referenceDataUrl(*referenceUrl, sessionId);
+                        if (!referenceDataUrl) {
+                            throw std::runtime_error("原图下载失败或格式不受支持，请重新发送静态图片");
+                        }
+                    }
+                    auto [message, source] =
+                      co_await ImageGenerationService::generate(prompt, size, sessionId, std::move(referenceDataUrl));
+                    std::string description = "依据生成提示词：" + prompt;
+                    try {
+                        if (const auto recognized =
+                              co_await ImageDescriptionService::describeGeneratedImage(std::move(source), sessionId)) {
+                            description = recognized->description;
+                        }
+                    } catch (const std::exception &error) {
+                        Logger::warn(sessionId, "ImageGeneration", fmt::format("生成图片识别失败: {}", error.what()));
+                    }
+                    co_return AsyncTaskManager::Result{
+                      .content = std::move(message), .imageDescription = std::move(description)};
+                });
+            switch (status) {
+                case AsyncTaskManager::StartResult::Status::Started:
+                    return fmt::format("图片任务 #{} 已启动，完成后会直接发送到本会话。", taskId);
+                case AsyncTaskManager::StartResult::Status::Busy:
+                    return fmt::format("本会话已有异步任务 #{} 在执行，请等待完成。", taskId);
+                case AsyncTaskManager::StartResult::Status::Stopping:
+                    return "程序正在退出，无法启动图片任务。";
+            }
+            return "无法启动图片任务。";
+        }
+    } // namespace
+
     auto ActionToolsPlugin::id() const noexcept -> std::string_view { return "builtin.action"; }
 
     /// @brief 注册动作执行工具（ACTION，执行操作、产生副作用）
     void ActionToolsPlugin::registerTools(ToolRegistry &registry) const {
+
+        registry.registerTool(
+          {
+            .name = "generate_image",
+            .description = "根据用户明确提出的画面要求异步生成一张图片。工具立即返回任务状态，图片生成完成后"
+                           "会自动发送到当前会话，不要再调用 reply 发送图片。一次会话同时只能生成一张。",
+            .parameters = json{{"type", "object"},
+              {"properties", {{"prompt", {{"type", "string"}, {"description", "具体的画面描述"}}},
+                               {"size", {{"type", "string"},
+                                          {"description", "图片尺寸，格式为宽x高，如 1024x1024；默认 2048x2048"}}}}},
+              {"required", {"prompt"}}},
+            .handler = [](const json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
+                const auto prompt = trim(argString(args, "prompt"));
+                if (prompt.empty() || prompt.size() > 4000) {
+                    co_return std::string("图片描述不能为空且不得超过 4000 字节。");
+                }
+                const auto size = requestedImageSize(args);
+                if (!size) {
+                    co_return std::string("图片尺寸格式应为宽x高，例如 1024x1024。");
+                }
+                if (const auto &api = Config::instance().imageGeneration;
+                  api.apiKey.empty() || api.baseUrl.empty() || api.path.empty() || api.model.empty()) {
+                    co_return std::string("图片生成接口尚未配置完整。");
+                }
+                co_return startImageTask(ctx.sessionId, prompt, *size);
+            },
+          },
+          ToolCategory::ACTION);
+
+        registry.registerTool(
+          {
+            .name = "edit_image",
+            .description =
+              "用户明确要求修改或参照聊天中的一张图片时调用。用同会话的 message_id 和 image_index 指定原图，"
+              "prompt 说明期望的修改。原图在后台按需读取，任务完成后自动发送图片；不要传入或猜测图片 URL。",
+            .parameters = json{{"type", "object"},
+              {"properties",
+                {{"message_id", {{"type", "string"}, {"description", "原图所在消息的 message_id"}}},
+                  {"image_index",
+                    {{"type", "integer"}, {"minimum", 0}, {"description", "原图在消息中的索引，从 0 开始"}}},
+                  {"prompt", {{"type", "string"}, {"description", "对原图的修改要求"}}},
+                  {"size", {{"type", "string"}, {"description", "输出尺寸，格式为宽x高；默认 2048x2048"}}}}},
+              {"required", {"message_id", "image_index", "prompt"}}},
+            .handler = [](const json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
+                const auto prompt = trim(argString(args, "prompt"));
+                if (prompt.empty() || prompt.size() > 4000) {
+                    co_return std::string("图片修改要求不能为空且不得超过 4000 字节。");
+                }
+                const auto size = requestedImageSize(args);
+                if (!size) {
+                    co_return std::string("图片尺寸格式应为宽x高，例如 1024x1024。");
+                }
+                const u64 messageId = parseUInt64(argString(args, "message_id"));
+                const i32 imageIndex = getInt(args, "image_index", -1);
+                if (messageId == 0 || imageIndex < 0) {
+                    co_return std::string("请提供有效的图片消息 ID 和从 0 开始的图片索引。");
+                }
+                if (const auto &api = Config::instance().imageGeneration;
+                  api.apiKey.empty() || api.baseUrl.empty() || api.path.empty() || api.model.empty()) {
+                    co_return std::string("图片生成接口尚未配置完整。");
+                }
+
+                json record;
+                for (const json &message: ctx.messageSnapshot) {
+                    if (parseUInt64(getStr(message, "message_id")) == messageId) {
+                        record = message;
+                        break;
+                    }
+                }
+                if (record.is_null()) {
+                    const auto content = ChatRecordStore::findContentByMessageId(ctx.sessionId, messageId);
+                    if (!content || !tryParseJson(*content, record)) {
+                        co_return std::string("未找到该会话中的图片消息。");
+                    }
+                }
+                const auto source = MessageRecord::findImageSource(record, static_cast<size_t>(imageIndex));
+                if (!source || source->url.empty()) {
+                    co_return std::string("该消息没有可下载的原图，请让用户重新发送静态图片。");
+                }
+                co_return startImageTask(ctx.sessionId, prompt, *size, source->url);
+            },
+          },
+          ToolCategory::ACTION);
 
         // 演示工具只验证后台启动、会话互斥和独立发送；实际能力需提供自己的处理器。
         registry.registerTool(
@@ -35,10 +174,10 @@ namespace insoulforge {
                            "不是生图或其它实际业务能力。已有任务运行时返回其编号。",
             .parameters = json{{"type", "object"}, {"properties", json::object()}},
             .handler = [](const json, const ToolCallContext ctx) -> drogon::Task<std::string> {
-                const auto [status, taskId] =
-                  AsyncTaskManager::instance().start(ctx.sessionId, "演示延时任务", []() -> drogon::Task<std::string> {
+                const auto [status, taskId] = AsyncTaskManager::instance().start(
+                  ctx.sessionId, "演示延时任务", []() -> drogon::Task<AsyncTaskManager::Result> {
                       co_await drogon::sleepCoro(drogon::app().getLoop(), 3.0);
-                      co_return "异步演示任务已完成。";
+                      co_return AsyncTaskManager::Result{.content = "异步演示任务已完成。"};
                   });
                 switch (status) {
                     case AsyncTaskManager::StartResult::Status::Started:

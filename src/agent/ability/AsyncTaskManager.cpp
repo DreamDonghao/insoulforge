@@ -9,12 +9,14 @@
 #include <utility>
 #include <vector>
 
+#include <ctime>
 #include <fmt/format.h>
 
 #include <agent/ability/AsyncTaskManager.hpp>
 #include <conversation/message/SessionId.hpp>
 #include <conversation/workflow/OneBotEventWorkflow.hpp>
 #include <infrastructure/CommonUtil.hpp>
+#include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <onebot/messaging/MessageService.hpp>
 
@@ -28,7 +30,7 @@ namespace insoulforge {
               sequence.fetch_add(1, std::memory_order_relaxed));
         }
 
-        /// @brief 只记录系统状态；走入站队列会令 Router 对系统消息再次触发回复
+        /// @brief 记录启动或退出中断状态，不触发回复。
         void recordStatus(
           const u64 sessionId, const std::string &taskId, const std::string_view phase, const std::string &text) {
             json message;
@@ -37,6 +39,29 @@ namespace insoulforge {
             message["message_id"] = fmt::format("async-task:{}:{}", taskId, phase);
             message["segments"] = {{{"type", "text"}, {"text", text}}};
             OneBotEventWorkflow::instance().appendSystemStatusMessage(sessionId, std::move(message));
+        }
+
+        /// @brief 将任务结果作为新系统消息加入入站队列，按定时任务相同的流程触发回复。
+        void enqueueResultStatus(const u64 sessionId, const std::string &text) {
+            static std::atomic<i64> nextMessageId{
+              std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch())
+                .count()};
+            json event;
+            event["post_type"] = "message";
+            event["self_id"] = Config::instance().selfQQNumber;
+            event["time"] = std::time(nullptr);
+            event["message_id"] = nextMessageId.fetch_add(1, std::memory_order_relaxed);
+            event["raw_message"] = text;
+            event["sender"] = {{"user_id", SessionId::kSystemAccountId}, {"nickname", "系统异步任务"}};
+            if (SessionId::isPrivate(sessionId)) {
+                event["message_type"] = "private";
+                event["user_id"] = SessionId::privateUserId(sessionId);
+            } else {
+                event["message_type"] = "group";
+                event["group_id"] = sessionId;
+            }
+            event["message"] = json::array({{{"type", "text"}, {"data", {{"text", text}}}}});
+            OneBotEventWorkflow::instance().enqueueOneBotEvent(std::move(event));
         }
     } // namespace
 
@@ -76,9 +101,10 @@ namespace insoulforge {
         } catch (...) {
             release(sessionId, taskId);
             try {
-                recordStatus(sessionId, taskId, "failed", fmt::format("异步任务 #{} 启动失败。", taskId));
+                enqueueResultStatus(
+                  sessionId, fmt::format("【系统异步任务】任务 #{} 启动失败。请根据上下文告知用户任务失败。", taskId));
             } catch (...) {
-                Logger::error(sessionId, "AsyncTask", fmt::format("任务 #{} 启动失败状态记录失败", taskId));
+                Logger::error(sessionId, "AsyncTask", fmt::format("任务 #{} 启动失败消息入队失败", taskId));
             }
             throw;
         }
@@ -89,26 +115,43 @@ namespace insoulforge {
     auto AsyncTaskManager::run(const u64 sessionId, std::string taskId, Handler handler) -> drogon::Task<> {
         std::string failureReason;
         try {
-            const std::string content = co_await handler();
+            const Result result = co_await handler();
             bool maySend;
             {
                 std::lock_guard lock(m_mutex);
                 maySend = !m_stopping && m_active.contains(sessionId) && m_active.at(sessionId) == taskId;
             }
             if (maySend) {
-                if (content.empty()) {
+                if (result.content.empty()) {
                     throw std::runtime_error("任务结果为空");
                 }
                 std::optional<u64> sent;
                 if (SessionId::isPrivate(sessionId)) {
-                    sent = co_await MessageService::sendPrivateMsg(SessionId::privateUserId(sessionId), content);
+                    sent = co_await MessageService::sendPrivateMsg(
+                      SessionId::privateUserId(sessionId), result.content, result.imageDescription);
                 } else {
-                    sent = co_await MessageService::sendGroupMsg(sessionId, content);
+                    sent = co_await MessageService::sendGroupMsg(sessionId, result.content, result.imageDescription);
                 }
                 if (!sent) {
                     throw std::runtime_error("结果发送失败");
                 }
                 Logger::info(sessionId, "AsyncTask", fmt::format("任务 #{} 已完成并发送", taskId));
+                try {
+                    bool shouldNotify;
+                    {
+                        std::lock_guard lock(m_mutex);
+                        shouldNotify = !m_stopping && m_active.contains(sessionId) && m_active.at(sessionId) == taskId;
+                    }
+                    if (shouldNotify) {
+                        enqueueResultStatus(
+                          sessionId, fmt::format("【系统异步任务】任务 #{} 已完成，结果已发送到当前会话。"
+                                                 "请结合上一条结果简短回应，不要重复发送结果。",
+                                       taskId));
+                    }
+                } catch (const std::exception &error) {
+                    Logger::error(
+                      sessionId, "AsyncTask", fmt::format("任务 #{} 完成消息入队失败: {}", taskId, error.what()));
+                }
             }
         } catch (const std::exception &error) {
             failureReason = error.what();
@@ -118,26 +161,21 @@ namespace insoulforge {
         if (!failureReason.empty()) {
             Logger::error(sessionId, "AsyncTask", fmt::format("任务 #{} 失败: {}", taskId, failureReason));
             try {
-                bool maySend;
+                bool shouldNotify;
                 {
                     std::lock_guard lock(m_mutex);
-                    maySend = !m_stopping && m_active.contains(sessionId) && m_active.at(sessionId) == taskId;
-                    if (maySend) {
-                        recordStatus(sessionId, taskId, "failed", fmt::format("异步任务 #{} 执行失败。", taskId));
-                    }
+                    shouldNotify = !m_stopping && m_active.contains(sessionId) && m_active.at(sessionId) == taskId;
                 }
-                if (maySend) {
-                    const std::string failure = fmt::format("异步任务 #{} 执行失败，请稍后重试。", taskId);
-                    if (SessionId::isPrivate(sessionId)) {
-                        co_await MessageService::sendPrivateMsg(SessionId::privateUserId(sessionId), failure);
-                    } else {
-                        co_await MessageService::sendGroupMsg(sessionId, failure);
-                    }
+                if (shouldNotify) {
+                    enqueueResultStatus(
+                      sessionId, fmt::format("【系统异步任务】任务 #{} 执行或发送失败，结果未成功交付。"
+                                             "请根据上下文告知用户任务失败，不要声称结果已发送。",
+                                   taskId));
                 }
-            } catch (const std::exception &sendError) {
-                Logger::error(sessionId, "AsyncTask", fmt::format("失败通知发送异常: {}", sendError.what()));
+            } catch (const std::exception &statusError) {
+                Logger::error(sessionId, "AsyncTask", fmt::format("失败消息入队异常: {}", statusError.what()));
             } catch (...) {
-                Logger::error(sessionId, "AsyncTask", "失败通知发送发生未知异常");
+                Logger::error(sessionId, "AsyncTask", "失败消息入队发生未知异常");
             }
         }
         release(sessionId, taskId);
