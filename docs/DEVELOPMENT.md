@@ -125,7 +125,7 @@ insoulforge/
 ├── CMakeLists.txt            # C++23 构建脚本（含前端自动构建）
 ├── include/                  # 头文件（按模块分目录）
 │   ├── agent/
-│   │   ├── ability/          # 定时任务及其存储
+│   │   ├── ability/          # 定时任务、后台耗时任务及其存储
 │   │   ├── memory/           # Agent 记忆的查询、召回与存储
 │   │   ├── runtime/          # AgentSystem / ExecutorAgent / AgentTypes
 │   │   └── tools/            # 工具运行时、插件、自定义工具与表情缓存
@@ -241,7 +241,7 @@ MessageService → OneBot API
     - `INFORMATION`：信息工具（`recall_memory` / `list_stickers` / `deep_think` / `list_scheduled_tasks`），获取数据
     - `ACTION`：动作工具（`send_face` / `send_image` / `send_sticker` / `save_sticker` / `rename_sticker` /
       `reply_and_continue` / `delete_sticker` / `at_user` / `ban_user` / `add_to_blacklist` / `send_poke` /
-      `recall_message` / `create_scheduled_task` / `cancel_scheduled_task`），执行操作
+      `recall_message` / `create_scheduled_task` / `cancel_scheduled_task` / `demo_async_task`），执行操作
 - 内置工具分为 `builtin.reply`、`builtin.info`、`builtin.action` 三个 `ToolPlugin` 实现，注册代码按类别拆分在
   `src/agent/tools/plugins/ReplyToolsPlugin.cpp` / `InfoToolsPlugin.cpp` / `ActionToolsPlugin.cpp`。`ToolPluginCatalog`
   显式组合并加载
@@ -264,6 +264,17 @@ MessageService → OneBot API
 - `deep_think` 是信息工具，不是全局思考模式。Executor 只在复杂问题需要额外推理时调用，工具结果再回到 Executor 组织成聊天回复。
 - `add_to_blacklist` 复用全局黑名单存储；仅接受当前会话快照中的发送者 QQ 号，并拒绝管理员与机器人自身。
   工具描述要求先提醒、无效后拉黑并告知用户，但提醒状态未单独持久化，后端不强制校验提醒是否发生。
+- `AsyncTaskManager` 按会话限制同时运行的后台耗时任务。工具立即返回任务状态；启动和失败状态直接写入
+  `MessageList`，不触发 Router。后台结果经 `MessageService` 发送。`demo_async_task` 仅用于显式测试，任务不持久化恢复。
+
+添加生图等耗时能力时，在动作工具中先校验参数，再以统一会话 ID 调用 `AsyncTaskManager::start`，传入任务描述和返回
+`drogon::Task<std::string>` 的处理器。处理器返回最终可发送的文本或 CQ 码；抛异常、返回空结果或发送失败均视为失败。将
+`StartResult` 的启动、忙碌或退出状态转换为工具结果交还 Executor，不在工具处理器中等待后台完成。处理器只按值捕获任务所需数据，
+不得跨挂起点引用工具调用栈上的对象。后台任务完成后由管理器发送，不要再通过 `enqueueOneBotEvent` 注入完成事件。
+
+此管理器与 `TaskScheduler`（到点触发）及 `ConversationMaintenanceService`（持久化、重试和重启恢复）用途不同。每个会话仅有一个
+运行中的耗时任务，不同会话可以并行；正常退出时 `main` 在 `MessageList` 落库前调用 `stop()` 记录中断，但不会等待处理器
+完成。需要重启恢复、取消或进度查询的实际能力应另外设计持久化状态，不能假设该接口已有这些保证。
 
 ### 会话派生状态维护
 

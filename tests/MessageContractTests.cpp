@@ -14,6 +14,7 @@
 
 #include <drogon/utils/coroutine.h>
 
+#include <agent/ability/AsyncTaskManager.hpp>
 #include <agent/memory/LongTermMemoryStore.hpp>
 #include <agent/memory/MemoryStore.hpp>
 #include <conversation/history/ChatRecordStore.hpp>
@@ -28,6 +29,7 @@
 #include <conversation/workflow/MessageList.hpp>
 #include <conversation/workflow/MessageRouter.hpp>
 #include <conversation/workflow/OneBotEventNormalizer.hpp>
+#include <conversation/workflow/OneBotEventWorkflow.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/config/ConfigStore.hpp>
@@ -212,10 +214,9 @@ namespace {
         config.jev = {};
         config.router = {};
 
-        const insoulforge::json plainSnapshot = insoulforge::json::array({{{"message_id", "plain"},
-          {"sender", {{"qq", "11"}}},
-          {"segments",
-            insoulforge::json::array({{{"type", "text"}, {"text", "今天天气的大家都在干什么"}}})}}});
+        const insoulforge::json plainSnapshot =
+          insoulforge::json::array({{{"message_id", "plain"}, {"sender", {{"qq", "11"}}},
+            {"segments", insoulforge::json::array({{{"type", "text"}, {"text", "今天天气的大家都在干什么"}}})}}});
         const auto fallback = drogon::sync_wait(insoulforge::MessageRouter::route(100, "plain", plainSnapshot));
         check(fallback.shouldReply, "unconfigured jev falls back to existing fail-open path", kTestName);
         check(fallback.reason == "Router 请求失败", "fallback reason is unchanged", kTestName);
@@ -240,7 +241,7 @@ namespace {
         check(!insoulforge::MessageRouter::classifyJevChoice("skip", std::nullopt, 0.6).has_value(),
           "missing confidence falls back", kTestName);
         check(!insoulforge::MessageRouter::classifyJevChoice("reply", std::numeric_limits<double>::quiet_NaN(), 0.6)
-                 .has_value(),
+                .has_value(),
           "non-finite confidence falls back", kTestName);
         check(insoulforge::MessageRouter::classifyJevChoice("reply", 0.6, 0.6) == Action::REPLY,
           "threshold confidence is accepted", kTestName);
@@ -250,8 +251,8 @@ namespace {
           "unclear label falls back to nullopt", kTestName);
         check(!insoulforge::MessageRouter::classifyJevChoice("other", 0.9, 0.6).has_value(),
           "unknown label falls back to nullopt", kTestName);
-        check(!insoulforge::MessageRouter::classifyJevChoice("", 0.9, 0.6).has_value(), "empty label falls back to nullopt",
-          kTestName);
+        check(!insoulforge::MessageRouter::classifyJevChoice("", 0.9, 0.6).has_value(),
+          "empty label falls back to nullopt", kTestName);
     }
 
     void testJevClientChoiceAndConfidenceParsing() {
@@ -269,28 +270,28 @@ namespace {
 
         check(!insoulforge::JevClient::readChoice(ok, "missing", validLabels).has_value(),
           "unknown question name yields nullopt", kTestName);
-        check(!insoulforge::JevClient::readChoice(insoulforge::json{{"answers", insoulforge::json::object()}},
-                 "action", validLabels)
-                 .has_value(),
+        check(!insoulforge::JevClient::readChoice(
+                insoulforge::json{{"answers", insoulforge::json::object()}}, "action", validLabels)
+                .has_value(),
           "empty answers yields nullopt", kTestName);
         check(!insoulforge::JevClient::readChoice(insoulforge::json::object(), "action", validLabels).has_value(),
           "missing answers yields nullopt", kTestName);
         check(!insoulforge::JevClient::readChoice(
-                 insoulforge::json{{"answers", {{"action", {{"choice", 42}}}}}}, "action", validLabels)
-                 .has_value(),
+                insoulforge::json{{"answers", {{"action", {{"choice", 42}}}}}}, "action", validLabels)
+                .has_value(),
           "wrong answer type yields nullopt", kTestName);
         check(!insoulforge::JevClient::readChoice(
-                 insoulforge::json{{"answers", {{"action", {{"choice", "other"}}}}}}, "action", validLabels)
-                 .has_value(),
+                insoulforge::json{{"answers", {{"action", {{"choice", "other"}}}}}}, "action", validLabels)
+                .has_value(),
           "label outside valid set yields nullopt", kTestName);
 
         check(!insoulforge::JevClient::readConfidence(
-                 insoulforge::json{{"answers", {{"action", {{"choice", "reply"}, {"confidence", 1.5}}}}}}, "action")
-                 .has_value(),
+                insoulforge::json{{"answers", {{"action", {{"choice", "reply"}, {"confidence", 1.5}}}}}}, "action")
+                .has_value(),
           "out of range confidence yields nullopt", kTestName);
         check(!insoulforge::JevClient::readConfidence(
-                 insoulforge::json{{"answers", {{"action", {{"choice", "reply"}}}}}}, "action")
-                 .has_value(),
+                insoulforge::json{{"answers", {{"action", {{"choice", "reply"}}}}}}, "action")
+                .has_value(),
           "missing confidence yields nullopt", kTestName);
         check(!insoulforge::JevClient::readConfidence(insoulforge::json::object(), "action").has_value(),
           "missing answers yields nullopt for confidence", kTestName);
@@ -306,16 +307,13 @@ namespace {
 
         // keep=10, slide=10 时窗口大小 = 10 + size % 10，因此 size 为 10 的整数倍时窗口收回到 keep。
         // 以下用例锁住窗口的周期性：同一批次内起始下标保持不变，跨批次边界时前缀前移。
-        check(insoulforge::MessageRouter::windowStartIndex(30) == 20,
-          "window resets to keep at period boundary", kTestName);
-        check(insoulforge::MessageRouter::windowStartIndex(35) == 20,
-          "window grows within a period", kTestName);
-        check(insoulforge::MessageRouter::windowStartIndex(39) == 20,
-          "window keeps a stable prefix within a period", kTestName);
-        check(insoulforge::MessageRouter::windowStartIndex(40) == 30,
-          "next period starts a new prefix", kTestName);
-        check(insoulforge::MessageRouter::windowStartIndex(5) == 0,
-          "short snapshot starts at zero", kTestName);
+        check(insoulforge::MessageRouter::windowStartIndex(30) == 20, "window resets to keep at period boundary",
+          kTestName);
+        check(insoulforge::MessageRouter::windowStartIndex(35) == 20, "window grows within a period", kTestName);
+        check(insoulforge::MessageRouter::windowStartIndex(39) == 20, "window keeps a stable prefix within a period",
+          kTestName);
+        check(insoulforge::MessageRouter::windowStartIndex(40) == 30, "next period starts a new prefix", kTestName);
+        check(insoulforge::MessageRouter::windowStartIndex(5) == 0, "short snapshot starts at zero", kTestName);
 
         config.routerWindowTriggerCount = originalTrigger;
         config.routerWindowKeepCount = originalKeep;
@@ -462,7 +460,8 @@ namespace {
                           ("insoulforge-memory-config-test-" + std::to_string(suffix) + ".json");
         {
             std::ofstream output(path);
-            output << R"({"llm":{"executor":{"apiKey":"old-key","baseUrl":"https://old.example.com/v1","path":"/chat/completions","model":"old-model","maxTokens":150,"temperature":0.7,"topP":0.9,"reasoningEffort":""}},"memory":{"memoryExtractMaxTokens":8192}})";
+            output
+              << R"({"llm":{"executor":{"apiKey":"old-key","baseUrl":"https://old.example.com/v1","path":"/chat/completions","model":"old-model","maxTokens":150,"temperature":0.7,"topP":0.9,"reasoningEffort":""}},"memory":{"memoryExtractMaxTokens":8192}})";
         }
         insoulforge::ConfigStore::initialize(path.string());
         const auto memory = insoulforge::ConfigStore::getLLMConfig("memory");
@@ -503,25 +502,26 @@ namespace {
         check(insoulforge::Config::instance().imageParams.maxTokens == 1536, "loads configured image max tokens",
           kTestName);
 
-        insoulforge::ConfigStore::saveLLMConfig("memory", {{"apiKey", "memory-key"},
-          {"baseUrl", "https://memory.example.com/v1"}, {"path", "/chat/completions"},
-          {"model", "memory-model"}, {"maxTokens", 2048}, {"temperature", 0.4}, {"topP", 0.9},
-          {"reasoningEffort", "none"}});
+        insoulforge::ConfigStore::saveLLMConfig(
+          "memory", {{"apiKey", "memory-key"}, {"baseUrl", "https://memory.example.com/v1"},
+                      {"path", "/chat/completions"}, {"model", "memory-model"}, {"maxTokens", 2048},
+                      {"temperature", 0.4}, {"topP", 0.9}, {"reasoningEffort", "none"}});
         insoulforge::Config::instance().loadFromStorage();
-        check(insoulforge::Config::instance().memory.model == "memory-model",
-          "loads independent memory model", kTestName);
-        check(insoulforge::Config::instance().memoryParams.maxTokens == 2048,
-          "loads independent memory token limit", kTestName);
-        check(insoulforge::Config::instance().memory.reasoningEffort == "none",
-          "loads memory reasoning effort", kTestName);
+        check(
+          insoulforge::Config::instance().memory.model == "memory-model", "loads independent memory model", kTestName);
+        check(insoulforge::Config::instance().memoryParams.maxTokens == 2048, "loads independent memory token limit",
+          kTestName);
+        check(
+          insoulforge::Config::instance().memory.reasoningEffort == "none", "loads memory reasoning effort", kTestName);
 
-        insoulforge::ConfigStore::saveLLMConfig("jev", {{"apiKey", "key"}, {"baseUrl", "https://example.com"},
-          {"path", "/decisions"}, {"model", "jev-model"}, {"minConfidence", 0.8}});
+        insoulforge::ConfigStore::saveLLMConfig(
+          "jev", {{"apiKey", "key"}, {"baseUrl", "https://example.com"}, {"path", "/decisions"}, {"model", "jev-model"},
+                   {"minConfidence", 0.8}});
         insoulforge::Config::instance().loadFromStorage();
-        check(insoulforge::Config::instance().jevMinConfidence == 0.8,
-          "loads configured Jev confidence threshold", kTestName);
-        insoulforge::ConfigStore::saveLLMConfig("jev", {{"apiKey", "key"}, {"baseUrl", "https://example.com"},
-          {"path", "/decisions"}, {"model", "jev-model"}});
+        check(insoulforge::Config::instance().jevMinConfidence == 0.8, "loads configured Jev confidence threshold",
+          kTestName);
+        insoulforge::ConfigStore::saveLLMConfig("jev",
+          {{"apiKey", "key"}, {"baseUrl", "https://example.com"}, {"path", "/decisions"}, {"model", "jev-model"}});
         check(insoulforge::ConfigStore::getLLMConfig("jev")["minConfidence"] == 0.8,
           "saving Jev without a threshold keeps the previous value", kTestName);
         database.close();
@@ -611,6 +611,48 @@ namespace {
         database.close();
     }
 
+    void testAsyncTaskSessionExclusivity() {
+        constexpr std::string_view kTestName = "async task session exclusivity";
+        auto &database = insoulforge::Database::instance();
+        database.initialize(":memory:");
+        insoulforge::ConfigStore::initialize("data/message-contract-test-config.json");
+        insoulforge::Config::instance().loadFromStorage();
+
+        auto &tasks = insoulforge::AsyncTaskManager::instance();
+        const auto delayedResult = []() -> drogon::Task<std::string> {
+            co_await drogon::sleepCoro(drogon::app().getLoop(), 60.0);
+            co_return "unused";
+        };
+        const auto first = tasks.start(100, "测试任务", delayedResult);
+        const auto busy = tasks.start(100, "重复任务", delayedResult);
+        const auto otherSession = tasks.start(200, "独立任务", delayedResult);
+        check(
+          first.status == insoulforge::AsyncTaskManager::StartResult::Status::Started, "first task starts", kTestName);
+        check(busy.status == insoulforge::AsyncTaskManager::StartResult::Status::Busy && busy.taskId == first.taskId,
+          "same session returns active task", kTestName);
+        check(otherSession.status == insoulforge::AsyncTaskManager::StartResult::Status::Started,
+          "different session starts independently", kTestName);
+
+        const auto messages = insoulforge::OneBotEventWorkflow::instance().getSessionMessages(100);
+        check(messages && messages->size() == 1, "start writes one status record", kTestName);
+        if (messages && !messages->empty()) {
+            check(insoulforge::MessageRecord::isSystem((*messages)[0]), "status has system sender", kTestName);
+            check(insoulforge::MessageRecord::projectForAgent((*messages)[0])["segments"][0]["text"]
+                      .get<std::string>()
+                      .find("已开始") != std::string::npos,
+              "status is visible in model projection", kTestName);
+        }
+
+        tasks.stop();
+        const auto stopped = tasks.start(300, "退出后任务", delayedResult);
+        check(stopped.status == insoulforge::AsyncTaskManager::StartResult::Status::Stopping,
+          "shutdown rejects new tasks", kTestName);
+        const auto stoppedMessages = insoulforge::OneBotEventWorkflow::instance().getSessionMessages(100);
+        check(stoppedMessages && stoppedMessages->size() == 2 &&
+                insoulforge::MessageRecord::extractText(stoppedMessages->back()).find("中断") != std::string::npos,
+          "shutdown records interruption", kTestName);
+        database.close();
+    }
 } // namespace
 
 auto main() -> int {
@@ -632,6 +674,7 @@ auto main() -> int {
     testImageDescriptionCacheStore();
     testUsageSummaryUsesLatestRoleModel();
     testMessageListSnapshotsAndPersistence();
+    testAsyncTaskSessionExclusivity();
     if (failures == 0) {
         std::cout << "All message contract tests passed\n";
         return 0;
