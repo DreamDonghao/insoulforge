@@ -98,7 +98,7 @@ namespace insoulforge::HttpUtil {
 
     auto send(const std::string_view tag, std::string baseUrl, std::string path, const drogon::HttpMethod method,
       json body, std::string bearerToken, const f64 timeout, std::optional<u64> sessionId, const bool traceResponse)
-      -> drogon::Task<std::optional<drogon::HttpResponsePtr>> {
+      -> drogon::Task<std::expected<drogon::HttpResponsePtr, std::string>> {
         normalizeTarget(baseUrl, path);
         // 实际请求保留原始 JSON；调试记录只省略其中的图片数据。
         auto bodyText = body.is_null() ? std::string{} : dumpJson(body);
@@ -124,7 +124,7 @@ namespace insoulforge::HttpUtil {
             trace.status = 0;
             trace.responseBody = e.what();
             HttpTrace::instance().append(std::move(trace));
-            co_return std::nullopt;
+            co_return std::unexpected(std::string(e.what()));
         }
 
         const auto req = drogon::HttpRequest::newHttpRequest();
@@ -150,12 +150,12 @@ namespace insoulforge::HttpUtil {
             Logger::error(sessionId.value_or(0), tag,
               fmt::format("HTTP 请求异常: {} ({} {}{}) body={}", e.what(), methodName(method), baseUrl, path, bodyLog));
             finishTrace(0, e.what());
-            co_return std::nullopt;
+            co_return std::unexpected(std::string(e.what()));
         }
 
         if (!resp) {
             finishTrace(0, "");
-            co_return std::nullopt;
+            co_return std::unexpected("未收到 HTTP 响应");
         }
 
         // HTTP 错误带上目标地址；DNS 和连接异常在前面的异常分支处理。

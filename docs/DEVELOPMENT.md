@@ -265,13 +265,17 @@ MessageService → OneBot API
 - `deep_think` 是信息工具，不是全局思考模式。Executor 只在复杂问题需要额外推理时调用，工具结果再回到 Executor 组织成聊天回复。
 - `add_to_blacklist` 复用全局黑名单存储；仅接受当前会话快照中的发送者 QQ 号，并拒绝管理员与机器人自身。
   工具描述要求先提醒、无效后拉黑并告知用户，但提醒状态未单独持久化，后端不强制校验提醒是否发生。
-- `AsyncTaskManager` 按会话限制同时运行的后台耗时任务。工具立即返回任务状态；启动和失败状态直接写入
-  `MessageList`，不触发 Router。后台结果经 `MessageService` 发送。`demo_async_task` 仅用于显式测试，任务不持久化恢复。
+- 普通工具处理器抛出的异常由 `ToolRegistry` 转为带具体原因的工具结果，再交还 Executor；回复工具的参数错误由
+  `ExecutorAgent` 处理。外部请求只回传限长的错误摘要，不将完整响应体或图片数据注入模型。
+- `AsyncTaskManager` 按会话限制同时运行的后台耗时任务。工具立即返回任务状态；启动状态写入
+  `MessageList`，不触发 Router。后台结果经 `MessageService` 发送；完成或失败会产生新的系统消息并触发回复，失败消息附带限长的错误原因。`demo_async_task` 仅用于显式测试，任务不持久化恢复。
 
 添加生图等耗时能力时，在动作工具中先校验参数，再以统一会话 ID 调用 `AsyncTaskManager::start`，传入任务描述和返回
-`drogon::Task<std::string>` 的处理器。处理器返回最终可发送的文本或 CQ 码；抛异常、返回空结果或发送失败均视为失败。将
+`drogon::Task<AsyncTaskManager::Result>` 的处理器。结果的 `content` 是最终可发送的文本或 CQ 码，可附带图片描述；抛异常、返回空内容或发送失败均视为失败。将
 `StartResult` 的启动、忙碌或退出状态转换为工具结果交还 Executor，不在工具处理器中等待后台完成。处理器只按值捕获任务所需数据，
-不得跨挂起点引用工具调用栈上的对象。后台任务完成后由管理器发送，不要再通过 `enqueueOneBotEvent` 注入完成事件。
+不得跨挂起点引用工具调用栈上的对象。后台结果由管理器发送，完成或失败的系统消息也由管理器加入入站工作流；工具自身不要重复注入事件。
+
+`HttpUtil::send` 返回 `std::expected<HttpResponsePtr, std::string>`：网络、地址或超时失败在 `error()` 中，收到的 HTTP 4xx/5xx 仍是有效响应，由调用方检查状态码。调试记录保持原有脱敏规则；对模型只回传必要、限长的错误详情。
 
 此管理器与 `TaskScheduler`（到点触发）及 `ConversationMaintenanceService`（持久化、重试和重启恢复）用途不同。每个会话仅有一个
 运行中的耗时任务，不同会话可以并行；正常退出时 `main` 在 `MessageList` 落库前调用 `stop()` 记录中断，但不会等待处理器

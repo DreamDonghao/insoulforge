@@ -55,7 +55,7 @@ namespace insoulforge {
             return false;
         }
         std::unique_lock lock(m_mutex);
-        for (const auto &[name, tool]: staged.m_tools) {
+        for (const auto &name: staged.m_tools | std::views::keys) {
             if (const auto existing = m_tools.find(name);
               existing != m_tools.end() && existing->second.pluginId != pluginId) {
                 Logger::error(0, "Tool",
@@ -106,8 +106,7 @@ namespace insoulforge {
         }
 
         m_tools.insert_or_assign(tool.name, RegisteredTool{.tool = tool, .category = category, .pluginId = pluginId});
-        auto &names = m_pluginTools[pluginId];
-        if (!std::ranges::contains(names, tool.name))
+        if (auto &names = m_pluginTools[pluginId]; !std::ranges::contains(names, tool.name))
             names.push_back(tool.name);
         return true;
     }
@@ -118,7 +117,7 @@ namespace insoulforge {
 
         std::vector<const RegisteredTool *> visibleTools;
         visibleTools.reserve(m_tools.size());
-        for (const auto &[name, registered]: m_tools) {
+        for (const auto &registered: m_tools | std::views::values) {
             if (query.isPrivateSession && registered.tool.scope == ToolScope::GROUP_ONLY)
                 continue;
             visibleTools.push_back(&registered);
@@ -146,7 +145,15 @@ namespace insoulforge {
             }
         }
         if (handler) {
-            co_return co_await handler(std::move(args), std::move(ctx));
+            try {
+                co_return co_await handler(std::move(args), std::move(ctx));
+            } catch (const std::exception &error) {
+                Logger::error(ctx.sessionId, "Tool", fmt::format("工具 '{}' 执行异常: {}", name, error.what()));
+                co_return fmt::format("工具 '{}' 执行失败: {}", name, std::string_view(error.what()).substr(0, 500));
+            } catch (...) {
+                Logger::error(ctx.sessionId, "Tool", fmt::format("工具 '{}' 执行发生未知异常", name));
+                co_return fmt::format("工具 '{}' 执行失败: 未知异常", name);
+            }
         }
         co_return "工具未找到: " + name;
     }

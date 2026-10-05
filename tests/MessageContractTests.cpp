@@ -7,6 +7,7 @@
 #include <iostream>
 #include <limits>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -512,6 +513,25 @@ namespace {
         registry.unregisterPlugin("contract.plugin");
     }
 
+    void testToolRegistryReturnsHandlerErrors() {
+        constexpr std::string_view kTestName = "tool handler error result";
+        auto &registry = insoulforge::ToolRegistry::instance();
+        check(registry.registerPlugin("contract.error", [](insoulforge::ToolRegistry &staged) {
+                  staged.registerTool(
+                    {.name = "contract_error_tool",
+                      .description = "test",
+                      .handler = [](insoulforge::json, insoulforge::ToolCallContext) -> drogon::Task<std::string> {
+                          throw std::runtime_error("具体失败原因");
+                          co_return "";
+                      }},
+                    insoulforge::ToolCategory::INFORMATION);
+              }),
+          "error tool registers", kTestName);
+        const auto result = drogon::sync_wait(registry.executeTool("contract_error_tool", {}, {.sessionId = 100}));
+        check(result.find("具体失败原因") != std::string::npos, "handler error is returned to model", kTestName);
+        registry.unregisterPlugin("contract.error");
+    }
+
     void testCharacterImageStore() {
         constexpr std::string_view kTestName = "character image storage";
         constexpr std::string_view encoded =
@@ -908,6 +928,7 @@ auto main() -> int {
     testSchemaMigration();
     testLuaToolExecutor();
     testToolRegistryReload();
+    testToolRegistryReturnsHandlerErrors();
     testCharacterImageStore();
     testHttpTraceImageRedaction();
     testCharacterImageToolRequiresUpload();
