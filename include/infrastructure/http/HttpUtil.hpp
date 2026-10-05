@@ -9,8 +9,8 @@
 #include <string>
 #include <string_view>
 
-#include <drogon/HttpClient.h>
 #include <drogon/utils/coroutine.h>
+#include <expected>
 
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
@@ -29,8 +29,8 @@ namespace insoulforge::HttpUtil {
     /// @param timeout 超时秒数
     /// @param sessionId 关联的会话 ID；缺省时视为全局请求
     /// @param traceResponse 是否保留原始响应体；为 false 时只记录脱敏后的 JSON 响应
-    /// @return 响应；网络异常（含地址解析失败、超时）返回 std::nullopt
+    /// @return 成功时为 HTTP 响应（含 4xx/5xx），建连或发送失败时为错误说明
     auto send(std::string_view tag, std::string baseUrl, std::string path, drogon::HttpMethod method, json body,
       std::string bearerToken, f64 timeout, std::optional<u64> sessionId = std::nullopt, bool traceResponse = true)
-      -> drogon::Task<std::optional<drogon::HttpResponsePtr>>;
+      -> drogon::Task<std::expected<drogon::HttpResponsePtr, std::string>>;
 } // namespace insoulforge::HttpUtil

@@ -91,8 +91,20 @@ namespace insoulforge::ImageGenerationService {
         // 响应可能包含数十 MB 的图片数据；调试记录只保留非图片字段。
         const auto response = co_await HttpUtil::send("ImageGeneration", config.baseUrl, config.path, drogon::Post,
           request, config.apiKey, 180.0, sessionId, false);
-        if (!response || (*response)->getStatusCode() != drogon::k200OK) {
-            throw std::runtime_error("图片生成接口请求失败");
+        if (!response) {
+            throw std::runtime_error("图片生成接口请求失败: " + response.error().substr(0, 500));
+        }
+        if ((*response)->getStatusCode() != drogon::k200OK) {
+            json errorBody;
+            std::string detail;
+            if (tryParseJson((*response)->body(), errorBody)) {
+                const auto &error = atOrNull(errorBody, "error");
+                detail = error.is_object() ? getStr(error, "message") : jsonToString(error);
+                if (detail.empty())
+                    detail = getStr(errorBody, "message");
+            }
+            throw std::runtime_error(fmt::format("图片生成接口请求失败: HTTP {}{}",
+              static_cast<i32>((*response)->getStatusCode()), detail.empty() ? "" : ", " + detail.substr(0, 500)));
         }
 
         json result;

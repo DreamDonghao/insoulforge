@@ -868,7 +868,7 @@ namespace insoulforge {
                       isPrivateSession ? "私聊" : "本群");
                 } catch (const std::exception &e) {
                     Logger::error(sessionId, "Scheduler", fmt::format("创建定时任务入库失败: {}", e.what()));
-                    co_return std::string("创建定时任务失败，请稍后重试");
+                    co_return fmt::format("创建定时任务失败: {}", std::string_view(e.what()).substr(0, 500));
                 }
             },
           },

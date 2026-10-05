@@ -88,7 +88,7 @@ namespace insoulforge {
         };
         std::unique_ptr<FILE, PipeCloser> pipe(openReadPipe(command.c_str()));
         if (!pipe) {
-            co_return std::string("执行脚本失败");
+            co_return std::string("Python 工具启动失败: 无法创建子进程管道");
         }
 
         std::array<char, 4096> buffer{};
@@ -96,12 +96,13 @@ namespace insoulforge {
         while (fgets(buffer.data(), static_cast<i32>(buffer.size()), pipe.get())) {
             result += buffer.data();
         }
-        if (const i32 exitCode = closePipe(pipe.release()); exitCode != 0) {
-            Logger::warn(0, "Tool", fmt::format("Python工具执行返回非零: {}, 输出: {}", exitCode, result));
-        }
-
         while (!result.empty() && (result.back() == '\n' || result.back() == '\r')) {
             result.pop_back();
+        }
+        if (const i32 exitCode = closePipe(pipe.release()); exitCode != 0) {
+            Logger::warn(0, "Tool", fmt::format("Python工具执行返回非零: {}, 输出: {}", exitCode, result));
+            co_return fmt::format("Python 工具执行失败 (退出状态 {}): {}", exitCode,
+              result.empty() ? "脚本没有输出错误信息" : result.substr(0, 500));
         }
         co_return result;
     }
@@ -110,7 +111,7 @@ namespace insoulforge {
         json configJson;
         if (!tryParseJson(config, configJson)) {
             Logger::error(0, "Tool", fmt::format("HTTP工具配置解析失败"));
-            co_return std::string("工具配置错误");
+            co_return std::string("HTTP 工具配置错误: 配置不是有效的 JSON");
         }
 
         const std::string url = getStr(configJson, "url");
@@ -131,7 +132,20 @@ namespace insoulforge {
         const auto response = co_await HttpUtil::send("[HttpTool]", baseUrl, path, isGet ? drogon::Get : drogon::Post,
           isGet ? json() : std::move(args), "", 30.0, sessionId);
         if (!response) {
-            co_return std::string("HTTP请求失败");
+            co_return fmt::format("HTTP 工具请求失败: {}", response.error().substr(0, 500));
+        }
+        if ((*response)->getStatusCode() >= drogon::k400BadRequest) {
+            const std::string responseBody((*response)->body());
+            json errorBody;
+            std::string detail;
+            if (tryParseJson(responseBody, errorBody)) {
+                const auto &error = atOrNull(errorBody, "error");
+                detail = error.is_object() ? getStr(error, "message") : jsonToString(error);
+                if (detail.empty())
+                    detail = getStr(errorBody, "message");
+            }
+            co_return fmt::format("HTTP 工具请求失败: 状态码 {}{}", static_cast<i32>((*response)->getStatusCode()),
+              detail.empty() ? "" : ", " + detail.substr(0, 500));
         }
         co_return std::string((*response)->getBody());
     }
