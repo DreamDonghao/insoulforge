@@ -63,8 +63,8 @@ namespace insoulforge {
         /// @param channelName 日志中的渠道名（"群消息"/"私聊消息"）
         /// @return 发送成功返回 message_id；失败不记聊天记录，返回 nullopt（已记日志）
         auto afterSendMessage(drogon::Task<std::optional<u64>> sendTask, std::string processedMessage,
-          const u64 sessionId, std::string_view channelName, std::optional<std::string> imageDescription)
-          -> drogon::Task<std::optional<u64>> {
+          const u64 sessionId, std::string_view channelName, std::optional<std::string> imageDescription,
+          json toolHistory) -> drogon::Task<std::optional<u64>> {
             const auto messageId = co_await std::move(sendTask);
             if (!messageId) {
                 co_return std::nullopt;
@@ -73,10 +73,13 @@ namespace insoulforge {
             const auto storedMessage =
               processedMessage.starts_with("[CQ:image,file=base64://") ? std::string("[生成图片]") : processedMessage;
             const auto senderName = Config::instance().botName + "(我)";
-            const json record =
+            json record =
               imageDescription && processedMessage.starts_with("[CQ:image,file=")
                 ? MessageRecord::createAssistantGeneratedImageRecord(senderName, *messageId, *imageDescription)
                 : MessageRecord::createAssistantRecord(senderName, *messageId, storedMessage);
+            if (toolHistory.is_array() && !toolHistory.empty()) {
+                record["tool_history"] = std::move(toolHistory);
+            }
             // 发送成功后写入所属会话的内存消息列表；列表在正常退出时统一持久化。
             OneBotEventWorkflow::instance().appendDeliveredAssistantMessage(sessionId, record);
 
@@ -87,21 +90,21 @@ namespace insoulforge {
     } // namespace
 
     auto MessageService::sendGroupMsg(const u64 groupId, std::string message,
-      std::optional<std::string> imageDescription) -> drogon::Task<std::optional<u64>> {
+      std::optional<std::string> imageDescription, json toolHistory) -> drogon::Task<std::optional<u64>> {
         // 转换 @[QQ:xxx] 为 CQ 码
         const std::string processedMessage =
           message.starts_with("[CQ:image,file=base64://") ? std::move(message) : convertAtToCQCode(std::move(message));
         co_return co_await afterSendMessage(OneBotClient::sendGroupMsg(groupId, processedMessage), processedMessage,
-          groupId, "群消息", std::move(imageDescription));
+          groupId, "群消息", std::move(imageDescription), std::move(toolHistory));
     }
 
     auto MessageService::sendPrivateMsg(const u64 userId, std::string message,
-      std::optional<std::string> imageDescription) -> drogon::Task<std::optional<u64>> {
+      std::optional<std::string> imageDescription, json toolHistory) -> drogon::Task<std::optional<u64>> {
         const std::string processedMessage =
           message.starts_with("[CQ:image,file=base64://") ? std::move(message) : convertAtToCQCode(std::move(message));
         co_return co_await afterSendMessage(
           OneBotClient::sendPrivateMsg(userId, processedMessage, SessionId::fromPrivateUser(userId)), processedMessage,
-          SessionId::fromPrivateUser(userId), "私聊消息", std::move(imageDescription));
+          SessionId::fromPrivateUser(userId), "私聊消息", std::move(imageDescription), std::move(toolHistory));
     }
 
     auto MessageService::fetchAndUpdateSessionName(const u64 sessionId) -> drogon::Task<std::string> {

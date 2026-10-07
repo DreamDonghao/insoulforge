@@ -34,6 +34,13 @@ namespace insoulforge::MessageRecord {
     [[nodiscard]] auto createAssistantGeneratedImageRecord(
       std::string senderName, u64 messageId, const std::string &description) -> json;
 
+    /// @brief 构造内部执行记录，不生成 QQ 消息 ID，也不表示向用户发送了消息。
+    [[nodiscard]] auto createAssistantExecutionRecord(
+      std::string senderName, json toolHistory, std::string status, std::string reason = {}) -> json;
+
+    /// @brief 保存单次工具名称、脱敏且限长的参数和处理状态，不复制完整工具结果。
+    [[nodiscard]] auto createToolHistoryEntry(std::string name, json arguments, std::string status) -> json;
+
     /// @brief 按段出现顺序拼接记录中的文本内容
     /// @param record 统一聊天记录
     /// @return 所有 `text` 段拼接后的文本；无段时兼容旧版 `text` 字段
@@ -60,7 +67,8 @@ namespace insoulforge::MessageRecord {
     /// @param record 已解析的持久化聊天记录
     /// @return 保留时间、发送者、引用和有序语义段的记录，不含图片来源
     /// @details 同时兼容旧版 `text`、`images`、`faces` 与 `notifications` 字段。
-    [[nodiscard]] auto projectForAgent(const json &record) -> json;
+    /// @param includeToolHistory 仅 Executor 读取工具历史；其他调用方默认不包含。
+    [[nodiscard]] auto projectForAgent(const json &record, bool includeToolHistory = false) -> json;
 
     /// @brief 提取用于消息级向量召回的语义文本
     /// @param record 已解析的持久化聊天记录

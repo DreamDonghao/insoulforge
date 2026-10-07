@@ -9,6 +9,7 @@
 
 #include <drogon/utils/coroutine.h>
 
+#include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
 
 /// @brief 封装消息发送、@转换和会话名称更新
@@ -23,16 +24,18 @@ namespace insoulforge::MessageService {
     /// @param message 消息内容
     /// @return 发送成功返回 message_id，失败返回 nullopt（已记日志）
     /// @param imageDescription 可选的图片描述；仅在图片发送成功时写入助手消息记录
-    auto sendGroupMsg(u64 groupId, std::string message, std::optional<std::string> imageDescription = std::nullopt)
-      -> drogon::Task<std::optional<u64>>;
+    /// @param toolHistory 可选的执行历史，发送成功时附在助手记录中，不发送给 OneBot。
+    auto sendGroupMsg(u64 groupId, std::string message, std::optional<std::string> imageDescription = std::nullopt,
+      json toolHistory = {}) -> drogon::Task<std::optional<u64>>;
 
     /// @brief 发送私聊消息
     /// @param userId 用户 QQ 号
     /// @param message 消息内容
     /// @return 发送成功返回 message_id，失败返回 nullopt（已记日志）
     /// @param imageDescription 可选的图片描述；仅在图片发送成功时写入助手消息记录
-    auto sendPrivateMsg(u64 userId, std::string message, std::optional<std::string> imageDescription = std::nullopt)
-      -> drogon::Task<std::optional<u64>>;
+    /// @param toolHistory 可选的执行历史，发送成功时附在助手记录中，不发送给 OneBot。
+    auto sendPrivateMsg(u64 userId, std::string message, std::optional<std::string> imageDescription = std::nullopt,
+      json toolHistory = {}) -> drogon::Task<std::optional<u64>>;
 
     /// @brief 获取并更新会话名称（群聊为群名，私聊为 QQ 昵称）
     /// @param sessionId 会话 ID（私聊带标志位）

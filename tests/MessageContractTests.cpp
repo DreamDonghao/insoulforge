@@ -882,6 +882,57 @@ namespace {
         std::filesystem::remove(path);
     }
 
+    void testToolHistoryRecords() {
+        constexpr std::string_view kTestName = "tool history records";
+        const insoulforge::json arguments{{"query", "测试搜索"}, {"apiKey", "private-key"},
+          {"headers", {{"Authorization", "Bearer private-token"}}}, {"image", "data:image/png;base64,aGVsbG8="}};
+        const auto search = insoulforge::MessageRecord::createToolHistoryEntry("search_web", arguments, "returned");
+        check(search["arguments"]["query"] == "测试搜索", "keeps ordinary tool arguments", kTestName);
+        check(insoulforge::dumpJson(search).find("private-") == std::string::npos &&
+                insoulforge::dumpJson(search).find("aGVsbG8=") == std::string::npos,
+          "history does not retain credentials or image bytes", kTestName);
+        check(arguments["apiKey"] == "private-key", "sanitizing history does not alter execution arguments", kTestName);
+        const auto large =
+          insoulforge::MessageRecord::createToolHistoryEntry("custom", {{"value", std::string(3000, '.')}}, "returned");
+        check(large["arguments"].contains("_omitted"), "oversized arguments are explicitly omitted", kTestName);
+
+        const auto noReply =
+          insoulforge::MessageRecord::createToolHistoryEntry("no_reply", insoulforge::json::object(), "decision");
+        const auto history = insoulforge::json::array({search, noReply});
+        const auto record =
+          insoulforge::MessageRecord::createAssistantExecutionRecord("机器人(我)", history, "no_reply");
+        check(insoulforge::MessageRecord::isAssistant(record) && !record.contains("message_id") &&
+                record["segments"].empty() && record["execution_status"] == "no_reply",
+          "no_reply is an internal assistant record, not a sent QQ message", kTestName);
+        check(record["tool_history"][0]["name"] == "search_web" && record["tool_history"][1]["name"] == "no_reply",
+          "history keeps call order and the no_reply decision", kTestName);
+        check(!insoulforge::MessageRecord::projectForAgent(record).contains("tool_history"),
+          "router and maintenance projections omit tool history", kTestName);
+        check(insoulforge::MessageRecord::projectForAgent(record, true)["tool_history"] == history,
+          "executor projection retains internal history", kTestName);
+
+        auto sent = insoulforge::MessageRecord::createAssistantRecord("机器人(我)", 123, "最终回复");
+        sent["tool_history"] = history;
+        check(insoulforge::MessageRecord::projectForAgent(sent, true)["tool_history"] == history &&
+                insoulforge::MessageRecord::extractText(sent) == "最终回复",
+          "sent messages carry history without changing outgoing text", kTestName);
+        sent["sender"]["qq"] = "11";
+        check(!insoulforge::MessageRecord::projectForAgent(sent, true).contains("tool_history"),
+          "user records cannot claim assistant tool history", kTestName);
+
+        auto &database = insoulforge::Database::instance();
+        database.initialize(":memory:");
+        insoulforge::MessageList messages(987654);
+        const auto update = messages.append(record);
+        check(update && update->messageSnapshot.back()["tool_history"] == history,
+          "no_reply history enters the context snapshot", kTestName);
+        messages.flushToStorage();
+        insoulforge::MessageList restored(987654);
+        check(restored.fullSnapshot() == messages.fullSnapshot(), "no_reply survives persistence and restoration",
+          kTestName);
+        database.close();
+    }
+
     void testImageDescriptionCacheStore() {
         constexpr std::string_view kTestName = "image description cache store";
         auto &database = insoulforge::Database::instance();
@@ -1124,6 +1175,7 @@ auto main() -> int {
     testConversationMaintenanceStore();
     testMemoryModelConfigMigration();
     testExecutionConfig();
+    testToolHistoryRecords();
     testImageDescriptionCacheStore();
     testImageGenerationResponse();
     testUsageSummaryUsesLatestRoleModel();

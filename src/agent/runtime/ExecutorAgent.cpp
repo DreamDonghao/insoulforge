@@ -26,6 +26,11 @@ namespace insoulforge::ExecutorAgent {
 
 你收到的上下文是键顺序固定的 JSON，earlier_conversation 与 recent_conversation 均按时间从旧到新排列：
 
+助手记录中的 tool_history 按处理顺序保存工具名、参数和状态；returned 只表示处理器返回了结果，不等于业务成功。
+record_type=tool_execution 的记录是内部执行记录，没有 QQ 消息 ID，不能引用、撤回或认为向群友发送了消息。
+execution_status=no_reply 表示当时选择不回复；failed/send_failed 表示执行或发送未完成。
+不要声称未确认成功的操作已完成。历史查询记录不含完整结果，必要时可以重新核实来源。
+
 ```json
 {
     "short_term_memory": [
@@ -157,7 +162,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
             if (!raw.is_object()) {
                 return getStr(record, "content"); // 历史存量可能是纯文本
             }
-            json content = MessageRecord::projectForAgent(raw);
+            json content = MessageRecord::projectForAgent(raw, true);
             if (!truncateText) {
                 return content;
             }
@@ -378,10 +383,10 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
 
         /// @brief 逐个处理本轮工具调用：回复工具直接产出回复决策；其余工具经 ToolRegistry 执行并把结果
         /// 作为 tool 消息回传，CQ 码类工具的结果累积备用
-        /// @return {回复工具决策（同轮多个以最后一个为准，未命中为 nullopt）, 回传工具结果后的消息列表, 累积的 CQ 码}
+        /// @return {回复决策, 工具结果消息列表, 累积 CQ 码, 按顺序保存的工具历史}
         auto processToolCalls(json message, json messages, std::string accumulatedCQCodes, const u64 sessionId,
-          const json &messageSnapshot, const bool replyOnly)
-          -> drogon::Task<std::tuple<std::optional<ReplyDecision>, json, std::string>> {
+          const json &messageSnapshot, const bool replyOnly, json toolHistory)
+          -> drogon::Task<std::tuple<std::optional<ReplyDecision>, json, std::string, json>> {
             ReplyDecision decision;
             bool hasDecision = false;
 
@@ -390,9 +395,13 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
                 Logger::info(sessionId, "Executor", fmt::format("工具: {}", name));
 
                 const json args = parseToolArguments(toolCall);
+                const auto recordCall = [&](const std::string &status) {
+                    toolHistory.push_back(MessageRecord::createToolHistoryEntry(name, args, status));
+                };
 
                 const ReplyToolResult replyResult = applyReplyTool(name, args, accumulatedCQCodes, decision);
                 if (replyResult == ReplyToolResult::Applied) {
+                    recordCall("decision");
                     hasDecision = true; // 回复工具：结束本轮，不回传工具结果
                     continue;
                 }
@@ -405,6 +414,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
                             Logger::warn(sessionId, "Executor", "reply 参数为空，使用 assistant content 兜底");
                             decision.shouldReply = true;
                             decision.content = fallback;
+                            recordCall("decision");
                             hasDecision = true;
                             continue;
                         }
@@ -413,6 +423,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
                                                 ? "reply_with_quote 需要非空 content 和 message_id，请重新调用。"
                                                 : "reply 需要非空 content，请重新调用。";
                     Logger::warn(sessionId, "Executor", fmt::format("回复工具参数无效: {}", name));
+                    recordCall("invalid_arguments");
                     appendToolResult(messages, toolCall, error);
                     continue;
                 }
@@ -432,7 +443,8 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
 
                 const std::string result = co_await ToolRegistry::instance().executeTool(name, args, std::move(ctx));
                 Logger::debug(sessionId, "Executor", fmt::format("工具结果: {}", result));
-                if (isCqCodeTool(name)) {
+                recordCall(replyOnly ? "rejected" : "returned");
+                if (!replyOnly && isCqCodeTool(name)) {
                     accumulatedCQCodes += result;
                 }
 
@@ -440,9 +452,9 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
             }
 
             if (hasDecision) {
-                co_return {decision, std::move(messages), std::move(accumulatedCQCodes)};
+                co_return {decision, std::move(messages), std::move(accumulatedCQCodes), std::move(toolHistory)};
             }
-            co_return {std::nullopt, std::move(messages), std::move(accumulatedCQCodes)};
+            co_return {std::nullopt, std::move(messages), std::move(accumulatedCQCodes), std::move(toolHistory)};
         }
 
         /// @brief Agent 模式执行（带 tools）：循环「请求模型 → 处理工具调用」，直到产出回复决策或达最大轮数
@@ -459,6 +471,16 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
               ToolRegistry::instance().getTools({.isPrivateSession = isPrivateSession, .replyOnly = true});
 
             std::string accumulatedCQCodes; // 跨轮累积 CQ 码，产出 reply 时自动拼入正文
+            json toolHistory = json::array();
+            const auto failedDecision = [&](std::string reason) -> std::optional<ReplyDecision> {
+                if (toolHistory.empty()) {
+                    return std::nullopt;
+                }
+                ReplyDecision decision;
+                decision.toolHistory = std::move(toolHistory);
+                decision.failureReason = std::move(reason);
+                return decision;
+            };
 
             // 一次回复固定使用启动时的上限，后台保存只影响后续流程。
             const auto maxToolRounds = config.execution.maxToolRounds.load(std::memory_order_relaxed);
@@ -467,13 +489,13 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
                 const json &roundTools = replyOnly ? replyTools : tools;
                 if (roundTools.empty()) {
                     Logger::error(sessionId, "Executor", "最后一轮未注册可用的回复工具");
-                    co_return std::nullopt;
+                    co_return failedDecision("最后一轮没有可用的回复工具");
                 }
                 auto requestMessages = buildIterationMessages(messages, round + 1, maxToolRounds);
                 const auto respJson = co_await LlmClient::requestChat("LLM", "executor", config.executor,
                   config.executorParams, std::move(requestMessages), roundTools, sessionId);
                 if (!respJson) {
-                    co_return std::nullopt;
+                    co_return failedDecision("Executor 模型请求失败");
                 }
 
                 const json &message = atOrNull((*respJson)["choices"][0], "message");
@@ -482,6 +504,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
                 if (!message.contains("tool_calls") || !message["tool_calls"].is_array() ||
                     message["tool_calls"].empty()) {
                     ReplyDecision decision;
+                    decision.toolHistory = std::move(toolHistory);
                     if (message.contains("content") && !message["content"].is_null()) {
                         decision.shouldReply = true;
                         decision.content = cleanReplyContent(jsonToString(message["content"]));
@@ -491,17 +514,20 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
 
                 // 有工具调用：回传 assistant 消息后逐个处理，未命中回复工具则继续下一轮
                 messages.push_back(buildAssistantToolCallMessage(message));
-                auto [roundDecision, nextMessages, nextAccumulatedCQCodes] = co_await processToolCalls(
-                  message, std::move(messages), std::move(accumulatedCQCodes), sessionId, messageSnapshot, replyOnly);
+                auto [roundDecision, nextMessages, nextAccumulatedCQCodes, nextToolHistory] =
+                  co_await processToolCalls(message, std::move(messages), std::move(accumulatedCQCodes), sessionId,
+                    messageSnapshot, replyOnly, std::move(toolHistory));
                 if (roundDecision) {
+                    roundDecision->toolHistory = std::move(nextToolHistory);
                     co_return std::move(roundDecision);
                 }
                 messages = std::move(nextMessages);
                 accumulatedCQCodes = std::move(nextAccumulatedCQCodes);
+                toolHistory = std::move(nextToolHistory);
             }
 
             Logger::error(sessionId, "Executor", fmt::format("达到最大迭代次数: {}", maxToolRounds));
-            co_return std::nullopt;
+            co_return failedDecision("达到最大迭代轮数，未生成最终回复");
         }
 
     } // namespace

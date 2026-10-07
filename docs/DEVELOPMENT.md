@@ -263,6 +263,10 @@ MessageService → OneBot API
   `ToolCallContext.replyOnly` 同时在注册中心拒绝非回复处理器执行；上限为 1 时首轮即应用此规则。
 - `reply` / `reply_with_quote` / `no_reply` 是回复工具，调用后结束本轮处理；它们在 `ExecutorAgent::processToolCalls`
   中被拦截，不走普通工具返回值路径。
+- `ReplyDecision.toolHistory` 跨迭代累计工具名、脱敏参数和处理状态，成功发送时经 MessageService 附在助手记录上。
+  `no_reply` 及有工具历史的流程失败通过 `appendAssistantExecutionRecord` 直接写入 MessageList，不进入入站队列。
+  内部记录标记 `record_type=tool_execution` 和执行状态，没有 QQ 消息 ID；仅 Executor 使用包含历史的投影，
+  Router、记忆和好感度仍使用默认投影。正常退出持久化和启动恢复沿用现有消息列表机制，不增加数据库表。
 - `send_sticker` / `send_poke` / `reply_and_continue` 是中途动作，执行后本轮不结束，最终仍需用回复工具收尾；一次对话需要连续多条消息时，用
   `reply_and_continue` 发送前置消息，再用 `reply` 或 `no_reply` 收尾。
 - `send_sticker` 与 `reply_and_continue` 通过 `MessageService` 直接发送，成功后自动写入聊天记录并推送
