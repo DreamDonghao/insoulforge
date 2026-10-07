@@ -155,7 +155,7 @@ insoulforge/
 ├── frontend/                 # Vue 3 + Vite + TypeScript 管理后台
 │   └── src/
 │       ├── components/      # 跨页面复用的 UI 组件
-│       └── features/        # 按访问、会话、LLM、OneBot、工具、诊断与概览归类的页面
+│       └── features/        # 按访问、执行、会话、LLM、OneBot、工具、诊断与概览归类的页面
 ├── agentTools/               # 自定义工具 JSON（时间、天气、随机数及 PageWeave 网页读取/搜索）
 └── docs/                     # 文档
 ```
@@ -256,8 +256,17 @@ MessageService → OneBot API
 
 工具执行的几个约束：
 
+- 工具循环上限由 `execution.maxToolRounds` 配置，默认 8、范围 1～100。一次回复在开始时读取并固定该值；
+  同一轮可处理多个工具，最终模型回复也占一轮。达到上限仍无回复决策时返回空结果，不额外发起模型请求。
+- 每轮复制当前请求上下文，在末尾追加一条 system 执行状态，说明当前轮次和后续剩余轮数；状态不进入持久上下文，
+  不影响已有 assistant/tool 配对，也不会累积到下一轮或传给 `deep_think`。最后一轮仅提供 REPLY 类工具，
+  `ToolCallContext.replyOnly` 同时在注册中心拒绝非回复处理器执行；上限为 1 时首轮即应用此规则。
 - `reply` / `reply_with_quote` / `no_reply` 是回复工具，调用后结束本轮处理；它们在 `ExecutorAgent::processToolCalls`
   中被拦截，不走普通工具返回值路径。
+- `ReplyDecision.toolHistory` 跨迭代累计工具名、脱敏参数和处理状态，成功发送时经 MessageService 附在助手记录上。
+  `no_reply` 及有工具历史的流程失败通过 `appendAssistantExecutionRecord` 直接写入 MessageList，不进入入站队列。
+  内部记录标记 `record_type=tool_execution` 和执行状态，没有 QQ 消息 ID；仅 Executor 使用包含历史的投影，
+  Router、记忆和好感度仍使用默认投影。正常退出持久化和启动恢复沿用现有消息列表机制，不增加数据库表。
 - `send_sticker` / `send_poke` / `reply_and_continue` 是中途动作，执行后本轮不结束，最终仍需用回复工具收尾；一次对话需要连续多条消息时，用
   `reply_and_continue` 发送前置消息，再用 `reply` 或 `no_reply` 收尾。
 - `send_sticker` 与 `reply_and_continue` 通过 `MessageService` 直接发送，成功后自动写入聊天记录并推送
@@ -303,7 +312,7 @@ MessageService → OneBot API
 
 ### 配置系统
 
-`ConfigStore` 将 LLM API 配置（router / jev / executor / executorThinking / image / imageGeneration / memory / embedding）、QQ Bot 配置和记忆参数统一写入
+`ConfigStore` 将 LLM API 配置（router / jev / executor / executorThinking / image / imageGeneration / memory / embedding）、QQ Bot 配置、记忆和执行参数统一写入
 `data/config.json`。聊天模型可设置 `maxTokens`、`temperature`、`topP` 和 `reasoningEffort`；Embedding、Jev 与图片生成不使用这些采样参数。
 后台上传的角色参考图单独保存在 `data/character-image`，不写入配置或公开静态目录；部署时沿用现有 `data/` 持久化挂载。
 Jev 默认指向 OpenRouter Decisions API，API Key 默认为空，因此默认不启用；其 `minConfidence` 默认 0.6，限制在 0～1，
@@ -312,6 +321,12 @@ JSON 损坏则备份为 `config.json.broken.<时间戳>` 后重建；缺失或�
 
 `Config` 单例在启动期从该文件加载运行时副本。提示词由 `PromptService` 管理（`executor_system` /
 `router_system`），支持 `{botName}` 占位符，修改后写回数据库。
+
+执行参数位于独立的 `execution` 节点，管理接口为 `GET/POST /admin/api/execution-config`，前端页面为“执行配置”。
+首项 `maxToolRounds` 只接受 1～100 的整数；启动时缺失或非法值修复为 8，接口保存非法值返回 HTTP 400。
+文件写入成功后才更新原子运行时值，写入失败返回 HTTP 500 并保留原配置；保存时保留其他执行字段。
+每次回复固定读取一次上限，后台修改不打断正在运行的循环。新增同类执行参数时，在这个节点、接口和页面中扩展，
+不用添加到 LLM 采样参数或自定义工具脚本设置里。
 
 **用量统计**：聊天模型与 Jev 调用通过 `LlmClient::logUsage` 记录模型与 token 用量；Jev 客户端先将
 `input_tokens` / `output_tokens` 映射到现有记账字段，角色记为 `jev`。后台「用量统计」页读取 `/admin/api/usage` 展示。

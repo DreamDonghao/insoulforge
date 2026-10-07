@@ -120,6 +120,10 @@ namespace insoulforge {
         }
     }
 
+    void OneBotEventWorkflow::appendAssistantExecutionRecord(const u64 sessionId, json message) {
+        appendSystemStatusMessage(sessionId, std::move(message));
+    }
+
     void OneBotEventWorkflow::appendSystemStatusMessage(const u64 sessionId, json message) {
         const auto sessionState = getOrCreateSessionState(sessionId);
         const auto update = sessionState->messageList()->append(std::move(message));
@@ -288,14 +292,30 @@ namespace insoulforge {
                         const auto replyDecision =
                           co_await ExecutorAgent::execute(records, memory, std::move(routerDecision), messageSnapshot);
                         if (replyDecision && replyDecision->shouldReply && !replyDecision->content.empty()) {
+                            std::optional<u64> sentMessageId;
                             if (SessionId::isPrivate(sessionId)) {
-                                co_await MessageService::sendPrivateMsg(
-                                  SessionId::privateUserId(sessionId), replyDecision->content);
+                                sentMessageId =
+                                  co_await MessageService::sendPrivateMsg(SessionId::privateUserId(sessionId),
+                                    replyDecision->content, std::nullopt, replyDecision->toolHistory);
                             } else {
-                                co_await MessageService::sendGroupMsg(sessionId, replyDecision->content);
+                                sentMessageId = co_await MessageService::sendGroupMsg(
+                                  sessionId, replyDecision->content, std::nullopt, replyDecision->toolHistory);
+                            }
+                            if (!sentMessageId) {
+                                appendAssistantExecutionRecord(sessionId,
+                                  MessageRecord::createAssistantExecutionRecord(Config::instance().botName + "(我)",
+                                    replyDecision->toolHistory, "send_failed",
+                                    "OneBot 未确认发送成功，不能认为回复已送达"));
                             }
                         } else {
                             Logger::info(sessionId, "Executor", "未生成可发送的回复");
+                            if (replyDecision) {
+                                appendAssistantExecutionRecord(sessionId,
+                                  MessageRecord::createAssistantExecutionRecord(Config::instance().botName + "(我)",
+                                    replyDecision->toolHistory,
+                                    replyDecision->failureReason.empty() ? "no_reply" : "failed",
+                                    replyDecision->failureReason));
+                            }
                         }
                     }
                 }

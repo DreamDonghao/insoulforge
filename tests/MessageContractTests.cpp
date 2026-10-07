@@ -1,6 +1,7 @@
 /// @file MessageContractTests.cpp
 /// @brief 消息链路的契约测试
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -16,9 +17,11 @@
 #include <drogon/utils/coroutine.h>
 #include <openssl/evp.h>
 
+#include <admin/http/AdminController.hpp>
 #include <agent/ability/AsyncTaskManager.hpp>
 #include <agent/memory/LongTermMemoryStore.hpp>
 #include <agent/memory/MemoryStore.hpp>
+#include <agent/runtime/ExecutorAgent.hpp>
 #include <agent/tools/ToolRegistry.hpp>
 #include <agent/tools/custom/LuaToolExecutor.hpp>
 #include <agent/tools/plugins/ActionToolsPlugin.hpp>
@@ -513,19 +516,109 @@ namespace {
         registry.unregisterPlugin("contract.plugin");
     }
 
+    void testFinalRoundToolPolicy() {
+        constexpr std::string_view kTestName = "final round tool policy";
+        auto &registry = insoulforge::ToolRegistry::instance();
+        i32 executed = 0;
+        const auto handler = [&executed](insoulforge::json, insoulforge::ToolCallContext) -> drogon::Task<std::string> {
+            ++executed;
+            co_return "executed";
+        };
+        check(registry.registerPlugin("contract.round-policy",
+                [&](insoulforge::ToolRegistry &staged) {
+                    staged.registerTool(
+                      {.name = "contract_round_reply", .handler = handler}, insoulforge::ToolCategory::REPLY);
+                    staged.registerTool({.name = "contract_round_group_reply",
+                                          .handler = handler,
+                                          .scope = insoulforge::ToolScope::GROUP_ONLY},
+                      insoulforge::ToolCategory::REPLY);
+                    staged.registerTool(
+                      {.name = "contract_round_query", .handler = handler}, insoulforge::ToolCategory::INFORMATION);
+                    staged.registerTool(
+                      {.name = "contract_round_action", .handler = handler}, insoulforge::ToolCategory::ACTION);
+                }),
+          "policy tools register", kTestName);
+
+        const auto names = [](const insoulforge::json &tools) {
+            std::vector<std::string> result;
+            for (const auto &tool: tools) {
+                result.push_back(tool["function"]["name"].get<std::string>());
+            }
+            return result;
+        };
+        const auto regularNames = names(registry.getTools({}));
+        check(std::ranges::find(regularNames, "contract_round_query") != regularNames.end() &&
+                std::ranges::find(regularNames, "contract_round_action") != regularNames.end(),
+          "normal rounds keep query and action tools", kTestName);
+        const auto finalNames = names(registry.getTools({.replyOnly = true}));
+        check(std::ranges::find(finalNames, "contract_round_reply") != finalNames.end(),
+          "final round exposes reply tools", kTestName);
+        check(std::ranges::find(finalNames, "contract_round_query") == finalNames.end() &&
+                std::ranges::find(finalNames, "contract_round_action") == finalNames.end(),
+          "final round excludes query and action tools", kTestName);
+        const auto privateNames = names(registry.getTools({.isPrivateSession = true, .replyOnly = true}));
+        check(std::ranges::find(privateNames, "contract_round_group_reply") == privateNames.end(),
+          "reply filtering preserves private-session restrictions", kTestName);
+
+        for (const auto name: {"contract_round_query", "contract_round_action"}) {
+            const auto result = drogon::sync_wait(registry.executeTool(name, {}, {.replyOnly = true}));
+            check(result.find("未执行") != std::string::npos && executed == 0,
+              "non-reply calls cannot execute on final round", kTestName);
+        }
+        check(drogon::sync_wait(registry.executeTool("contract_round_reply", {}, {.replyOnly = true})) == "executed" &&
+                executed == 1,
+          "final-round policy allows reply category", kTestName);
+        check(drogon::sync_wait(registry.executeTool("contract_round_query", {}, {})) == "executed" && executed == 2,
+          "normal-round execution is unchanged", kTestName);
+        registry.unregisterPlugin("contract.round-policy");
+    }
+
+    void testIterationRequestMessages() {
+        constexpr std::string_view kTestName = "iteration request messages";
+        const auto history = insoulforge::json::array(
+          {{{"role", "system"}, {"content", "original prompt"}}, {{"role", "user"}, {"content", "question"}},
+            {{"role", "assistant"}, {"tool_calls", {{{"id", "call-1"}, {"type", "function"}}}}},
+            {{"role", "tool"}, {"tool_call_id", "call-1"}, {"content", "source data"}}});
+
+        const auto first = insoulforge::ExecutorAgent::buildIterationMessages(history, 1, 8);
+        const auto middle = insoulforge::ExecutorAgent::buildIterationMessages(history, 3, 8);
+        const auto last = insoulforge::ExecutorAgent::buildIterationMessages(history, 8, 8);
+        check(first.size() == history.size() + 1 && middle.size() == first.size() && last.size() == first.size(),
+          "each request has exactly one transient execution status", kTestName);
+        for (size_t index = 0; index < history.size(); ++index) {
+            check(first[index] == history[index] && middle[index] == history[index] && last[index] == history[index],
+              "request status preserves the full history and tool results", kTestName);
+        }
+        check(first.back()["role"] == "system" &&
+                first.back()["content"].get<std::string>().find("还可请求模型 7 次") != std::string::npos,
+          "first round counts future requests excluding the current one", kTestName);
+        check(middle.back()["content"].get<std::string>().find("3/8") != std::string::npos &&
+                middle.back()["content"].get<std::string>().find("还可请求模型 5 次") != std::string::npos,
+          "intermediate status reflects the current round", kTestName);
+        check(last.back()["content"].get<std::string>().find("还可请求模型 0 次") != std::string::npos &&
+                last.back()["content"].get<std::string>().find("仅开放回复类工具") != std::string::npos,
+          "last round explicitly requires a reply decision", kTestName);
+        const auto single = insoulforge::ExecutorAgent::buildIterationMessages(history, 1, 1);
+        check(single.back()["content"].get<std::string>().find("仅开放回复类工具") != std::string::npos,
+          "a one-round limit is immediately reply-only", kTestName);
+        check(history.size() == 4 && history.front()["content"] == "original prompt",
+          "transient status never modifies the original conversation", kTestName);
+    }
+
     void testToolRegistryReturnsHandlerErrors() {
         constexpr std::string_view kTestName = "tool handler error result";
         auto &registry = insoulforge::ToolRegistry::instance();
-        check(registry.registerPlugin("contract.error", [](insoulforge::ToolRegistry &staged) {
-                  staged.registerTool(
-                    {.name = "contract_error_tool",
-                      .description = "test",
-                      .handler = [](insoulforge::json, insoulforge::ToolCallContext) -> drogon::Task<std::string> {
-                          throw std::runtime_error("具体失败原因");
-                          co_return "";
-                      }},
-                    insoulforge::ToolCategory::INFORMATION);
-              }),
+        check(registry.registerPlugin("contract.error",
+                [](insoulforge::ToolRegistry &staged) {
+                    staged.registerTool(
+                      {.name = "contract_error_tool",
+                        .description = "test",
+                        .handler = [](insoulforge::json, insoulforge::ToolCallContext) -> drogon::Task<std::string> {
+                            throw std::runtime_error("具体失败原因");
+                            co_return "";
+                        }},
+                      insoulforge::ToolCategory::INFORMATION);
+                }),
           "error tool registers", kTestName);
         const auto result = drogon::sync_wait(registry.executeTool("contract_error_tool", {}, {.sessionId = 100}));
         check(result.find("具体失败原因") != std::string::npos, "handler error is returned to model", kTestName);
@@ -694,6 +787,150 @@ namespace {
         check(!insoulforge::ConfigStore::getMemoryConfig().contains("memoryExtractMaxTokens"),
           "removes legacy token field", kTestName);
         std::filesystem::remove(path);
+    }
+
+    void testExecutionConfig() {
+        constexpr std::string_view kTestName = "execution config";
+        const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
+        const auto path = std::filesystem::temp_directory_path() /
+                          ("insoulforge-execution-config-test-" + std::to_string(suffix) + ".json");
+        {
+            std::ofstream output(path);
+            output << R"({"qq":{"botName":"existing-bot"}})";
+        }
+        insoulforge::ConfigStore::initialize(path.string());
+        insoulforge::Config::instance().loadFromStorage();
+        check(insoulforge::ConfigStore::getExecutionConfig()["maxToolRounds"] == 8,
+          "old files receive the default limit", kTestName);
+        check(insoulforge::Config::instance().execution.maxToolRounds.load() == 8, "loads the default runtime limit",
+          kTestName);
+        insoulforge::ConfigStore::saveExecutionConfig({{"maxToolRounds", 8}, {"futureSetting", true}});
+
+        const insoulforge::AdminController controller;
+        drogon::HttpResponsePtr response;
+        const auto callback = [&response](const drogon::HttpResponsePtr &value) { response = value; };
+        drogon::sync_wait(controller.getExecutionConfig(drogon::HttpRequest::newHttpRequest(), callback));
+        check(response->getStatusCode() == drogon::k200OK &&
+                insoulforge::parseJson(std::string(response->body()))["maxToolRounds"] == 8,
+          "GET returns stored execution settings", kTestName);
+
+        const auto save = [&](const std::string &body) {
+            auto request = drogon::HttpRequest::newHttpRequest();
+            request->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            request->setBody(body);
+            drogon::sync_wait(controller.saveExecutionConfig(request, callback));
+        };
+        for (const auto limit: {1, 32, 100}) {
+            save(insoulforge::dumpJson({{"maxToolRounds", limit}}));
+            check(response->getStatusCode() == drogon::k200OK &&
+                    insoulforge::parseJson(std::string(response->body()))["success"] == true,
+              "accepts valid limits including boundaries", kTestName);
+            check(insoulforge::Config::instance().execution.maxToolRounds.load() == limit,
+              "save updates runtime without reload", kTestName);
+        }
+        check(insoulforge::ConfigStore::getExecutionConfig()["futureSetting"] == true,
+          "saving preserves other execution fields", kTestName);
+        check(insoulforge::ConfigStore::getQQConfig()["botName"] == "existing-bot",
+          "saving leaves other configuration sections unchanged", kTestName);
+
+        const auto stored = insoulforge::ConfigStore::getExecutionConfig();
+        const auto invalidValues =
+          insoulforge::json::array({0, -1, 101, 8.0, 8.5, "8", true, nullptr, std::numeric_limits<u64>::max()});
+        for (const auto &value: invalidValues) {
+            save(insoulforge::dumpJson({{"maxToolRounds", value}}));
+            check(response->getStatusCode() == drogon::k400BadRequest,
+              "POST rejects non-integers and out-of-range limits", kTestName);
+            check(insoulforge::ConfigStore::getExecutionConfig() == stored &&
+                    insoulforge::Config::instance().execution.maxToolRounds.load() == 100,
+              "invalid saves do not change stored or runtime values", kTestName);
+        }
+        for (const auto body: {"{}", "[]", "null", "not json"}) {
+            save(body);
+            check(response->getStatusCode() == drogon::k400BadRequest,
+              "POST rejects missing settings and invalid JSON bodies", kTestName);
+        }
+
+        // Blocking the temporary path makes the write fail even when tests run with elevated permissions.
+        const auto temporaryPath = std::filesystem::path(path.string() + ".tmp");
+        std::filesystem::create_directory(temporaryPath);
+        save(R"({"maxToolRounds":16})");
+        check(
+          response->getStatusCode() == drogon::k500InternalServerError, "file write errors are reported", kTestName);
+        check(insoulforge::ConfigStore::getExecutionConfig() == stored &&
+                insoulforge::Config::instance().execution.maxToolRounds.load() == 100,
+          "write failure leaves stored and runtime values unchanged", kTestName);
+        std::filesystem::remove(temporaryPath);
+
+        insoulforge::ConfigStore::initialize(path.string());
+        insoulforge::Config::instance().loadFromStorage();
+        check(insoulforge::Config::instance().execution.maxToolRounds.load() == 100,
+          "saved values survive reinitialization", kTestName);
+
+        for (const auto &value: invalidValues) {
+            {
+                std::ofstream output(path);
+                output << insoulforge::dumpJson({{"execution", {{"maxToolRounds", value}}}});
+            }
+            insoulforge::ConfigStore::initialize(path.string());
+            check(insoulforge::ConfigStore::getExecutionConfig()["maxToolRounds"] == 8,
+              "startup repairs invalid file values", kTestName);
+            std::ifstream input(path);
+            const auto repaired = insoulforge::json::parse(input);
+            check(repaired["execution"]["maxToolRounds"] == 8, "startup persists the repaired default", kTestName);
+        }
+        insoulforge::Config::instance().loadFromStorage();
+        std::filesystem::remove(path);
+    }
+
+    void testToolHistoryRecords() {
+        constexpr std::string_view kTestName = "tool history records";
+        const insoulforge::json arguments{{"query", "测试搜索"}, {"apiKey", "private-key"},
+          {"headers", {{"Authorization", "Bearer private-token"}}}, {"image", "data:image/png;base64,aGVsbG8="}};
+        const auto search = insoulforge::MessageRecord::createToolHistoryEntry("search_web", arguments, "returned");
+        check(search["arguments"]["query"] == "测试搜索", "keeps ordinary tool arguments", kTestName);
+        check(insoulforge::dumpJson(search).find("private-") == std::string::npos &&
+                insoulforge::dumpJson(search).find("aGVsbG8=") == std::string::npos,
+          "history does not retain credentials or image bytes", kTestName);
+        check(arguments["apiKey"] == "private-key", "sanitizing history does not alter execution arguments", kTestName);
+        const auto large =
+          insoulforge::MessageRecord::createToolHistoryEntry("custom", {{"value", std::string(3000, '.')}}, "returned");
+        check(large["arguments"].contains("_omitted"), "oversized arguments are explicitly omitted", kTestName);
+
+        const auto noReply =
+          insoulforge::MessageRecord::createToolHistoryEntry("no_reply", insoulforge::json::object(), "decision");
+        const auto history = insoulforge::json::array({search, noReply});
+        const auto record =
+          insoulforge::MessageRecord::createAssistantExecutionRecord("机器人(我)", history, "no_reply");
+        check(insoulforge::MessageRecord::isAssistant(record) && !record.contains("message_id") &&
+                record["segments"].empty() && record["execution_status"] == "no_reply",
+          "no_reply is an internal assistant record, not a sent QQ message", kTestName);
+        check(record["tool_history"][0]["name"] == "search_web" && record["tool_history"][1]["name"] == "no_reply",
+          "history keeps call order and the no_reply decision", kTestName);
+        check(!insoulforge::MessageRecord::projectForAgent(record).contains("tool_history"),
+          "router and maintenance projections omit tool history", kTestName);
+        check(insoulforge::MessageRecord::projectForAgent(record, true)["tool_history"] == history,
+          "executor projection retains internal history", kTestName);
+
+        auto sent = insoulforge::MessageRecord::createAssistantRecord("机器人(我)", 123, "最终回复");
+        sent["tool_history"] = history;
+        check(insoulforge::MessageRecord::projectForAgent(sent, true)["tool_history"] == history &&
+                insoulforge::MessageRecord::extractText(sent) == "最终回复",
+          "sent messages carry history without changing outgoing text", kTestName);
+        sent["sender"]["qq"] = "11";
+        check(!insoulforge::MessageRecord::projectForAgent(sent, true).contains("tool_history"),
+          "user records cannot claim assistant tool history", kTestName);
+
+        auto &database = insoulforge::Database::instance();
+        database.initialize(":memory:");
+        insoulforge::MessageList messages(987654);
+        const auto update = messages.append(record);
+        check(update && update->messageSnapshot.back()["tool_history"] == history,
+          "no_reply history enters the context snapshot", kTestName);
+        messages.flushToStorage();
+        insoulforge::MessageList restored(987654);
+        check(restored.fullSnapshot() == messages.fullSnapshot(), "no_reply survives persistence and restoration",
+          kTestName);
+        database.close();
     }
 
     void testImageDescriptionCacheStore() {
@@ -928,6 +1165,8 @@ auto main() -> int {
     testSchemaMigration();
     testLuaToolExecutor();
     testToolRegistryReload();
+    testFinalRoundToolPolicy();
+    testIterationRequestMessages();
     testToolRegistryReturnsHandlerErrors();
     testCharacterImageStore();
     testHttpTraceImageRedaction();
@@ -935,6 +1174,8 @@ auto main() -> int {
     testMemoryMaintenanceStore();
     testConversationMaintenanceStore();
     testMemoryModelConfigMigration();
+    testExecutionConfig();
+    testToolHistoryRecords();
     testImageDescriptionCacheStore();
     testImageGenerationResponse();
     testUsageSummaryUsesLatestRoleModel();

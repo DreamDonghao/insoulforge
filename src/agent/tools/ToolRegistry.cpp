@@ -120,6 +120,8 @@ namespace insoulforge {
         for (const auto &registered: m_tools | std::views::values) {
             if (query.isPrivateSession && registered.tool.scope == ToolScope::GROUP_ONLY)
                 continue;
+            if (query.replyOnly && registered.category != ToolCategory::REPLY)
+                continue;
             visibleTools.push_back(&registered);
         }
 
@@ -141,6 +143,10 @@ namespace insoulforge {
         {
             std::shared_lock lock(m_mutex);
             if (const auto it = m_tools.find(name); it != m_tools.end()) {
+                if (ctx.replyOnly && it->second.category != ToolCategory::REPLY) {
+                    Logger::warn(ctx.sessionId, "Tool", fmt::format("最后一轮拒绝非回复工具: {}", name));
+                    co_return "最后一轮只允许回复类工具，未执行: " + name;
+                }
                 handler = it->second.tool.handler;
             }
         }

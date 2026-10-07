@@ -1,13 +1,42 @@
 /// @file MessageRecord.cpp
 /// @brief 聊天记录富内容的构造、兼容与投影实现
 
+#include <algorithm>
+#include <cctype>
+
 #include "conversation/message/SessionId.hpp"
 #include <conversation/message/MessageRecord.hpp>
 #include <conversation/session/QQNameDirectory.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/http/HttpUtil.hpp>
 
 namespace insoulforge::MessageRecord {
     namespace {
+        auto redactToolArguments(json value, const i32 depth = 0) -> json {
+            if (depth > 8) {
+                return "[嵌套参数已省略]";
+            }
+            if (value.is_object()) {
+                for (auto &[key, item]: value.items()) {
+                    auto normalized = key;
+                    std::ranges::transform(normalized, normalized.begin(),
+                      [](const unsigned char character) { return static_cast<char>(std::tolower(character)); });
+                    if (normalized == "apikey" || normalized == "api_key" || normalized == "token" ||
+                        normalized == "accesstoken" || normalized == "access_token" || normalized == "authorization" ||
+                        normalized == "password" || normalized == "cookie" || normalized == "secret") {
+                        item = "[敏感参数已省略]";
+                    } else {
+                        item = redactToolArguments(std::move(item), depth + 1);
+                    }
+                }
+            } else if (value.is_array()) {
+                for (auto &item: value) {
+                    item = redactToolArguments(std::move(item), depth + 1);
+                }
+            }
+            return value;
+        }
+
         /// @brief 向段数组追加文本，并合并相邻文本段以减小记录体积
         void appendText(json &segments, const std::string_view text) {
             if (text.empty()) {
@@ -217,6 +246,25 @@ namespace insoulforge::MessageRecord {
         return record;
     }
 
+    auto createToolHistoryEntry(std::string name, json arguments, std::string status) -> json {
+        auto sanitized = redactToolArguments(HttpUtil::redactImagePayloads(arguments));
+        if (dumpJson(sanitized).size() > 2048) {
+            sanitized = {{"_omitted", "参数超过 2048 字节，已省略"}};
+        }
+        return {{"name", std::move(name)}, {"arguments", std::move(sanitized)}, {"status", std::move(status)}};
+    }
+
+    auto createAssistantExecutionRecord(
+      std::string senderName, json toolHistory, std::string status, std::string reason) -> json {
+        json record{{"time", currentDateTime()}, {"sender", {{"name", std::move(senderName)}, {"qq", "self"}}},
+          {"record_type", "tool_execution"}, {"execution_status", std::move(status)}, {"segments", json::array()},
+          {"tool_history", std::move(toolHistory)}};
+        if (!reason.empty()) {
+            record["reason"] = std::move(reason);
+        }
+        return record;
+    }
+
     auto extractText(const json &record) -> std::string {
         std::string text;
         const json &segments = atOrNull(record, "segments");
@@ -249,7 +297,7 @@ namespace insoulforge::MessageRecord {
         return getStr(atOrNull(record, "sender"), "qq") == std::to_string(SessionId::kSystemAccountId);
     }
 
-    auto projectForAgent(const json &record) -> json {
+    auto projectForAgent(const json &record, const bool includeToolHistory) -> json {
         if (!record.is_object()) {
             return record;
         }
@@ -262,6 +310,18 @@ namespace insoulforge::MessageRecord {
         }
         if (record.contains("message_id")) {
             projected["message_id"] = record["message_id"];
+        }
+        if (isAssistant(record) && getStr(record, "record_type") == "tool_execution") {
+            projected["record_type"] = "tool_execution";
+            projected["execution_status"] = getStr(record, "execution_status");
+            if (includeToolHistory && record.contains("reason")) {
+                projected["reason"] = record["reason"];
+            }
+        }
+        if (includeToolHistory && isAssistant(record)) {
+            if (const auto &history = atOrNull(record, "tool_history"); history.is_array() && !history.empty()) {
+                projected["tool_history"] = history;
+            }
         }
         if (const json &replyTo = atOrNull(record, "reply_to"); !replyTo.is_null() && !replyTo.empty()) {
             projected["reply_to"] = replyTo;

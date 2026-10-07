@@ -43,6 +43,9 @@ namespace insoulforge {
         /// @note 线程安全。会推送管理后台，并按普通消息参与后续快照与记忆维护。
         void appendSystemStatusMessage(u64 sessionId, json message);
 
+        /// @brief 保存内部助手执行记录，不发送 QQ 消息，也不投递新回复任务。
+        void appendAssistantExecutionRecord(u64 sessionId, json message);
+
         /// @brief 获取运行中会话的完整消息列表快照
         /// @param sessionId 所属会话 ID
         /// @return 会话已在工作流中初始化时返回完整消息快照，否则返回空值

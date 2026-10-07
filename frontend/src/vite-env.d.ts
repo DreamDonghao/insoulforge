@@ -34,6 +34,10 @@ export interface MemoryConfig {
     longTermInjectThreshold: number
 }
 
+export interface ExecutionConfig {
+    maxToolRounds: number
+}
+
 export interface LongTermMemoryEntry {
     id: number
     groupId: string

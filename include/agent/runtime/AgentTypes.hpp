@@ -13,6 +13,7 @@
 
 #include <fmt/core.h>
 
+#include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
@@ -43,6 +44,8 @@ namespace insoulforge {
     struct ReplyDecision {
         bool shouldReply = false;
         std::string content;
+        json toolHistory = json::array(); ///< 按实际处理顺序记录工具与参数，不保留工具完整输出
+        std::string failureReason; ///< 无法完成回复流程时的原因，与主动 no_reply 区分
     };
 } // namespace insoulforge
 

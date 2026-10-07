@@ -16,6 +16,11 @@ defineProps<{ name: string }>()
   <svg v-else-if="name === 'llm'" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
     <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
   </svg>
+  <svg v-else-if="name === 'execution'" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+    <path d="M4 7h7m4 0h5M4 17h3m4 0h9"/>
+    <circle cx="13" cy="7" r="2"/>
+    <circle cx="9" cy="17" r="2"/>
+  </svg>
   <!-- 提示词 -->
   <svg v-else-if="name === 'prompts'" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>

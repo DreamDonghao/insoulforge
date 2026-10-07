@@ -4,8 +4,10 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <stdexcept>
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/config/Config.hpp>
 #include <infrastructure/config/ConfigStore.hpp>
 #include <infrastructure/logging/Logger.hpp>
 
@@ -57,7 +59,23 @@ namespace insoulforge::ConfigStore {
               {"memory",
                 {{"contextWindowLimit", 100}, {"memorySummaryTriggerCount", 100}, {"memorySummaryBatchSize", 50},
                   {"memorySummaryContextCount", 10}, {"routerWindowTriggerCount", 20}, {"routerWindowKeepCount", 10},
-                  {"shortTermMemoryMax", 15}, {"longTermRecallThreshold", 0.65}, {"longTermInjectThreshold", 0.45}}}};
+                  {"shortTermMemoryMax", 15}, {"longTermRecallThreshold", 0.65}, {"longTermInjectThreshold", 0.45}}},
+              {"execution", {{"maxToolRounds", ExecutionSettings::kDefaultMaxToolRounds}}}};
+        }
+
+        auto validToolRounds(const json &value) -> bool {
+            return value.is_number_integer() && value >= ExecutionSettings::kMinToolRounds &&
+                   value <= ExecutionSettings::kMaxToolRounds;
+        }
+
+        /// @brief 启动时修复整数类型以外或越界的执行参数，不截断小数。
+        auto normalizeExecutionConfig(json &config) -> bool {
+            auto &rounds = config["execution"]["maxToolRounds"];
+            if (validToolRounds(rounds)) {
+                return false;
+            }
+            rounds = ExecutionSettings::kDefaultMaxToolRounds;
+            return true;
         }
 
         auto compatibleType(const json &value, const json &defaultValue) -> bool {
@@ -217,6 +235,7 @@ namespace insoulforge::ConfigStore {
             }
         }
 
+        needsWrite = normalizeExecutionConfig(config) || needsWrite;
         fileState.path = configPath;
         fileState.content = std::move(config);
         fileState.initialized = true;
@@ -274,5 +293,24 @@ namespace insoulforge::ConfigStore {
     void saveMemoryConfig(const json &config) {
         saveSection("memory", config);
         Logger::info(0, "Config", fmt::format("记忆配置已保存"));
+    }
+
+    auto getExecutionConfig() -> json { return getSection("execution"); }
+
+    void saveExecutionConfig(const json &config) {
+        if (!config.is_object() || !validToolRounds(atOrNull(config, "maxToolRounds"))) {
+            throw std::invalid_argument("最大工具迭代轮数必须是 1 到 100 之间的整数");
+        }
+
+        ensureInitialized();
+        auto &fileState = state();
+        std::scoped_lock lock(fileState.mutex);
+        auto nextConfig = fileState.content;
+        nextConfig["execution"].update(config);
+        writeConfigFile(fileState.path, nextConfig);
+        fileState.content = std::move(nextConfig);
+        // 与配置文件在同一个锁内更新，避免并发保存使运行时值回退。
+        Config::instance().execution.maxToolRounds.store(config["maxToolRounds"].get<i32>(), std::memory_order_relaxed);
+        Logger::info(0, "Config", "执行配置已保存");
     }
 } // namespace insoulforge::ConfigStore

@@ -125,6 +125,11 @@ namespace insoulforge {
 
         ADD_METHOD_TO(AdminController::saveMemoryConfig, "/admin/api/memory-config", drogon::Post);
 
+        // 执行流程配置
+        ADD_METHOD_TO(AdminController::getExecutionConfig, "/admin/api/execution-config", drogon::Get);
+
+        ADD_METHOD_TO(AdminController::saveExecutionConfig, "/admin/api/execution-config", drogon::Post);
+
         // 长期记忆
         ADD_METHOD_TO(AdminController::getLongTermMemories, "/admin/api/long-term-memory", drogon::Get);
 
@@ -441,6 +446,14 @@ namespace insoulforge {
         /// @param req HTTP 请求，body 包含配置 JSON
         /// @param callback HTTP 响应回调
         auto saveMemoryConfig(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
+
+        /// @brief 获取回复执行流程配置。
+        auto getExecutionConfig(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
+
+        /// @brief 保存执行配置；无效参数不会改变配置文件或运行时值。
+        auto saveExecutionConfig(drogon::HttpRequestPtr req,
           std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         /// @brief 分页查询长期记忆

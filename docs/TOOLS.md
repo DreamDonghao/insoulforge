@@ -9,6 +9,14 @@ Executor（`ExecutorAgent`）在单个 Agent 循环中通过工具调用生成�
 | `INFORMATION` | `tools/plugins/InfoToolsPlugin.cpp`   | 查询数据、获取答案，无副作用 |
 | `ACTION`      | `tools/plugins/ActionToolsPlugin.cpp` | 执行操作、产生副作用         |
 
+管理后台“执行配置”中的最大迭代轮数控制整个 Executor 工具循环，配置字段为 `execution.maxToolRounds`，
+默认 8、允许 1～100。一次模型请求及其工具处理算一轮，同轮多个工具不增加轮数，生成最终回复也占一轮。
+保存后对新回复流程生效；达到上限仍未生成回复时，记录错误并结束，不额外生成兜底回复。
+
+每轮请求在上下文末尾附带当前轮次及后续剩余轮数，执行状态只用于当前请求，不写入聊天记录或后续轮次历史。
+最后一轮只开放 REPLY 类的 `reply`、`reply_with_quote`、`no_reply`，不会执行查询或动作工具。
+若最大轮数设为 1，第一轮就是仅回复模式。工具结果日志仍保留。
+
 内置三组分别归属 `builtin.reply`、`builtin.info`、`builtin.action` 插件，由 `ToolPluginCatalog`
 显式加载；自定义工具（Lua / Python / HTTP）归属 `custom` 插件并统一注册为 `INFORMATION`。同名工具不能跨插件覆盖；刷新自定义工具只会替换
 `custom` 的工具。
@@ -188,6 +196,15 @@ python3 -m unittest discover -s tests -p 'test_pageweave_tools.py'
 
 ## 共同模式
 
+- **跨回复工具历史**：Executor 按实际处理顺序保存 `tool_history`，每项含 `name`、`arguments` 和 `status`。
+  正常回复发送成功后，历史附在助手消息上；`no_reply` 写入内部助手执行记录，不发送 QQ 消息、没有 QQ 消息 ID，也不触发新回复。
+  已调用工具后模型请求失败、耗尽轮数或发送失败，也保留内部记录并标明 `failed`/`send_failed`，不把它们当主动不回复。
+  记录可随 MessageList 保存和恢复，工具历史只投影给 Executor；Router 和记忆维护不接收调用参数。
+  参数中的常见凭据和图片数据会省略，单次参数超过 2048 字节时明确标注省略，不保存完整工具结果。
+  `decision` 表示回复工具形成决策，`invalid_arguments` 表示回复参数无效，`rejected` 表示最后一轮拒绝调用；
+  `returned` 只表示工具处理器返回，不能仅凭它判断业务成功。此前查询不含完整结果，需要时仍可重新核实。
+- **调用日志**：Executor 记录工具名称，并在 debug 级别记录工具结果；不打印脚本源码或 Python 启动命令。
+  Python 执行失败时保留退出状态和输出日志，具体输出摘要继续作为工具结果回传给模型。
 - **错误反馈**：普通工具的结果会作为 `tool` 消息回传给 Executor。处理器抛异常时，`ToolRegistry` 将异常摘要（最多 500 字符）转为工具结果，不让异常中断整轮调用；回复工具的参数错误则由 Executor 自行回传。Python 工具失败时附带退出状态与输出摘要，HTTP 自定义工具附带传输错误或 HTTP 状态及服务端错误消息。仅返回布尔成功状态的 OneBot 接口无法提供更细的失败原因，工具会返回相应的通用提示。异步工具启动后的执行错误通过新的系统消息反馈，不作为原工具调用的即时结果。
 - **会话上下文**：所有工具签名统一为 `(json args, ToolCallContext)`，会话 ID 从 `ctx.sessionId` 取得；`ctx.messageSnapshot`
   是本轮冻结的完整消息快照，媒体工具可用它按 `message_id` 与 `image_index` 解析图片来源。群操作类工具统一做私聊拦截与

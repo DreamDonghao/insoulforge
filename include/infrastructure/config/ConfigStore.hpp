@@ -37,4 +37,11 @@ namespace insoulforge::ConfigStore {
     /// @brief 保存会话窗口和记忆处理配置
     void saveMemoryConfig(const json &config);
 
+    /// @brief 获取独立的执行流程配置。
+    [[nodiscard]] auto getExecutionConfig() -> json;
+
+    /// @brief 保存执行配置，并在文件写入成功后更新运行时值。
+    /// @throws std::invalid_argument 最大工具迭代轮数不是 1～100 的整数。
+    void saveExecutionConfig(const json &config);
+
 } // namespace insoulforge::ConfigStore
