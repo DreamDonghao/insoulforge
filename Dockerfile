@@ -39,7 +39,7 @@ FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive TZ=Asia/Shanghai
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates tzdata libsqlite3-0 libjsoncpp25 libssl3t64 libpng16-16 libgif7 liblua5.4-0 \
+        ca-certificates tzdata libsqlite3-0 libjsoncpp25 libssl3t64 libpng16-16 libgif7 liblua5.4-0 python3 \
     && rm -rf /var/lib/apt/lists/* \
     && ln -fs /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 
