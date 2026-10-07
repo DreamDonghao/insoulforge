@@ -214,17 +214,23 @@ Git 忽略，Docker 部署时通过 `./data:/app/data` 挂载即可持久化。
 
 项目提供了一些常用工具配置，位于 `agentTools/` 目录：
 
-| 文件               | 功能       | 依赖                |
-|--------------------|------------|---------------------|
-| `random.json`      | 随机数生成 | 无                  |
-| `get_time.json`    | 获取时间   | 无                  |
-| `get_weather.json` | 天气查询   | 无                  |
-| `search_web.json`  | 网络搜索   | `duckduckgo-search` |
+| 文件                 | 功能                  | 额外依赖             |
+|----------------------|-----------------------|----------------------|
+| `random.json`        | 随机数生成            | 无                   |
+| `get_time.json`      | 获取时间              | 无                   |
+| `get_weather.json`   | 天气查询              | 无                   |
+| `fetch_webpage.json` | 读取动态网页          | PageWeave 服务       |
+| `search_web.json`    | 读取 Bing 搜索结果页  | PageWeave 服务       |
 
 导入方法：
 
 1. 管理后台 → 自定义工具 → 导入
 2. 上传 JSON 文件
+
+网页读取和搜索工具仅使用 Python 标准库，默认连接 `http://172.31.100.240:7779/extract`；
+可通过机器人进程的 `PAGEWEAVE_URL` 环境变量或脚本中的默认地址调整。缺少协议的网址自动补全 `https://`，
+其他协议会被拒绝。使用 Python 工具前需在机器人运行环境安装 `python3` 并配置解释器路径；当前发布镜像不包含 Python。
+已有同名工具需编辑更新或删除后重新导入，仓库文件不会自动覆盖数据库里的脚本。参数和运行说明见[工具文档](docs/TOOLS.md#pageweave-网页工具)。
 
 ### 配置 Embedding（可选）
 

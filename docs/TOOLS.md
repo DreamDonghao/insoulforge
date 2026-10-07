@@ -141,6 +141,51 @@ end
 脚本编辑后立即重载；正在执行的调用继续使用启动时的脚本版本。Lua 不开放文件、进程与任意 C++ 对象接口，
 并限制脚本大小、内存、指令数和单次执行时间。这是减少误操作的限制，不是允许不可信用户上传脚本的安全沙箱。
 
+## PageWeave 网页工具
+
+`agentTools/fetch_webpage.json` 和 `agentTools/search_web.json` 是可导入的 Python 自定义工具，不属于 C++ 内置工具。
+Lua 当前没有 HTTP 或 WebSocket 宿主接口，因此这两个工具使用 Python 标准库请求 PageWeave，无需 Jina Reader、DuckDuckGo 或第三方 Python 包。
+
+| 工具 | 参数 | 行为 |
+|------|------|------|
+| `fetch_webpage` | `url`、`content_scope?`、`max_chars?`、`remove_images?`、`remove_links?` | 读取动态加载后的网页，默认整页 Markdown、12000 字符、保留链接、去掉图片引用 |
+| `search_web` | `query`、`max_chars?` | URL 编码关键词后打开 `https://www.bing.com/search?q=...`，等待 `#b_results` 有内容，读取整页 Markdown |
+
+网页网址缺少协议时补全 `https://`，支持 `//example.com`、域名加端口以及页面片段；只接受 HTTP/HTTPS，
+拒绝内嵌用户名密码、空白、控制字符和反斜杠，不自动回退 HTTP。目标地址能否访问仍由 PageWeave 网络策略校验。
+原有 `remove_images`/`remove_links` 参数继续保留，但 `remove_links` 默认改为 `false`，便于模型引用来源。
+
+输出包含标题、最终来源网址及 Markdown 内容，并提示截断、正文兜底或动态观察达到上限。
+HTTP 错误向模型返回状态码、PageWeave 错误码、原因和请求 ID；请求不自动重试。
+搜索只读取 Bing 页面，不自动打开每个来源；验证码、访问限制或页面结构变化可能导致提取失败，不等于没有搜索结果。
+
+### 配置和部署
+
+1. 确认机器人运行环境存在 `python3`，在后台“自定义工具 → Python 配置”中设置解释器路径。
+2. 确认该环境能访问 `http://172.31.100.240:7779/health/ready`，响应应为 `{"status":"ok"}`。
+3. 导入两个 JSON 文件并启用；有同名旧工具时编辑其脚本和参数，或先删除再导入。
+4. 测试读取 `{"url":"example.com"}` 和搜索 `{"query":"InSoulForge GitHub"}`。
+
+脚本默认服务地址为 `http://172.31.100.240:7779/extract`。可修改各脚本的默认值，
+或在启动机器人时设置 `PAGEWEAVE_URL` 为完整 HTTP/HTTPS 接口地址。脚本请求超时为 30 秒，PageWeave 的服务预算应短于此值。
+Docker 里 `127.0.0.1` 指向机器人容器自身，不能因为两个服务在同一宿主机就使用回环地址互访。
+
+当前发布镜像未安装 Python。部署时可用以下派生镜像添加解释器，然后使用该镜像启动机器人；
+直接在正在运行的容器中安装只适合临时测试，重建容器后会丢失。
+
+```dockerfile
+FROM dreamdonghao/insoulforge:latest
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends python3 \
+    && rm -rf /var/lib/apt/lists/*
+```
+
+网页工具的参数和错误契约测试无需 C++ 构建：
+
+```bash
+python3 -m unittest discover -s tests -p 'test_pageweave_tools.py'
+```
+
 ## 共同模式
 
 - **错误反馈**：普通工具的结果会作为 `tool` 消息回传给 Executor。处理器抛异常时，`ToolRegistry` 将异常摘要（最多 500 字符）转为工具结果，不让异常中断整轮调用；回复工具的参数错误则由 Executor 自行回传。Python 工具失败时附带退出状态与输出摘要，HTTP 自定义工具附带传输错误或 HTTP 状态及服务端错误消息。仅返回布尔成功状态的 OneBot 接口无法提供更细的失败原因，工具会返回相应的通用提示。异步工具启动后的执行错误通过新的系统消息反馈，不作为原工具调用的即时结果。
