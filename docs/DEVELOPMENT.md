@@ -156,7 +156,7 @@ insoulforge/
 │   └── src/
 │       ├── components/      # 跨页面复用的 UI 组件
 │       └── features/        # 按访问、会话、LLM、OneBot、工具、诊断与概览归类的页面
-├── agentTools/               # 自定义工具的 JSON 配置（random / get_time / get_weather / search_web）
+├── agentTools/               # 自定义工具 JSON（时间、天气、随机数及 PageWeave 网页读取/搜索）
 └── docs/                     # 文档
 ```
 
@@ -379,6 +379,11 @@ Schema 中写清楚触发条件与边界。需要调整同类别展示位置时�
 1. 管理后台 → 自定义工具 → 添加
 2. 填写名称、描述、参数定义（JSON Schema）、Python 脚本
 3. 脚本从 `sys.argv[1]` 指定的 JSON 文件读取参数，结果打印到 stdout
+
+网页读取和 Bing 搜索示例使用 Python 标准库调用 PageWeave，默认地址为 `http://172.31.100.240:7779/extract`。
+参数、服务地址覆盖和容器解释器配置见[PageWeave 网页工具](TOOLS.md#pageweave-网页工具)。
+修改这些脚本后执行 `python3 -m unittest discover -s tests -p 'test_pageweave_tools.py'`；
+JSON 文件导入后保存在数据库，修改仓库文件不会自动替换已保存的工具脚本。
 
 也可直接编写 JSON 配置文件放入 `agentTools/` 后从后台导入，格式：
 
