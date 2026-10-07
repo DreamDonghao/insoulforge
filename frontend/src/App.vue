@@ -10,6 +10,7 @@ import type {QQConfig as QQConfigType} from './vite-env.d'
 import NavIcon from './components/NavIcon.vue'
 import Dashboard from './features/overview/Dashboard.vue'
 import About from './features/overview/About.vue'
+import ExecutionConfig from './features/agent/ExecutionConfig.vue'
 import AccessManager from './features/access/AccessManager.vue'
 import GroupManager from './features/conversation/GroupManager.vue'
 import MemoryConfig from './features/conversation/MemoryConfig.vue'
@@ -31,6 +32,7 @@ interface NavItem {
 // 导航配置
 const systemNavItems: NavItem[] = [
   {key: 'llm', label: 'LLM配置', icon: 'llm'},
+  {key: 'executionConfig', label: '执行配置', icon: 'execution'},
   {key: 'qqConfig', label: 'OneBot 配置', icon: 'qq'},
   {key: 'prompts', label: '提示词', icon: 'prompts'},
   {key: 'customTools', label: '自定义工具', icon: 'tool'},
@@ -407,6 +409,7 @@ onMounted(async () => {
     <div class="main">
       <Dashboard v-if="currentView === 'dashboard'"/>
       <LLMConfig v-else-if="currentView === 'llm'"/>
+      <ExecutionConfig v-else-if="currentView === 'executionConfig'"/>
       <PromptEditor v-else-if="currentView === 'prompts'"/>
       <CustomTools v-else-if="currentView === 'customTools'"/>
       <EmojiManager v-else-if="currentView === 'emojis'"/>

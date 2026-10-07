@@ -15,9 +15,6 @@
 
 namespace insoulforge::ExecutorAgent {
     namespace {
-        /// @brief 工具调用循环最大轮数（防止模型无限循环调用工具）
-        constexpr i32 kMaxToolRounds = 8;
-
         /// @brief 获取系统提示词（私聊与群聊使用各自的人设提示词，差异行按会话类型拼接）
         auto getSystemPrompt(const RouterDecision &decision) -> std::string {
             std::string prompt = decision.isPrivate ? PromptService::getExecutorPrivateSystemPrompt()
@@ -456,7 +453,9 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
 
             std::string accumulatedCQCodes; // 跨轮累积 CQ 码，产出 reply 时自动拼入正文
 
-            for (i32 round = 0; round < kMaxToolRounds; ++round) {
+            // 一次回复固定使用启动时的上限，后台保存只影响后续流程。
+            const auto maxToolRounds = config.execution.maxToolRounds.load(std::memory_order_relaxed);
+            for (i32 round = 0; round < maxToolRounds; ++round) {
                 const auto respJson = co_await LlmClient::requestChat(
                   "LLM", "executor", config.executor, config.executorParams, messages, tools, sessionId);
                 if (!respJson) {
@@ -487,7 +486,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
                 accumulatedCQCodes = std::move(nextAccumulatedCQCodes);
             }
 
-            Logger::error(sessionId, "Executor", "达到最大迭代次数");
+            Logger::error(sessionId, "Executor", fmt::format("达到最大迭代次数: {}", maxToolRounds));
             co_return std::nullopt;
         }
 

@@ -1,7 +1,8 @@
 /// @file AdminControllerSettingsAndTools.cpp
-/// @brief 管理后台 REST API 控制器 - 模型与提示词设置、自定义工具接口
+/// @brief 管理后台 REST API 控制器 - 模型、执行流程、提示词和自定义工具设置
 
 #include <cmath>
+#include <stdexcept>
 
 #include <admin/http/AdminController.hpp>
 #include <admin/http/AdminResponse.hpp>
@@ -88,6 +89,40 @@ auto AdminController::saveLLMConfig(
     }
 
     callback(jsonResponse(AdminResponse::okJson("LLM配置已保存")));
+    co_return;
+}
+
+// ==================== 执行配置 ====================
+
+auto AdminController::getExecutionConfig(
+  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const -> Task<> {
+    callback(jsonResponse(ConfigStore::getExecutionConfig()));
+    co_return;
+}
+
+auto AdminController::saveExecutionConfig(
+  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const -> Task<> {
+    const auto body = parseJsonBody(req);
+    if (!body || !body->is_object()) {
+        auto response = jsonResponse(AdminResponse::failJson("执行配置必须是 JSON 对象"));
+        response->setStatusCode(k400BadRequest);
+        callback(response);
+        co_return;
+    }
+
+    try {
+        ConfigStore::saveExecutionConfig(*body);
+        callback(jsonResponse(AdminResponse::okJson("执行配置已保存")));
+    } catch (const std::invalid_argument &error) {
+        auto response = jsonResponse(AdminResponse::failJson(error.what()));
+        response->setStatusCode(k400BadRequest);
+        callback(response);
+    } catch (const std::exception &error) {
+        Logger::error(0, "Config", fmt::format("执行配置保存失败: {}", error.what()));
+        auto response = jsonResponse(AdminResponse::failJson("执行配置保存失败，请检查配置文件是否可写"));
+        response->setStatusCode(k500InternalServerError);
+        callback(response);
+    }
     co_return;
 }
 

@@ -2,6 +2,7 @@
 /// @brief 全局配置管理
 #pragma once
 
+#include <atomic>
 #include <string>
 
 #include <infrastructure/NumericTypes.hpp>
@@ -24,10 +25,21 @@ namespace insoulforge {
         f64 topP = 0.9;
     };
 
+    /// @brief 回复执行流程的参数；后台保存与 Executor 读取可并发进行。
+    struct ExecutionSettings {
+        static constexpr i32 kDefaultMaxToolRounds = 8;
+        static constexpr i32 kMinToolRounds = 1;
+        static constexpr i32 kMaxToolRounds = 100;
+
+        std::atomic<i32> maxToolRounds{kDefaultMaxToolRounds};
+    };
+
     /// @brief 进程内生效的全局配置
     /// @details 启动时从 config.json 加载。管理后台保存配置时会更新对应字段。
     class Config {
     public:
+        ExecutionSettings execution;
+
         // Agent 配置
         LLMApiConfig router;
         LLMModelParams routerParams;

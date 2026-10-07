@@ -16,6 +16,7 @@
 #include <drogon/utils/coroutine.h>
 #include <openssl/evp.h>
 
+#include <admin/http/AdminController.hpp>
 #include <agent/ability/AsyncTaskManager.hpp>
 #include <agent/memory/LongTermMemoryStore.hpp>
 #include <agent/memory/MemoryStore.hpp>
@@ -516,16 +517,17 @@ namespace {
     void testToolRegistryReturnsHandlerErrors() {
         constexpr std::string_view kTestName = "tool handler error result";
         auto &registry = insoulforge::ToolRegistry::instance();
-        check(registry.registerPlugin("contract.error", [](insoulforge::ToolRegistry &staged) {
-                  staged.registerTool(
-                    {.name = "contract_error_tool",
-                      .description = "test",
-                      .handler = [](insoulforge::json, insoulforge::ToolCallContext) -> drogon::Task<std::string> {
-                          throw std::runtime_error("具体失败原因");
-                          co_return "";
-                      }},
-                    insoulforge::ToolCategory::INFORMATION);
-              }),
+        check(registry.registerPlugin("contract.error",
+                [](insoulforge::ToolRegistry &staged) {
+                    staged.registerTool(
+                      {.name = "contract_error_tool",
+                        .description = "test",
+                        .handler = [](insoulforge::json, insoulforge::ToolCallContext) -> drogon::Task<std::string> {
+                            throw std::runtime_error("具体失败原因");
+                            co_return "";
+                        }},
+                      insoulforge::ToolCategory::INFORMATION);
+                }),
           "error tool registers", kTestName);
         const auto result = drogon::sync_wait(registry.executeTool("contract_error_tool", {}, {.sessionId = 100}));
         check(result.find("具体失败原因") != std::string::npos, "handler error is returned to model", kTestName);
@@ -693,6 +695,99 @@ namespace {
         check(memory.value("temperature", 0.0) == 0.4, "preserves extraction sampling temperature", kTestName);
         check(!insoulforge::ConfigStore::getMemoryConfig().contains("memoryExtractMaxTokens"),
           "removes legacy token field", kTestName);
+        std::filesystem::remove(path);
+    }
+
+    void testExecutionConfig() {
+        constexpr std::string_view kTestName = "execution config";
+        const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
+        const auto path = std::filesystem::temp_directory_path() /
+                          ("insoulforge-execution-config-test-" + std::to_string(suffix) + ".json");
+        {
+            std::ofstream output(path);
+            output << R"({"qq":{"botName":"existing-bot"}})";
+        }
+        insoulforge::ConfigStore::initialize(path.string());
+        insoulforge::Config::instance().loadFromStorage();
+        check(insoulforge::ConfigStore::getExecutionConfig()["maxToolRounds"] == 8,
+          "old files receive the default limit", kTestName);
+        check(insoulforge::Config::instance().execution.maxToolRounds.load() == 8, "loads the default runtime limit",
+          kTestName);
+        insoulforge::ConfigStore::saveExecutionConfig({{"maxToolRounds", 8}, {"futureSetting", true}});
+
+        const insoulforge::AdminController controller;
+        drogon::HttpResponsePtr response;
+        const auto callback = [&response](const drogon::HttpResponsePtr &value) { response = value; };
+        drogon::sync_wait(controller.getExecutionConfig(drogon::HttpRequest::newHttpRequest(), callback));
+        check(response->getStatusCode() == drogon::k200OK &&
+                insoulforge::parseJson(std::string(response->body()))["maxToolRounds"] == 8,
+          "GET returns stored execution settings", kTestName);
+
+        const auto save = [&](const std::string &body) {
+            auto request = drogon::HttpRequest::newHttpRequest();
+            request->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            request->setBody(body);
+            drogon::sync_wait(controller.saveExecutionConfig(request, callback));
+        };
+        for (const auto limit: {1, 32, 100}) {
+            save(insoulforge::dumpJson({{"maxToolRounds", limit}}));
+            check(response->getStatusCode() == drogon::k200OK &&
+                    insoulforge::parseJson(std::string(response->body()))["success"] == true,
+              "accepts valid limits including boundaries", kTestName);
+            check(insoulforge::Config::instance().execution.maxToolRounds.load() == limit,
+              "save updates runtime without reload", kTestName);
+        }
+        check(insoulforge::ConfigStore::getExecutionConfig()["futureSetting"] == true,
+          "saving preserves other execution fields", kTestName);
+        check(insoulforge::ConfigStore::getQQConfig()["botName"] == "existing-bot",
+          "saving leaves other configuration sections unchanged", kTestName);
+
+        const auto stored = insoulforge::ConfigStore::getExecutionConfig();
+        const auto invalidValues =
+          insoulforge::json::array({0, -1, 101, 8.0, 8.5, "8", true, nullptr, std::numeric_limits<u64>::max()});
+        for (const auto &value: invalidValues) {
+            save(insoulforge::dumpJson({{"maxToolRounds", value}}));
+            check(response->getStatusCode() == drogon::k400BadRequest,
+              "POST rejects non-integers and out-of-range limits", kTestName);
+            check(insoulforge::ConfigStore::getExecutionConfig() == stored &&
+                    insoulforge::Config::instance().execution.maxToolRounds.load() == 100,
+              "invalid saves do not change stored or runtime values", kTestName);
+        }
+        for (const auto body: {"{}", "[]", "null", "not json"}) {
+            save(body);
+            check(response->getStatusCode() == drogon::k400BadRequest,
+              "POST rejects missing settings and invalid JSON bodies", kTestName);
+        }
+
+        // Blocking the temporary path makes the write fail even when tests run with elevated permissions.
+        const auto temporaryPath = std::filesystem::path(path.string() + ".tmp");
+        std::filesystem::create_directory(temporaryPath);
+        save(R"({"maxToolRounds":16})");
+        check(
+          response->getStatusCode() == drogon::k500InternalServerError, "file write errors are reported", kTestName);
+        check(insoulforge::ConfigStore::getExecutionConfig() == stored &&
+                insoulforge::Config::instance().execution.maxToolRounds.load() == 100,
+          "write failure leaves stored and runtime values unchanged", kTestName);
+        std::filesystem::remove(temporaryPath);
+
+        insoulforge::ConfigStore::initialize(path.string());
+        insoulforge::Config::instance().loadFromStorage();
+        check(insoulforge::Config::instance().execution.maxToolRounds.load() == 100,
+          "saved values survive reinitialization", kTestName);
+
+        for (const auto &value: invalidValues) {
+            {
+                std::ofstream output(path);
+                output << insoulforge::dumpJson({{"execution", {{"maxToolRounds", value}}}});
+            }
+            insoulforge::ConfigStore::initialize(path.string());
+            check(insoulforge::ConfigStore::getExecutionConfig()["maxToolRounds"] == 8,
+              "startup repairs invalid file values", kTestName);
+            std::ifstream input(path);
+            const auto repaired = insoulforge::json::parse(input);
+            check(repaired["execution"]["maxToolRounds"] == 8, "startup persists the repaired default", kTestName);
+        }
+        insoulforge::Config::instance().loadFromStorage();
         std::filesystem::remove(path);
     }
 
@@ -935,6 +1030,7 @@ auto main() -> int {
     testMemoryMaintenanceStore();
     testConversationMaintenanceStore();
     testMemoryModelConfigMigration();
+    testExecutionConfig();
     testImageDescriptionCacheStore();
     testImageGenerationResponse();
     testUsageSummaryUsesLatestRoleModel();

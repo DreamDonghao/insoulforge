@@ -9,6 +9,10 @@ Executor（`ExecutorAgent`）在单个 Agent 循环中通过工具调用生成�
 | `INFORMATION` | `tools/plugins/InfoToolsPlugin.cpp`   | 查询数据、获取答案，无副作用 |
 | `ACTION`      | `tools/plugins/ActionToolsPlugin.cpp` | 执行操作、产生副作用         |
 
+管理后台“执行配置”中的最大迭代轮数控制整个 Executor 工具循环，配置字段为 `execution.maxToolRounds`，
+默认 8、允许 1～100。一次模型请求及其工具处理算一轮，同轮多个工具不增加轮数，生成最终回复也占一轮。
+保存后对新回复流程生效；达到上限仍未生成回复时，记录错误并结束，不额外生成兜底回复。
+
 内置三组分别归属 `builtin.reply`、`builtin.info`、`builtin.action` 插件，由 `ToolPluginCatalog`
 显式加载；自定义工具（Lua / Python / HTTP）归属 `custom` 插件并统一注册为 `INFORMATION`。同名工具不能跨插件覆盖；刷新自定义工具只会替换
 `custom` 的工具。

@@ -56,6 +56,10 @@ namespace insoulforge {
             ? configuredJevConfidence
             : 0.6;
 
+        execution.maxToolRounds.store(
+          getInt(ConfigStore::getExecutionConfig(), "maxToolRounds", ExecutionSettings::kDefaultMaxToolRounds),
+          std::memory_order_relaxed);
+
         // 加载记忆配置
         if (const auto memCfg = ConfigStore::getMemoryConfig(); !memCfg.is_null()) {
             contextWindowLimit = getInt(memCfg, "contextWindowLimit");
