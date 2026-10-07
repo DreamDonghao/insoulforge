@@ -258,6 +258,9 @@ MessageService → OneBot API
 
 - 工具循环上限由 `execution.maxToolRounds` 配置，默认 8、范围 1～100。一次回复在开始时读取并固定该值；
   同一轮可处理多个工具，最终模型回复也占一轮。达到上限仍无回复决策时返回空结果，不额外发起模型请求。
+- 每轮复制当前请求上下文，在末尾追加一条 system 执行状态，说明当前轮次和后续剩余轮数；状态不进入持久上下文，
+  不影响已有 assistant/tool 配对，也不会累积到下一轮或传给 `deep_think`。最后一轮仅提供 REPLY 类工具，
+  `ToolCallContext.replyOnly` 同时在注册中心拒绝非回复处理器执行；上限为 1 时首轮即应用此规则。
 - `reply` / `reply_with_quote` / `no_reply` 是回复工具，调用后结束本轮处理；它们在 `ExecutorAgent::processToolCalls`
   中被拦截，不走普通工具返回值路径。
 - `send_sticker` / `send_poke` / `reply_and_continue` 是中途动作，执行后本轮不结束，最终仍需用回复工具收尾；一次对话需要连续多条消息时，用

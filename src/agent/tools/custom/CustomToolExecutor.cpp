@@ -76,8 +76,6 @@ namespace insoulforge {
 
         const std::string command =
           ToolStore::getCustomToolPython() + " " + scriptFile.path() + " " + inputFile.path() + " 2>&1";
-        Logger::debug(0, "Tool", fmt::format("Python脚本内容:\n{}", script));
-        Logger::debug(0, "Tool", fmt::format("执行Python工具: {}", command));
 
         struct PipeCloser {
             void operator()(FILE *pipe) const noexcept {

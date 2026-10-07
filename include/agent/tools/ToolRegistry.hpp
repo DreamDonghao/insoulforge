@@ -24,6 +24,7 @@ namespace insoulforge {
         u64 sessionId = 0;
         json conversationContext; ///< system 之后的完整消息列表，deep_think 等需要会话上下文的工具使用
         json messageSnapshot; ///< 本轮冻结的完整消息快照，图片保存等工具读取服务端媒体来源
+        bool replyOnly = false; ///< 最后一轮只允许回复类工具，拒绝其他处理器执行
     };
 
     /// @brief 异步工具处理器
@@ -39,6 +40,7 @@ namespace insoulforge {
     /// @brief 一次模型请求的工具筛选条件
     struct ToolQuery {
         bool isPrivateSession = false; ///< 是否为私聊会话
+        bool replyOnly = false; ///< 仅返回 REPLY 类工具的定义
     };
 
     /// @brief 工具定义与运行时元数据
@@ -86,6 +88,7 @@ namespace insoulforge {
         [[nodiscard]] auto getAllTools() const -> json;
 
         /// @brief 执行工具（异步，ctx 随调用传给 handler）
+        /// @details ctx.replyOnly 为 true 时拒绝执行非回复类处理器。
         [[nodiscard]] auto executeTool(std::string name, json args, ToolCallContext ctx) const
           -> drogon::Task<std::string>;
 

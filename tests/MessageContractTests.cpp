@@ -1,6 +1,7 @@
 /// @file MessageContractTests.cpp
 /// @brief 消息链路的契约测试
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -20,6 +21,7 @@
 #include <agent/ability/AsyncTaskManager.hpp>
 #include <agent/memory/LongTermMemoryStore.hpp>
 #include <agent/memory/MemoryStore.hpp>
+#include <agent/runtime/ExecutorAgent.hpp>
 #include <agent/tools/ToolRegistry.hpp>
 #include <agent/tools/custom/LuaToolExecutor.hpp>
 #include <agent/tools/plugins/ActionToolsPlugin.hpp>
@@ -512,6 +514,95 @@ namespace {
         check(drogon::sync_wait(registry.executeTool("contract_reload_tool", {}, {})) == "new",
           "reload replaces handler", kTestName);
         registry.unregisterPlugin("contract.plugin");
+    }
+
+    void testFinalRoundToolPolicy() {
+        constexpr std::string_view kTestName = "final round tool policy";
+        auto &registry = insoulforge::ToolRegistry::instance();
+        i32 executed = 0;
+        const auto handler = [&executed](insoulforge::json, insoulforge::ToolCallContext) -> drogon::Task<std::string> {
+            ++executed;
+            co_return "executed";
+        };
+        check(registry.registerPlugin("contract.round-policy",
+                [&](insoulforge::ToolRegistry &staged) {
+                    staged.registerTool(
+                      {.name = "contract_round_reply", .handler = handler}, insoulforge::ToolCategory::REPLY);
+                    staged.registerTool({.name = "contract_round_group_reply",
+                                          .handler = handler,
+                                          .scope = insoulforge::ToolScope::GROUP_ONLY},
+                      insoulforge::ToolCategory::REPLY);
+                    staged.registerTool(
+                      {.name = "contract_round_query", .handler = handler}, insoulforge::ToolCategory::INFORMATION);
+                    staged.registerTool(
+                      {.name = "contract_round_action", .handler = handler}, insoulforge::ToolCategory::ACTION);
+                }),
+          "policy tools register", kTestName);
+
+        const auto names = [](const insoulforge::json &tools) {
+            std::vector<std::string> result;
+            for (const auto &tool: tools) {
+                result.push_back(tool["function"]["name"].get<std::string>());
+            }
+            return result;
+        };
+        const auto regularNames = names(registry.getTools({}));
+        check(std::ranges::find(regularNames, "contract_round_query") != regularNames.end() &&
+                std::ranges::find(regularNames, "contract_round_action") != regularNames.end(),
+          "normal rounds keep query and action tools", kTestName);
+        const auto finalNames = names(registry.getTools({.replyOnly = true}));
+        check(std::ranges::find(finalNames, "contract_round_reply") != finalNames.end(),
+          "final round exposes reply tools", kTestName);
+        check(std::ranges::find(finalNames, "contract_round_query") == finalNames.end() &&
+                std::ranges::find(finalNames, "contract_round_action") == finalNames.end(),
+          "final round excludes query and action tools", kTestName);
+        const auto privateNames = names(registry.getTools({.isPrivateSession = true, .replyOnly = true}));
+        check(std::ranges::find(privateNames, "contract_round_group_reply") == privateNames.end(),
+          "reply filtering preserves private-session restrictions", kTestName);
+
+        for (const auto name: {"contract_round_query", "contract_round_action"}) {
+            const auto result = drogon::sync_wait(registry.executeTool(name, {}, {.replyOnly = true}));
+            check(result.find("未执行") != std::string::npos && executed == 0,
+              "non-reply calls cannot execute on final round", kTestName);
+        }
+        check(drogon::sync_wait(registry.executeTool("contract_round_reply", {}, {.replyOnly = true})) == "executed" &&
+                executed == 1,
+          "final-round policy allows reply category", kTestName);
+        check(drogon::sync_wait(registry.executeTool("contract_round_query", {}, {})) == "executed" && executed == 2,
+          "normal-round execution is unchanged", kTestName);
+        registry.unregisterPlugin("contract.round-policy");
+    }
+
+    void testIterationRequestMessages() {
+        constexpr std::string_view kTestName = "iteration request messages";
+        const auto history = insoulforge::json::array(
+          {{{"role", "system"}, {"content", "original prompt"}}, {{"role", "user"}, {"content", "question"}},
+            {{"role", "assistant"}, {"tool_calls", {{{"id", "call-1"}, {"type", "function"}}}}},
+            {{"role", "tool"}, {"tool_call_id", "call-1"}, {"content", "source data"}}});
+
+        const auto first = insoulforge::ExecutorAgent::buildIterationMessages(history, 1, 8);
+        const auto middle = insoulforge::ExecutorAgent::buildIterationMessages(history, 3, 8);
+        const auto last = insoulforge::ExecutorAgent::buildIterationMessages(history, 8, 8);
+        check(first.size() == history.size() + 1 && middle.size() == first.size() && last.size() == first.size(),
+          "each request has exactly one transient execution status", kTestName);
+        for (size_t index = 0; index < history.size(); ++index) {
+            check(first[index] == history[index] && middle[index] == history[index] && last[index] == history[index],
+              "request status preserves the full history and tool results", kTestName);
+        }
+        check(first.back()["role"] == "system" &&
+                first.back()["content"].get<std::string>().find("还可请求模型 7 次") != std::string::npos,
+          "first round counts future requests excluding the current one", kTestName);
+        check(middle.back()["content"].get<std::string>().find("3/8") != std::string::npos &&
+                middle.back()["content"].get<std::string>().find("还可请求模型 5 次") != std::string::npos,
+          "intermediate status reflects the current round", kTestName);
+        check(last.back()["content"].get<std::string>().find("还可请求模型 0 次") != std::string::npos &&
+                last.back()["content"].get<std::string>().find("仅开放回复类工具") != std::string::npos,
+          "last round explicitly requires a reply decision", kTestName);
+        const auto single = insoulforge::ExecutorAgent::buildIterationMessages(history, 1, 1);
+        check(single.back()["content"].get<std::string>().find("仅开放回复类工具") != std::string::npos,
+          "a one-round limit is immediately reply-only", kTestName);
+        check(history.size() == 4 && history.front()["content"] == "original prompt",
+          "transient status never modifies the original conversation", kTestName);
     }
 
     void testToolRegistryReturnsHandlerErrors() {
@@ -1023,6 +1114,8 @@ auto main() -> int {
     testSchemaMigration();
     testLuaToolExecutor();
     testToolRegistryReload();
+    testFinalRoundToolPolicy();
+    testIterationRequestMessages();
     testToolRegistryReturnsHandlerErrors();
     testCharacterImageStore();
     testHttpTraceImageRedaction();

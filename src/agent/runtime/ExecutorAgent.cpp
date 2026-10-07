@@ -1,6 +1,8 @@
 /// @file ExecutorAgent.cpp
 /// @brief Executor Agent - 实现
 
+#include <stdexcept>
+
 #include <agent/runtime/ExecutorAgent.hpp>
 #include <conversation/maintenance/affinity/AffinityStore.hpp>
 #include <conversation/message/MessageRecord.hpp>
@@ -378,7 +380,8 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         /// 作为 tool 消息回传，CQ 码类工具的结果累积备用
         /// @return {回复工具决策（同轮多个以最后一个为准，未命中为 nullopt）, 回传工具结果后的消息列表, 累积的 CQ 码}
         auto processToolCalls(json message, json messages, std::string accumulatedCQCodes, const u64 sessionId,
-          const json &messageSnapshot) -> drogon::Task<std::tuple<std::optional<ReplyDecision>, json, std::string>> {
+          const json &messageSnapshot, const bool replyOnly)
+          -> drogon::Task<std::tuple<std::optional<ReplyDecision>, json, std::string>> {
             ReplyDecision decision;
             bool hasDecision = false;
 
@@ -419,6 +422,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
                 ToolCallContext ctx;
                 ctx.sessionId = sessionId;
                 ctx.messageSnapshot = messageSnapshot;
+                ctx.replyOnly = replyOnly;
                 if (name == "deep_think") {
                     ctx.conversationContext = json::array();
                     for (size_t i = 1; i < messages.size(); ++i) {
@@ -445,19 +449,29 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         auto executeWithAgent(json messages, const u64 sessionId, const json &messageSnapshot)
           -> drogon::Task<std::optional<ReplyDecision>> {
             const auto &config = Config::instance();
-            const json tools = ToolRegistry::instance().getTools({.isPrivateSession = SessionId::isPrivate(sessionId)});
+            const auto isPrivateSession = SessionId::isPrivate(sessionId);
+            const json tools = ToolRegistry::instance().getTools({.isPrivateSession = isPrivateSession});
             if (tools.empty()) {
                 Logger::error(sessionId, "Executor", "未注册工具");
                 co_return std::nullopt;
             }
+            const json replyTools =
+              ToolRegistry::instance().getTools({.isPrivateSession = isPrivateSession, .replyOnly = true});
 
             std::string accumulatedCQCodes; // 跨轮累积 CQ 码，产出 reply 时自动拼入正文
 
             // 一次回复固定使用启动时的上限，后台保存只影响后续流程。
             const auto maxToolRounds = config.execution.maxToolRounds.load(std::memory_order_relaxed);
             for (i32 round = 0; round < maxToolRounds; ++round) {
-                const auto respJson = co_await LlmClient::requestChat(
-                  "LLM", "executor", config.executor, config.executorParams, messages, tools, sessionId);
+                const bool replyOnly = round + 1 == maxToolRounds;
+                const json &roundTools = replyOnly ? replyTools : tools;
+                if (roundTools.empty()) {
+                    Logger::error(sessionId, "Executor", "最后一轮未注册可用的回复工具");
+                    co_return std::nullopt;
+                }
+                auto requestMessages = buildIterationMessages(messages, round + 1, maxToolRounds);
+                const auto respJson = co_await LlmClient::requestChat("LLM", "executor", config.executor,
+                  config.executorParams, std::move(requestMessages), roundTools, sessionId);
                 if (!respJson) {
                     co_return std::nullopt;
                 }
@@ -478,7 +492,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
                 // 有工具调用：回传 assistant 消息后逐个处理，未命中回复工具则继续下一轮
                 messages.push_back(buildAssistantToolCallMessage(message));
                 auto [roundDecision, nextMessages, nextAccumulatedCQCodes] = co_await processToolCalls(
-                  message, std::move(messages), std::move(accumulatedCQCodes), sessionId, messageSnapshot);
+                  message, std::move(messages), std::move(accumulatedCQCodes), sessionId, messageSnapshot, replyOnly);
                 if (roundDecision) {
                     co_return std::move(roundDecision);
                 }
@@ -491,6 +505,24 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         }
 
     } // namespace
+
+    auto buildIterationMessages(json messages, const i32 currentRound, const i32 maxToolRounds) -> json {
+        if (!messages.is_array() || currentRound < 1 || currentRound > maxToolRounds) {
+            throw std::invalid_argument("执行轮次必须在 1 到总轮数之间，消息必须是数组");
+        }
+        const auto remainingRounds = maxToolRounds - currentRound;
+        auto status = fmt::format("【执行状态】\n当前执行轮次：{}/{}。\n本轮结束后还可请求模型 {} 次。\n", currentRound,
+          maxToolRounds, remainingRounds);
+        if (remainingRounds == 0) {
+            status +=
+              "这是最后一轮，仅开放回复类工具。请根据已有信息调用 reply、reply_with_quote 或 no_reply 完成决策。"
+              "不要再调用查询或动作工具，不要声称完成尚未执行的操作。";
+        } else {
+            status += "请根据剩余轮数安排工具调用，信息足够时及时完成回复，不要重复执行已经完成的查询。";
+        }
+        messages.push_back({{"role", "system"}, {"content", std::move(status)}});
+        return messages;
+    }
 
     /// @brief 清理模型输出的污染内容（think标签、tool_call标签、DSML标签等）
     auto cleanReplyContent(const std::string &text) -> std::string {
