@@ -190,11 +190,13 @@ python3 -m unittest discover -s tests -p 'test_pageweave_tools.py'
 ## 共同模式
 
 - **跨回复工具历史**：Executor 按实际处理顺序保存 `tool_history`，每项含 `name`、`arguments` 和 `status`。
+  `reply`、`reply_with_quote` 不加入工具历史，正文与引用目标分别保留在助手消息的 `segments`、`reply_to` 中；
+  两种回复工具的参数错误仍在当前迭代中回传模型，但不保留跨回复的调用记录。`no_reply`、查询和动作工具继续记录。
   正常回复发送成功后，历史附在助手消息上；`no_reply` 写入内部助手执行记录，不发送 QQ 消息、没有 QQ 消息 ID，也不触发新回复。
   已调用工具后模型请求失败、耗尽轮数或发送失败，也保留内部记录并标明 `failed`/`send_failed`，不把它们当主动不回复。
   记录可随 MessageList 保存和恢复，工具历史只投影给 Executor；Router 和记忆维护不接收调用参数。
   参数中的常见凭据和图片数据会省略，单次参数超过 2048 字节时明确标注省略，不保存完整工具结果。
-  `decision` 表示回复工具形成决策，`invalid_arguments` 表示回复参数无效，`rejected` 表示最后一轮拒绝调用；
+  新记录中的 `decision` 表示 `no_reply` 形成决策，`rejected` 表示最后一轮拒绝调用；
   `returned` 只表示工具处理器返回，不能仅凭它判断业务成功。此前查询不含完整结果，需要时仍可重新核实。
 - **调用日志**：Executor 记录工具名称，并在 debug 级别记录工具结果；不打印脚本源码或 Python 启动命令。
   Python 执行失败时保留退出状态和输出日志，具体输出摘要继续作为工具结果回传给模型。
