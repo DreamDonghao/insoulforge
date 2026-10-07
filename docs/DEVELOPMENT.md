@@ -264,6 +264,7 @@ MessageService → OneBot API
 - `reply` / `reply_with_quote` / `no_reply` 是回复工具，调用后结束本轮处理；它们在 `ExecutorAgent::processToolCalls`
   中被拦截，不走普通工具返回值路径。
 - `ReplyDecision.toolHistory` 跨迭代累计工具名、脱敏参数和处理状态，成功发送时经 MessageService 附在助手记录上。
+  不累计 `reply`、`reply_with_quote` 的调用参数，避免重复保存正文和引用目标；`no_reply` 与其他工具继续记录。
   `no_reply` 及有工具历史的流程失败通过 `appendAssistantExecutionRecord` 直接写入 MessageList，不进入入站队列。
   内部记录标记 `record_type=tool_execution` 和执行状态，没有 QQ 消息 ID；仅 Executor 使用包含历史的投影，
   Router、记忆和好感度仍使用默认投影。正常退出持久化和启动恢复沿用现有消息列表机制，不增加数据库表。

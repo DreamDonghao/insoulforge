@@ -396,6 +396,10 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
 
                 const json args = parseToolArguments(toolCall);
                 const auto recordCall = [&](const std::string &status) {
+                    // 正文和引用目标已保存在助手消息中，不重复记录发送内容的回复工具。
+                    if (name == "reply" || name == "reply_with_quote") {
+                        return;
+                    }
                     toolHistory.push_back(MessageRecord::createToolHistoryEntry(name, args, status));
                 };
 
