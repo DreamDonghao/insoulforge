@@ -395,6 +395,9 @@ Schema 中写清楚触发条件与边界。需要调整同类别展示位置时�
 2. 填写名称、描述、参数定义（JSON Schema）、Python 脚本
 3. 脚本从 `sys.argv[1]` 指定的 JSON 文件读取参数，结果打印到 stdout
 
+Dockerfile 的运行阶段安装 `python3`，供自定义工具使用；不在 C++ 构建阶段执行脚本。
+本地运行需自行安装 Python 3，额外的第三方 Python 包不随运行镜像安装。
+
 网页读取和 Bing 搜索示例使用 Python 标准库调用 PageWeave，默认地址为 `http://172.31.100.240:7779/extract`。
 参数、服务地址覆盖和容器解释器配置见[PageWeave 网页工具](TOOLS.md#pageweave-网页工具)。
 修改这些脚本后执行 `python3 -m unittest discover -s tests -p 'test_pageweave_tools.py'`；

@@ -169,7 +169,7 @@ HTTP 错误向模型返回状态码、PageWeave 错误码、原因和请求 ID�
 
 ### 配置和部署
 
-1. 确认机器人运行环境存在 `python3`，在后台“自定义工具 → Python 配置”中设置解释器路径。
+1. Docker 运行镜像包含 Python 3，可使用默认的 `python3` 解释器；本地运行需自行安装，并按需在后台“自定义工具 → Python 配置”中设置路径。
 2. 确认该环境能访问 `http://172.31.100.240:7779/health/ready`，响应应为 `{"status":"ok"}`。
 3. 导入两个 JSON 文件并启用；有同名旧工具时编辑其脚本和参数，或先删除再导入。
 4. 测试读取 `{"url":"example.com"}` 和搜索 `{"query":"InSoulForge GitHub"}`。
@@ -178,15 +178,8 @@ HTTP 错误向模型返回状态码、PageWeave 错误码、原因和请求 ID�
 或在启动机器人时设置 `PAGEWEAVE_URL` 为完整 HTTP/HTTPS 接口地址。脚本请求超时为 30 秒，PageWeave 的服务预算应短于此值。
 Docker 里 `127.0.0.1` 指向机器人容器自身，不能因为两个服务在同一宿主机就使用回环地址互访。
 
-当前发布镜像未安装 Python。部署时可用以下派生镜像添加解释器，然后使用该镜像启动机器人；
-直接在正在运行的容器中安装只适合临时测试，重建容器后会丢失。
-
-```dockerfile
-FROM dreamdonghao/insoulforge:latest
-USER root
-RUN apt-get update && apt-get install -y --no-install-recommends python3 \
-    && rm -rf /var/lib/apt/lists/*
-```
+按当前 Dockerfile 构建的镜像在运行阶段安装 `python3`，无需另建派生镜像；已有镜像需重新构建或更新到包含此更改的版本。
+网页读取和 Bing 搜索只使用标准库；其他脚本若依赖第三方包，仍需自行准备相应环境。
 
 网页工具的参数和错误契约测试无需 C++ 构建：
 
