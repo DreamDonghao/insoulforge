@@ -12,8 +12,18 @@
 #include <infrastructure/NumericTypes.hpp>
 
 
+namespace insoulforge {
+    class Database;
+}
+
 /// @brief 聊天记录存储
 namespace insoulforge::ChatRecordStore {
+    /// @brief 使用指定数据库恢复和保存会话记录；调用方保证数据库已初始化。
+    [[nodiscard]] auto getSessionIds(const Database &database) -> std::vector<u64>;
+    [[nodiscard]] auto getChatRecords(const Database &database, u64 sessionId, i32 limit = 50) -> std::vector<json>;
+    void addChatRecord(const Database &database, u64 sessionId, const std::string &role, const std::string &content);
+    void clearSessionChatRecords(const Database &database, u64 sessionId);
+
     /// @brief 追加一条会话记录
     /// @param sessionId 统一会话 ID
     /// @param role user 或 assistant

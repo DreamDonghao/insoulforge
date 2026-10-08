@@ -6,6 +6,8 @@
 #include <string>
 #include <string_view>
 
+#include <expected>
+
 #include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
@@ -16,7 +18,8 @@ namespace insoulforge {
         enum class Level { Trace, Debug, Info, Warn, Error, Critical };
 
         /// @brief 初始化日志输出与历史日志缓冲区
-        static void init();
+        /// @return 日志输出初始化失败时返回原因；文件日志不可用时降级为控制台输出并成功返回。
+        [[nodiscard]] static auto initialize() -> std::expected<void, std::string>;
 
         /// @brief 写入 trace 级别日志
         static void trace(u64 sessionId, std::string_view source, std::string content);

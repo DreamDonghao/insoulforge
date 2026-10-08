@@ -18,7 +18,6 @@
 #include <include/agent/ability/TaskScheduler.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
-#include <infrastructure/config/ConfigStore.hpp>
 #include <infrastructure/http/HttpTrace.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <llm/usage/UsageStore.hpp>
@@ -183,9 +182,8 @@ auto AdminController::downloadHttpTrace(HttpRequestPtr req, std::function<void(c
         co_return;
     }
 
-    const json document = {
-      {"id", entry->id}, {"timestamp", entry->timestamp}, {"tag", entry->tag}, {"method", entry->method},
-      {"url", entry->url}, {"status", entry->status}, {"requestBody", entry->requestBody},
+    const json document = {{"id", entry->id}, {"timestamp", entry->timestamp}, {"tag", entry->tag},
+      {"method", entry->method}, {"url", entry->url}, {"status", entry->status}, {"requestBody", entry->requestBody},
       {"responseBody", entry->responseBody},
       {"sessionId", entry->sessionId ? json(std::to_string(*entry->sessionId)) : json(nullptr)}};
     auto response = jsonResponse(document);
@@ -733,7 +731,7 @@ auto AdminController::cancelScheduledTask(
 
 auto AdminController::getMemoryConfig(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
   -> Task<> {
-    const auto config = ConfigStore::getMemoryConfig();
+    const auto config = Config::instance().getMemoryConfig();
     callback(jsonResponse(config));
     co_return;
 }
@@ -742,54 +740,16 @@ auto AdminController::saveMemoryConfig(HttpRequestPtr req, std::function<void(co
   -> Task<> {
     // 需就地补默认值，body 须可变
     auto body = parseJsonBody(req);
-    if (!body) {
-        callback(jsonResponse(AdminResponse::errorJson("缺少配置数据")));
+    if (!body || !body->is_object()) {
+        callback(AdminResponse::configErrorResponse({ConfigErrorType::InvalidArgument, "记忆配置必须是 JSON 对象"}));
         co_return;
     }
 
-    if (getInt(*body, "contextWindowLimit") <= 0) {
-        (*body)["contextWindowLimit"] = Config::instance().contextWindowLimit;
+    if (auto result = Config::instance().saveMemoryConfig(*body); !result) {
+        Logger::error(0, "Config", result.error().message);
+        callback(AdminResponse::configErrorResponse(result.error()));
+        co_return;
     }
-    if (getInt(*body, "memorySummaryTriggerCount") <= 0) {
-        (*body)["memorySummaryTriggerCount"] = Config::instance().memorySummaryTriggerCount;
-    }
-    if (getInt(*body, "memorySummaryBatchSize") <= 0 ||
-        getInt(*body, "memorySummaryBatchSize") > getInt(*body, "memorySummaryTriggerCount")) {
-        (*body)["memorySummaryBatchSize"] = getInt(*body, "memorySummaryTriggerCount") / 2;
-    }
-    if (getInt(*body, "memorySummaryContextCount") < 0) {
-        (*body)["memorySummaryContextCount"] = Config::instance().memorySummaryContextCount;
-    }
-    // Router 子窗口校验: 保留条数必须小于触发条数
-    if (getInt(*body, "routerWindowTriggerCount") <= 0) {
-        (*body)["routerWindowTriggerCount"] = Config::instance().routerWindowTriggerCount;
-    }
-    if (getInt(*body, "routerWindowKeepCount") <= 0 ||
-        getInt(*body, "routerWindowKeepCount") >= getInt(*body, "routerWindowTriggerCount")) {
-        (*body)["routerWindowKeepCount"] = getInt(*body, "routerWindowTriggerCount") / 2;
-    }
-    // 召回阈值: 必须在 (0,1) 开区间内
-    if (getDouble(*body, "longTermRecallThreshold") <= 0.0 || getDouble(*body, "longTermRecallThreshold") >= 1.0) {
-        (*body)["longTermRecallThreshold"] = Config::instance().longTermRecallThreshold;
-    }
-    // 注入阈值: 必须在 (0,1) 开区间内
-    if (getDouble(*body, "longTermInjectThreshold") <= 0.0 || getDouble(*body, "longTermInjectThreshold") >= 1.0) {
-        (*body)["longTermInjectThreshold"] = Config::instance().longTermInjectThreshold;
-    }
-
-    ConfigStore::saveMemoryConfig(*body);
-
-    // 更新内存中的配置
-    auto &config = Config::instance();
-    config.contextWindowLimit = getInt(*body, "contextWindowLimit");
-    config.memorySummaryTriggerCount = getInt(*body, "memorySummaryTriggerCount");
-    config.memorySummaryBatchSize = getInt(*body, "memorySummaryBatchSize");
-    config.memorySummaryContextCount = getInt(*body, "memorySummaryContextCount");
-    config.routerWindowTriggerCount = getInt(*body, "routerWindowTriggerCount");
-    config.routerWindowKeepCount = getInt(*body, "routerWindowKeepCount");
-    config.shortTermMemoryMax = getInt(*body, "shortTermMemoryMax");
-    config.longTermRecallThreshold = getDouble(*body, "longTermRecallThreshold");
-    config.longTermInjectThreshold = getDouble(*body, "longTermInjectThreshold");
 
     callback(jsonResponse(AdminResponse::okJson("记忆配置已保存")));
     co_return;
@@ -799,7 +759,7 @@ auto AdminController::saveMemoryConfig(HttpRequestPtr req, std::function<void(co
 
 auto AdminController::getQQConfig(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
   -> Task<> {
-    const auto config = ConfigStore::getQQConfig();
+    const auto config = Config::instance().getQQConfig();
     callback(jsonResponse(config));
     co_return;
 }
@@ -807,28 +767,17 @@ auto AdminController::getQQConfig(HttpRequestPtr req, std::function<void(const H
 auto AdminController::saveQQConfig(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
   -> Task<> {
     const auto body = parseJsonBody(req);
-    if (!body) {
-        callback(jsonResponse(AdminResponse::errorJson("缺少配置数据")));
+    if (!body || !body->is_object()) {
+        callback(AdminResponse::configErrorResponse({ConfigErrorType::InvalidArgument, "QQ 配置必须是 JSON 对象"}));
         co_return;
     }
 
-    // 更新内存中的配置
-    auto &config = Config::instance();
-    config.accessToken = getStr(*body, "accessToken");
-    config.selfQQNumber = getInt64(*body, "selfQQNumber");
-    config.oneBotTransport = getStr(*body, "oneBotTransport", "http");
-    config.qqHttpHost = getStr(*body, "qqHttpHost");
-    config.qqWebSocketHost = getStr(*body, "qqWebSocketHost");
-    config.botName = getStr(*body, "botName", "机器人");
-    if (config.oneBotTransport != "http" && config.oneBotTransport != "websocket") {
-        config.oneBotTransport = "http";
+    if (auto result = Config::instance().saveQQConfig(*body); !result) {
+        Logger::error(0, "Config", result.error().message);
+        callback(AdminResponse::configErrorResponse(result.error()));
+        co_return;
     }
-    json normalizedConfig = *body;
-    normalizedConfig["oneBotTransport"] = config.oneBotTransport;
-    normalizedConfig["qqHttpHost"] = config.qqHttpHost;
-    normalizedConfig["qqWebSocketHost"] = config.qqWebSocketHost;
-
-    ConfigStore::saveQQConfig(normalizedConfig);
+    const auto &config = Config::instance();
 
     // 更新机器人自己的自定义昵称
     QQNameDirectory::setCustomName(config.selfQQNumber, config.botName + "(我)");

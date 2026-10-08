@@ -19,8 +19,7 @@ namespace insoulforge::AffinityMaintenanceStore {
         }
     } // namespace
 
-    auto pendingSessionIds() -> std::vector<u64> {
-        const auto &database = Database::instance();
+    auto pendingSessionIds(const Database &database) -> std::vector<u64> {
         std::shared_lock lock(database.mutex());
         const Statement statement(
           database.handle(), "SELECT DISTINCT session_id FROM affinity_maintenance_jobs ORDER BY session_id");
@@ -85,4 +84,6 @@ namespace insoulforge::AffinityMaintenanceStore {
             throw;
         }
     }
+
+    auto pendingSessionIds() -> std::vector<u64> { return pendingSessionIds(Database::instance()); }
 } // namespace insoulforge::AffinityMaintenanceStore

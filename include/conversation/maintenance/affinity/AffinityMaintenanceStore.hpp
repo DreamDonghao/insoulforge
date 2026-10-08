@@ -11,6 +11,7 @@
 #include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
+    class Database;
     /// @brief 等待好感度评估的消息批次
     struct AffinityMaintenanceJob {
         i64 id{0}; ///< 任务主键
@@ -20,6 +21,9 @@ namespace insoulforge {
     };
 
     namespace AffinityMaintenanceStore {
+        /// @brief 使用指定数据库读取启动恢复所需的待处理会话。
+        [[nodiscard]] auto pendingSessionIds(const Database &database) -> std::vector<u64>;
+
         /// @brief 获取拥有待处理好感度任务的会话 ID
         [[nodiscard]] auto pendingSessionIds() -> std::vector<u64>;
 

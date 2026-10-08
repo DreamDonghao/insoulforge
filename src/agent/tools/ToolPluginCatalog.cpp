@@ -9,11 +9,11 @@
 namespace insoulforge::ToolPluginCatalog {
     /// @brief 构造并注册全部编译期内置插件
     /// @details 插件对象仅在注册期间存活；ToolRegistry 保存工具定义和处理器副本。
-    void registerBuiltinPlugins() {
+    auto registerBuiltinPlugins(const std::string_view botName) -> std::expected<void, std::string> {
         // 新增独立工具域时，仅在此处加入插件实例；Agent 主流程无需改动。
         const ReplyToolsPlugin replyTools;
         const InfoToolsPlugin infoTools;
-        const ActionToolsPlugin actionTools;
+        const ActionToolsPlugin actionTools(botName);
         const std::array<const ToolPlugin *, 3> plugins = {
           &replyTools,
           &infoTools,
@@ -21,8 +21,11 @@ namespace insoulforge::ToolPluginCatalog {
         };
         auto &registry = ToolRegistry::instance();
         for (const auto *plugin: plugins) {
-            registry.registerPlugin(std::string(plugin->id()),
-              [plugin](ToolRegistry &pluginRegistry) -> void { plugin->registerTools(pluginRegistry); });
+            if (!registry.registerPlugin(std::string(plugin->id()),
+                  [plugin](ToolRegistry &pluginRegistry) -> void { plugin->registerTools(pluginRegistry); })) {
+                return std::unexpected("内置工具插件注册失败: " + std::string(plugin->id()));
+            }
         }
+        return {};
     }
 } // namespace insoulforge::ToolPluginCatalog

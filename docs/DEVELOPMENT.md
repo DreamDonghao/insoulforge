@@ -164,6 +164,12 @@ insoulforge/
 
 ### 消息处理工作流
 
+`OneBotEventWorkflow::instance()` 只取得对象，不恢复会话或启动维护任务。
+启动入口显式调用 `initialize(database, config, agent)`，检查返回的 `std::expected<void, std::string>`，
+成功后才启动 OneBot 接收与定时任务。数据库、配置和 Agent 必须已初始化，并覆盖工作流的生命周期。
+恢复查询及消息列表使用传入的数据库与配置；同一组依赖重复初始化不会重复恢复消息或调度任务。
+初始化仅限启动阶段调用，不与消息处理并发执行。
+
 ```
 HTTP 模式：OneBot HTTP POST /
 WebSocket 模式：OneBotWebSocketClient 接收事件，并按 echo 匹配动作响应
@@ -299,7 +305,7 @@ MessageService → OneBot API
   `memorySummaryContextCount` 条只读上下文。待总结消息在任务成功前继续保留在列表中。
 - **任务持久化与恢复**：`ConversationMaintenanceService` 通过 `ConversationMaintenanceStore` 在同一 SQLite 事务中创建
   `memory_maintenance_jobs` 与 `affinity_maintenance_jobs`，随后分别异步调度消费者。两类任务各自按会话串行、退避重试，并在启动时由
-  `resumePending()` 恢复；它们互不依赖。
+  `resumePending(database)` 恢复；它们互不依赖。
 - **记忆维护**：`MemoryMaintenanceService` 提取并归类短期/长期记忆；它会按 `longTermRecallThreshold`
   召回相似长期记忆，用于合并、去重和替换。embedding 完成后，在同一事务中更新短期记忆、写入长期记忆、删除被取代条目并确认任务完成。只有该任务成功并确认后，
   `MessageList` 才删除对应的最旧前缀。
@@ -316,11 +322,27 @@ MessageService → OneBot API
 `ConfigStore` 将 LLM API 配置（router / jev / executor / executorThinking / image / imageGeneration / memory / embedding）、QQ Bot 配置、记忆和执行参数统一写入
 `data/config.json`。聊天模型可设置 `maxTokens`、`temperature`、`topP` 和 `reasoningEffort`；Embedding、Jev 与图片生成不使用这些采样参数。
 后台上传的角色参考图单独保存在 `data/character-image`，不写入配置或公开静态目录；部署时沿用现有 `data/` 持久化挂载。
+`main` 只调用 `Config::initialize("data/config.json")`，统一完成文件读取、迁移、类型转换和运行时加载。
+`ConfigStore` 是配置系统内部的持久化实现，业务代码和管理接口通过 `Config` 读写配置，不分别初始化两层。
+初始化和保存接口返回 `std::expected<void, ConfigError>`，调用方必须检查结果；参数错误与文件操作错误分别标识。
+读取接口要求初始化已成功，不会自行创建或选择配置文件；调试构建通过断言检查这个前置条件。
+初始化或保存失败不替换已有内存状态，管理接口保存失败不应用新配置或重连 OneBot。
+配置先转换到临时对象，转换和校验通过后才提交文件与运行时值。整数字段含小数或溢出、负 QQ 号、
+非有限数值和越界采样参数返回配置错误；启动时原有缺失字段与旧字段修复规则保持不变。
+后台保存通过 `Config` 串行完成校验、持久化和运行时更新，控制器不再逐项修改配置成员。
+保存只更新对应配置域的运行时字段；执行参数保存仍仅写入原子值，不重写模型或 OneBot 配置。
+启动期的日志、管理令牌、数据库和 Agent 初始化接口返回 `std::expected<void, std::string>`，
+`main` 检查每一步的结果，失败时输出原因并退出，不启动后续服务。日志尚未就绪时使用标准错误输出；
+文件日志不可用仍允许降级为控制台日志。数据库迁移错误在初始化边界转换为返回值并关闭新连接；
+Agent 仅在工具和提示词加载完成后标记为就绪，工具重载失败也通过返回值报告。
+启动初始化必须显式传递实际依赖：`AgentSystem::initialize(database, config.botName)` 将已初始化的数据库
+传给自定义工具查询和提示词初始化，将机器人名称传给内置工具注册。定时任务工具说明使用传入名称，
+不在注册阶段读取全局配置。运行时提示词接口仍沿用进程级数据库，初始化流程使用显式数据库重载。
 Jev 默认指向 OpenRouter Decisions API，API Key 默认为空，因此默认不启用；其 `minConfidence` 默认 0.6，限制在 0～1，
 可在管理后台修改并即时更新运行时配置。启动时若文件不存在则创建默认配置；若
 JSON 损坏则备份为 `config.json.broken.<时间戳>` 后重建；缺失或类型不匹配的字段会补默认值并回写。管理后台保存时先写入临时文件，再原子替换原文件。
 
-`Config` 单例在启动期从该文件加载运行时副本。提示词由 `PromptService` 管理（`executor_system` /
+`Config` 单例提供业务使用的运行时配置。提示词由 `PromptService` 管理（`executor_system` /
 `router_system`），支持 `{botName}` 占位符，修改后写回数据库。
 
 执行参数位于独立的 `execution` 节点，管理接口为 `GET/POST /admin/api/execution-config`，前端页面为“执行配置”。
@@ -451,10 +473,12 @@ JSON 文件导入后保存在数据库，修改仓库文件不会自动替换已
 - `POST /admin/api/auth/login`：提交 `{"token":"..."}`，验证成功后写入 `HttpOnly`、`SameSite=Strict` 会话 Cookie。
 - `POST /admin/api/auth/logout`：清除当前会话 Cookie。
 - `GET /admin/api/auth/status`：返回当前请求是否已认证。
-- 除上述认证接口外，`/admin/api/*`、`/admin/ws` 和 `/admin/logs/ws` 均由服务端鉴权；未经认证的请求返回 `401`。
+- 仅登录和认证状态接口公开；其他 `/admin/api/*` 请求（包括退出登录）、`/admin/ws` 和 `/admin/logs/ws` 均由服务端鉴权，未经认证返回 `401`。
+
+启动入口注册 `AdminAccessToken::checkRequestAccess` 为 Drogon 路由前回调；路径判断、公开接口放行和未授权响应统一由访问控制模块处理。
 
 新增后台接口时无需在 Controller 中重复校验 Cookie，但必须使用受保护的 `/admin/api/` 路径。若确实需要公开接口，应在
-`main.cpp` 的认证白名单中显式声明，并审查其是否会泄露配置或运行数据。
+`AdminAccessToken::checkRequestAccess` 的认证白名单中显式声明，并审查其是否会泄露配置或运行数据。
 
 ### 添加前端页面
 

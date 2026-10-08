@@ -3,7 +3,6 @@
 
 #include <array>
 #include <mutex>
-#include <stdexcept>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -16,6 +15,7 @@
 #include <openssl/rand.h>
 
 #include <admin/access/AdminAccessToken.hpp>
+#include <admin/http/AdminResponse.hpp>
 #include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
@@ -75,15 +75,16 @@ namespace insoulforge {
         }
     } // namespace
 
-    void AdminAccessToken::initialize() {
+    auto AdminAccessToken::initialize() -> std::expected<void, std::string> {
         std::array<unsigned char, 32> bytes{};
-        if (RAND_bytes(bytes.data(), static_cast<i32>(bytes.size())) != 1) {
-            throw std::runtime_error("无法生成管理后台访问令牌");
+        if (RAND_bytes(bytes.data(), std::ranges::ssize(bytes)) != 1) {
+            return std::unexpected("无法生成管理后台访问令牌");
         }
 
         auto &[value, mutex] = state();
         std::scoped_lock lock(mutex);
         value = encodeHex(bytes);
+        return {};
     }
 
     auto AdminAccessToken::loginUrls(const u16 port) -> std::vector<std::string> {
@@ -102,6 +103,21 @@ namespace insoulforge {
 
     auto AdminAccessToken::isAuthorized(const drogon::HttpRequestPtr &request) -> bool {
         return request && matches(request->getCookie(std::string(cookieName_)));
+    }
+
+    void AdminAccessToken::checkRequestAccess(
+      const drogon::HttpRequestPtr &request, drogon::AdviceCallback &&callback, drogon::AdviceChainCallback &&next) {
+        const std::string &path = request->path();
+        const bool isAdminApi = path.starts_with("/admin/api/");
+        const bool isAdminWebSocket = path == "/admin/ws" || path == "/admin/logs/ws";
+        const bool isPublicAuthEndpoint = path == "/admin/api/auth/login" || path == "/admin/api/auth/status";
+        if ((!isAdminApi && !isAdminWebSocket) || isPublicAuthEndpoint || isAuthorized(request)) {
+            next();
+            return;
+        }
+        const auto response = jsonResponse(AdminResponse::failJson("未登录或登录已失效"));
+        response->setStatusCode(drogon::k401Unauthorized);
+        callback(response);
     }
 
     auto AdminAccessToken::matches(const std::string_view token) -> bool {

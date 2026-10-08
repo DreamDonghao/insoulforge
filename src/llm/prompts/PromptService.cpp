@@ -15,7 +15,7 @@ namespace insoulforge {
           "项目地址：https://github.com/DreamDonghao/insoulforge。\n\n";
     }
 
-    void PromptService::initialize() {
+    void PromptService::initialize(const Database &database) {
 
         // 定义默认提示词
         const struct {
@@ -172,24 +172,24 @@ reply 的场景：
 
         // 插入默认提示词（如果不存在）
         for (const auto &[key, content, desc]: defaultPrompts) {
-            if (!PromptStore::hasPrompt(key)) {
-                PromptStore::setPrompt(key, content, desc);
+            if (!PromptStore::hasPrompt(database, key)) {
+                PromptStore::setPrompt(database, key, content, desc);
                 Logger::info(0, "Prompt", fmt::format("插入默认提示词: {}", key));
             }
         }
 
         // 自愈: 早期版本 router_system 默认值带 fmt 转义残留(双花括号)，模型照抄导致 JSON 解析失败。
         // 若库中内容仍含损坏标记(未被用户编辑修复过)，覆盖为修复后的默认值
-        if (const std::string stored = PromptStore::getPrompt("router_system", "");
+        if (const std::string stored = PromptStore::getPrompt(database, "router_system", "");
           stored.find("不要其他内容）：\n{{") != std::string::npos) {
-            PromptStore::setPrompt("router_system", defaultPrompts[1].content, defaultPrompts[1].desc);
+            PromptStore::setPrompt(database, "router_system", defaultPrompts[1].content, defaultPrompts[1].desc);
             Logger::warn(0, "Prompt", fmt::format("已自愈 router_system 默认值中的双花括号残留"));
         }
 
         // 思考模式已改为 Executor 的 deep_think 工具：从 Router 提示词中移除 enableThinking 策略项
         // （仅删除包含 enableThinking 的行，不影响提示词其余部分的自定义内容）
         for (const char *key: {"router_system", "router_private_system"}) {
-            std::string stored = PromptStore::getPrompt(key, "");
+            std::string stored = PromptStore::getPrompt(database, key, "");
             if (stored.find("enableThinking") == std::string::npos) {
                 continue;
             }
@@ -204,7 +204,7 @@ reply 的场景：
                 }
                 start = stop + 1;
             }
-            PromptStore::setPrompt(key, updated);
+            PromptStore::setPrompt(database, key, updated);
             Logger::info(0, "Prompt", fmt::format("已从 Router 提示词移除 enableThinking 策略项: {}", key));
         }
 

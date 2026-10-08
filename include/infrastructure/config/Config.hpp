@@ -3,9 +3,15 @@
 #pragma once
 
 #include <atomic>
+#include <mutex>
 #include <string>
+#include <string_view>
 
+#include <expected>
+
+#include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/config/ConfigError.hpp>
 
 namespace insoulforge {
     /// @brief 单个模型服务的连接与身份信息
@@ -77,10 +83,31 @@ namespace insoulforge {
 
         static auto instance() -> Config &;
 
-        /// @brief 从全局配置文件加载运行时配置。
-        void loadFromStorage();
+        /// @brief 读取、迁移和校验指定文件，成功后统一应用运行时配置。
+        /// @return 读取或转换失败时返回原因，保留已有配置。
+        [[nodiscard]] auto initialize(std::string_view path) -> std::expected<void, ConfigError>;
+
+        /// @brief 获取持久化配置的独立副本；要求初始化已成功。
+        [[nodiscard]] auto getLLMConfig(const std::string &name) const -> json;
+        [[nodiscard]] auto getAllLLMConfigs() const -> json;
+        [[nodiscard]] auto getQQConfig() const -> json;
+        [[nodiscard]] auto getMemoryConfig() const -> json;
+        [[nodiscard]] auto getExecutionConfig() const -> json;
+
+        /// @brief 校验并保存配置，写入成功后更新运行时值；失败不应用新配置。
+        [[nodiscard]] auto saveLLMConfig(const std::string &name, const json &value)
+          -> std::expected<void, ConfigError>;
+        [[nodiscard]] auto saveQQConfig(const json &value) -> std::expected<void, ConfigError>;
+        [[nodiscard]] auto saveMemoryConfig(const json &value) -> std::expected<void, ConfigError>;
+        [[nodiscard]] auto saveExecutionConfig(const json &value) -> std::expected<void, ConfigError>;
 
     private:
         Config() = default;
+        auto loadValues(const json &value) -> std::expected<void, ConfigError>;
+        void applyValues(Config &&value);
+        void applyLLMValues(std::string_view name, Config &&value);
+        void applyQQValues(Config &&value);
+        void applyMemoryValues(const Config &value);
+        std::mutex m_updateMutex; ///< 串行化读取、保存和运行时更新，防止并发保存使状态回退。
     };
 } // namespace insoulforge

@@ -10,6 +10,7 @@
 #include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
+    class Database;
     /// @brief 自定义工具存储
     namespace ToolStore {
         /// @brief 自定义工具结构
@@ -29,7 +30,7 @@ namespace insoulforge {
         [[nodiscard]] auto getCustomTools() -> std::vector<CustomTool>;
 
         /// @brief 获取启用的自定义工具（供 ToolRuntime 使用）
-        [[nodiscard]] auto getEnabledCustomTools() -> std::vector<CustomTool>;
+        [[nodiscard]] auto getEnabledCustomTools(const Database &database) -> std::vector<CustomTool>;
 
         /// @brief 添加自定义工具
         [[nodiscard]] auto addCustomTool(const CustomTool &tool) -> i32;

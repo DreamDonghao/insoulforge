@@ -9,7 +9,7 @@
 namespace insoulforge::ImageDescriptionStore {
     namespace {
         /// @brief 删除超过十天未命中的缓存；调用方必须持有数据库写锁
-        size_t purgeExpiredLocked(sqlite3 *database) {
+        auto purgeExpiredLocked(sqlite3 *database) -> size_t {
             const Statement stmt(
               database, "DELETE FROM image_description_cache WHERE updated_at < datetime('now', '-10 days')");
             stmt.exec();
@@ -73,13 +73,13 @@ namespace insoulforge::ImageDescriptionStore {
         stmt.exec();
     }
 
-    size_t purgeExpired() {
+    auto purgeExpired() -> u64 {
         const auto &db = Database::instance();
         std::unique_lock lock(db.mutex());
         return purgeExpiredLocked(db.handle());
     }
 
-    size_t clearAll() {
+    auto clearAll() -> size_t {
         const auto &db = Database::instance();
         std::unique_lock lock(db.mutex());
         const Statement stmt(db.handle(), "DELETE FROM image_description_cache");

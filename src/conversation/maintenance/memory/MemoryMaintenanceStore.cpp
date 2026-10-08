@@ -43,8 +43,7 @@ namespace insoulforge::MemoryMaintenanceStore {
         return Statement::lastInsertRowId(database.handle());
     }
 
-    auto pendingSessionIds() -> std::vector<u64> {
-        const auto &database = Database::instance();
+    auto pendingSessionIds(const Database &database) -> std::vector<u64> {
         std::shared_lock lock(database.mutex());
         const Statement statement(database.handle(),
           "SELECT DISTINCT session_id FROM memory_maintenance_jobs WHERE status = 'pending' ORDER BY session_id");
@@ -55,8 +54,7 @@ namespace insoulforge::MemoryMaintenanceStore {
         return sessionIds;
     }
 
-    auto hasUnfinished(const u64 sessionId) -> bool {
-        const auto &database = Database::instance();
+    auto hasUnfinished(const Database &database, const u64 sessionId) -> bool {
         std::shared_lock lock(database.mutex());
         const Statement statement(
           database.handle(), "SELECT 1 FROM memory_maintenance_jobs WHERE session_id = ? LIMIT 1");
@@ -91,8 +89,7 @@ namespace insoulforge::MemoryMaintenanceStore {
           .attemptCount = statement.getInt(4)};
     }
 
-    auto takeCompleted(const u64 sessionId) -> std::optional<size_t> {
-        const auto &database = Database::instance();
+    auto takeCompleted(const Database &database, const u64 sessionId) -> std::optional<size_t> {
         std::unique_lock lock(database.mutex());
         sqlite3 *handle = database.handle();
         const Statement select(handle,
@@ -163,5 +160,11 @@ namespace insoulforge::MemoryMaintenanceStore {
             sqlite3_exec(handle, "ROLLBACK", nullptr, nullptr, nullptr);
             throw;
         }
+    }
+
+    auto pendingSessionIds() -> std::vector<u64> { return pendingSessionIds(Database::instance()); }
+    auto hasUnfinished(const u64 sessionId) -> bool { return hasUnfinished(Database::instance(), sessionId); }
+    auto takeCompleted(const u64 sessionId) -> std::optional<size_t> {
+        return takeCompleted(Database::instance(), sessionId);
     }
 } // namespace insoulforge::MemoryMaintenanceStore

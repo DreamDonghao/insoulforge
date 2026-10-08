@@ -20,7 +20,9 @@ namespace insoulforge {
     public:
         /// @brief 创建会话工作流状态
         /// @param sessionId 会话 ID
-        explicit SessionWorkflowState(u64 sessionId);
+        /// @param database 传递给消息列表的数据库，必须覆盖会话状态的生命周期。
+        /// @param config 传递给消息列表的运行时配置。
+        SessionWorkflowState(u64 sessionId, const Database &database, const Config &config);
 
         /// @brief 取得当前会话的完整消息列表
         /// @return 仅在构造时创建的消息列表实例

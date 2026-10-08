@@ -7,7 +7,7 @@
     <script>
         // 提前应用主题，避免加载闪烁
         (function () {
-            var t = localStorage.getItem('theme')
+            let t = localStorage.getItem('theme');
             if (t !== 'light' && t !== 'dark') {
                 t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
             }

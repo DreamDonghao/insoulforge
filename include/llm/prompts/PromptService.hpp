@@ -9,35 +9,39 @@
 #include <string>
 
 namespace insoulforge {
-    /// @brief 提示词服务 - 管理所有 LLM 使用的提示词，支持运行时修改
-    namespace PromptService {
-        /// @brief 初始化提示词（如果不存在则插入默认值）
-        void initialize();
-
-        /// @brief 获取提示词（支持占位符替换）
-        /// @param key 提示词键名
-        /// @return 提示词内容，已替换 {botName} 等占位符
-        auto getPrompt(const std::string &key) -> std::string;
-
-        /// @brief 设置提示词（运行时修改）
-        /// @param key 提示词键名
-        /// @param content 提示词内容
-        void setPrompt(const std::string &key, const std::string &content);
-
-        /// @brief 获取 Executor 系统提示词（群聊）
-        /// @return Executor 角色系统提示词
-        [[nodiscard]] auto getExecutorSystemPrompt() -> std::string;
-
-        /// @brief 获取 Executor 系统提示词（私聊）
-        /// @return Executor 私聊角色系统提示词
-        [[nodiscard]] auto getExecutorPrivateSystemPrompt() -> std::string;
-
-        /// @brief 获取 Router 系统提示词（群聊）
-        /// @return Router 消息路由决策提示词
-        [[nodiscard]] auto getRouterSystemPrompt() -> std::string;
-
-        /// @brief 获取 Router 系统提示词（私聊）
-        /// @return Router 私聊消息路由决策提示词
-        [[nodiscard]] auto getRouterPrivateSystemPrompt() -> std::string;
-    } // namespace PromptService
+    class Database;
 }
+
+
+/// @brief 提示词服务 - 管理所有 LLM 使用的提示词，支持运行时修改
+namespace insoulforge::PromptService {
+    /// @brief 初始化提示词（如果不存在则插入默认值）
+    /// @param database 已成功打开并完成迁移的数据库。
+    void initialize(const Database &database);
+
+    /// @brief 获取提示词（支持占位符替换）
+    /// @param key 提示词键名
+    /// @return 提示词内容，已替换 {botName} 等占位符
+    auto getPrompt(const std::string &key) -> std::string;
+
+    /// @brief 设置提示词（运行时修改）
+    /// @param key 提示词键名
+    /// @param content 提示词内容
+    void setPrompt(const std::string &key, const std::string &content);
+
+    /// @brief 获取 Executor 系统提示词（群聊）
+    /// @return Executor 角色系统提示词
+    [[nodiscard]] auto getExecutorSystemPrompt() -> std::string;
+
+    /// @brief 获取 Executor 系统提示词（私聊）
+    /// @return Executor 私聊角色系统提示词
+    [[nodiscard]] auto getExecutorPrivateSystemPrompt() -> std::string;
+
+    /// @brief 获取 Router 系统提示词（群聊）
+    /// @return Router 消息路由决策提示词
+    [[nodiscard]] auto getRouterSystemPrompt() -> std::string;
+
+    /// @brief 获取 Router 系统提示词（私聊）
+    /// @return Router 私聊消息路由决策提示词
+    [[nodiscard]] auto getRouterPrivateSystemPrompt() -> std::string;
+} // namespace insoulforge::PromptService

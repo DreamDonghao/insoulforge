@@ -90,6 +90,8 @@ namespace insoulforge {
     auto ActionToolsPlugin::id() const noexcept -> std::string_view { return "builtin.action"; }
 
     /// @brief 注册动作执行工具（ACTION，执行操作、产生副作用）
+    ActionToolsPlugin::ActionToolsPlugin(const std::string_view botName) : m_botName(botName) {}
+
     void ActionToolsPlugin::registerTools(ToolRegistry &registry) const {
 
         registry.registerTool(
@@ -816,7 +818,7 @@ namespace insoulforge {
         scheduleParams["properties"]["content"]["description"] = fmt::format(
           "到点时留给自己（{}）的备忘说明，不是最终的回复文本：写清楚要提醒谁（带上对方昵称及sender."
           "qq）、要做什么事、以及创建时对话里的相关背景。到点后你会看到这段备忘并结合当时的聊天上下文自行组织回复",
-          Config::instance().botName);
+          m_botName);
         registry.registerTool(
           {
             .name = "create_scheduled_task",
