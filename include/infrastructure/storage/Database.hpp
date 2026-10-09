@@ -6,6 +6,7 @@
 #include <shared_mutex>
 #include <string>
 
+#include <expected>
 #include <sqlite3.h>
 
 namespace insoulforge {
@@ -15,7 +16,9 @@ namespace insoulforge {
         static auto instance() -> Database &;
 
         /// @brief 打开数据库并执行 Schema 迁移
-        void initialize(const std::string &dbPath);
+        /// @note 仅在启动期或测试中调用，不得与数据库读写并发执行。
+        /// @return 目录创建、打开或迁移失败时返回原因，关闭新连接并保留已有连接。
+        [[nodiscard]] auto initialize(const std::string &dbPath) -> std::expected<void, std::string>;
 
         /// @brief 关闭数据库
         void close();

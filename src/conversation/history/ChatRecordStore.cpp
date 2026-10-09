@@ -9,8 +9,8 @@
 
 namespace insoulforge {
     namespace ChatRecordStore {
-        void addChatRecord(const u64 sessionId, const std::string &role, const std::string &content) {
-            const auto &db = Database::instance();
+        void addChatRecord(
+          const Database &db, const u64 sessionId, const std::string &role, const std::string &content) {
             std::unique_lock lock(db.mutex());
             const Statement stmt(db.handle(), "INSERT INTO chat_records (group_id, role, content) VALUES (?, ?, ?)");
             stmt.bind(1, sessionId);
@@ -19,8 +19,7 @@ namespace insoulforge {
             stmt.exec();
         }
 
-        auto getChatRecords(const u64 sessionId, const i32 limit) -> std::vector<json> {
-            const auto &db = Database::instance();
+        auto getChatRecords(const Database &db, const u64 sessionId, const i32 limit) -> std::vector<json> {
             std::shared_lock lock(db.mutex());
             std::vector<json> records;
 
@@ -61,8 +60,7 @@ namespace insoulforge {
             return records;
         }
 
-        auto getSessionIds() -> std::vector<u64> {
-            const auto &db = Database::instance();
+        auto getSessionIds(const Database &db) -> std::vector<u64> {
             std::shared_lock lock(db.mutex());
             const Statement stmt(db.handle(), "SELECT DISTINCT group_id FROM chat_records");
             std::vector<u64> sessionIds;
@@ -104,13 +102,21 @@ namespace insoulforge {
             stmt.exec();
         }
 
-        void clearSessionChatRecords(const u64 sessionId) {
-            const auto &db = Database::instance();
+        void clearSessionChatRecords(const Database &db, const u64 sessionId) {
             std::unique_lock lock(db.mutex());
             const Statement stmt(db.handle(), "DELETE FROM chat_records WHERE group_id = ?");
             stmt.bind(1, sessionId);
             stmt.exec();
             Logger::info(sessionId, "History", "聊天记录已清空");
         }
+
+        void addChatRecord(const u64 sessionId, const std::string &role, const std::string &content) {
+            addChatRecord(Database::instance(), sessionId, role, content);
+        }
+        auto getChatRecords(const u64 sessionId, const i32 limit) -> std::vector<json> {
+            return getChatRecords(Database::instance(), sessionId, limit);
+        }
+        auto getSessionIds() -> std::vector<u64> { return getSessionIds(Database::instance()); }
+        void clearSessionChatRecords(const u64 sessionId) { clearSessionChatRecords(Database::instance(), sessionId); }
     } // namespace ChatRecordStore
 } // namespace insoulforge

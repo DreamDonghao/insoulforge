@@ -34,6 +34,6 @@ namespace insoulforge {
         /// @brief 删除超过十天未使用的图片视觉描述缓存
         /// @return 已删除的缓存条数
         /// @note 线程安全。程序启动及每次缓存访问时自动调用。
-        [[nodiscard]] auto purgeExpired() -> size_t;
+        [[nodiscard]] auto purgeExpired() -> u64;
     } // namespace ImageDescriptionStore
 } // namespace insoulforge

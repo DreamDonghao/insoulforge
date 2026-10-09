@@ -6,20 +6,27 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include <drogon/utils/coroutine.h>
+#include <expected>
 
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
 
+namespace insoulforge {
+    class Database;
+}
+
 /// @brief 工具运行时服务
 namespace insoulforge::ToolRuntime {
     /// @brief 注册全部编译期内置工具插件
-    void registerBuiltinTools();
+    [[nodiscard]] auto registerBuiltinTools(std::string_view botName) -> std::expected<void, std::string>;
 
     /// @brief 从数据库重载启用的自定义工具
     /// @details 仅替换 custom 插件，不影响内置工具插件。
-    void reloadCustomTools();
+    /// @param database 已成功初始化的数据库。
+    [[nodiscard]] auto reloadCustomTools(const Database &database) -> std::expected<void, std::string>;
 
     /// @brief 执行 Python 脚本工具
     /// @param scriptContent Python脚本内容（直接存储在数据库中）

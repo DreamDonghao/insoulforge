@@ -72,31 +72,38 @@ namespace insoulforge {
         }
     } // namespace
 
-    void Logger::init() {
-        const auto consoleSink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-        // 等级已包含在结构化正文中；只用颜色标记为控制台整条日志着色，文件和 Web 保持纯文本。
-        consoleSink->set_pattern("%^[%H:%M:%S] %v%$");
-
-        std::vector<spdlog::sink_ptr> sinks{consoleSink};
+    auto Logger::initialize() -> std::expected<void, std::string> {
         try {
-            std::filesystem::create_directories(kLogDir);
-            const auto fileSink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-              kLogFile.data(), kLogFileMaxSize, kLogFileMaxCount);
-            fileSink->set_pattern("[%Y-%m-%d %H:%M:%S.%e] %v");
-            sinks.push_back(fileSink);
-        } catch (const std::exception &e) {
-            fmt::print(stderr, "警告: 文件日志不可用 ({})，仅输出到控制台\n", e.what());
+            const auto consoleSink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+            // 等级已包含在结构化正文中；只用颜色标记为控制台整条日志着色，文件和 Web 保持纯文本。
+            consoleSink->set_pattern("%^[%H:%M:%S] %v%$");
+
+            std::vector<spdlog::sink_ptr> sinks{consoleSink};
+            try {
+                std::filesystem::create_directories(kLogDir);
+                const auto fileSink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+                  kLogFile.data(), kLogFileMaxSize, kLogFileMaxCount);
+                fileSink->set_pattern("[%Y-%m-%d %H:%M:%S.%e] %v");
+                sinks.push_back(fileSink);
+            } catch (const std::exception &e) {
+                fmt::print(stderr, "警告: 文件日志不可用 ({})，仅输出到控制台\n", e.what());
+            }
+
+            spdlog::init_thread_pool(8192, 1);
+            const auto logger = std::make_shared<spdlog::async_logger>(
+              "main", sinks.begin(), sinks.end(), spdlog::thread_pool(), spdlog::async_overflow_policy::block);
+            logger->set_level(spdlog::level::trace);
+            logger->flush_on(spdlog::level::warn);
+            spdlog::set_default_logger(logger);
+
+            LogBuffer::instance().loadFromDirectory(kLogDir.data());
+            info(0, "Logger", fmt::format("日志系统初始化完成 | file={}", sinks.size() > 1));
+            return {};
+        } catch (const spdlog::spdlog_ex &error) {
+            return std::unexpected(std::string("日志系统初始化失败: ") + error.what());
+        } catch (const std::system_error &error) {
+            return std::unexpected(std::string("日志系统初始化失败: ") + error.what());
         }
-
-        spdlog::init_thread_pool(8192, 1);
-        const auto logger = std::make_shared<spdlog::async_logger>(
-          "main", sinks.begin(), sinks.end(), spdlog::thread_pool(), spdlog::async_overflow_policy::block);
-        logger->set_level(spdlog::level::trace);
-        logger->flush_on(spdlog::level::warn);
-        spdlog::set_default_logger(logger);
-
-        LogBuffer::instance().loadFromDirectory(kLogDir.data());
-        info(0, "Logger", fmt::format("日志系统初始化完成 | file={}", sinks.size() > 1));
     }
 
     void Logger::trace(const u64 sessionId, const std::string_view source, std::string content) {

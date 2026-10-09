@@ -9,6 +9,8 @@
 
 #include <drogon/HttpRequest.h>
 #include <drogon/HttpResponse.h>
+#include <drogon/drogon_callbacks.h>
+#include <expected>
 
 #include <infrastructure/NumericTypes.hpp>
 
@@ -19,8 +21,8 @@ namespace insoulforge {
     class AdminAccessToken {
     public:
         /// @brief 生成本次进程有效的访问令牌。
-        /// @throws std::runtime_error 随机数生成失败时抛出。
-        static void initialize();
+        /// @return 随机数生成失败时返回原因，不替换已有令牌。
+        [[nodiscard]] static auto initialize() -> std::expected<void, std::string>;
 
         /// @brief 构建当前令牌可直接登录的管理后台链接。
         /// @details 令牌放在 URL 片段中，浏览器不会将其发送到服务端；仅枚举当前进程网络命名空间内
@@ -35,6 +37,12 @@ namespace insoulforge {
 
         /// @brief 判断请求是否携带有效的管理后台会话 Cookie。
         [[nodiscard]] static auto isAuthorized(const drogon::HttpRequestPtr &request) -> bool;
+
+        /// @brief 管理后台的路由前鉴权回调，供 Drogon 注册。
+        /// @details 放行非管理请求和公开登录接口；其他管理 API 与 WebSocket 请求须携带有效 Cookie。
+        /// 未授权时返回 HTTP 401，不继续路由。
+        static void checkRequestAccess(
+          const drogon::HttpRequestPtr &request, drogon::AdviceCallback &&callback, drogon::AdviceChainCallback &&next);
 
         /// @brief 校验用户输入的启动令牌。
         [[nodiscard]] static auto matches(std::string_view token) -> bool;

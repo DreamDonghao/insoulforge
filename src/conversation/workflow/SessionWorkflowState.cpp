@@ -5,8 +5,8 @@
 #include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
-    SessionWorkflowState::SessionWorkflowState(const u64 sessionId) :
-        m_messageList(std::make_shared<MessageList>(sessionId)) {}
+    SessionWorkflowState::SessionWorkflowState(const u64 sessionId, const Database &database, const Config &config) :
+        m_messageList(std::make_shared<MessageList>(sessionId, database, config)) {}
 
     auto SessionWorkflowState::messageList() const noexcept -> const std::shared_ptr<MessageList> & {
         return m_messageList;

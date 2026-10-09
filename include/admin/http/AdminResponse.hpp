@@ -4,6 +4,7 @@
 #include <string>
 
 #include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/config/ConfigError.hpp>
 
 namespace insoulforge::AdminResponse {
     /// @brief 成功响应 {"success":true[, "message": ...]}
@@ -29,5 +30,13 @@ namespace insoulforge::AdminResponse {
         resp["success"] = false;
         resp["error"] = message;
         return resp;
+    }
+
+    /// @brief 将配置保存错误转换为管理接口的失败响应。
+    inline auto configErrorResponse(const ConfigError &error) -> drogon::HttpResponsePtr {
+        auto response = jsonResponse(failJson(error.message));
+        response->setStatusCode(
+          error.type == ConfigErrorType::InvalidArgument ? drogon::k400BadRequest : drogon::k500InternalServerError);
+        return response;
     }
 } // namespace insoulforge::AdminResponse

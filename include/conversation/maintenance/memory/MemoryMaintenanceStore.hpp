@@ -11,6 +11,7 @@
 #include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
+    class Database;
     /// @brief 等待维护的记忆总结批次
     struct MemoryMaintenanceJob {
         i64 id{0};
@@ -30,6 +31,11 @@ namespace insoulforge {
 
     /// @brief 记忆维护存储
     namespace MemoryMaintenanceStore {
+        /// @brief 使用指定数据库读取启动恢复所需的待处理会话。
+        [[nodiscard]] auto pendingSessionIds(const Database &database) -> std::vector<u64>;
+        [[nodiscard]] auto hasUnfinished(const Database &database, u64 sessionId) -> bool;
+        [[nodiscard]] auto takeCompleted(const Database &database, u64 sessionId) -> std::optional<size_t>;
+
         /// @brief 持久化一批待总结消息及其只读上下文
         /// @return 新任务 ID
         auto enqueue(u64 sessionId, const json &messages, const json &contextMessages, size_t removeCount) -> i64;

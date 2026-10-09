@@ -526,7 +526,7 @@ onMounted(async () => {
   color: var(--primary);
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.8px;
+  letter-spacing: 1px;
   text-transform: uppercase;
 }
 

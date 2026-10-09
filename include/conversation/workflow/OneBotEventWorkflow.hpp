@@ -3,18 +3,23 @@
 
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <unordered_map>
 
 #include <drogon/utils/coroutine.h>
+#include <expected>
 
 #include <conversation/workflow/SessionWorkflowState.hpp>
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
+    class Database;
+    class Config;
+    class AgentSystem;
     /// @brief OneBot 入站事件处理工作流
     /// @details 每个会话串行预处理入站消息；回复处理同一时间只运行一轮。预处理完成后，
     ///          回复阶段从 MessageList 读取快照并调用 Router、Executor 和发送服务。
@@ -25,6 +30,15 @@ namespace insoulforge {
         /// @return 单例工作流
         /// @note 线程安全。C++ 保证函数内静态对象只初始化一次；取得实例后仍应遵循各公开成员函数的并发约束。
         [[nodiscard]] static auto instance() -> OneBotEventWorkflow &;
+
+        /// @brief 显式恢复会话并调度遗留维护任务；获取单例不会触发恢复。
+        /// @param database 已成功打开并完成迁移的数据库。
+        /// @param config 已成功加载的运行时配置。
+        /// @param agent 已成功初始化的 Agent，用于检查是否允许处理消息。
+        /// @note 仅在启动期、接收事件前调用；依赖对象必须比工作流存活更久。
+        /// 同一组依赖重复初始化不会重复恢复或调度任务。
+        [[nodiscard]] auto initialize(const Database &database, const Config &config, const AgentSystem &agent)
+          -> std::expected<void, std::string>;
 
         /// @brief 将所有会话的当前完整消息列表写入数据库恢复副本
         /// @note 线程安全。可与消息处理并发执行，写入的是调用期间取得的各会话消息列表快照。
@@ -59,10 +73,17 @@ namespace insoulforge {
         void enqueueOneBotEvent(json body);
 
     private:
+        struct Dependencies {
+            const Database &database;
+            const Config &config;
+            const AgentSystem &agent;
+        };
+        std::optional<Dependencies> m_dependencies;
+        std::atomic_bool m_initialized{false};
         std::mutex m_sessionsMutex; ///< 保护会话状态索引
         std::unordered_map<u64, std::shared_ptr<SessionWorkflowState>> m_sessions; ///< 已恢复或已激活的会话状态
 
-        OneBotEventWorkflow();
+        OneBotEventWorkflow() = default;
 
         /// @brief 保存命令消息并向命令来源发送执行结果
         auto executeCommand(const json &message) -> drogon::Task<>;

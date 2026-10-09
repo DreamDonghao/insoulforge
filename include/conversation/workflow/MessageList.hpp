@@ -11,6 +11,8 @@
 #include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
+    class Database;
+    class Config;
     /// @brief 一批待提取记忆的消息及其只读上下文
     struct MemorySummaryBatch {
         json messages; ///< 真正参与记忆提取、成功后从列表删除的最旧消息
@@ -30,7 +32,9 @@ namespace insoulforge {
     public:
         /// @brief 从数据库恢复一个统一会话的最近完整消息
         /// @param sessionId 群号或带私聊标志位的用户 QQ 号
-        explicit MessageList(u64 sessionId);
+        /// @param database 已成功初始化的数据库，供恢复和持久化使用。
+        /// @param config 消息窗口与总结参数；两个依赖必须覆盖消息列表的生命周期。
+        MessageList(u64 sessionId, const Database &database, const Config &config);
 
         /// @brief 追加完整消息并生成冻结快照
         /// @param message 完整消息 JSON；内部不会保留工作流专用 `session_id`
@@ -67,6 +71,8 @@ namespace insoulforge {
         [[nodiscard]] auto createSummaryBatchLocked() -> std::optional<MemorySummaryBatch>;
 
         u64 m_sessionId; ///< 绑定的统一会话 ID
+        const Database &m_database;
+        const Config &m_config;
         mutable std::mutex m_mutex; ///< 保护消息、总结批次状态与快照生成
         std::deque<json> m_messages; ///< 按时间顺序保存的完整消息
         bool m_summaryBatchPending{false}; ///< 是否已有尚未完成的总结任务

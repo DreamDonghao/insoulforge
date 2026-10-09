@@ -17,10 +17,12 @@
 #include <drogon/utils/coroutine.h>
 #include <openssl/evp.h>
 
+#include <admin/access/AdminAccessToken.hpp>
 #include <admin/http/AdminController.hpp>
 #include <agent/ability/AsyncTaskManager.hpp>
 #include <agent/memory/LongTermMemoryStore.hpp>
 #include <agent/memory/MemoryStore.hpp>
+#include <agent/runtime/AgentSystem.hpp>
 #include <agent/runtime/ExecutorAgent.hpp>
 #include <agent/tools/ToolRegistry.hpp>
 #include <agent/tools/custom/LuaToolExecutor.hpp>
@@ -40,7 +42,6 @@
 #include <conversation/workflow/OneBotEventWorkflow.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
-#include <infrastructure/config/ConfigStore.hpp>
 #include <infrastructure/http/HttpUtil.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/SchemaMigrator.hpp>
@@ -239,7 +240,7 @@ namespace {
     void testJevUnconfiguredFallsBackToExistingBehavior() {
         constexpr std::string_view kTestName = "jev unconfigured falls back to existing behavior";
         auto &database = insoulforge::Database::instance();
-        database.initialize(":memory:");
+        check(database.initialize(":memory:").has_value(), "initializes database", kTestName);
         auto &config = insoulforge::Config::instance();
         const auto originalJev = config.jev;
         const auto originalRouter = config.router;
@@ -693,7 +694,9 @@ namespace {
         constexpr std::string_view kTestName = "self image tool reference";
         auto &registry = insoulforge::ToolRegistry::instance();
         check(registry.registerPlugin("contract.character-image",
-                [](insoulforge::ToolRegistry &staged) { insoulforge::ActionToolsPlugin{}.registerTools(staged); }),
+                [](insoulforge::ToolRegistry &staged) {
+                    insoulforge::ActionToolsPlugin{"test-bot"}.registerTools(staged);
+                }),
           "action tools register", kTestName);
         const auto oldConfig = insoulforge::Config::instance().imageGeneration;
         auto &api = insoulforge::Config::instance().imageGeneration;
@@ -712,7 +715,7 @@ namespace {
     void testMemoryMaintenanceStore() {
         constexpr std::string_view kTestName = "memory maintenance store";
         auto &database = insoulforge::Database::instance();
-        database.initialize(":memory:");
+        check(database.initialize(":memory:").has_value(), "initializes database", kTestName);
 
         const insoulforge::json messages = {{{"message_id", "1"}, {"segments", insoulforge::json::array()}}};
         const i64 firstJob = insoulforge::MemoryMaintenanceStore::enqueue(100, messages, insoulforge::json::array(), 2);
@@ -745,7 +748,7 @@ namespace {
     void testConversationMaintenanceStore() {
         constexpr std::string_view kTestName = "conversation maintenance store";
         auto &database = insoulforge::Database::instance();
-        database.initialize(":memory:");
+        check(database.initialize(":memory:").has_value(), "initializes database", kTestName);
 
         const insoulforge::json messages = {{{"message_id", "1"}, {"segments", insoulforge::json::array()}}};
         const insoulforge::json context = {{{"message_id", "2"}, {"segments", insoulforge::json::array()}}};
@@ -774,19 +777,184 @@ namespace {
             output
               << R"({"llm":{"executor":{"apiKey":"old-key","baseUrl":"https://old.example.com/v1","path":"/chat/completions","model":"old-model","maxTokens":150,"temperature":0.7,"topP":0.9,"reasoningEffort":""}},"memory":{"memoryExtractMaxTokens":8192}})";
         }
-        insoulforge::ConfigStore::initialize(path.string());
-        const auto defaultGeneration = insoulforge::ConfigStore::getLLMConfig("imageGeneration");
+        check(insoulforge::Config::instance().initialize(path.string()).has_value(), "initializes config", kTestName);
+        const auto defaultGeneration = insoulforge::Config::instance().getLLMConfig("imageGeneration");
         check(defaultGeneration.value("baseUrl", "") == "https://api.openai.com/v1",
           "creates official image generation URL default", kTestName);
         check(defaultGeneration.value("model", "") == "gpt-image-2.5-flare",
           "creates official image generation model default", kTestName);
-        const auto memory = insoulforge::ConfigStore::getLLMConfig("memory");
+        const auto memory = insoulforge::Config::instance().getLLMConfig("memory");
         check(memory.value("model", "") == "old-model", "inherits executor model", kTestName);
         check(memory.value("maxTokens", 0) == 8192, "preserves old memory token limit", kTestName);
         check(memory.value("temperature", 0.0) == 0.4, "preserves extraction sampling temperature", kTestName);
-        check(!insoulforge::ConfigStore::getMemoryConfig().contains("memoryExtractMaxTokens"),
+        check(!insoulforge::Config::instance().getMemoryConfig().contains("memoryExtractMaxTokens"),
           "removes legacy token field", kTestName);
         std::filesystem::remove(path);
+    }
+
+    void testStartupResults() {
+        constexpr std::string_view kTestName = "startup initialization results";
+        check(insoulforge::AdminAccessToken::initialize().has_value(), "generates admin token", kTestName);
+        check(insoulforge::AdminAccessToken::token().size() == 64, "token contains 32 random bytes encoded as hex",
+          kTestName);
+
+        auto &database = insoulforge::Database::instance();
+        check(database.initialize(":memory:").has_value(), "initializes database", kTestName);
+        const auto oldConnection = database.handle();
+        const auto directory =
+          std::filesystem::temp_directory_path() /
+          ("insoulforge-db-init-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        std::filesystem::create_directory(directory);
+        const auto blocked = directory / "blocked";
+        {
+            std::ofstream output(blocked);
+            output << "not a directory";
+        }
+        const auto directoryFailure = database.initialize((blocked / "db.sqlite").string());
+        check(!directoryFailure && !directoryFailure.error().empty() && database.handle() == oldConnection,
+          "directory failure returns a reason and preserves connection", kTestName);
+        check(!database.initialize(directory.string()) && database.handle() == oldConnection,
+          "database open failure preserves connection", kTestName);
+        const auto invalidDatabase = directory / "invalid.sqlite";
+        {
+            std::ofstream output(invalidDatabase);
+            output << "this is not a SQLite database";
+        }
+        check(!database.initialize(invalidDatabase.string()) && database.handle() == oldConnection,
+          "migration failure returns an error and preserves connection", kTestName);
+
+        auto &agent = insoulforge::AgentSystem::instance();
+        check(agent.initialize(database, "explicit-bot-name").has_value() && agent.isReady(),
+          "successful Agent initialization marks ready", kTestName);
+        bool foundScheduleTool = false;
+        for (const auto &tool: insoulforge::ToolRegistry::instance().getAllTools()) {
+            const auto &function = tool["function"];
+            if (function["name"] == "create_scheduled_task") {
+                foundScheduleTool = true;
+                check(function["parameters"]["properties"]["content"]["description"].get<std::string>().find(
+                        "explicit-bot-name") != std::string::npos,
+                  "tool registration uses the supplied name rather than global configuration", kTestName);
+            }
+        }
+        check(foundScheduleTool, "schedule tool is registered", kTestName);
+        check(sqlite3_exec(database.handle(), "DROP TABLE prompts", nullptr, nullptr, nullptr) == SQLITE_OK,
+          "simulates unavailable prompt storage", kTestName);
+        const auto agentFailure = agent.initialize(database, "explicit-bot-name");
+        check(!agentFailure && !agentFailure.error().empty() && !agent.isReady(),
+          "Agent dependency failure returns an error and clears ready state", kTestName);
+        database.close();
+        check(!agent.initialize(database, "explicit-bot-name") && !agent.isReady(),
+          "uninitialized database is rejected before dependency access", kTestName);
+        std::filesystem::remove_all(directory);
+    }
+
+    void testAdminRequestAccess() {
+        constexpr std::string_view kTestName = "admin request access";
+        using insoulforge::AdminAccessToken;
+        check(AdminAccessToken::initialize().has_value(), "initializes token", kTestName);
+        const auto loginResponse = drogon::HttpResponse::newHttpResponse();
+        AdminAccessToken::grantSession(loginResponse);
+        for (const auto *path: {"/index.html", "/onebot", "/admin/api/auth/login", "/admin/api/auth/status",
+               "/admin/api/execution-config", "/admin/ws", "/admin/logs/ws", "/admin/api/auth/login/"}) {
+            const std::string_view route = path;
+            const bool protectedRoute =
+              route.starts_with("/admin/api/") || route == "/admin/ws" || route == "/admin/logs/ws";
+            const bool publicAuth = route == "/admin/api/auth/login" || route == "/admin/api/auth/status";
+            for (const auto authenticated: {false, true}) {
+                const auto request = drogon::HttpRequest::newHttpRequest();
+                request->setPath(path);
+                if (authenticated) {
+                    for (const auto &[name, cookie]: loginResponse->cookies()) {
+                        request->addCookie(name, cookie.value());
+                    }
+                }
+                bool continued = false;
+                drogon::HttpResponsePtr rejected;
+                AdminAccessToken::checkRequestAccess(
+                  request, [&rejected](const drogon::HttpResponsePtr &response) { rejected = response; },
+                  [&continued] { continued = true; });
+                const bool allowed = !protectedRoute || publicAuth || authenticated;
+                check(continued == allowed && static_cast<bool>(rejected) == !allowed,
+                  "calls exactly one routing callback", kTestName);
+                if (!allowed && rejected) {
+                    check(rejected->getStatusCode() == drogon::k401Unauthorized &&
+                            insoulforge::parseJson(std::string(rejected->body()))["success"] == false,
+                      "protected request returns the original unauthorized response", kTestName);
+                }
+            }
+        }
+    }
+
+    void testConfigInitialization() {
+        constexpr std::string_view kTestName = "explicit configuration initialization";
+        const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
+        const auto directory =
+          std::filesystem::temp_directory_path() / ("insoulforge-config-init-" + std::to_string(suffix));
+        std::filesystem::create_directory(directory);
+        const auto path = directory / "selected.json";
+        const auto temporaryPath = directory / "selected.json.tmp";
+        std::filesystem::create_directory(temporaryPath);
+        const auto failed = insoulforge::Config::instance().initialize(path.string());
+        check(!failed && failed.error().type == insoulforge::ConfigErrorType::FileOperation,
+          "first initialization returns file failure", kTestName);
+        std::filesystem::remove(temporaryPath);
+        check(insoulforge::Config::instance().initialize(path.string()).has_value() && std::filesystem::exists(path),
+          "retry creates defaults at the explicitly selected path", kTestName);
+        check(insoulforge::Config::instance().getExecutionConfig()["maxToolRounds"] == 8,
+          "created defaults are readable", kTestName);
+        std::filesystem::remove_all(directory);
+    }
+
+    void testConfigFacade() {
+        constexpr std::string_view kTestName = "configuration facade";
+        const auto directory =
+          std::filesystem::temp_directory_path() /
+          ("insoulforge-config-facade-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        std::filesystem::create_directory(directory);
+        const auto path = directory / "config.json";
+        auto &config = insoulforge::Config::instance();
+        check(config.initialize(path.string()).has_value(), "initializes storage and runtime together", kTestName);
+        check(config.saveQQConfig({{"botName", "facade-bot"}, {"selfQQNumber", 3457355246ULL}}).has_value() &&
+                config.botName == "facade-bot" && config.selfQQNumber == 3457355246ULL,
+          "saving immediately applies typed QQ configuration", kTestName);
+        const auto oldQQ = config.getQQConfig();
+        for (const auto &invalid:
+          insoulforge::json::array({{{"selfQQNumber", -1}}, {{"selfQQNumber", 123.5}}, {{"botName", 23}}})) {
+            const auto result = config.saveQQConfig(invalid);
+            check(!result && result.error().type == insoulforge::ConfigErrorType::InvalidArgument &&
+                    config.getQQConfig() == oldQQ && config.botName == "facade-bot",
+              "invalid conversion leaves storage and runtime unchanged", kTestName);
+        }
+        check(
+          !config.saveLLMConfig("router", {{"maxTokens", 100.5}}), "fractional token limits are rejected", kTestName);
+        check(!config.saveLLMConfig("router", {{"temperature", 3.0}}), "out-of-range sampling parameters are rejected",
+          kTestName);
+        const auto invalidPath = directory / "invalid.json";
+        const std::string invalidContent =
+          R"({"llm":{"router":{"maxTokens":4294967296}},"qq":{"botName":"not-applied"}})";
+        {
+            std::ofstream output(invalidPath);
+            output << invalidContent;
+        }
+        const auto invalidInit = config.initialize(invalidPath.string());
+        check(!invalidInit && invalidInit.error().type == insoulforge::ConfigErrorType::InvalidArgument &&
+                config.botName == "facade-bot" && config.getQQConfig() == oldQQ,
+          "failed startup conversion preserves existing runtime and storage", kTestName);
+        {
+            std::ifstream input(invalidPath);
+            const std::string content{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+            check(content == invalidContent, "conversion failure does not overwrite the source file", kTestName);
+        }
+        config.executor.model = "unrelated-runtime-model";
+        check(config.saveExecutionConfig({{"maxToolRounds", 16}}).has_value() &&
+                config.execution.maxToolRounds.load() == 16,
+          "saving after failed initialization still uses the previous file", kTestName);
+        check(config.executor.model == "unrelated-runtime-model",
+          "execution saves do not rewrite unrelated runtime fields", kTestName);
+        check(config.initialize(path.string()).has_value() && config.execution.maxToolRounds.load() == 16 &&
+                config.botName == "facade-bot",
+          "unified initialization restores saved runtime values", kTestName);
+        std::filesystem::remove_all(directory);
     }
 
     void testExecutionConfig() {
@@ -798,13 +966,15 @@ namespace {
             std::ofstream output(path);
             output << R"({"qq":{"botName":"existing-bot"}})";
         }
-        insoulforge::ConfigStore::initialize(path.string());
-        insoulforge::Config::instance().loadFromStorage();
-        check(insoulforge::ConfigStore::getExecutionConfig()["maxToolRounds"] == 8,
+        check(insoulforge::Config::instance().initialize(path.string()).has_value(), "initializes config", kTestName);
+        check(insoulforge::Config::instance().getExecutionConfig()["maxToolRounds"] == 8,
           "old files receive the default limit", kTestName);
         check(insoulforge::Config::instance().execution.maxToolRounds.load() == 8, "loads the default runtime limit",
           kTestName);
-        insoulforge::ConfigStore::saveExecutionConfig({{"maxToolRounds", 8}, {"futureSetting", true}});
+        check(insoulforge::Config::instance()
+                .saveExecutionConfig({{"maxToolRounds", 8}, {"futureSetting", true}})
+                .has_value(),
+          "saves execution config", kTestName);
 
         const insoulforge::AdminController controller;
         drogon::HttpResponsePtr response;
@@ -828,19 +998,19 @@ namespace {
             check(insoulforge::Config::instance().execution.maxToolRounds.load() == limit,
               "save updates runtime without reload", kTestName);
         }
-        check(insoulforge::ConfigStore::getExecutionConfig()["futureSetting"] == true,
+        check(insoulforge::Config::instance().getExecutionConfig()["futureSetting"] == true,
           "saving preserves other execution fields", kTestName);
-        check(insoulforge::ConfigStore::getQQConfig()["botName"] == "existing-bot",
+        check(insoulforge::Config::instance().getQQConfig()["botName"] == "existing-bot",
           "saving leaves other configuration sections unchanged", kTestName);
 
-        const auto stored = insoulforge::ConfigStore::getExecutionConfig();
+        const auto stored = insoulforge::Config::instance().getExecutionConfig();
         const auto invalidValues =
           insoulforge::json::array({0, -1, 101, 8.0, 8.5, "8", true, nullptr, std::numeric_limits<u64>::max()});
         for (const auto &value: invalidValues) {
             save(insoulforge::dumpJson({{"maxToolRounds", value}}));
             check(response->getStatusCode() == drogon::k400BadRequest,
               "POST rejects non-integers and out-of-range limits", kTestName);
-            check(insoulforge::ConfigStore::getExecutionConfig() == stored &&
+            check(insoulforge::Config::instance().getExecutionConfig() == stored &&
                     insoulforge::Config::instance().execution.maxToolRounds.load() == 100,
               "invalid saves do not change stored or runtime values", kTestName);
         }
@@ -856,13 +1026,52 @@ namespace {
         save(R"({"maxToolRounds":16})");
         check(
           response->getStatusCode() == drogon::k500InternalServerError, "file write errors are reported", kTestName);
-        check(insoulforge::ConfigStore::getExecutionConfig() == stored &&
+        check(insoulforge::Config::instance().getExecutionConfig() == stored &&
                 insoulforge::Config::instance().execution.maxToolRounds.load() == 100,
           "write failure leaves stored and runtime values unchanged", kTestName);
+        const auto oldQQ = insoulforge::Config::instance().getQQConfig();
+        const auto oldMemory = insoulforge::Config::instance().getMemoryConfig();
+        const auto oldModels = insoulforge::Config::instance().getAllLLMConfigs();
+        auto qqRequest = drogon::HttpRequest::newHttpRequest();
+        qqRequest->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+        qqRequest->setBody(insoulforge::dumpJson({{"botName", "not-applied"}, {"selfQQNumber", 123},
+          {"oneBotTransport", "http"}, {"qqHttpHost", "http://not-applied"}}));
+        const auto oldBotName = insoulforge::Config::instance().botName;
+        const auto oldTransport = insoulforge::Config::instance().oneBotTransport;
+        drogon::sync_wait(controller.saveQQConfig(qqRequest, callback));
+        check(response->getStatusCode() == drogon::k500InternalServerError &&
+                insoulforge::Config::instance().botName == oldBotName &&
+                insoulforge::Config::instance().oneBotTransport == oldTransport,
+          "QQ HTTP write failure does not apply runtime settings", kTestName);
+        check(!insoulforge::Config::instance().saveQQConfig({{"botName", "not-saved"}}) &&
+                insoulforge::Config::instance().getQQConfig() == oldQQ,
+          "QQ write failure preserves memory state", kTestName);
+        check(!insoulforge::Config::instance().saveMemoryConfig({{"contextWindowLimit", 23}}) &&
+                insoulforge::Config::instance().getMemoryConfig() == oldMemory,
+          "memory write failure preserves memory state", kTestName);
+        check(!insoulforge::Config::instance().saveLLMConfig("router", {{"model", "not-saved"}}) &&
+                insoulforge::Config::instance().getAllLLMConfigs() == oldModels,
+          "model write failure preserves memory state", kTestName);
+        const auto invalidSave = insoulforge::Config::instance().saveMemoryConfig(nullptr);
+        check(!invalidSave && invalidSave.error().type == insoulforge::ConfigErrorType::InvalidArgument,
+          "invalid section returns a typed error", kTestName);
+
+        const auto failedPath = std::filesystem::path(path.string() + ".new");
+        const auto blockedPath = std::filesystem::path(failedPath.string() + ".tmp");
+        std::filesystem::create_directory(blockedPath);
+        const auto failedInit = insoulforge::Config::instance().initialize(failedPath.string());
+        check(!failedInit && failedInit.error().type == insoulforge::ConfigErrorType::FileOperation &&
+                insoulforge::Config::instance().getQQConfig() == oldQQ &&
+                insoulforge::Config::instance().getExecutionConfig() == stored,
+          "failed reinitialization preserves existing configuration", kTestName);
+        std::filesystem::remove(blockedPath);
         std::filesystem::remove(temporaryPath);
 
-        insoulforge::ConfigStore::initialize(path.string());
-        insoulforge::Config::instance().loadFromStorage();
+        check(insoulforge::Config::instance().saveMemoryConfig(oldMemory).has_value(),
+          "failed reinitialization preserves the original file path", kTestName);
+        check(!std::filesystem::exists(failedPath), "failure does not create the requested config file", kTestName);
+
+        check(insoulforge::Config::instance().initialize(path.string()).has_value(), "reinitializes config", kTestName);
         check(insoulforge::Config::instance().execution.maxToolRounds.load() == 100,
           "saved values survive reinitialization", kTestName);
 
@@ -871,14 +1080,13 @@ namespace {
                 std::ofstream output(path);
                 output << insoulforge::dumpJson({{"execution", {{"maxToolRounds", value}}}});
             }
-            insoulforge::ConfigStore::initialize(path.string());
-            check(insoulforge::ConfigStore::getExecutionConfig()["maxToolRounds"] == 8,
+            check(insoulforge::Config::instance().initialize(path.string()).has_value(), "repairs config", kTestName);
+            check(insoulforge::Config::instance().getExecutionConfig()["maxToolRounds"] == 8,
               "startup repairs invalid file values", kTestName);
             std::ifstream input(path);
             const auto repaired = insoulforge::json::parse(input);
             check(repaired["execution"]["maxToolRounds"] == 8, "startup persists the repaired default", kTestName);
         }
-        insoulforge::Config::instance().loadFromStorage();
         std::filesystem::remove(path);
     }
 
@@ -921,13 +1129,13 @@ namespace {
           "user records cannot claim assistant tool history", kTestName);
 
         auto &database = insoulforge::Database::instance();
-        database.initialize(":memory:");
-        insoulforge::MessageList messages(987654);
+        check(database.initialize(":memory:").has_value(), "initializes database", kTestName);
+        insoulforge::MessageList messages(987654, database, insoulforge::Config::instance());
         const auto update = messages.append(record);
         check(update && update->messageSnapshot.back()["tool_history"] == history,
           "no_reply history enters the context snapshot", kTestName);
         messages.flushToStorage();
-        insoulforge::MessageList restored(987654);
+        insoulforge::MessageList restored(987654, database, insoulforge::Config::instance());
         check(restored.fullSnapshot() == messages.fullSnapshot(), "no_reply survives persistence and restoration",
           kTestName);
         database.close();
@@ -936,8 +1144,9 @@ namespace {
     void testImageDescriptionCacheStore() {
         constexpr std::string_view kTestName = "image description cache store";
         auto &database = insoulforge::Database::instance();
-        database.initialize(":memory:");
-        insoulforge::ConfigStore::initialize("data/message-contract-test-config.json");
+        check(database.initialize(":memory:").has_value(), "initializes database", kTestName);
+        check(insoulforge::Config::instance().initialize("data/message-contract-test-config.json").has_value(),
+          "initializes config", kTestName);
 
         insoulforge::ImageDescriptionStore::upsert("hash", "vision-model", 1, "gif", true, "角色挥手", 16);
         const auto succeeded = insoulforge::ImageDescriptionStore::find("hash", "vision-model", 1);
@@ -952,30 +1161,36 @@ namespace {
         check(!insoulforge::ImageDescriptionStore::find("hash", "vision-model", 1), "cleared entry is unavailable",
           kTestName);
 
-        insoulforge::ConfigStore::saveLLMConfig(
-          "image", {{"apiKey", "key"}, {"baseUrl", "https://example.com"}, {"path", "/v1/chat/completions"},
-                     {"model", "vision-model"}, {"maxTokens", 1536}, {"temperature", 0.4}, {"topP", 0.8},
-                     {"reasoningEffort", ""}, {"minConfidence", 0.2}});
-        check(!insoulforge::ConfigStore::getLLMConfig("image").contains("minConfidence"),
+        check(insoulforge::Config::instance()
+                .saveLLMConfig(
+                  "image", {{"apiKey", "key"}, {"baseUrl", "https://example.com"}, {"path", "/v1/chat/completions"},
+                             {"model", "vision-model"}, {"maxTokens", 1536}, {"temperature", 0.4}, {"topP", 0.8},
+                             {"reasoningEffort", ""}, {"minConfidence", 0.2}})
+                .has_value(),
+          "saves image config", kTestName);
+        check(!insoulforge::Config::instance().getLLMConfig("image").contains("minConfidence"),
           "Jev threshold is not stored with other models", kTestName);
-        insoulforge::Config::instance().loadFromStorage();
         check(insoulforge::Config::instance().imageParams.maxTokens == 1536, "loads configured image max tokens",
           kTestName);
 
-        insoulforge::ConfigStore::saveLLMConfig(
-          "imageGeneration", {{"apiKey", "image-key"}, {"baseUrl", "https://example.com/v1"},
-                               {"path", "/images/generations"}, {"model", "test-image"}, {"maxTokens", 100}});
-        check(!insoulforge::ConfigStore::getLLMConfig("imageGeneration").contains("maxTokens"),
+        check(insoulforge::Config::instance()
+                .saveLLMConfig(
+                  "imageGeneration", {{"apiKey", "image-key"}, {"baseUrl", "https://example.com/v1"},
+                                       {"path", "/images/generations"}, {"model", "test-image"}, {"maxTokens", 100}})
+                .has_value(),
+          "saves image generation config", kTestName);
+        check(!insoulforge::Config::instance().getLLMConfig("imageGeneration").contains("maxTokens"),
           "image generation does not persist chat parameters", kTestName);
-        insoulforge::Config::instance().loadFromStorage();
         check(insoulforge::Config::instance().imageGeneration.model == "test-image", "loads image generation model",
           kTestName);
 
-        insoulforge::ConfigStore::saveLLMConfig(
-          "memory", {{"apiKey", "memory-key"}, {"baseUrl", "https://memory.example.com/v1"},
-                      {"path", "/chat/completions"}, {"model", "memory-model"}, {"maxTokens", 2048},
-                      {"temperature", 0.4}, {"topP", 0.9}, {"reasoningEffort", "none"}});
-        insoulforge::Config::instance().loadFromStorage();
+        check(
+          insoulforge::Config::instance()
+            .saveLLMConfig("memory", {{"apiKey", "memory-key"}, {"baseUrl", "https://memory.example.com/v1"},
+                                       {"path", "/chat/completions"}, {"model", "memory-model"}, {"maxTokens", 2048},
+                                       {"temperature", 0.4}, {"topP", 0.9}, {"reasoningEffort", "none"}})
+            .has_value(),
+          "saves memory model config", kTestName);
         check(
           insoulforge::Config::instance().memory.model == "memory-model", "loads independent memory model", kTestName);
         check(insoulforge::Config::instance().memoryParams.maxTokens == 2048, "loads independent memory token limit",
@@ -983,15 +1198,19 @@ namespace {
         check(
           insoulforge::Config::instance().memory.reasoningEffort == "none", "loads memory reasoning effort", kTestName);
 
-        insoulforge::ConfigStore::saveLLMConfig(
-          "jev", {{"apiKey", "key"}, {"baseUrl", "https://example.com"}, {"path", "/decisions"}, {"model", "jev-model"},
-                   {"minConfidence", 0.8}});
-        insoulforge::Config::instance().loadFromStorage();
+        check(insoulforge::Config::instance()
+                .saveLLMConfig("jev", {{"apiKey", "key"}, {"baseUrl", "https://example.com"}, {"path", "/decisions"},
+                                        {"model", "jev-model"}, {"minConfidence", 0.8}})
+                .has_value(),
+          "saves Jev config", kTestName);
         check(insoulforge::Config::instance().jevMinConfidence == 0.8, "loads configured Jev confidence threshold",
           kTestName);
-        insoulforge::ConfigStore::saveLLMConfig("jev",
-          {{"apiKey", "key"}, {"baseUrl", "https://example.com"}, {"path", "/decisions"}, {"model", "jev-model"}});
-        check(insoulforge::ConfigStore::getLLMConfig("jev")["minConfidence"] == 0.8,
+        check(insoulforge::Config::instance()
+                .saveLLMConfig("jev", {{"apiKey", "key"}, {"baseUrl", "https://example.com"}, {"path", "/decisions"},
+                                        {"model", "jev-model"}})
+                .has_value(),
+          "preserves Jev threshold", kTestName);
+        check(insoulforge::Config::instance().getLLMConfig("jev")["minConfidence"] == 0.8,
           "saving Jev without a threshold keeps the previous value", kTestName);
         database.close();
     }
@@ -1024,7 +1243,7 @@ namespace {
     void testUsageSummaryUsesLatestRoleModel() {
         constexpr std::string_view kTestName = "usage summary model selection";
         auto &database = insoulforge::Database::instance();
-        database.initialize(":memory:");
+        check(database.initialize(":memory:").has_value(), "initializes database", kTestName);
 
         insoulforge::UsageStore::addUsageRecord("router", "old-model", 10, 5, 15, 0);
         insoulforge::UsageStore::addUsageRecord("router", "current-model", 20, 10, 30, 0);
@@ -1040,7 +1259,7 @@ namespace {
     void testMessageListSnapshotsAndPersistence() {
         constexpr std::string_view kTestName = "new workflow message list";
         auto &database = insoulforge::Database::instance();
-        database.initialize(":memory:");
+        check(database.initialize(":memory:").has_value(), "initializes database", kTestName);
 
         auto &config = insoulforge::Config::instance();
         const i32 originalContextLimit = config.contextWindowLimit;
@@ -1061,7 +1280,7 @@ namespace {
             return message;
         };
 
-        insoulforge::MessageList messages(100);
+        insoulforge::MessageList messages(100, database, config);
         const auto first = messages.append(makeMessage(1));
         static_cast<void>(messages.append(makeMessage(2)));
         const auto third = messages.append(makeMessage(3));
@@ -1094,7 +1313,7 @@ namespace {
         messages.flushToStorage();
         const auto restoredRecords = insoulforge::ChatRecordStore::getChatRecords(100);
         check(restoredRecords.size() == 2, "flush persists only retained messages", kTestName);
-        insoulforge::MessageList restored(100);
+        insoulforge::MessageList restored(100, database, config);
         check(
           restored.snapshot() == fourth->messageSnapshot, "startup restoration rebuilds retained snapshot", kTestName);
 
@@ -1108,10 +1327,35 @@ namespace {
     void testAsyncTaskSessionExclusivity() {
         constexpr std::string_view kTestName = "async task session exclusivity";
         auto &database = insoulforge::Database::instance();
-        database.initialize(":memory:");
-        insoulforge::ConfigStore::initialize("data/message-contract-test-config.json");
-        insoulforge::Config::instance().loadFromStorage();
+        auto &config = insoulforge::Config::instance();
+        auto &agent = insoulforge::AgentSystem::instance();
+        auto &workflow = insoulforge::OneBotEventWorkflow::instance();
+        database.close();
+        check(!workflow.getSessionMessages(555), "getting the workflow does not restore sessions", kTestName);
+        check(!workflow.initialize(database, config, agent), "uninitialized database returns an error", kTestName);
+        check(database.initialize(":memory:").has_value(), "initializes database", kTestName);
+        check(insoulforge::Config::instance().initialize("data/message-contract-test-config.json").has_value(),
+          "initializes config", kTestName);
 
+
+        check(agent.initialize(database, config.botName).has_value(), "initializes Agent", kTestName);
+        check(sqlite3_exec(database.handle(), "DROP TABLE chat_records", nullptr, nullptr, nullptr) == SQLITE_OK,
+          "simulates restore failure", kTestName);
+        const auto failedRestore = workflow.initialize(database, config, agent);
+        check(!failedRestore && !failedRestore.error().empty() && !workflow.getSessionMessages(555),
+          "restore failure returns an error without publishing sessions", kTestName);
+        check(database.initialize(":memory:").has_value(), "recreates database after failure", kTestName);
+        check(agent.initialize(database, config.botName).has_value(), "reinitializes Agent dependencies", kTestName);
+        const auto restoredMessage = insoulforge::MessageRecord::createAssistantRecord("test", 777, "restored");
+        insoulforge::ChatRecordStore::addChatRecord(database, 555, "assistant", insoulforge::dumpJson(restoredMessage));
+        check(workflow.initialize(database, config, agent).has_value(), "initializes workflow", kTestName);
+        const auto restored = workflow.getSessionMessages(555);
+        check(restored && restored->size() == 1 && restored->front() == restoredMessage,
+          "explicit initialization restores persisted messages", kTestName);
+        workflow.appendDeliveredAssistantMessage(
+          555, insoulforge::MessageRecord::createAssistantRecord("test", 778, "new message"));
+        check(workflow.initialize(database, config, agent).has_value() && workflow.getSessionMessages(555)->size() == 2,
+          "repeat initialization does not overwrite live messages", kTestName);
         auto &tasks = insoulforge::AsyncTaskManager::instance();
         const auto delayedResult = []() -> drogon::Task<insoulforge::AsyncTaskManager::Result> {
             co_await drogon::sleepCoro(drogon::app().getLoop(), 60.0);
@@ -1150,6 +1394,8 @@ namespace {
 } // namespace
 
 auto main() -> int {
+    testAdminRequestAccess();
+    testConfigInitialization();
     testNewWorkflowNormalizesOneBotEvent();
     testNewWorkflowNormalizesOneBotNotices();
     testNewWorkflowDetectsCommands();
@@ -1174,6 +1420,7 @@ auto main() -> int {
     testMemoryMaintenanceStore();
     testConversationMaintenanceStore();
     testMemoryModelConfigMigration();
+    testConfigFacade();
     testExecutionConfig();
     testToolHistoryRecords();
     testImageDescriptionCacheStore();
@@ -1181,6 +1428,7 @@ auto main() -> int {
     testUsageSummaryUsesLatestRoleModel();
     testMessageListSnapshotsAndPersistence();
     testAsyncTaskSessionExclusivity();
+    testStartupResults();
     if (failures == 0) {
         std::cout << "All message contract tests passed\n";
         return 0;

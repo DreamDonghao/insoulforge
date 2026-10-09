@@ -4,7 +4,8 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
-#include <stdexcept>
+
+#include <cassert>
 
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
@@ -105,7 +106,7 @@ namespace insoulforge::ConfigStore {
         auto migrateLegacyFields(json &config) -> bool {
             bool changed = false;
             changed = config.erase("version") > 0;
-            auto llm = config.find("llm");
+            const auto llm = config.find("llm");
             if (llm == config.end() || !llm->is_object())
                 return false;
 
@@ -122,7 +123,7 @@ namespace insoulforge::ConfigStore {
                 (*llm)["memory"] = std::move(memoryConfig);
                 changed = true;
             }
-            if (auto memory = config.find("memory"); memory != config.end() && memory->is_object()) {
+            if (const auto memory = config.find("memory"); memory != config.end() && memory->is_object()) {
                 changed = memory->erase("memoryExtractMaxTokens") > 0 || changed;
             }
 
@@ -147,56 +148,73 @@ namespace insoulforge::ConfigStore {
             return changed;
         }
 
-        void writeConfigFile(const std::filesystem::path &path, const json &config) {
+        auto writeConfigFile(const std::filesystem::path &path, const json &config)
+          -> std::expected<void, ConfigError> {
             const std::filesystem::path temporaryPath = path.string() + ".tmp";
             {
                 std::ofstream output(temporaryPath, std::ios::trunc);
                 if (!output) {
-                    throw std::runtime_error("无法写入配置临时文件: " + temporaryPath.string());
+                    return std::unexpected(
+                      ConfigError{ConfigErrorType::FileOperation, "无法写入配置临时文件: " + temporaryPath.string()});
                 }
                 output << dumpJson(config, true, 2) << '\n';
                 output.flush();
                 if (!output) {
-                    throw std::runtime_error("配置临时文件写入失败: " + temporaryPath.string());
+                    return std::unexpected(
+                      ConfigError{ConfigErrorType::FileOperation, "配置临时文件写入失败: " + temporaryPath.string()});
+                }
+                output.close();
+                if (!output) {
+                    return std::unexpected(
+                      ConfigError{ConfigErrorType::FileOperation, "关闭配置临时文件失败: " + temporaryPath.string()});
                 }
             }
 
             std::error_code error;
             std::filesystem::rename(temporaryPath, path, error);
             if (error) {
-                throw std::runtime_error("无法原子替换配置文件: " + error.message());
+                return std::unexpected(
+                  ConfigError{ConfigErrorType::FileOperation, "无法原子替换配置文件: " + error.message()});
             }
+            return {};
         }
 
-        void ensureInitialized() {
-            auto &fileState = state();
-            {
-                std::scoped_lock lock(fileState.mutex);
-                if (fileState.initialized)
-                    return;
-            }
-            initialize();
+        /// @pre 调用方已持有配置状态锁。
+        void requireInitializedLocked() {
+            assert(state().initialized && "Config::initialize must succeed before accessing configuration");
         }
 
         auto getSection(const std::string_view section) -> json {
-            ensureInitialized();
             auto &fileState = state();
             std::scoped_lock lock(fileState.mutex);
+            requireInitializedLocked();
             return fileState.content[std::string(section)];
         }
 
-        void saveSection(const std::string_view section, json content) {
-            ensureInitialized();
+        auto saveSection(const std::string_view section, json content, const ConfigValidator &validate)
+          -> std::expected<void, ConfigError> {
+            if (!content.is_object()) {
+                return std::unexpected(ConfigError{ConfigErrorType::InvalidArgument, "配置必须是 JSON 对象"});
+            }
             auto &fileState = state();
             std::scoped_lock lock(fileState.mutex);
-            fileState.content[std::string(section)] = std::move(content);
-            migrateLegacyFields(fileState.content);
-            applyDefaults(fileState.content, defaultConfig());
-            writeConfigFile(fileState.path, fileState.content);
+            requireInitializedLocked();
+            auto nextConfig = fileState.content;
+            nextConfig[std::string(section)] = std::move(content);
+            migrateLegacyFields(nextConfig);
+            applyDefaults(nextConfig, defaultConfig());
+            if (auto result = validate(nextConfig); !result) {
+                return result;
+            }
+            if (auto result = writeConfigFile(fileState.path, nextConfig); !result) {
+                return result;
+            }
+            fileState.content = std::move(nextConfig);
+            return {};
         }
     } // namespace
 
-    void initialize(const std::string &path) {
+    auto initialize(const std::string_view path, const ConfigValidator &validate) -> std::expected<void, ConfigError> {
         auto &fileState = state();
         std::scoped_lock lock(fileState.mutex);
 
@@ -205,17 +223,36 @@ namespace insoulforge::ConfigStore {
             std::error_code error;
             std::filesystem::create_directories(configPath.parent_path(), error);
             if (error) {
-                throw std::runtime_error("无法创建配置目录: " + error.message());
+                return std::unexpected(
+                  ConfigError{ConfigErrorType::FileOperation, "无法创建配置目录: " + error.message()});
             }
         }
 
         json config = defaultConfig();
-        bool needsWrite = !std::filesystem::exists(configPath);
+        std::error_code existsError;
+        bool needsWrite = !std::filesystem::exists(configPath, existsError);
+        if (existsError) {
+            return std::unexpected(ConfigError{
+              .type = ConfigErrorType::FileOperation, .message = "无法检查配置文件: " + existsError.message()});
+        }
         if (!needsWrite) {
+            std::error_code fileError;
+            if (!std::filesystem::is_regular_file(configPath, fileError) || fileError) {
+                return std::unexpected(
+                  ConfigError{ConfigErrorType::FileOperation, "配置路径不是可读取的普通文件: " + configPath.string()});
+            }
             std::ifstream input(configPath);
-            const std::string payload{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
-            json parsed;
-            if (!input || !tryParseJson(payload, parsed) || !parsed.is_object()) {
+            if (!input) {
+                return std::unexpected(ConfigError{
+                  .type = ConfigErrorType::FileOperation, .message = "无法读取配置文件: " + configPath.string()});
+            }
+            const std::string payload{std::istreambuf_iterator(input), std::istreambuf_iterator<char>()};
+            if (input.bad()) {
+                return std::unexpected(ConfigError{
+                  .type = ConfigErrorType::FileOperation, .message = "配置文件读取失败: " + configPath.string()});
+            }
+            input.close();
+            if (json parsed; !tryParseJson(payload, parsed) || !parsed.is_object()) {
                 const auto timestamp =
                   std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch())
                     .count();
@@ -223,7 +260,8 @@ namespace insoulforge::ConfigStore {
                 std::error_code error;
                 std::filesystem::rename(configPath, backupPath, error);
                 if (error) {
-                    throw std::runtime_error("无法备份损坏的配置文件: " + error.message());
+                    return std::unexpected(ConfigError{
+                      .type = ConfigErrorType::FileOperation, .message = "无法备份损坏的配置文件: " + error.message()});
                 }
                 Logger::error(
                   0, "Config", fmt::format("配置文件格式无效，已备份为 {} 并重建默认配置", backupPath.string()));
@@ -236,15 +274,20 @@ namespace insoulforge::ConfigStore {
         }
 
         needsWrite = normalizeExecutionConfig(config) || needsWrite;
+        if (auto result = validate(config); !result) {
+            return result;
+        }
+        if (needsWrite) {
+            if (auto result = writeConfigFile(configPath, config); !result) {
+                return result;
+            }
+        }
         fileState.path = configPath;
         fileState.content = std::move(config);
         fileState.initialized = true;
-        if (needsWrite) {
-            writeConfigFile(fileState.path, fileState.content);
-            Logger::info(0, "Config", fmt::format("全局配置文件已初始化: {}", fileState.path.string()));
-        } else {
-            Logger::info(0, "Config", fmt::format("全局配置文件已加载: {}", fileState.path.string()));
-        }
+        Logger::info(
+          0, "Config", fmt::format("全局配置文件已{}: {}", needsWrite ? "初始化" : "加载", configPath.string()));
+        return {};
     }
 
     auto getLLMConfig(const std::string &name) -> json {
@@ -253,7 +296,12 @@ namespace insoulforge::ConfigStore {
         return it == llm.end() ? json{} : *it;
     }
 
-    void saveLLMConfig(const std::string &name, const json &config) {
+    auto saveLLMConfig(const std::string &name, const json &config, const ConfigValidator &validate)
+      -> std::expected<void, ConfigError> {
+        if (name.empty() || !config.is_object()) {
+            return std::unexpected(ConfigError{
+              .type = ConfigErrorType::InvalidArgument, .message = "模型名称不能为空，配置必须是 JSON 对象"});
+        }
         json llm = getSection("llm");
         json persistedConfig = config;
         persistedConfig.erase("name");
@@ -275,42 +323,56 @@ namespace insoulforge::ConfigStore {
             persistedConfig.erase("minConfidence");
         }
         llm[name] = std::move(persistedConfig);
-        saveSection("llm", std::move(llm));
+        if (auto result = saveSection("llm", std::move(llm), validate); !result) {
+            return result;
+        }
         Logger::info(0, "Config", fmt::format("LLM 配置已保存: {}", name));
+        return {};
     }
 
     auto getAllLLMConfigs() -> json { return getSection("llm"); }
 
     auto getQQConfig() -> json { return getSection("qq"); }
 
-    void saveQQConfig(const json &config) {
-        saveSection("qq", config);
+    auto saveQQConfig(const json &config, const ConfigValidator &validate) -> std::expected<void, ConfigError> {
+        if (auto result = saveSection("qq", config, validate); !result) {
+            return result;
+        }
         Logger::info(0, "Config", fmt::format("QQ Bot 配置已保存"));
+        return {};
     }
 
     auto getMemoryConfig() -> json { return getSection("memory"); }
 
-    void saveMemoryConfig(const json &config) {
-        saveSection("memory", config);
+    auto saveMemoryConfig(const json &config, const ConfigValidator &validate) -> std::expected<void, ConfigError> {
+        if (auto result = saveSection("memory", config, validate); !result) {
+            return result;
+        }
         Logger::info(0, "Config", fmt::format("记忆配置已保存"));
+        return {};
     }
 
     auto getExecutionConfig() -> json { return getSection("execution"); }
 
-    void saveExecutionConfig(const json &config) {
+    auto saveExecutionConfig(const json &config, const ConfigValidator &validate) -> std::expected<void, ConfigError> {
         if (!config.is_object() || !validToolRounds(atOrNull(config, "maxToolRounds"))) {
-            throw std::invalid_argument("最大工具迭代轮数必须是 1 到 100 之间的整数");
+            return std::unexpected(ConfigError{
+              .type = ConfigErrorType::InvalidArgument, .message = "最大工具迭代轮数必须是 1 到 100 之间的整数"});
         }
 
-        ensureInitialized();
         auto &fileState = state();
         std::scoped_lock lock(fileState.mutex);
+        requireInitializedLocked();
         auto nextConfig = fileState.content;
         nextConfig["execution"].update(config);
-        writeConfigFile(fileState.path, nextConfig);
+        if (auto result = validate(nextConfig); !result) {
+            return result;
+        }
+        if (auto result = writeConfigFile(fileState.path, nextConfig); !result) {
+            return result;
+        }
         fileState.content = std::move(nextConfig);
-        // 与配置文件在同一个锁内更新，避免并发保存使运行时值回退。
-        Config::instance().execution.maxToolRounds.store(config["maxToolRounds"].get<i32>(), std::memory_order_relaxed);
         Logger::info(0, "Config", "执行配置已保存");
+        return {};
     }
 } // namespace insoulforge::ConfigStore

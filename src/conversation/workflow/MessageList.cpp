@@ -9,14 +9,16 @@
 #include <infrastructure/config/Config.hpp>
 
 namespace insoulforge {
-    MessageList::MessageList(const u64 sessionId) : m_sessionId(sessionId) {
+    MessageList::MessageList(const u64 sessionId, const Database &database, const Config &config) :
+        m_sessionId(sessionId), m_database(database), m_config(config) {
         // 总结任务完成前不能丢失其待删除前缀；模型可见范围由 snapshotLocked 单独限制。
-        for (const json &record: ChatRecordStore::getChatRecords(sessionId, std::numeric_limits<i32>::max())) {
+        for (const json &record:
+          ChatRecordStore::getChatRecords(m_database, sessionId, std::numeric_limits<i32>::max())) {
             if (json message; tryParseJson(getStr(record, "content"), message) && message.is_object()) {
                 m_messages.push_back(std::move(message));
             }
         }
-        m_summaryBatchPending = ConversationMaintenanceService::hasPendingMemorySummary(sessionId);
+        m_summaryBatchPending = ConversationMaintenanceService::hasPendingMemorySummary(m_database, sessionId);
     }
 
     auto MessageList::append(json message) -> std::optional<MessageListAppendResult> {
@@ -34,7 +36,8 @@ namespace insoulforge {
 
     auto MessageList::removeCompletedSummaryMessages() -> std::optional<MemorySummaryBatch> {
         std::lock_guard lock(m_mutex);
-        while (const auto completed = ConversationMaintenanceService::takeCompletedMemorySummary(m_sessionId)) {
+        while (
+          const auto completed = ConversationMaintenanceService::takeCompletedMemorySummary(m_database, m_sessionId)) {
             const size_t count = std::min(*completed, m_messages.size());
             for (size_t index = 0; index < count; ++index) {
                 m_messages.pop_front();
@@ -61,16 +64,17 @@ namespace insoulforge {
 
     void MessageList::flushToStorage() const {
         const json currentMessages = fullSnapshot();
-        ChatRecordStore::clearSessionChatRecords(m_sessionId);
+        ChatRecordStore::clearSessionChatRecords(m_database, m_sessionId);
         for (const json &message: currentMessages) {
             const bool isAssistant = getStr(atOrNull(message, "sender"), "qq") == "self";
-            ChatRecordStore::addChatRecord(m_sessionId, isAssistant ? "assistant" : "user", dumpJson(message));
+            ChatRecordStore::addChatRecord(
+              m_database, m_sessionId, isAssistant ? "assistant" : "user", dumpJson(message));
         }
     }
 
     auto MessageList::snapshotLocked() const -> json {
         json result = json::array();
-        const size_t limit = static_cast<size_t>(std::max(Config::instance().contextWindowLimit, 1));
+        const size_t limit = static_cast<size_t>(std::max(m_config.contextWindowLimit, 1));
         const size_t first = m_messages.size() > limit ? m_messages.size() - limit : 0;
         for (size_t index = first; index < m_messages.size(); ++index) {
             result.push_back(m_messages[index]);
@@ -87,7 +91,7 @@ namespace insoulforge {
     }
 
     auto MessageList::createSummaryBatchLocked() -> std::optional<MemorySummaryBatch> {
-        const auto &config = Config::instance();
+        const auto &config = m_config;
         if (const size_t trigger = static_cast<size_t>(std::max(config.memorySummaryTriggerCount, 1));
           m_summaryBatchPending || m_messages.size() < trigger) {
             return std::nullopt;

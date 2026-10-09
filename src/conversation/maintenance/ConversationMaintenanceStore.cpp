@@ -19,8 +19,7 @@ namespace insoulforge::ConversationMaintenanceStore {
         }
     } // namespace
 
-    void enqueue(const u64 sessionId, const json &messages, const json &contextMessages) {
-        const auto &database = Database::instance();
+    void enqueue(const Database &database, const u64 sessionId, const json &messages, const json &contextMessages) {
         std::unique_lock lock(database.mutex());
         sqlite3 *handle = database.handle();
         executeOrThrow(handle, "BEGIN IMMEDIATE");
@@ -44,5 +43,9 @@ namespace insoulforge::ConversationMaintenanceStore {
             sqlite3_exec(handle, "ROLLBACK", nullptr, nullptr, nullptr);
             throw;
         }
+    }
+
+    void enqueue(const u64 sessionId, const json &messages, const json &contextMessages) {
+        enqueue(Database::instance(), sessionId, messages, contextMessages);
     }
 } // namespace insoulforge::ConversationMaintenanceStore

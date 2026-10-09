@@ -12,8 +12,8 @@
 #include <include/agent/tools/ToolRegistry.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
-#include <infrastructure/config/ConfigStore.hpp>
 #include <infrastructure/logging/Logger.hpp>
+#include <infrastructure/storage/Database.hpp>
 #include <llm/prompts/PromptStore.hpp>
 
 using namespace insoulforge;
@@ -23,7 +23,7 @@ using namespace drogon;
 
 auto AdminController::getLLMConfigs(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
   -> Task<> {
-    const auto configs = ConfigStore::getAllLLMConfigs();
+    const auto configs = Config::instance().getAllLLMConfigs();
     callback(jsonResponse(configs));
     co_return;
 }
@@ -31,61 +31,17 @@ auto AdminController::getLLMConfigs(HttpRequestPtr req, std::function<void(const
 auto AdminController::saveLLMConfig(
   const HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const -> Task<> {
     const auto body = parseJsonBody(req);
-    if (!body || !body->contains("name")) {
-        callback(jsonResponse(AdminResponse::errorJson("缺少name字段")));
+    if (!body || !body->is_object() || !body->contains("name")) {
+        callback(AdminResponse::configErrorResponse(
+          {ConfigErrorType::InvalidArgument, "模型配置必须是包含 name 字段的 JSON 对象"}));
         co_return;
     }
 
     const std::string name = getStr(*body, "name");
-    if (name == "jev" && body->contains("minConfidence")) {
-        const json &value = (*body)["minConfidence"];
-        const f64 confidence = jsonToDouble(value, -1.0);
-        if (!value.is_number() || !std::isfinite(confidence) || confidence < 0.0 || confidence > 1.0) {
-            callback(jsonResponse(AdminResponse::errorJson("Jev 置信度阈值必须在 0 到 1 之间")));
-            co_return;
-        }
-    }
-    ConfigStore::saveLLMConfig(name, *body);
-
-    // 更新内存中的配置
-    struct ConfigTarget {
-        std::string_view name;
-        LLMApiConfig *api;
-        LLMModelParams *params; // nullptr 表示该配置没有模型参数
-        i32 defaultMaxTokens;
-    };
-    auto &config = Config::instance();
-    const std::array targets{
-      ConfigTarget{.name = "router", .api = &config.router, .params = &config.routerParams, .defaultMaxTokens = 100},
-      ConfigTarget{
-        .name = "executor", .api = &config.executor, .params = &config.executorParams, .defaultMaxTokens = 100},
-      ConfigTarget{.name = "executorThinking",
-        .api = &config.executorThinking,
-        .params = &config.executorThinkingParams,
-        .defaultMaxTokens = 512},
-      ConfigTarget{.name = "image", .api = &config.image, .params = &config.imageParams, .defaultMaxTokens = 1024},
-      ConfigTarget{.name = "imageGeneration", .api = &config.imageGeneration, .params = nullptr, .defaultMaxTokens = 0},
-      ConfigTarget{.name = "memory", .api = &config.memory, .params = &config.memoryParams, .defaultMaxTokens = 4000},
-      ConfigTarget{.name = "embedding", .api = &config.embedding, .params = nullptr, .defaultMaxTokens = 0},
-      // Jev 同 embedding 一样无采样参数，补进目标列表使保存后即时生效，无需重启。
-      ConfigTarget{.name = "jev", .api = &config.jev, .params = nullptr, .defaultMaxTokens = 0},
-    };
-
-    if (const auto it = std::ranges::find(targets, name, &ConfigTarget::name); it != targets.end()) {
-        auto &api = *it->api;
-        api.apiKey = getStr(*body, "apiKey");
-        api.baseUrl = getStr(*body, "baseUrl");
-        api.path = getStr(*body, "path");
-        api.model = getStr(*body, "model");
-        api.reasoningEffort = getStr(*body, "reasoningEffort");
-        if (it->params) {
-            it->params->maxTokens = getInt(*body, "maxTokens", it->defaultMaxTokens);
-            it->params->temperature = getDouble(*body, "temperature", 0.7);
-            it->params->topP = getDouble(*body, "topP", getDouble(*body, "top_P", 0.9));
-        }
-        if (name == "jev") {
-            config.jevMinConfidence = getDouble(ConfigStore::getLLMConfig("jev"), "minConfidence", 0.6);
-        }
+    if (auto result = Config::instance().saveLLMConfig(name, *body); !result) {
+        Logger::error(0, "Config", result.error().message);
+        callback(AdminResponse::configErrorResponse(result.error()));
+        co_return;
     }
 
     callback(jsonResponse(AdminResponse::okJson("LLM配置已保存")));
@@ -96,7 +52,7 @@ auto AdminController::saveLLMConfig(
 
 auto AdminController::getExecutionConfig(
   HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const -> Task<> {
-    callback(jsonResponse(ConfigStore::getExecutionConfig()));
+    callback(jsonResponse(Config::instance().getExecutionConfig()));
     co_return;
 }
 
@@ -110,19 +66,12 @@ auto AdminController::saveExecutionConfig(
         co_return;
     }
 
-    try {
-        ConfigStore::saveExecutionConfig(*body);
-        callback(jsonResponse(AdminResponse::okJson("执行配置已保存")));
-    } catch (const std::invalid_argument &error) {
-        auto response = jsonResponse(AdminResponse::failJson(error.what()));
-        response->setStatusCode(k400BadRequest);
-        callback(response);
-    } catch (const std::exception &error) {
-        Logger::error(0, "Config", fmt::format("执行配置保存失败: {}", error.what()));
-        auto response = jsonResponse(AdminResponse::failJson("执行配置保存失败，请检查配置文件是否可写"));
-        response->setStatusCode(k500InternalServerError);
-        callback(response);
+    if (auto result = Config::instance().saveExecutionConfig(*body); !result) {
+        Logger::error(0, "Config", result.error().message);
+        callback(AdminResponse::configErrorResponse(result.error()));
+        co_return;
     }
+    callback(jsonResponse(AdminResponse::okJson("执行配置已保存")));
     co_return;
 }
 
@@ -231,7 +180,14 @@ auto AdminController::addCustomTool(HttpRequestPtr req, std::function<void(const
     const i32 id = ToolStore::addCustomTool(tool);
 
     // 立即注册到 ToolRegistry
-    ToolRuntime::reloadCustomTools();
+    if (auto result = ToolRuntime::reloadCustomTools(Database::instance()); !result) {
+        Logger::error(0, "Tool", result.error());
+        auto response =
+          jsonResponse(AdminResponse::failJson("工具数据可能已保存，但运行时重载失败: " + result.error()));
+        response->setStatusCode(k500InternalServerError);
+        callback(response);
+        co_return;
+    }
 
     json resp = AdminResponse::okJson("自定义工具已添加");
     resp["id"] = id;
@@ -271,7 +227,14 @@ auto AdminController::updateCustomTool(
     ToolStore::updateCustomTool(tool);
 
     // 重新注册工具
-    ToolRuntime::reloadCustomTools();
+    if (auto result = ToolRuntime::reloadCustomTools(Database::instance()); !result) {
+        Logger::error(0, "Tool", result.error());
+        auto response =
+          jsonResponse(AdminResponse::failJson("工具数据可能已保存，但运行时重载失败: " + result.error()));
+        response->setStatusCode(k500InternalServerError);
+        callback(response);
+        co_return;
+    }
 
     callback(jsonResponse(AdminResponse::okJson("自定义工具已更新")));
     co_return;
@@ -283,7 +246,14 @@ auto AdminController::deleteCustomTool(
     ToolStore::deleteCustomTool(toolId);
 
     // 重新注册工具（移除已删除的）
-    ToolRuntime::reloadCustomTools();
+    if (auto result = ToolRuntime::reloadCustomTools(Database::instance()); !result) {
+        Logger::error(0, "Tool", result.error());
+        auto response =
+          jsonResponse(AdminResponse::failJson("工具数据可能已保存，但运行时重载失败: " + result.error()));
+        response->setStatusCode(k500InternalServerError);
+        callback(response);
+        co_return;
+    }
 
     callback(jsonResponse(AdminResponse::okJson("自定义工具已删除")));
     co_return;
@@ -295,7 +265,14 @@ auto AdminController::toggleCustomTool(
     ToolStore::toggleCustomTool(toolId);
 
     // 重新注册工具
-    ToolRuntime::reloadCustomTools();
+    if (auto result = ToolRuntime::reloadCustomTools(Database::instance()); !result) {
+        Logger::error(0, "Tool", result.error());
+        auto response =
+          jsonResponse(AdminResponse::failJson("工具数据可能已保存，但运行时重载失败: " + result.error()));
+        response->setStatusCode(k500InternalServerError);
+        callback(response);
+        co_return;
+    }
 
     callback(jsonResponse(AdminResponse::okJson("工具状态已切换")));
     co_return;
@@ -303,7 +280,14 @@ auto AdminController::toggleCustomTool(
 
 auto AdminController::reloadCustomTools(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
   -> Task<> {
-    ToolRuntime::reloadCustomTools();
+    if (auto result = ToolRuntime::reloadCustomTools(Database::instance()); !result) {
+        Logger::error(0, "Tool", result.error());
+        auto response =
+          jsonResponse(AdminResponse::failJson("工具数据可能已保存，但运行时重载失败: " + result.error()));
+        response->setStatusCode(k500InternalServerError);
+        callback(response);
+        co_return;
+    }
 
     callback(jsonResponse(AdminResponse::okJson("自定义工具已重新加载")));
     co_return;
@@ -495,7 +479,14 @@ auto AdminController::importCustomTool(HttpRequestPtr req, std::function<void(co
 
     // 添加到数据库
     i32 newId = ToolStore::addCustomTool(tool);
-    ToolRuntime::reloadCustomTools();
+    if (auto result = ToolRuntime::reloadCustomTools(Database::instance()); !result) {
+        Logger::error(0, "Tool", result.error());
+        auto response =
+          jsonResponse(AdminResponse::failJson("工具数据可能已保存，但运行时重载失败: " + result.error()));
+        response->setStatusCode(k500InternalServerError);
+        callback(response);
+        co_return;
+    }
 
     Logger::info(0, "Admin", fmt::format("导入自定义工具: {} (ID: {})", tool.name, newId));
 

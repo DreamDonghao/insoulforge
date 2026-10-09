@@ -10,8 +10,7 @@
 namespace insoulforge {
     namespace ToolStore {
         namespace {
-            std::vector<CustomTool> loadCustomTools(const bool onlyEnabled) {
-                const auto &db = Database::instance();
+            std::vector<CustomTool> loadCustomTools(const Database &db, const bool onlyEnabled) {
                 std::shared_lock lock(db.mutex());
                 std::vector<CustomTool> tools;
                 const Statement stmt(
@@ -36,9 +35,11 @@ namespace insoulforge {
             }
         } // namespace
 
-        std::vector<CustomTool> getCustomTools() { return loadCustomTools(false); }
+        std::vector<CustomTool> getCustomTools() { return loadCustomTools(Database::instance(), false); }
 
-        std::vector<CustomTool> getEnabledCustomTools() { return loadCustomTools(true); }
+        std::vector<CustomTool> getEnabledCustomTools(const Database &database) {
+            return loadCustomTools(database, true);
+        }
 
         i32 addCustomTool(const CustomTool &tool) {
             const auto &db = Database::instance();
