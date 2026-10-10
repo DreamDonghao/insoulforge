@@ -66,6 +66,9 @@ namespace insoulforge {
         /// @note 线程安全。用于管理后台展示；结果不受模型上下文窗口长度限制。
         [[nodiscard]] auto getSessionMessages(u64 sessionId) -> std::optional<json>;
 
+        /// @brief 清空会话的内存消息与持久化恢复副本，保留启用状态与已提取记忆。
+        void clearSessionMessages(u64 sessionId);
+
         /// @brief 将 OneBot 上报事件加入处理流程
         /// @param body 已通过 HTTP JSON 校验的 OneBot 事件对象
         /// @details 归一化并检查机器人状态、发送者后入队；会话尚无预处理任务时启动协程。

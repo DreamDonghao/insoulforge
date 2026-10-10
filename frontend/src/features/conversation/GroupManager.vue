@@ -217,14 +217,20 @@ const deleteRecord = async (recordId: number): Promise<void> => {
 // 清空当前会话的聊天记录
 const clearGroupRecords = async (): Promise<void> => {
   if (!selectedGroup.value) return
-  if (!confirm('确定清空该群的所有聊天记录？此操作不可恢复！')) return
+  if (!confirm('确定清空该会话的所有聊天记录？此操作不可恢复！')) return
 
-  const resp = await fetch(`/admin/api/chat-records/${selectedGroup.value}/clear`, {method: 'DELETE'})
-  const data: ApiResponse = await resp.json()
-  if (data.success) {
+  try {
+    const resp = await fetch(`/admin/api/chat-records/${selectedGroup.value}/clear`, {method: 'DELETE'})
+    const data: ApiResponse = await resp.json()
+    if (!resp.ok || !data.success) {
+      showToast!(data.error || '清空失败', true)
+      return
+    }
     chatRecords.value = []
     showToast!('聊天记录已清空')
     await loadGroups()
+  } catch {
+    showToast!('清空失败，请检查网络与后端服务', true)
   }
 }
 

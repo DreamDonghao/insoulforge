@@ -60,6 +60,9 @@ namespace insoulforge {
         /// @brief 将当前完整列表持久化为会话的恢复副本
         void flushToStorage() const;
 
+        /// @brief 清空内存消息和数据库恢复副本；不取消正在执行的回复或记忆任务。
+        void clear();
+
     private:
         /// @brief 生成锁保护下模型可见的最近消息快照
         [[nodiscard]] auto snapshotLocked() const -> json;
@@ -76,5 +79,6 @@ namespace insoulforge {
         mutable std::mutex m_mutex; ///< 保护消息、总结批次状态与快照生成
         std::deque<json> m_messages; ///< 按时间顺序保存的完整消息
         bool m_summaryBatchPending{false}; ///< 是否已有尚未完成的总结任务
+        bool m_discardSummaryRemoval{false}; ///< 清空后旧总结完成时不得删除新消息
     };
 } // namespace insoulforge

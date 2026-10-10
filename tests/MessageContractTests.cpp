@@ -1317,6 +1317,25 @@ namespace {
         check(
           restored.snapshot() == fourth->messageSnapshot, "startup restoration rebuilds retained snapshot", kTestName);
 
+        messages.clear();
+        check(messages.fullSnapshot().empty(), "clear removes runtime messages", kTestName);
+        check(insoulforge::ChatRecordStore::getChatRecords(100).empty(), "clear removes stored messages", kTestName);
+        messages.flushToStorage();
+        check(insoulforge::ChatRecordStore::getChatRecords(100).empty(), "flush does not resurrect cleared messages", kTestName);
+
+        static_cast<void>(messages.append(makeMessage(5)));
+        static_cast<void>(messages.append(makeMessage(6)));
+        const auto pending = messages.append(makeMessage(7));
+        insoulforge::MemoryMaintenanceStore::enqueue(100, pending->summaryBatch->messages,
+          pending->summaryBatch->contextMessages, pending->summaryBatch->messages.size());
+        const auto oldJob = insoulforge::MemoryMaintenanceStore::next(100);
+        messages.clear();
+        static_cast<void>(messages.append(makeMessage(8)));
+        insoulforge::MemoryMaintenanceStore::complete(oldJob->id, 100, std::nullopt, {});
+        static_cast<void>(messages.removeCompletedSummaryMessages());
+        check(messages.fullSnapshot().size() == 1 && messages.fullSnapshot()[0]["message_id"] == "8",
+          "old summary completion cannot delete messages received after clear", kTestName);
+
         config.contextWindowLimit = originalContextLimit;
         config.memorySummaryTriggerCount = originalTriggerCount;
         config.memorySummaryBatchSize = originalBatchSize;

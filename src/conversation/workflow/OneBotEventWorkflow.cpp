@@ -190,6 +190,15 @@ namespace insoulforge {
         return sessionState->messageList()->fullSnapshot();
     }
 
+    void OneBotEventWorkflow::clearSessionMessages(const u64 sessionId) {
+        std::lock_guard lock(m_sessionsMutex);
+        if (const auto found = m_sessions.find(sessionId); found != m_sessions.end()) {
+            found->second->messageList()->clear();
+        } else {
+            ChatRecordStore::clearSessionChatRecords(sessionId);
+        }
+    }
+
     auto OneBotEventWorkflow::getOrCreateSessionState(const u64 sessionId) -> std::shared_ptr<SessionWorkflowState> {
         std::lock_guard lock(m_sessionsMutex);
         if (const auto found = m_sessions.find(sessionId); found != m_sessions.end()) {
