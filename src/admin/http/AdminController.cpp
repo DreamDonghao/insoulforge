@@ -405,7 +405,7 @@ auto AdminController::getGroups(HttpRequestPtr req, std::function<void(const Htt
 auto AdminController::enableSession(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
   -> Task<> {
     auto body = parseJsonBody(req);
-    if (!body || (!body->contains("sessionId") && !body->contains("userId"))) {
+    if (!body || (!body->contains("groupId") && !body->contains("userId"))) {
         callback(jsonResponse(AdminResponse::errorJson("缺少groupId或userId字段")));
         co_return;
     }

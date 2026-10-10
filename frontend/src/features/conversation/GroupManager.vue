@@ -23,15 +23,17 @@ const wsObj = inject<{ get: () => WebSocket | null }>('ws')
 // 会话列表
 const groups: Ref<(Group & { enabled?: boolean })[]> = ref([])
 const loading: Ref<boolean> = ref(false)
-const newGroupId: Ref<number | undefined> = ref(undefined)
-const saving: Ref<boolean> = ref(false)
-// 添加与筛选
-const addType: Ref<'group' | 'private'> = ref('group')
+// 会话筛选
+const searchKeyword = ref('')
 const typeFilter: Ref<'all' | 'group' | 'private'> = ref('all')
 const filteredGroups = computed(() => {
-  if (typeFilter.value === 'all') return groups.value
-  return groups.value.filter(g =>
-      typeFilter.value === 'private' ? isPrivateSession(g) : !isPrivateSession(g))
+  const keyword = searchKeyword.value.trim().toLowerCase()
+  return groups.value.filter(g => {
+    const matchesType = typeFilter.value === 'all' ||
+        (typeFilter.value === 'private' ? isPrivateSession(g) : !isPrivateSession(g))
+    return matchesType && (!keyword ||
+        `${g.groupName ?? ''} ${g.userId ?? ''} ${sessionKey(g)}`.toLowerCase().includes(keyword))
+  })
 })
 
 // 会话 ID 的字符串形式（私聊会话 ID 带标志位，超过 JS Number 安全范围，须以字符串操作）
@@ -87,35 +89,6 @@ const loadGroups = async (): Promise<void> => {
     groups.value = []
   } finally {
     loading.value = false
-  }
-}
-
-// 添加会话（群聊按群号，私聊按 QQ 号，私聊会话 ID 由后端构造）
-const addGroup = async (): Promise<void> => {
-  if (!newGroupId.value) {
-    showToast!(addType.value === 'private' ? '请输入QQ号' : '请输入群号', true)
-    return
-  }
-  saving.value = true
-  try {
-    const body = addType.value === 'private'
-        ? {sessionType: 'private', userId: newGroupId.value}
-        : {groupId: newGroupId.value}
-    const resp = await fetch('/admin/api/group', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body)
-    })
-    const data: ApiResponse = await resp.json()
-    if (data.success) {
-      showToast!('会话已添加')
-      newGroupId.value = undefined
-      await loadGroups()
-    } else {
-      showToast!(data.error || '添加失败', true)
-    }
-  } finally {
-    saving.value = false
   }
 }
 
@@ -609,31 +582,6 @@ onUnmounted(restoreWebSocket)
     </div>
 
     <template v-if="!selectedGroup">
-      <!-- 添加会话 -->
-      <div class="card" style="padding: 12px 16px; margin-bottom: 16px;">
-        <div class="card-header" style="padding: 0 0 12px 0; margin-bottom: 0;">
-          <h3 class="card-title" style="font-size: 15px; margin-bottom: 0;">添加会话</h3>
-        </div>
-        <div style="display: flex; gap: 12px; align-items: flex-end; margin-bottom: 8px;">
-          <div class="form-group" style="width: 140px; margin: 0;">
-            <label class="form-label" style="margin-bottom: 4px;">类型</label>
-            <select v-model="addType" class="form-input" style="height: 36px; padding: 0 8px; font-size: 13px;">
-              <option value="group">群聊</option>
-              <option value="private">私聊</option>
-            </select>
-          </div>
-          <div class="form-group" style="flex: 1; max-width: 300px; margin: 0;">
-            <label class="form-label" style="margin-bottom: 4px;">{{ addType === 'private' ? 'QQ号' : '群号' }}</label>
-            <input v-model.number="newGroupId" :placeholder="addType === 'private' ? '输入QQ号' : '输入群号'"
-                   class="form-input" style="height: 36px; padding: 0 8px; font-size: 13px;" type="number">
-          </div>
-          <button :disabled="saving" class="btn btn-success" style="height: 36px; line-height: 36px; padding: 0 16px;"
-                  @click="addGroup">
-            {{ saving ? '添加中...' : '添加' }}
-          </button>
-        </div>
-      </div>
-
       <!-- 会话列表 -->
       <div class="card">
         <div class="card-header">
@@ -644,7 +592,9 @@ onUnmounted(restoreWebSocket)
               {{ wsConnected ? '实时连接' : '未连接' }}
             </div>
           </div>
-          <div style="display: flex; gap: 8px; align-items: center;">
+          <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+            <input v-model="searchKeyword" aria-label="搜索会话" class="form-input"
+                   placeholder="搜索名称、群号或 QQ 号" type="search" style="width: 240px; max-width: 100%;">
             <div class="filter-tabs">
               <button :class="{ active: typeFilter === 'all' }" class="filter-tab"
                       @click="typeFilter = 'all'">全部
@@ -669,7 +619,7 @@ onUnmounted(restoreWebSocket)
           <template v-else-if="filteredGroups.length === 0">
             <div class="empty-state">
               <div class="empty-icon">👥</div>
-              <p>暂无会话，请添加或由用户在私聊中发送 /enable 启用</p>
+              <p>{{ groups.length ? '没有符合筛选条件的会话' : '暂无会话，请通过 /enable 命令启用' }}</p>
             </div>
           </template>
           <template v-else>
