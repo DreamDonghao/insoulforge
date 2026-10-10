@@ -23,12 +23,23 @@ const limit = ref(200)
 const logListEl = ref<HTMLElement | null>(null)
 let logWs: WebSocket | null = null
 let reconnectTimer: number | undefined
+let scrollFrame: number | undefined
+let forceScroll = false
+let disposed = false
 
-const scrollToBottom = async (): Promise<void> => {
+const scrollToBottom = async (force = false): Promise<void> => {
+  forceScroll ||= force
+  if (scrollFrame !== undefined || disposed) return
   await nextTick()
-  if (logListEl.value) {
-    logListEl.value.scrollTop = logListEl.value.scrollHeight
-  }
+  if (scrollFrame !== undefined || disposed) return
+  // 同一帧内的日志共用一次布局读取和滚动，避免逐条强制布局。
+  scrollFrame = window.requestAnimationFrame(() => {
+    scrollFrame = undefined
+    if ((forceScroll || followLatest.value) && logListEl.value) {
+      logListEl.value.scrollTop = logListEl.value.scrollHeight
+    }
+    forceScroll = false
+  })
 }
 
 // 会话展示辅助：私聊会话 ID 带标志位（超过 JS Number 安全范围），需按字符串/BigInt 处理
@@ -38,9 +49,10 @@ const sessionLabel = (g: Group): string =>
     g.sessionType === 'private'
         ? g.groupName ? `${g.groupName} (${g.userId ?? ''})` : `私聊 ${g.userId ?? ''}`
         : g.groupName || `群 ${g.groupId}`
+const groupLabels = computed(() => new Map(groups.value.map(g => [sessionKey(g), sessionLabel(g)])))
 const groupTag = (sessionId: string): string => {
-  const g = groups.value.find(item => sessionKey(item) === sessionId)
-  if (g) return sessionLabel(g)
+  const label = groupLabels.value.get(sessionId)
+  if (label) return label
   try {
     return (BigInt(sessionId) & PRIVATE_FLAG) !== 0n
         ? `私聊 ${BigInt(sessionId) & ~PRIVATE_FLAG}`
@@ -70,6 +82,7 @@ const subscribe = (): void => {
 }
 
 const connectWebSocket = (): void => {
+  if (disposed) return
   if (logWs && logWs.readyState <= WebSocket.OPEN) return
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
   logWs = new WebSocket(`${protocol}//${location.host}/admin/logs/ws`)
@@ -119,7 +132,7 @@ const applySnapshot = (data: LogQueryResult, append = false): void => {
     entries.value = [...list, ...entries.value]
   } else {
     entries.value = list
-    void scrollToBottom()
+    void scrollToBottom(true)
   }
   hasMore.value = data.hasMore
   nextBeforeId.value = data.nextBeforeId || 0
@@ -165,7 +178,7 @@ const handleWsMessage = (event: MessageEvent<string>): void => {
     const entry = payload.data as LogEntry
     const lastEntry = entries.value.length > 0 ? entries.value[entries.value.length - 1] : undefined
     if (entry.id > (lastEntry?.id || 0)) {
-      entries.value = [...entries.value, entry]
+      entries.value.push(entry)
       if (followLatest.value) void scrollToBottom()
     }
   } else if (payload.type === 'status' && payload.data && 'size' in payload.data) {
@@ -191,7 +204,11 @@ onMounted(async () => {
   connectWebSocket()
 })
 
-onUnmounted(() => disconnectWebSocket())
+onUnmounted(() => {
+  disposed = true
+  disconnectWebSocket()
+  if (scrollFrame !== undefined) window.cancelAnimationFrame(scrollFrame)
+})
 </script>
 
 <template>
@@ -241,7 +258,8 @@ onUnmounted(() => disconnectWebSocket())
     <div class="card log-list-card">
       <div ref="logListEl" class="log-list" @scroll="onScroll">
         <div v-if="entries.length === 0" class="log-empty">暂无日志</div>
-        <div v-for="entry in entries" :key="entry.id" :class="['log-line', levelClass(entry.level)]">
+        <div v-for="entry in entries" :key="entry.id" v-memo="[entry, groupLabels]"
+             :class="['log-line', levelClass(entry.level)]">
           <span class="log-time">{{ entry.timestamp }}</span>
           <span class="log-level">{{ entry.level }}</span>
           <span :title="entry.sessionId === '0' ? '系统' : groupTag(entry.sessionId)" class="log-group">{{

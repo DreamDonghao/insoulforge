@@ -3,25 +3,25 @@
  * @file App.vue
  * @brief 主应用组件 - 管理后台入口
  */
-import {computed, onMounted, provide, reactive, ref, type Ref} from 'vue'
+import {defineAsyncComponent, computed, onMounted, onUnmounted, provide, reactive, ref, type Ref} from 'vue'
 import {useToast} from './composables/useToast'
 import type {QQConfig as QQConfigType} from './vite-env.d'
 
 import NavIcon from './components/NavIcon.vue'
-import Dashboard from './features/overview/Dashboard.vue'
-import About from './features/overview/About.vue'
-import ExecutionConfig from './features/agent/ExecutionConfig.vue'
-import AccessManager from './features/access/AccessManager.vue'
-import GroupManager from './features/conversation/GroupManager.vue'
-import MemoryConfig from './features/conversation/MemoryConfig.vue'
-import LLMConfig from './features/llm/LLMConfig.vue'
-import PromptEditor from './features/llm/PromptEditor.vue'
-import UsageStats from './features/llm/UsageStats.vue'
-import OneBotConfig from './features/onebot/OneBotConfig.vue'
-import CustomTools from './features/tools/CustomTools.vue'
-import EmojiManager from './features/tools/EmojiManager.vue'
-import LogViewer from './features/diagnostics/LogViewer.vue'
-import RequestDebug from './features/diagnostics/RequestDebug.vue'
+const Dashboard = defineAsyncComponent(() => import('./features/overview/Dashboard.vue'))
+const About = defineAsyncComponent(() => import('./features/overview/About.vue'))
+const ExecutionConfig = defineAsyncComponent(() => import('./features/agent/ExecutionConfig.vue'))
+const AccessManager = defineAsyncComponent(() => import('./features/access/AccessManager.vue'))
+const GroupManager = defineAsyncComponent(() => import('./features/conversation/GroupManager.vue'))
+const MemoryConfig = defineAsyncComponent(() => import('./features/conversation/MemoryConfig.vue'))
+const LLMConfig = defineAsyncComponent(() => import('./features/llm/LLMConfig.vue'))
+const PromptEditor = defineAsyncComponent(() => import('./features/llm/PromptEditor.vue'))
+const UsageStats = defineAsyncComponent(() => import('./features/llm/UsageStats.vue'))
+const OneBotConfig = defineAsyncComponent(() => import('./features/onebot/OneBotConfig.vue'))
+const CustomTools = defineAsyncComponent(() => import('./features/tools/CustomTools.vue'))
+const EmojiManager = defineAsyncComponent(() => import('./features/tools/EmojiManager.vue'))
+const LogViewer = defineAsyncComponent(() => import('./features/diagnostics/LogViewer.vue'))
+const RequestDebug = defineAsyncComponent(() => import('./features/diagnostics/RequestDebug.vue'))
 
 interface NavItem {
   key: string
@@ -110,6 +110,18 @@ const avatarFailed: Ref<boolean> = ref(false)
 // WebSocket
 const wsConnected: Ref<boolean> = ref(false)
 let ws: WebSocket | null = null
+let reconnectTimer: number | undefined
+
+const disconnectWebSocket = (): void => {
+  window.clearTimeout(reconnectTimer)
+  reconnectTimer = undefined
+  if (ws) {
+    ws.onclose = null
+    ws.close()
+    ws = null
+  }
+  wsConnected.value = false
+}
 
 const loadQQConfig = async (): Promise<void> => {
   const resp = await fetch('/admin/api/qq-config')
@@ -120,13 +132,15 @@ const loadQQConfig = async (): Promise<void> => {
 }
 
 const connectWebSocket = (): void => {
-  const wsUrl = `ws://${location.host}/admin/ws`
+  if (!authenticated.value || (ws && ws.readyState <= WebSocket.OPEN)) return
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const wsUrl = `${protocol}//${location.host}/admin/ws`
   ws = new WebSocket(wsUrl)
   ws.onopen = () => wsConnected.value = true
   ws.onclose = () => {
     wsConnected.value = false
     if (authenticated.value) {
-      setTimeout(connectWebSocket, 3000)
+      reconnectTimer = window.setTimeout(connectWebSocket, 3000)
     }
   }
 }
@@ -197,9 +211,8 @@ const loginFromUrlFragment = async (): Promise<void> => {
 
 const logout = async (): Promise<void> => {
   await fetch('/admin/api/auth/logout', {method: 'POST'})
-  ws?.close()
-  ws = null
   authenticated.value = false
+  disconnectWebSocket()
 }
 
 // 提供给子组件
@@ -217,6 +230,8 @@ onMounted(async () => {
     await initializeAdmin()
   }
 })
+
+onUnmounted(disconnectWebSocket)
 </script>
 
 <template>

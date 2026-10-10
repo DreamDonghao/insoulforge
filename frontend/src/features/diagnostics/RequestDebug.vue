@@ -3,18 +3,18 @@
  * @file RequestDebug.vue
  * @brief 请求调试 - 查看最近 HTTP 请求与响应（图片数据会被省略）
  */
-import {computed, inject, onMounted, onUnmounted, ref} from 'vue'
+import {computed, inject, onMounted, onUnmounted, ref, shallowRef} from 'vue'
 import type {HttpTraceEntry, HttpTraceListResult} from '../../vite-env.d'
 
 const showToast = inject<(msg: string, isError?: boolean) => void>('showToast')
 
-const entries = ref<HttpTraceEntry[]>([])
+const entries = shallowRef<HttpTraceEntry[]>([])
 const total = ref(0)
 const loading = ref(false)
 const keyword = ref('')
 const autoRefresh = ref(true)
 const expandNestedJson = ref(true)
-const selected = ref<HttpTraceEntry | null>(null)
+const selected = shallowRef<HttpTraceEntry | null>(null)
 let timer: number | undefined
 
 // 会话展示辅助：私聊会话 ID 带标志位（超过 JS Number 安全范围），需按 BigInt 处理
@@ -84,6 +84,10 @@ const pretty = (text: string | null | undefined): string => {
 
 const sizeOf = (text: string | null | undefined): number => text?.length ?? 0
 
+// 仅在报文或展开选项变化时格式化，刷新列表与复制操作共用结果。
+const requestText = computed(() => pretty(selected.value?.requestBody))
+const responseText = computed(() => pretty(selected.value?.responseBody))
+
 const statusClass = (status: number): string =>
     status === 0 ? 'st-none' : status < 400 ? 'st-ok' : 'st-err'
 
@@ -141,11 +145,17 @@ const downloadTrace = async (id: number): Promise<void> => {
 }
 
 const load = async (): Promise<void> => {
+  if (loading.value) return
   loading.value = true
   try {
     const resp = await fetch('/admin/api/http-traces?limit=100')
     const data: HttpTraceListResult = await resp.json()
-    entries.value = data.entries || []
+    const previous = new Map(entries.value.map(entry => [entry.id, entry]))
+    entries.value = (data.entries || []).map(entry => {
+      const old = previous.get(entry.id)
+      return old && Object.keys(entry).every(key =>
+          old[key as keyof HttpTraceEntry] === entry[key as keyof HttpTraceEntry]) ? old : entry
+    })
     total.value = data.total || 0
     // 保持选中项跟随最新数据
     if (selected.value) {
@@ -240,19 +250,19 @@ onUnmounted(() => window.clearInterval(timer))
             <div class="body-header">
               <span>请求体（{{ sizeOf(selected.requestBody) }} 字符）</span>
               <button class="btn btn-secondary btn-sm" type="button"
-                      @click="copyText(pretty(selected.requestBody), '请求体')">复制
+                      @click="copyText(requestText, '请求体')">复制
               </button>
             </div>
-            <pre class="body-content">{{ pretty(selected.requestBody) || '(无)' }}</pre>
+            <pre class="body-content">{{ requestText || '(无)' }}</pre>
           </section>
           <section class="body-section">
             <div class="body-header">
               <span>响应体（{{ sizeOf(selected.responseBody) }} 字符）</span>
               <button class="btn btn-secondary btn-sm" type="button"
-                      @click="copyText(pretty(selected.responseBody), '响应体')">复制
+                      @click="copyText(responseText, '响应体')">复制
               </button>
             </div>
-            <pre class="body-content">{{ pretty(selected.responseBody) || '(无)' }}</pre>
+            <pre class="body-content">{{ responseText || '(无)' }}</pre>
           </section>
         </template>
         <div v-else class="empty">点击左侧请求查看完整内容</div>
@@ -264,6 +274,7 @@ onUnmounted(() => window.clearInterval(timer))
 <style scoped>
 .toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   margin-bottom: 16px;
@@ -395,11 +406,13 @@ onUnmounted(() => window.clearInterval(timer))
 }
 
 .detail-card {
+  min-width: 0;
   padding: 16px;
 }
 
 .detail-meta {
   flex-wrap: wrap;
+  overflow-wrap: anywhere;
   font-size: 13px;
   color: var(--text-secondary);
   padding-bottom: 12px;

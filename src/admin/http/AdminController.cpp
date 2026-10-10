@@ -405,7 +405,7 @@ auto AdminController::getGroups(HttpRequestPtr req, std::function<void(const Htt
 auto AdminController::enableSession(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
   -> Task<> {
     auto body = parseJsonBody(req);
-    if (!body || (!body->contains("sessionId") && !body->contains("userId"))) {
+    if (!body || (!body->contains("groupId") && !body->contains("userId"))) {
         callback(jsonResponse(AdminResponse::errorJson("缺少groupId或userId字段")));
         co_return;
     }
@@ -560,7 +560,7 @@ auto AdminController::deleteChatRecord(HttpRequestPtr req, std::function<void(co
 auto AdminController::clearSessionChatRecords(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
   const std::string &sessionId) const -> Task<> {
     const u64 gid = std::stoull(sessionId);
-    ChatRecordStore::clearSessionChatRecords(gid);
+    OneBotEventWorkflow::instance().clearSessionMessages(gid);
 
     callback(jsonResponse(AdminResponse::okJson("聊天记录已清空")));
     co_return;

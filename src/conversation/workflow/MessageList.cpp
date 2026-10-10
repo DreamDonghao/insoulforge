@@ -38,11 +38,12 @@ namespace insoulforge {
         std::lock_guard lock(m_mutex);
         while (
           const auto completed = ConversationMaintenanceService::takeCompletedMemorySummary(m_database, m_sessionId)) {
-            const size_t count = std::min(*completed, m_messages.size());
+            const size_t count = m_discardSummaryRemoval ? 0 : std::min(*completed, m_messages.size());
             for (size_t index = 0; index < count; ++index) {
                 m_messages.pop_front();
             }
             m_summaryBatchPending = false;
+            m_discardSummaryRemoval = false;
         }
         return createSummaryBatchLocked();
     }
@@ -50,6 +51,7 @@ namespace insoulforge {
     void MessageList::cancelSummaryBatch() {
         std::lock_guard lock(m_mutex);
         m_summaryBatchPending = false;
+        m_discardSummaryRemoval = false;
     }
 
     auto MessageList::snapshot() const -> json {
@@ -63,13 +65,22 @@ namespace insoulforge {
     }
 
     void MessageList::flushToStorage() const {
-        const json currentMessages = fullSnapshot();
+        std::lock_guard lock(m_mutex);
+        const json currentMessages = fullSnapshotLocked();
         ChatRecordStore::clearSessionChatRecords(m_database, m_sessionId);
         for (const json &message: currentMessages) {
             const bool isAssistant = getStr(atOrNull(message, "sender"), "qq") == "self";
             ChatRecordStore::addChatRecord(
               m_database, m_sessionId, isAssistant ? "assistant" : "user", dumpJson(message));
         }
+    }
+
+    void MessageList::clear() {
+        std::lock_guard lock(m_mutex);
+        ChatRecordStore::clearSessionChatRecords(m_database, m_sessionId);
+        m_messages.clear();
+        // 保留旧任务的占位，待完成后再允许新批次，避免完成计数作用于新消息。
+        m_discardSummaryRemoval = m_summaryBatchPending;
     }
 
     auto MessageList::snapshotLocked() const -> json {
