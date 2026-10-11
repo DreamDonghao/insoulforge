@@ -4,6 +4,8 @@
 
 QQ 交流群：1097487360
 
+> 本项目采用 OneBot 协议标准，不包含任何聊天平台协议的具体实现，也不提供任何连接聊天平台的方法。使用本项目时，您仅可使用合法合规的 OneBot 实现。使用本项目即表示您已阅读、理解并同意：由此产生的一切后果及风险均由您自行承担，本项目不承担任何责任。
+
 ## ✨ 特性
 
 - **Web 管理后台** - 可视化查看与配置
@@ -22,13 +24,15 @@ QQ 交流群：1097487360
 
 ## 🚀 快速开始
 
+全新 Ubuntu 系统可参考[完整 Docker 部署教程](docs/DEPLOYMENT.md)，包含 Docker 安装、NapCat 登录、OneBot 配置、备份和更新步骤。
+
 ### 前置要求
 
-本机器人需要配合 **OneBot** 协议实现使用，推荐使用 **napcat**
+本机器人需配合 **OneBot** 协议实现使用。可使用 **NapCat** 等 OneBot 实现（本项目仅将其作为示例，不对其合法性、合规性作任何保证；如您认为其不合法合规，请自行更换其他合法合规的实现）。
 
-选择一个 OneBot 实现，并启用 HTTP 或正向 WebSocket 服务之一。
+请确保所选 OneBot 实现合法合规，并启用 HTTP 或正向 WebSocket 服务之一。
 
-消息接收端口：7778
+InSoulForge 的 HTTP 服务端口为 `7778`，用于访问管理后台；使用 OneBot HTTP 模式时，也通过该端口接收消息上报。使用正向 WebSocket 模式时，InSoulForge 主动连接 OneBot 的 WebSocket 服务，无需配置 HTTP 上报地址。
 
 ### 方式一：Docker 部署（推荐）
 
@@ -46,17 +50,35 @@ GitHub Container Registry （备用）
 docker pull ghcr.io/dreamdonghao/insoulforge:latest
 ```
 
-启动容器：
+创建宿主机数据目录并启动容器：
 
 ```bash
+sudo mkdir -p /opt/insoulforge/data
+
 docker run -d --name insoulforge \
   -p 7778:7778 \
-  -v ./data:/app/data \
+  -v /opt/insoulforge/data:/app/data \
   dreamdonghao/insoulforge:latest
 ```
 
-> 全局配置文件 `data/config.json`、数据库、日志和表情包分别持久化在宿主机的 `./data`
-> 目录（也可自定义目录），升级镜像时数据不会丢失。首次启动会自动创建包含默认值的 `data/config.json`。
+> 配置文件、数据库等数据保存在宿主机的 `/opt/insoulforge/data` 目录中，不受执行命令所在目录影响。
+> 首次启动会自动创建 `/opt/insoulforge/data/config.json`，对应容器内的 `/app/data/config.json`。
+> 删除容器不会删除宿主机数据目录。更新前建议备份该目录，不要删除其中的数据。
+
+更新镜像时，停止并删除旧容器，再挂载同一个宿主机数据目录创建新容器：
+
+```bash
+docker pull dreamdonghao/insoulforge:latest
+docker stop insoulforge
+docker rm insoulforge
+docker run -d --name insoulforge \
+  -p 7778:7778 \
+  -v /opt/insoulforge/data:/app/data \
+  dreamdonghao/insoulforge:latest
+```
+
+> 如果旧容器使用了自定义网络、端口或其他启动参数，重建时也要保留这些参数。
+> 已部署的用户，更新时应继续使用原来的数据挂载路径；不要直接改为上述示例路径，否则程序可能读取到一份空数据。
 
 > 如果 napcat 也运行在 Docker 中，注意容器内的 `127.0.0.1` 指向容器自身。启动后让两个容器加入同一个 docker
 > 网络，然后用容器名互访（无需重建容器，connect 直接生效）：
@@ -163,7 +185,7 @@ Jev 只处理通过硬规则的群聊消息；私聊、@机器人和系统任务
 再调用 Router LLM。这里比较的是 `confidence`，不是 `probabilities.reply`；保存阈值后立即生效。
 
 全局运行配置保存在 `data/config.json`，包括 LLM、OneBot、记忆与执行参数。文件不存在时程序会写入默认内容；缺失或类型错误的字段会在启动时自动修复。配置文件已被
-Git 忽略，Docker 部署时通过 `./data:/app/data` 挂载即可持久化。
+Git 忽略，Docker 部署时通过 `/opt/insoulforge/data:/app/data` 挂载宿主机数据目录即可持久化。
 
 > `config.json` 不保存管理后台访问令牌。请通过服务启动日志获取当前令牌，不要将其提交到仓库或发送给无关人员。
 
