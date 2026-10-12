@@ -1341,6 +1341,21 @@ namespace {
                                        {"temperature", 0.4}, {"topP", 0.9}, {"reasoningEffort", "none"}})
             .has_value(),
           "saves memory model config", kTestName);
+        const auto primaryExecutor = insoulforge::Config::instance().getLLMConfig("executor");
+        check(insoulforge::Config::instance().executorFallback.model.empty(),
+          "fallback is disabled by default", kTestName);
+        check(insoulforge::Config::instance()
+                .saveLLMConfig(
+                  "executorFallback", {{"apiKey", "fallback-key"}, {"baseUrl", "https://fallback.example.com/v1"},
+                                        {"path", "/chat/completions"}, {"model", "fallback-model"}, {"maxTokens", 300},
+                                        {"temperature", 0.5}, {"topP", 0.8}, {"reasoningEffort", "none"}})
+                .has_value(),
+          "saves executor fallback config", kTestName);
+        check(insoulforge::Config::instance().executorFallback.model == "fallback-model" &&
+                insoulforge::Config::instance().executorFallbackParams.maxTokens == 300,
+          "loads independent fallback model and parameters", kTestName);
+        check(insoulforge::Config::instance().getLLMConfig("executor") == primaryExecutor,
+          "fallback configuration preserves primary executor", kTestName);
         check(
           insoulforge::Config::instance().memory.model == "memory-model", "loads independent memory model", kTestName);
         check(insoulforge::Config::instance().memoryParams.maxTokens == 2048, "loads independent memory token limit",

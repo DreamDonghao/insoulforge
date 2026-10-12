@@ -67,6 +67,7 @@ const roleLabels: Record<string, string> = {
   router: 'Router',
   jev: 'Jev',
   executor: 'Executor',
+  executorFallback: 'Executor 兜底',
   executorThinking: 'Executor思考',
   memory: 'Memory',
   image: 'Image'

@@ -496,8 +496,17 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
                     co_return failedDecision("最后一轮没有可用的回复工具");
                 }
                 auto requestMessages = buildIterationMessages(messages, round + 1, maxToolRounds);
-                const auto respJson = co_await LlmClient::requestChat("LLM", "executor", config.executor,
-                  config.executorParams, std::move(requestMessages), roundTools, sessionId);
+                // 兜底只重试当前请求，不改变后续轮次的默认模型，也不重新执行工具。
+                const bool fallbackConfigured = LlmClient::isConfigured(config.executorFallback);
+                auto respJson =
+                  co_await LlmClient::requestChat("LLM", "executor", config.executor, config.executorParams,
+                    fallbackConfigured ? requestMessages : std::move(requestMessages), roundTools, sessionId);
+                if (!respJson && fallbackConfigured) {
+                    Logger::warn(sessionId, "Executor", "默认模型请求失败，本次请求使用兜底模型");
+                    respJson =
+                      co_await LlmClient::requestChat("ExecutorFallback", "executorFallback", config.executorFallback,
+                        config.executorFallbackParams, std::move(requestMessages), roundTools, sessionId);
+                }
                 if (!respJson) {
                     co_return failedDecision("Executor 模型请求失败");
                 }
