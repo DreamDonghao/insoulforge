@@ -28,27 +28,6 @@ namespace insoulforge {
 
         /// @brief 按执行器类型构建自定义工具定义
         [[nodiscard]] auto makeCustomTool(const ToolStore::CustomTool &tool, json parameters) -> std::optional<Tool> {
-            if (tool.executorType == "python") {
-                return Tool{
-                  .name = tool.name,
-                  .description = tool.description,
-                  .parameters = std::move(parameters),
-                  .handler = [script = tool.scriptContent](json args, ToolCallContext) -> drogon::Task<std::string> {
-                      co_return co_await ToolRuntime::executePythonTool(script, std::move(args));
-                  },
-                };
-            }
-            if (tool.executorType == "http") {
-                return Tool{
-                  .name = tool.name,
-                  .description = tool.description,
-                  .parameters = std::move(parameters),
-                  .handler = [config = tool.executorConfig](
-                               json args, ToolCallContext context) -> drogon::Task<std::string> {
-                      co_return co_await ToolRuntime::executeHttpTool(config, std::move(args), context.sessionId);
-                  },
-                };
-            }
             if (tool.executorType == "lua") {
                 return Tool{
                   .name = tool.name,

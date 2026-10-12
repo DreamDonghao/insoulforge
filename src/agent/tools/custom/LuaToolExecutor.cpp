@@ -1,7 +1,9 @@
 /// @file LuaToolExecutor.cpp
 /// @brief 每次调用独立的 Lua 状态，宿主请求交由 Drogon 协程处理
 
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <memory>
 #include <optional>
@@ -11,6 +13,8 @@
 #include <unordered_set>
 #include <utility>
 
+#include <drogon/HttpClient.h>
+#include <drogon/utils/Utilities.h>
 #include <lua.hpp>
 
 #include <agent/ability/AsyncTaskManager.hpp>
@@ -25,6 +29,9 @@ namespace insoulforge::LuaToolExecutor {
         constexpr i32 kMaxJsonDepth = 32;
         constexpr i32 kMaxInstructions = 1'000'000;
         constexpr i32 kMaxHostOperations = 32;
+        constexpr size_t kMaxHttpBytes = 1024 * 1024;
+        constexpr char kJsonArray[] = "tool_json_array";
+        char kJsonNull;
         constexpr auto kMaxCpuTime = std::chrono::milliseconds(100);
 
         constexpr std::string_view kHostApi = R"lua(
@@ -35,6 +42,27 @@ namespace insoulforge::LuaToolExecutor {
             end
             function bot.start_task(description, payload)
                 return yield_to_host({op = "start_task", description = description, payload = payload})
+            end
+            http = {}
+            function http.request(options)
+                return yield_to_host({op = "http_request", options = options})
+            end
+            json = {}
+            function json.encode(value)
+                local result = yield_to_host({op = "json_encode", value = value})
+                if not result.ok then error(result.error) end
+                return result.value
+            end
+            function json.decode(text)
+                local result = yield_to_host({op = "json_decode", text = text})
+                if not result.ok then error(result.error) end
+                return result.value
+            end
+            url = {}
+            function url.encode(text)
+                local result = yield_to_host({op = "url_encode", text = text})
+                if not result.ok then error(result.error) end
+                return result.value
             end
             coroutine = nil
         )lua";
@@ -92,6 +120,8 @@ namespace insoulforge::LuaToolExecutor {
                 }
             } else if (value.is_array()) {
                 lua_createtable(state, static_cast<i32>(value.size()), 0);
+                luaL_getmetatable(state, kJsonArray);
+                lua_setmetatable(state, -2);
                 for (size_t index = 0; index < value.size(); ++index) {
                     pushJson(state, value[index], depth + 1);
                     lua_rawseti(state, -2, static_cast<lua_Integer>(index + 1));
@@ -106,7 +136,7 @@ namespace insoulforge::LuaToolExecutor {
             } else if (value.is_number()) {
                 lua_pushnumber(state, value.get<lua_Number>());
             } else {
-                lua_pushnil(state);
+                lua_pushlightuserdata(state, &kJsonNull);
             }
         }
 
@@ -117,6 +147,11 @@ namespace insoulforge::LuaToolExecutor {
             }
             index = lua_absindex(state, index);
             switch (lua_type(state, index)) {
+                case LUA_TLIGHTUSERDATA:
+                    if (lua_touserdata(state, index) == &kJsonNull) {
+                        return nullptr;
+                    }
+                    throw std::runtime_error("Lua 返回了不支持的数据类型");
                 case LUA_TNIL:
                     return nullptr;
                 case LUA_TBOOLEAN:
@@ -148,6 +183,12 @@ namespace insoulforge::LuaToolExecutor {
             bool hasStringKey = false;
             size_t count = 0;
             const size_t length = lua_rawlen(state, index);
+            bool markedArray = false;
+            if (lua_getmetatable(state, index)) {
+                luaL_getmetatable(state, kJsonArray);
+                markedArray = lua_rawequal(state, -1, -2);
+                lua_pop(state, 2);
+            }
             lua_pushnil(state);
             while (lua_next(state, index) != 0) {
                 ++count;
@@ -177,7 +218,13 @@ namespace insoulforge::LuaToolExecutor {
             if (hasNumericKey && hasStringKey) {
                 throw std::runtime_error("Lua 表不能混用数组下标与字符串键");
             }
-            return isArray && count == length && count != 0 ? std::move(array) : std::move(object);
+            if (hasNumericKey && (!isArray || count != length)) {
+                throw std::runtime_error("Lua 数组下标必须从 1 开始且连续");
+            }
+            if (markedArray && hasStringKey) {
+                throw std::runtime_error("JSON 数组不能使用字符串键");
+            }
+            return isArray && count == length && (count != 0 || markedArray) ? std::move(array) : std::move(object);
         }
 
         [[nodiscard]] auto readJson(lua_State *state, const i32 index) -> json {
@@ -197,6 +244,8 @@ namespace insoulforge::LuaToolExecutor {
                     throw std::runtime_error("无法创建 Lua 状态");
                 }
                 luaL_openlibs(m_state);
+                luaL_newmetatable(m_state, kJsonArray);
+                lua_pop(m_state, 1);
                 for (const char *name:
                   {"io", "os", "package", "debug", "require", "dofile", "loadfile", "load", "collectgarbage"}) {
                     lua_pushnil(m_state);
@@ -205,6 +254,10 @@ namespace insoulforge::LuaToolExecutor {
                 *static_cast<ExecutionBudget **>(lua_getextraspace(m_state)) = &m_execution;
                 lua_sethook(m_state, checkBudget, LUA_MASKCOUNT, 1000);
                 load(kHostApi);
+                lua_getglobal(m_state, "json");
+                lua_pushlightuserdata(m_state, &kJsonNull);
+                lua_setfield(m_state, -2, "null");
+                lua_pop(m_state, 1);
             }
 
             LuaState(const LuaState &) = delete;
@@ -248,6 +301,98 @@ namespace insoulforge::LuaToolExecutor {
 
         [[nodiscard]] auto contextJson(const u64 sessionId) -> json {
             return {{"session_id", std::to_string(sessionId)}, {"is_private", SessionId::isPrivate(sessionId)}};
+        }
+
+        /// @brief 保留原始请求体；网络等待交给 Drogon，HTTP 错误状态仍返回响应内容。
+        auto requestHttp(json options, const bool testMode) -> drogon::Task<json> {
+            try {
+                const auto address = options.at("url").get<std::string>();
+                const auto schemeEnd = address.find("://");
+                if (!(address.starts_with("http://") || address.starts_with("https://")) ||
+                    address.find_first_of("\r\n\t \\") != std::string::npos) {
+                    throw std::runtime_error("URL 必须是有效的 HTTP 或 HTTPS 地址");
+                }
+                const auto authorityStart = schemeEnd + 3;
+                const auto pathStart = address.find_first_of("/?#", authorityStart);
+                const auto origin = address.substr(0, pathStart);
+                const auto authority = origin.substr(authorityStart);
+                if (authority.empty() || authority.find('@') != std::string::npos) {
+                    throw std::runtime_error("URL 主机不能为空，也不能包含用户名密码");
+                }
+                auto path = pathStart == std::string::npos ? std::string("/") : address.substr(pathStart);
+                path.erase(path.find('#') == std::string::npos ? path.size() : path.find('#'));
+                if (path.empty() || path.front() != '/') {
+                    path.insert(0, "/");
+                }
+                const auto method = options.value("method", std::string("GET"));
+                const auto timeout = options.value("timeout_ms", 30000.0);
+                if (!std::isfinite(timeout) || timeout < 1 || timeout > 120000) {
+                    throw std::runtime_error("timeout_ms 必须在 1 到 120000 之间");
+                }
+                const auto body = options.value("body", std::string());
+                if (body.size() > kMaxHttpBytes) {
+                    throw std::runtime_error("HTTP 请求体超过 1 MiB");
+                }
+                const auto request = drogon::HttpRequest::newHttpRequest();
+                if (method == "GET")
+                    request->setMethod(drogon::Get);
+                else if (method == "POST")
+                    request->setMethod(drogon::Post);
+                else if (method == "PUT")
+                    request->setMethod(drogon::Put);
+                else if (method == "PATCH")
+                    request->setMethod(drogon::Patch);
+                else if (method == "DELETE")
+                    request->setMethod(drogon::Delete);
+                else if (method == "HEAD")
+                    request->setMethod(drogon::Head);
+                else if (method == "OPTIONS")
+                    request->setMethod(drogon::Options);
+                else
+                    throw std::runtime_error("不支持的 HTTP 方法: " + method);
+                const auto headers = options.value("headers", json::object());
+                if (!headers.is_object()) {
+                    throw std::runtime_error("headers 必须是对象");
+                }
+                for (const auto &[name, value]: headers.items()) {
+                    const auto text = value.get<std::string>();
+                    if (name.empty() || name.find_first_of("\r\n :\t") != std::string::npos ||
+                        text.find_first_of("\r\n") != std::string::npos) {
+                        throw std::runtime_error("HTTP 请求头格式无效");
+                    }
+                    auto normalizedName = name;
+                    std::ranges::transform(normalizedName, normalizedName.begin(), [](const unsigned char c) {
+                        return static_cast<char>(c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c);
+                    });
+                    // Drogon 序列化请求时使用独立的内容类型字段，不能只添加普通请求头。
+                    if (normalizedName == "content-type") {
+                        request->setContentTypeString(text);
+                    } else {
+                        request->addHeader(name, text);
+                    }
+                }
+                request->setPath(path);
+                request->setBody(body);
+                if (testMode) {
+                    co_return json{{"ok", true}, {"status", 200}, {"headers", json::object()}, {"body", body}};
+                }
+                const auto client = drogon::HttpClient::newHttpClient(origin);
+                const auto response = co_await client->sendRequestCoro(request, timeout / 1000.0);
+                if (!response) {
+                    throw std::runtime_error("未收到 HTTP 响应");
+                }
+                if (response->body().size() > kMaxHttpBytes) {
+                    throw std::runtime_error("HTTP 响应体超过 1 MiB");
+                }
+                json responseHeaders = json::object();
+                for (const auto &[name, value]: response->headers()) {
+                    responseHeaders[name] = value;
+                }
+                co_return json{{"ok", true}, {"status", static_cast<i32>(response->getStatusCode())},
+                  {"headers", std::move(responseHeaders)}, {"body", std::string(response->body())}};
+            } catch (const std::exception &error) {
+                co_return json{{"ok", false}, {"error", error.what()}};
+            }
         }
     } // namespace
 
@@ -305,9 +450,6 @@ namespace insoulforge::LuaToolExecutor {
             if (resultCount != 1) {
                 throw std::runtime_error("Lua 宿主请求格式错误");
             }
-            if (++hostOperations > kMaxHostOperations) {
-                throw std::runtime_error("Lua 宿主操作次数超限");
-            }
             json request = readJson(thread, -1);
             lua_pop(thread, resultCount);
             if (!request.is_object()) {
@@ -316,7 +458,27 @@ namespace insoulforge::LuaToolExecutor {
 
             json response;
             const std::string operation = getStr(request, "op");
-            if (operation == "send_message") {
+            if (operation != "json_encode" && operation != "json_decode" && operation != "url_encode" &&
+                ++hostOperations > kMaxHostOperations) {
+                throw std::runtime_error("Lua 宿主操作次数超限");
+            }
+            if (operation == "http_request") {
+                response = co_await requestHttp(request.value("options", json::object()), testMode);
+            } else if (operation == "json_encode" || operation == "json_decode" || operation == "url_encode") {
+                try {
+                    json value;
+                    if (operation == "json_encode") {
+                        value = request.value("value", json()).dump();
+                    } else if (operation == "json_decode") {
+                        value = json::parse(request.at("text").get<std::string>());
+                    } else {
+                        value = drogon::utils::urlEncodeComponent(request.at("text").get<std::string>());
+                    }
+                    response = {{"ok", true}, {"value", std::move(value)}};
+                } catch (const std::exception &error) {
+                    response = {{"ok", false}, {"error", error.what()}};
+                }
+            } else if (operation == "send_message") {
                 const std::string text = getStr(request, "text");
                 if (text.empty()) {
                     response = {{"ok", false}, {"error", "消息内容为空"}};

@@ -248,6 +248,7 @@ namespace insoulforge {
             execAll(db, v10Tables);
             execAll(db, v11Tables);
             execAll(db, indexes);
+            execSQL(db, "DROP TABLE IF EXISTS custom_tools");
             setUserVersion(db, SchemaMigrator::kLatestVersion);
         }
 
@@ -482,6 +483,15 @@ namespace insoulforge {
             execSQL(db, "DROP TABLE custom_tools");
             execSQL(db, "ALTER TABLE custom_tools_new RENAME TO custom_tools");
         }
+        void migrateV12ToV13(sqlite3 *db) {
+            Logger::warn(0, "Storage", "自定义工具改用文件存储；旧工具内容不迁移，请重新添加工具");
+            execSQL(db, "DROP TABLE IF EXISTS custom_tools");
+        }
+
+        void migrateV13ToV14(sqlite3 *db) {
+            Logger::info(0, "Storage", "执行迁移: 移除自定义工具 Python 解释器设置");
+            execSQL(db, "DELETE FROM settings WHERE key='custom_tool_python'");
+        }
     } // namespace
 
     namespace SchemaMigrator {
@@ -513,6 +523,8 @@ namespace insoulforge {
               &migrateV9ToV10, // 好感度维护任务与记忆维护任务解耦
               &migrateV10ToV11, // 新增全局 QQ 黑名单
               &migrateV11ToV12, // 自定义工具增加 Lua 执行器
+              &migrateV12ToV13, // 自定义工具改为文件存储，不迁移旧工具内容
+              &migrateV13ToV14, // 删除已停用的 Python 解释器设置
             };
 
             for (i32 v = version; v < kLatestVersion; ++v) {

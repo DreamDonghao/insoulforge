@@ -26,6 +26,7 @@
 #include <agent/runtime/ExecutorAgent.hpp>
 #include <agent/tools/ToolRegistry.hpp>
 #include <agent/tools/custom/LuaToolExecutor.hpp>
+#include <agent/tools/custom/ToolStore.hpp>
 #include <agent/tools/plugins/ActionToolsPlugin.hpp>
 #include <conversation/history/ChatRecordStore.hpp>
 #include <conversation/maintenance/ConversationMaintenanceStore.hpp>
@@ -429,6 +430,10 @@ namespace {
 
         sqlite3_exec(db, "PRAGMA user_version = 6", nullptr, nullptr, nullptr);
         sqlite3_exec(db,
+          "CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT); "
+          "INSERT INTO settings VALUES('custom_tool_python','python3'),('other','preserved')",
+          nullptr, nullptr, nullptr);
+        sqlite3_exec(db,
           "CREATE TABLE custom_tools (id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, description TEXT NOT NULL, "
           "parameters TEXT, executor_type TEXT NOT NULL CHECK(executor_type IN ('python', 'http')), "
           "executor_config TEXT, script_content TEXT, readme TEXT, enabled INTEGER DEFAULT 1, "
@@ -451,16 +456,143 @@ namespace {
           db, "SELECT messages, attempt_count FROM affinity_maintenance_jobs LIMIT 1", -1, &stmt, nullptr);
         check(affinityJobPrepareResult == SQLITE_OK, "migration creates durable affinity maintenance jobs", kTestName);
         sqlite3_finalize(stmt);
-        const i32 oldToolResult = sqlite3_prepare_v2(
-          db, "SELECT id, executor_type FROM custom_tools WHERE name='old_tool'", -1, &stmt, nullptr);
-        check(oldToolResult == SQLITE_OK && sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_int(stmt, 0) == 7,
-          "migration preserves Python tool and ID", kTestName);
+        check(sqlite3_prepare_v2(db, "SELECT * FROM custom_tools", -1, &stmt, nullptr) != SQLITE_OK,
+          "migration removes legacy tool storage", kTestName);
         sqlite3_finalize(stmt);
-        check(sqlite3_exec(db,
-                "INSERT INTO custom_tools (name, description, executor_type) VALUES ('new_tool', 'new', 'lua')",
-                nullptr, nullptr, nullptr) == SQLITE_OK,
-          "migration permits Lua tool", kTestName);
+        insoulforge::SchemaMigrator::migrate(db);
+        check(sqlite3_prepare_v2(db, "SELECT value FROM settings WHERE key='custom_tool_python'", -1, &stmt, nullptr) ==
+                  SQLITE_OK &&
+                sqlite3_step(stmt) == SQLITE_DONE,
+          "upgrade removes obsolete Python setting", kTestName);
+        sqlite3_finalize(stmt);
+        check(sqlite3_prepare_v2(db, "SELECT value FROM settings WHERE key='other'", -1, &stmt, nullptr) == SQLITE_OK &&
+                sqlite3_step(stmt) == SQLITE_ROW,
+          "upgrade preserves unrelated settings", kTestName);
+        sqlite3_finalize(stmt);
+        sqlite3_exec(db, "CREATE TABLE custom_tools(id INTEGER); PRAGMA user_version=12", nullptr, nullptr, nullptr);
+        insoulforge::SchemaMigrator::migrate(db);
+        check(sqlite3_prepare_v2(db, "SELECT * FROM custom_tools", -1, &stmt, nullptr) != SQLITE_OK,
+          "v12 upgrade removes legacy table", kTestName);
+        sqlite3_finalize(stmt);
         sqlite3_close(db);
+    }
+
+    void testFileToolStore() {
+        constexpr std::string_view kTestName = "file custom tool storage";
+        namespace store = insoulforge::ToolStore;
+        const auto directory =
+          std::filesystem::temp_directory_path() /
+          ("insoulforge-tools-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        auto &database = insoulforge::Database::instance();
+        check(database.initialize((directory / "bot.db").string()).has_value(), "opens file database", kTestName);
+        auto tool = store::CustomTool{.name = "test_lua",
+          .description = "test",
+          .parameters = R"({"type":"object"})",
+          .executorType = "lua",
+          .scriptContent = "function run() return 'hello' end"};
+        tool.id = store::addCustomTool(tool);
+        check(std::filesystem::exists(directory / "tools/test_lua/main.lua"), "writes separate script", kTestName);
+        check(store::getCustomTools().size() == 1 && store::getCustomTools()[0].scriptContent == tool.scriptContent,
+          "reads tool metadata and script", kTestName);
+        store::toggleCustomTool(tool.id);
+        check(store::getEnabledCustomTools(database).empty(), "disabled tool is not registered", kTestName);
+        tool.name = "renamed_tool";
+        store::updateCustomTool(tool);
+        check(!std::filesystem::exists(directory / "tools/test_lua") && store::hasCustomTool("renamed_tool"),
+          "rename preserves ID and moves directory", kTestName);
+        std::filesystem::rename(
+          directory / "tools/renamed_tool", directory / ("tools/.backup-" + std::to_string(tool.id)));
+        check(store::getCustomTools().size() == 1 && std::filesystem::exists(directory / "tools/renamed_tool"),
+          "recovers interrupted directory replacement", kTestName);
+        tool.parameters = "invalid JSON";
+        try {
+            store::updateCustomTool(tool);
+            check(false, "rejects invalid metadata", kTestName);
+        } catch (const std::exception &) {
+            check(store::getCustomTools()[0].parameters == R"({"type":"object"})", "failed save preserves old tool",
+              kTestName);
+        }
+        try {
+            auto invalid = tool;
+            invalid.name = "../escape";
+            std::ignore = store::addCustomTool(invalid);
+            check(false, "rejects path traversal", kTestName);
+        } catch (const std::exception &) {
+            check(!std::filesystem::exists(directory / "escape"), "no files outside tool directory", kTestName);
+        }
+        std::filesystem::create_directory_symlink(directory / "tools/renamed_tool", directory / "tools/symlink_tool");
+        check(store::getCustomTools().size() == 1, "skips symlink tool directory", kTestName);
+        database.close();
+        check(database.initialize((directory / "bot.db").string()).has_value() && store::getCustomTools().size() == 1,
+          "restart loads tools without database tool table", kTestName);
+        store::deleteCustomTool(tool.id);
+        tool.name = "new_tool";
+        tool.parameters = "{}";
+        const auto newId = store::addCustomTool(tool);
+        check(newId > tool.id, "deleted IDs are not reused", kTestName);
+        auto httpTool = tool;
+        httpTool.name = "legacy_http";
+        httpTool.executorType = "http";
+        try {
+            std::ignore = store::addCustomTool(httpTool);
+            check(false, "rejects HTTP executor", kTestName);
+        } catch (const std::exception &) {
+            check(!std::filesystem::exists(directory / "tools/legacy_http"), "HTTP tool is not saved", kTestName);
+        }
+        std::filesystem::create_directory(directory / "tools/legacy_http");
+        {
+            std::ofstream metadata(directory / "tools/legacy_http/tool.json");
+            metadata << R"({"id":999,"name":"legacy_http","description":"old","executorType":"http"})";
+        }
+        check(store::getCustomTools().size() == 1 && std::filesystem::exists(directory / "tools/legacy_http/tool.json"),
+          "legacy HTTP tool is skipped without deleting user files", kTestName);
+        auto pythonTool = tool;
+        pythonTool.name = "legacy_python";
+        pythonTool.executorType = "python";
+        try {
+            std::ignore = store::addCustomTool(pythonTool);
+            check(false, "rejects Python executor", kTestName);
+        } catch (const std::exception &) {
+            check(!std::filesystem::exists(directory / "tools/legacy_python"), "Python tool is not saved", kTestName);
+        }
+        std::filesystem::create_directory(directory / "tools/legacy_python");
+        {
+            std::ofstream metadata(directory / "tools/legacy_python/tool.json");
+            metadata << R"({"id":998,"name":"legacy_python","description":"old","executorType":"python"})";
+        }
+        check(
+          store::getCustomTools().size() == 1 && std::filesystem::exists(directory / "tools/legacy_python/tool.json"),
+          "legacy Python tool is skipped without deleting user files", kTestName);
+        database.close();
+        std::filesystem::remove_all(directory);
+    }
+
+    void testLuaToolExamples() {
+        constexpr std::string_view kTestName = "Lua tool examples";
+        const auto root = std::filesystem::path(__FILE__).parent_path().parent_path();
+        const auto load = [&root](const std::string &name) -> std::string {
+            std::ifstream stream(root / "agentTools" / (name + ".json"));
+            insoulforge::json definition;
+            stream >> definition;
+            return definition.at("scriptContent").get<std::string>();
+        };
+        for (const auto &name: {"fetch_webpage", "search_web", "random", "get_weather"}) {
+            check(!insoulforge::LuaToolExecutor::validate(load(name)), "valid Lua example", kTestName);
+        }
+        const auto execute = [&load](const std::string &name, insoulforge::json args) -> std::string {
+            return drogon::sync_wait(
+              insoulforge::LuaToolExecutor::execute(load(name), std::move(args), 123, false, true));
+        };
+        check(execute("random", {{"min", 4}, {"max", 4}}).find("4") != std::string::npos,
+          "random example runs without Python", kTestName);
+        check(execute("fetch_webpage", {{"url", "ftp://example.com"}}).starts_with("错误"),
+          "webpage example rejects unsupported schemes", kTestName);
+        check(execute("fetch_webpage", {{"url", "example.com"}}).find("https://example.com") != std::string::npos,
+          "webpage example supplies HTTPS in mocked request body", kTestName);
+        check(execute("search_web", {{"query", "a &b"}}).find("a+%26b") != std::string::npos,
+          "search example encodes query", kTestName);
+        check(execute("get_weather", {{"city", "New York"}}) == "天气接口响应格式无效",
+          "weather example validates mocked response", kTestName);
     }
 
     void testLuaToolExecutor() {
@@ -484,6 +616,25 @@ namespace {
         const std::string background = drogon::sync_wait(
           insoulforge::LuaToolExecutor::execute(std::string(script), {{"text", "完成"}}, 123, true, true));
         check(background == "完成:123", "background entry receives payload", kTestName);
+        const auto utilities = drogon::sync_wait(insoulforge::LuaToolExecutor::execute(R"lua(
+            function run()
+                local value = json.decode('{"items":[],"missing":null,"text":"你好"}')
+                assert(value.missing == json.null)
+                local body = json.encode(value)
+                assert(body:find('"items":[]', 1, true))
+                assert(body:find('"missing":null', 1, true))
+                local response = http.request({url="https://example.com?query=test#fragment",
+                    method="POST", headers={['Content-Type']='application/json'}, body=body})
+                assert(response.ok and response.status == 200 and response.body == body)
+                assert(not http.request({url="file:///tmp/test"}).ok)
+                assert(not http.request({url="https://example.com", timeout_ms=0}).ok)
+                assert(not http.request({url="https://user:pass@example.com"}).ok)
+                assert(not pcall(json.decode, '{bad'))
+                return url.encode("a b&c")
+            end
+        )lua",
+          insoulforge::json::object(), 123, false, true));
+        check(utilities == "a+b%26c", "HTTP validation and JSON/URL helpers", kTestName);
         try {
             std::ignore = drogon::sync_wait(insoulforge::LuaToolExecutor::execute(
               "function run() while true do end end", insoulforge::json::object(), 0, false, true));
@@ -1321,7 +1472,8 @@ namespace {
         check(messages.fullSnapshot().empty(), "clear removes runtime messages", kTestName);
         check(insoulforge::ChatRecordStore::getChatRecords(100).empty(), "clear removes stored messages", kTestName);
         messages.flushToStorage();
-        check(insoulforge::ChatRecordStore::getChatRecords(100).empty(), "flush does not resurrect cleared messages", kTestName);
+        check(insoulforge::ChatRecordStore::getChatRecords(100).empty(), "flush does not resurrect cleared messages",
+          kTestName);
 
         static_cast<void>(messages.append(makeMessage(5)));
         static_cast<void>(messages.append(makeMessage(6)));
@@ -1428,7 +1580,9 @@ auto main() -> int {
     testAssistantStickerRecordKeepsOnlyName();
     testGeneratedImageRecordKeepsDescription();
     testSchemaMigration();
+    testFileToolStore();
     testLuaToolExecutor();
+    testLuaToolExamples();
     testToolRegistryReload();
     testFinalRoundToolPolicy();
     testIterationRequestMessages();

@@ -256,7 +256,7 @@ MessageService → OneBot API
   全局唯一，冲突时拒绝注册，避免自定义工具覆盖内置工具后出现定义与执行不一致。
 - 工具定义按“类别 → `promptOrder` → 工具名”稳定排序，避免重启或自定义工具刷新后改变 provider 的 prompt cache
   和模型偏好。私聊请求会在注入前排除 `GROUP_ONLY` 工具（当前为 `at_user`、`ban_user`、`send_poke`）。
-- 自定义工具（Lua / Python / HTTP）存储于数据库，启动及后台刷新时加载；Python 工具通过 `sys.argv[1]` 传入参数 JSON 文件路径。Lua 工具每次调用创建独立状态，宿主操作由协程桥接，详见 [TOOLS.md](./TOOLS.md)
+- 自定义工具仅支持 Lua，存储于数据库同级的 `tools/` 文件夹，启动及后台刷新时加载。每次调用创建独立 Lua 状态，宿主网络和消息操作由协程桥接，详见 [TOOLS.md](./TOOLS.md)
 - 拍一拍、撤回、引用回复、表情包收发、定时任务均由上述工具实现，由 Executor 根据上下文自动决策调用；天气、搜索、随机数、时间等能力来自
   `agentTools/` 目录的可导入自定义工具
 
@@ -358,8 +358,8 @@ JSON 损坏则备份为 `config.json.broken.<时间戳>` 后重建；缺失或�
 
 SQLite 文件位于 `data/insoulforge.db`（`Database`
 单例，以读写锁保护）。存储包括完整消息恢复副本、短期/长期记忆、记忆与好感度维护任务、提示词、会话配置、管理员、全局 QQ
-黑名单、表情与自定义工具。全局运行配置不属于数据库，位于同目录的
-`config.json`。
+黑名单和表情。全局运行配置与自定义工具不属于数据库，分别位于同目录的
+`config.json` 和 `tools/`。
 
 调试时可用任意 SQLite 客户端查看：
 
@@ -412,47 +412,10 @@ const WeatherToolsPlugin weatherTools;
 不要把“工具排在前面”当作调用策略。顺序对部分模型有弱影响，因此系统保证顺序稳定；更有效的做法是按会话能力筛选、合并重叠工具，并在名称、描述和参数
 Schema 中写清楚触发条件与边界。需要调整同类别展示位置时才设置 `Tool::promptOrder`，数值越小越靠前。
 
-### 添加自定义工具（Python）
-
-1. 管理后台 → 自定义工具 → 添加
-2. 填写名称、描述、参数定义（JSON Schema）、Python 脚本
-3. 脚本从 `sys.argv[1]` 指定的 JSON 文件读取参数，结果打印到 stdout
-
-Dockerfile 的运行阶段安装 `python3`，供自定义工具使用；不在 C++ 构建阶段执行脚本。
-本地运行需自行安装 Python 3，额外的第三方 Python 包不随运行镜像安装。
-
-网页读取和 Bing 搜索示例使用 Python 标准库调用 PageWeave，默认地址为 `http://172.31.100.240:7779/extract`。
-参数、服务地址覆盖和容器解释器配置见[PageWeave 网页工具](TOOLS.md#pageweave-网页工具)。
-修改这些脚本后执行 `python3 -m unittest discover -s tests -p 'test_pageweave_tools.py'`；
-JSON 文件导入后保存在数据库，修改仓库文件不会自动替换已保存的工具脚本。
-
-也可直接编写 JSON 配置文件放入 `agentTools/` 后从后台导入，格式：
-
-```json
-{
-  "name": "tool_name",
-  "description": "工具描述",
-  "parameters": {
-    "type": "object",
-    "properties": {
-      "param1": {
-        "type": "string",
-        "description": "参数说明"
-      }
-    },
-    "required": [
-      "param1"
-    ]
-  },
-  "scriptContent": "import json\nimport sys\nwith open(sys.argv[1]) as f:\n    args = json.load(f)\nprint(args['param1'])",
-  "readme": "# 工具说明\n作者、用法、联系方式等"
-}
-```
-
 ### 添加自定义工具（Lua）
 
-管理后台选择 Lua 类型，填写 JSON Schema 和脚本，定义 `run(args, ctx)` 返回工具结果字符串。脚本可调用
-`bot.send_message(text)` 和 `bot.start_task(description, payload)`；后台任务另定义 `background(payload, ctx)`。
+管理后台填写名称、描述、JSON Schema 和 Lua 脚本，定义 `run(args, ctx)` 返回工具结果字符串。脚本可调用
+`bot.send_message(text)`、`bot.start_task(description, payload)`、异步 `http.request(options)`，以及 JSON 编解码和 URL 编码接口；后台任务另定义 `background(payload, ctx)`。
 详情和返回结构见 [TOOLS.md](./TOOLS.md)。测试接口模拟宿主操作，保存前校验脚本；新脚本无需重新编译或重启程序。
 
 ### 添加管理 API

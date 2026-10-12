@@ -130,7 +130,6 @@ auto AdminController::getCustomTools(HttpRequestPtr req, std::function<void(cons
         item["description"] = tool.description;
         item["parameters"] = tool.parameters;
         item["executorType"] = tool.executorType;
-        item["executorConfig"] = tool.executorConfig;
         item["scriptContent"] = tool.scriptContent;
         item["readme"] = tool.readme;
         item["enabled"] = tool.enabled;
@@ -143,8 +142,8 @@ auto AdminController::getCustomTools(HttpRequestPtr req, std::function<void(cons
 auto AdminController::addCustomTool(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
   -> Task<> {
     const auto body = parseJsonBody(req);
-    if (!body || !body->contains("name") || !body->contains("executorType") || !body->contains("executorConfig")) {
-        callback(jsonResponse(AdminResponse::errorJson("缺少必要字段 (name, executorType, executorConfig)")));
+    if (!body || !body->contains("name") || !body->contains("executorType")) {
+        callback(jsonResponse(AdminResponse::errorJson("缺少必要字段 (name, executorType)")));
         co_return;
     }
 
@@ -162,7 +161,6 @@ auto AdminController::addCustomTool(HttpRequestPtr req, std::function<void(const
     tool.description = getStr(*body, "description");
     tool.parameters = getStr(*body, "parameters");
     tool.executorType = getStr(*body, "executorType");
-    tool.executorConfig = getStr(*body, "executorConfig");
     tool.scriptContent = getStr(*body, "scriptContent");
     tool.readme = getStr(*body, "readme");
     tool.enabled = getBool(*body, "enabled", true);
@@ -172,12 +170,18 @@ auto AdminController::addCustomTool(HttpRequestPtr req, std::function<void(const
             callback(jsonResponse(AdminResponse::errorJson(*error)));
             co_return;
         }
-    } else if (tool.executorType != "python" && tool.executorType != "http") {
+    } else {
         callback(jsonResponse(AdminResponse::errorJson("未知的执行类型")));
         co_return;
     }
 
-    const i32 id = ToolStore::addCustomTool(tool);
+    i32 id = 0;
+    try {
+        id = ToolStore::addCustomTool(tool);
+    } catch (const std::exception &error) {
+        callback(jsonResponse(AdminResponse::failJson(error.what())));
+        co_return;
+    }
 
     // 立即注册到 ToolRegistry
     if (auto result = ToolRuntime::reloadCustomTools(Database::instance()); !result) {
@@ -198,8 +202,8 @@ auto AdminController::addCustomTool(HttpRequestPtr req, std::function<void(const
 auto AdminController::updateCustomTool(
   HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &id) const -> Task<> {
     const auto body = parseJsonBody(req);
-    if (!body || !body->contains("name") || !body->contains("executorType") || !body->contains("executorConfig")) {
-        callback(jsonResponse(AdminResponse::errorJson("缺少必要字段 (name, executorType, executorConfig)")));
+    if (!body || !body->contains("name") || !body->contains("executorType")) {
+        callback(jsonResponse(AdminResponse::errorJson("缺少必要字段 (name, executorType)")));
         co_return;
     }
 
@@ -209,7 +213,6 @@ auto AdminController::updateCustomTool(
     tool.description = getStr(*body, "description");
     tool.parameters = getStr(*body, "parameters");
     tool.executorType = getStr(*body, "executorType");
-    tool.executorConfig = getStr(*body, "executorConfig");
     tool.scriptContent = getStr(*body, "scriptContent");
     tool.readme = getStr(*body, "readme");
     tool.enabled = getBool(*body, "enabled", true);
@@ -219,12 +222,17 @@ auto AdminController::updateCustomTool(
             callback(jsonResponse(AdminResponse::errorJson(*error)));
             co_return;
         }
-    } else if (tool.executorType != "python" && tool.executorType != "http") {
+    } else {
         callback(jsonResponse(AdminResponse::errorJson("未知的执行类型")));
         co_return;
     }
 
-    ToolStore::updateCustomTool(tool);
+    try {
+        ToolStore::updateCustomTool(tool);
+    } catch (const std::exception &error) {
+        callback(jsonResponse(AdminResponse::failJson(error.what())));
+        co_return;
+    }
 
     // 重新注册工具
     if (auto result = ToolRuntime::reloadCustomTools(Database::instance()); !result) {
@@ -243,7 +251,12 @@ auto AdminController::updateCustomTool(
 auto AdminController::deleteCustomTool(
   HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &id) const -> Task<> {
     const i32 toolId = std::stoi(id);
-    ToolStore::deleteCustomTool(toolId);
+    try {
+        ToolStore::deleteCustomTool(toolId);
+    } catch (const std::exception &error) {
+        callback(jsonResponse(AdminResponse::failJson(error.what())));
+        co_return;
+    }
 
     // 重新注册工具（移除已删除的）
     if (auto result = ToolRuntime::reloadCustomTools(Database::instance()); !result) {
@@ -262,7 +275,12 @@ auto AdminController::deleteCustomTool(
 auto AdminController::toggleCustomTool(
   HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &id) const -> Task<> {
     const i32 toolId = std::stoi(id);
-    ToolStore::toggleCustomTool(toolId);
+    try {
+        ToolStore::toggleCustomTool(toolId);
+    } catch (const std::exception &error) {
+        callback(jsonResponse(AdminResponse::failJson(error.what())));
+        co_return;
+    }
 
     // 重新注册工具
     if (auto result = ToolRuntime::reloadCustomTools(Database::instance()); !result) {
@@ -305,12 +323,11 @@ auto AdminController::testCustomTool(HttpRequestPtr req, std::function<void(cons
     // 1. 传入 toolId 测试已保存的工具
     // 2. 传入工具定义直接测试（未保存）
     std::string executorType;
-    std::string executorConfig;
     std::string scriptContent;
     json testArgs;
 
     if (body->contains("toolId")) {
-        // 从数据库加载工具
+        // 从文件目录加载工具
         const i32 toolId = getInt(*body, "toolId");
         auto tools = ToolStore::getCustomTools();
         auto it = std::ranges::find_if(tools, [toolId](const auto &t) -> auto { return t.id == toolId; });
@@ -319,23 +336,17 @@ auto AdminController::testCustomTool(HttpRequestPtr req, std::function<void(cons
             co_return;
         }
         executorType = it->executorType;
-        executorConfig = it->executorConfig;
         scriptContent = it->scriptContent;
         testArgs = body->contains("args") ? (*body)["args"] : json();
     } else {
         // 直接使用传入的定义
-        executorType = getStr(*body, "executorType", "python");
-        executorConfig = getStr(*body, "executorConfig");
+        executorType = getStr(*body, "executorType");
         scriptContent = getStr(*body, "scriptContent");
         testArgs = body->contains("args") ? (*body)["args"] : json();
     }
 
     std::string result;
-    if (executorType == "python") {
-        result = co_await ToolRuntime::executePythonTool(std::move(scriptContent), std::move(testArgs));
-    } else if (executorType == "http") {
-        result = co_await ToolRuntime::executeHttpTool(std::move(executorConfig), std::move(testArgs), 0);
-    } else if (executorType == "lua") {
+    if (executorType == "lua") {
         try {
             result = co_await LuaToolExecutor::execute(std::move(scriptContent), std::move(testArgs), 0, false, true);
         } catch (const std::exception &error) {
@@ -343,37 +354,13 @@ auto AdminController::testCustomTool(HttpRequestPtr req, std::function<void(cons
             co_return;
         }
     } else {
-        result = "未知的执行类型";
+        callback(jsonResponse(AdminResponse::failJson("不支持的执行类型，仅支持 Lua")));
+        co_return;
     }
 
     json resp = AdminResponse::okJson();
     resp["result"] = result;
     callback(jsonResponse(resp));
-    co_return;
-}
-
-// ==================== 自定义工具配置 ====================
-
-auto AdminController::getCustomToolConfig(
-  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const -> Task<> {
-    json resp;
-    resp["pythonPath"] = ToolStore::getCustomToolPython();
-    callback(jsonResponse(resp));
-    co_return;
-}
-
-auto AdminController::saveCustomToolConfig(
-  const HttpRequestPtr req, const std::function<void(const HttpResponsePtr &)> callback) const -> Task<> {
-    const auto body = parseJsonBody(req);
-    if (!body || !body->contains("pythonPath")) {
-        callback(jsonResponse(AdminResponse::failJson("缺少 pythonPath 字段")));
-        co_return;
-    }
-
-    const std::string pythonPath = getStr(*body, "pythonPath");
-    ToolStore::setCustomToolPython(pythonPath);
-
-    callback(jsonResponse(AdminResponse::okJson("Python解释器路径已保存")));
     co_return;
 }
 
@@ -393,13 +380,7 @@ auto AdminController::exportCustomTool(
 
     const auto &tool = *it;
 
-    // HTTP 配置中可能包含访问令牌，不通过脚本导出接口导出。
-    if (tool.executorType != "python" && tool.executorType != "lua") {
-        callback(jsonResponse(AdminResponse::failJson("仅支持导出脚本类型工具")));
-        co_return;
-    }
-
-    // 构建导出 JSON（简化格式，不含 executorType）
+    // 构建导出 JSON（不包含内部 ID）
     json exportJson;
     exportJson["name"] = tool.name;
     exportJson["description"] = tool.description;
@@ -450,13 +431,12 @@ auto AdminController::importCustomTool(HttpRequestPtr req, std::function<void(co
         co_return;
     }
 
-    // 兼容旧版没有 executorType 的 Python 导出文件。
     ToolStore::CustomTool tool;
     tool.name = name;
     tool.description = getStr(*body, "description");
-    tool.executorType = getStr(*body, "executorType", "python");
-    if (tool.executorType != "python" && tool.executorType != "lua") {
-        callback(jsonResponse(AdminResponse::failJson("仅支持导入 Python 或 Lua 脚本")));
+    tool.executorType = getStr(*body, "executorType");
+    if (tool.executorType != "lua") {
+        callback(jsonResponse(AdminResponse::failJson("仅支持导入 Lua 脚本；旧 Python 工具需要手动改写")));
         co_return;
     }
 
@@ -477,8 +457,13 @@ auto AdminController::importCustomTool(HttpRequestPtr req, std::function<void(co
     tool.readme = getStr(*body, "readme");
     tool.enabled = true;
 
-    // 添加到数据库
-    i32 newId = ToolStore::addCustomTool(tool);
+    i32 newId = 0;
+    try {
+        newId = ToolStore::addCustomTool(tool);
+    } catch (const std::exception &error) {
+        callback(jsonResponse(AdminResponse::failJson(error.what())));
+        co_return;
+    }
     if (auto result = ToolRuntime::reloadCustomTools(Database::instance()); !result) {
         Logger::error(0, "Tool", result.error());
         auto response =
