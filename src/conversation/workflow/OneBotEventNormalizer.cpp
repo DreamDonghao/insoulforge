@@ -93,8 +93,15 @@ namespace insoulforge::OneBotEventNormalizer {
         /// @brief 初始化统一记录的公共元数据字段
         [[nodiscard]] auto createRecord(
           const json &body, const u64 senderId, const std::string &senderName, const i64 messageId) -> json {
-            return {{"time", normalizeTime(body)}, {"sender", {{"name", senderName}, {"qq", std::to_string(senderId)}}},
+            json record{{"time", normalizeTime(body)},
+              {"sender", {{"name", senderName}, {"qq", std::to_string(senderId)}}},
               {"message_id", std::to_string(messageId)}, {"segments", json::array()}};
+            if (getUInt(body, "group_id") != 0) {
+                if (auto card = getStr(atOrNull(body, "sender"), "card"); !card.empty()) {
+                    record["sender"]["card"] = std::move(card);
+                }
+            }
+            return record;
         }
 
         /// @brief 从原始上报提取统一会话 ID

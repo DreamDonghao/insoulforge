@@ -76,6 +76,7 @@ export interface Group {
     groupIdStr?: string
     groupName: string
     messageCount: number
+    sendGroupCard?: boolean
     enabled?: boolean
     sessionType?: 'private'
     userId?: number

@@ -319,6 +319,12 @@ MessageService → OneBot API
 
 ### 配置系统
 
+群消息的 `sender.card` 保存 OneBot 上报的群名片，与 `sender.name`（QQ 昵称）独立；空群名片和私聊不保存该字段。
+每个群的 `group_config.send_group_card` 默认关闭，在后台“会话管理”或群内管理员命令 `/groupcard on|off` 中设置。
+消息记录始终保留已有群名片；构建模型上下文时读取本群设置，并传入 `MessageRecord::projectForAgent`，
+按开关保留或移除 `card`，不修改原始消息。旧记录没有该字段时不补造，私聊不发送群名片。
+数据库 v14 → v15 自动补充字段，保留消息统计；禁用及重新启用群聊不清除该设置。
+
 `ConfigStore` 将 LLM API 配置（router / jev / executor / executorFallback / executorThinking / image / imageGeneration / memory / embedding）、QQ Bot 配置、记忆和执行参数统一写入
 `data/config.json`。聊天模型可设置 `maxTokens`、`temperature`、`topP` 和 `reasoningEffort`；Embedding、Jev 与图片生成不使用这些采样参数。
 后台上传的角色参考图单独保存在 `data/character-image`，不写入配置或公开静态目录；部署时沿用现有 `data/` 持久化挂载。

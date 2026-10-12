@@ -157,12 +157,13 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         }
 
         /// @brief 将持久化记录投影为 Agent 上下文，可选截断较早消息的文本段
-        [[nodiscard]] auto projectRecordForAgent(const json &record, const bool truncateText) -> json {
+        [[nodiscard]] auto projectRecordForAgent(
+          const json &record, const bool truncateText, const bool includeGroupCard) -> json {
             const json raw = parseRecordContent(record);
             if (!raw.is_object()) {
                 return getStr(record, "content"); // 历史存量可能是纯文本
             }
-            json content = MessageRecord::projectForAgent(raw, true);
+            json content = MessageRecord::projectForAgent(raw, true, includeGroupCard);
             if (!truncateText) {
                 return content;
             }
@@ -205,16 +206,20 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
 
             const auto affinityMap = AffinityStore::getAffinityMap(chatRecords.getSessionId());
 
+            const bool includeGroupCard = !SessionId::isPrivate(chatRecords.getSessionId()) &&
+                                          SessionStore::getSessionConfig(chatRecords.getSessionId()).sendGroupCard;
             ChatContext context;
 
             // 处理更早的对话
             for (const auto &record: olderRecords) {
-                context.earlier.push_back(injectAffinity(projectRecordForAgent(record, true), affinityMap));
+                context.earlier.push_back(
+                  injectAffinity(projectRecordForAgent(record, true, includeGroupCard), affinityMap));
             }
 
             // 处理最近对话（消息预处理时已注入召回记忆）
             for (const auto &record: recentRecords) {
-                context.recent.push_back(injectAffinity(projectRecordForAgent(record, false), affinityMap));
+                context.recent.push_back(
+                  injectAffinity(projectRecordForAgent(record, false, includeGroupCard), affinityMap));
             }
             return context;
         }
