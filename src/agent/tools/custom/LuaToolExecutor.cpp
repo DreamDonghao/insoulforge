@@ -1,6 +1,7 @@
 /// @file LuaToolExecutor.cpp
 /// @brief 每次调用独立的 Lua 状态，宿主请求交由 Drogon 协程处理
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -359,7 +360,16 @@ namespace insoulforge::LuaToolExecutor {
                         text.find_first_of("\r\n") != std::string::npos) {
                         throw std::runtime_error("HTTP 请求头格式无效");
                     }
-                    request->addHeader(name, text);
+                    auto normalizedName = name;
+                    std::ranges::transform(normalizedName, normalizedName.begin(), [](const unsigned char c) {
+                        return static_cast<char>(c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c);
+                    });
+                    // Drogon 序列化请求时使用独立的内容类型字段，不能只添加普通请求头。
+                    if (normalizedName == "content-type") {
+                        request->setContentTypeString(text);
+                    } else {
+                        request->addHeader(name, text);
+                    }
                 }
                 request->setPath(path);
                 request->setBody(body);

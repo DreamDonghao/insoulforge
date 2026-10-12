@@ -177,7 +177,13 @@ auto AdminController::addCustomTool(HttpRequestPtr req, std::function<void(const
         co_return;
     }
 
-    const i32 id = ToolStore::addCustomTool(tool);
+    i32 id = 0;
+    try {
+        id = ToolStore::addCustomTool(tool);
+    } catch (const std::exception &error) {
+        callback(jsonResponse(AdminResponse::failJson(error.what())));
+        co_return;
+    }
 
     // 立即注册到 ToolRegistry
     if (auto result = ToolRuntime::reloadCustomTools(Database::instance()); !result) {
@@ -224,7 +230,12 @@ auto AdminController::updateCustomTool(
         co_return;
     }
 
-    ToolStore::updateCustomTool(tool);
+    try {
+        ToolStore::updateCustomTool(tool);
+    } catch (const std::exception &error) {
+        callback(jsonResponse(AdminResponse::failJson(error.what())));
+        co_return;
+    }
 
     // 重新注册工具
     if (auto result = ToolRuntime::reloadCustomTools(Database::instance()); !result) {
@@ -243,7 +254,12 @@ auto AdminController::updateCustomTool(
 auto AdminController::deleteCustomTool(
   HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &id) const -> Task<> {
     const i32 toolId = std::stoi(id);
-    ToolStore::deleteCustomTool(toolId);
+    try {
+        ToolStore::deleteCustomTool(toolId);
+    } catch (const std::exception &error) {
+        callback(jsonResponse(AdminResponse::failJson(error.what())));
+        co_return;
+    }
 
     // 重新注册工具（移除已删除的）
     if (auto result = ToolRuntime::reloadCustomTools(Database::instance()); !result) {
@@ -262,7 +278,12 @@ auto AdminController::deleteCustomTool(
 auto AdminController::toggleCustomTool(
   HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &id) const -> Task<> {
     const i32 toolId = std::stoi(id);
-    ToolStore::toggleCustomTool(toolId);
+    try {
+        ToolStore::toggleCustomTool(toolId);
+    } catch (const std::exception &error) {
+        callback(jsonResponse(AdminResponse::failJson(error.what())));
+        co_return;
+    }
 
     // 重新注册工具
     if (auto result = ToolRuntime::reloadCustomTools(Database::instance()); !result) {
@@ -477,8 +498,13 @@ auto AdminController::importCustomTool(HttpRequestPtr req, std::function<void(co
     tool.readme = getStr(*body, "readme");
     tool.enabled = true;
 
-    // 添加到数据库
-    i32 newId = ToolStore::addCustomTool(tool);
+    i32 newId = 0;
+    try {
+        newId = ToolStore::addCustomTool(tool);
+    } catch (const std::exception &error) {
+        callback(jsonResponse(AdminResponse::failJson(error.what())));
+        co_return;
+    }
     if (auto result = ToolRuntime::reloadCustomTools(Database::instance()); !result) {
         Logger::error(0, "Tool", result.error());
         auto response =

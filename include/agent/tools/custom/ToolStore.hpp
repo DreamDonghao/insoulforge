@@ -1,6 +1,6 @@
 /// @file ToolStore.hpp
 /// @brief 自定义工具存储
-/// @details 表：custom_tools（工具定义与脚本）、settings（Python 解释器路径）
+/// @details 工具定义和脚本位于数据库同级 tools 目录；settings 表只保存 Python 解释器路径。
 
 #pragma once
 
@@ -21,7 +21,7 @@ namespace insoulforge {
             std::string parameters; ///< JSON Schema 字符串
             std::string executorType; ///< python、http 或 lua
             std::string executorConfig; ///< HTTP 执行配置 JSON
-            std::string scriptContent; ///< Python 脚本内容
+            std::string scriptContent; ///< Python 或 Lua 脚本内容
             std::string readme; ///< 面向管理员的 Markdown 说明
             bool enabled = true;
         };

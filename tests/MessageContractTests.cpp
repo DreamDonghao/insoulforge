@@ -26,6 +26,7 @@
 #include <agent/runtime/ExecutorAgent.hpp>
 #include <agent/tools/ToolRegistry.hpp>
 #include <agent/tools/custom/LuaToolExecutor.hpp>
+#include <agent/tools/custom/ToolStore.hpp>
 #include <agent/tools/plugins/ActionToolsPlugin.hpp>
 #include <conversation/history/ChatRecordStore.hpp>
 #include <conversation/maintenance/ConversationMaintenanceStore.hpp>
@@ -451,16 +452,73 @@ namespace {
           db, "SELECT messages, attempt_count FROM affinity_maintenance_jobs LIMIT 1", -1, &stmt, nullptr);
         check(affinityJobPrepareResult == SQLITE_OK, "migration creates durable affinity maintenance jobs", kTestName);
         sqlite3_finalize(stmt);
-        const i32 oldToolResult = sqlite3_prepare_v2(
-          db, "SELECT id, executor_type FROM custom_tools WHERE name='old_tool'", -1, &stmt, nullptr);
-        check(oldToolResult == SQLITE_OK && sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_int(stmt, 0) == 7,
-          "migration preserves Python tool and ID", kTestName);
+        check(sqlite3_prepare_v2(db, "SELECT * FROM custom_tools", -1, &stmt, nullptr) != SQLITE_OK,
+          "migration removes legacy tool storage", kTestName);
         sqlite3_finalize(stmt);
-        check(sqlite3_exec(db,
-                "INSERT INTO custom_tools (name, description, executor_type) VALUES ('new_tool', 'new', 'lua')",
-                nullptr, nullptr, nullptr) == SQLITE_OK,
-          "migration permits Lua tool", kTestName);
+        insoulforge::SchemaMigrator::migrate(db);
+        sqlite3_exec(db, "CREATE TABLE custom_tools(id INTEGER); PRAGMA user_version=12", nullptr, nullptr, nullptr);
+        insoulforge::SchemaMigrator::migrate(db);
+        check(sqlite3_prepare_v2(db, "SELECT * FROM custom_tools", -1, &stmt, nullptr) != SQLITE_OK,
+          "v12 upgrade removes legacy table", kTestName);
+        sqlite3_finalize(stmt);
         sqlite3_close(db);
+    }
+
+    void testFileToolStore() {
+        constexpr std::string_view kTestName = "file custom tool storage";
+        namespace store = insoulforge::ToolStore;
+        const auto directory =
+          std::filesystem::temp_directory_path() /
+          ("insoulforge-tools-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        auto &database = insoulforge::Database::instance();
+        check(database.initialize((directory / "bot.db").string()).has_value(), "opens file database", kTestName);
+        auto tool = store::CustomTool{.name = "test_lua",
+          .description = "test",
+          .parameters = R"({"type":"object"})",
+          .executorType = "lua",
+          .scriptContent = "function run() return 'hello' end"};
+        tool.id = store::addCustomTool(tool);
+        check(std::filesystem::exists(directory / "tools/test_lua/main.lua"), "writes separate script", kTestName);
+        check(store::getCustomTools().size() == 1 && store::getCustomTools()[0].scriptContent == tool.scriptContent,
+          "reads tool metadata and script", kTestName);
+        store::toggleCustomTool(tool.id);
+        check(store::getEnabledCustomTools(database).empty(), "disabled tool is not registered", kTestName);
+        tool.name = "renamed_tool";
+        store::updateCustomTool(tool);
+        check(!std::filesystem::exists(directory / "tools/test_lua") && store::hasCustomTool("renamed_tool"),
+          "rename preserves ID and moves directory", kTestName);
+        std::filesystem::rename(
+          directory / "tools/renamed_tool", directory / ("tools/.backup-" + std::to_string(tool.id)));
+        check(store::getCustomTools().size() == 1 && std::filesystem::exists(directory / "tools/renamed_tool"),
+          "recovers interrupted directory replacement", kTestName);
+        tool.parameters = "invalid JSON";
+        try {
+            store::updateCustomTool(tool);
+            check(false, "rejects invalid metadata", kTestName);
+        } catch (const std::exception &) {
+            check(store::getCustomTools()[0].parameters == R"({"type":"object"})", "failed save preserves old tool",
+              kTestName);
+        }
+        try {
+            auto invalid = tool;
+            invalid.name = "../escape";
+            std::ignore = store::addCustomTool(invalid);
+            check(false, "rejects path traversal", kTestName);
+        } catch (const std::exception &) {
+            check(!std::filesystem::exists(directory / "escape"), "no files outside tool directory", kTestName);
+        }
+        std::filesystem::create_directory_symlink(directory / "tools/renamed_tool", directory / "tools/symlink_tool");
+        check(store::getCustomTools().size() == 1, "skips symlink tool directory", kTestName);
+        database.close();
+        check(database.initialize((directory / "bot.db").string()).has_value() && store::getCustomTools().size() == 1,
+          "restart loads tools without database tool table", kTestName);
+        store::deleteCustomTool(tool.id);
+        tool.name = "new_tool";
+        tool.parameters = "{}";
+        const auto newId = store::addCustomTool(tool);
+        check(newId > tool.id, "deleted IDs are not reused", kTestName);
+        database.close();
+        std::filesystem::remove_all(directory);
     }
 
     void testLuaToolExecutor() {
@@ -1340,7 +1398,8 @@ namespace {
         check(messages.fullSnapshot().empty(), "clear removes runtime messages", kTestName);
         check(insoulforge::ChatRecordStore::getChatRecords(100).empty(), "clear removes stored messages", kTestName);
         messages.flushToStorage();
-        check(insoulforge::ChatRecordStore::getChatRecords(100).empty(), "flush does not resurrect cleared messages", kTestName);
+        check(insoulforge::ChatRecordStore::getChatRecords(100).empty(), "flush does not resurrect cleared messages",
+          kTestName);
 
         static_cast<void>(messages.append(makeMessage(5)));
         static_cast<void>(messages.append(makeMessage(6)));
@@ -1447,6 +1506,7 @@ auto main() -> int {
     testAssistantStickerRecordKeepsOnlyName();
     testGeneratedImageRecordKeepsDescription();
     testSchemaMigration();
+    testFileToolStore();
     testLuaToolExecutor();
     testToolRegistryReload();
     testFinalRoundToolPolicy();

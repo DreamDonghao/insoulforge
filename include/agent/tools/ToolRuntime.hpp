@@ -23,7 +23,7 @@ namespace insoulforge::ToolRuntime {
     /// @brief 注册全部编译期内置工具插件
     [[nodiscard]] auto registerBuiltinTools(std::string_view botName) -> std::expected<void, std::string>;
 
-    /// @brief 从数据库重载启用的自定义工具
+    /// @brief 从数据库同级的 tools 目录重载启用的自定义工具
     /// @details 仅替换 custom 插件，不影响内置工具插件。
     /// @param database 已成功初始化的数据库。
     [[nodiscard]] auto reloadCustomTools(const Database &database) -> std::expected<void, std::string>;

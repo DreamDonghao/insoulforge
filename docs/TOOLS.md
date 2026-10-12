@@ -122,6 +122,48 @@ base64 数据只用于 OneBot 发送和视觉识别，不保存到聊天记录�
 如果识别不可用或失败，图片仍会发送，消息段改为明确标注“依据生成提示词”的备用描述。
 每次任务只请求一次，不自动重试以避免重复计费；接口请求最长等待 180 秒。生成服务和 OneBot 的实际联通需在部署环境验证。
 
+## 自定义工具文件存储
+
+工具保存在数据库同级的 `tools/`，默认部署路径为 `/app/data/tools/`，沿用现有 `/app/data` 持久化挂载。
+
+```text
+data/tools/
+├── fetch_webpage/
+│   ├── tool.json
+│   └── main.lua
+└── search_web/
+    ├── tool.json
+    └── main.py
+```
+
+每个目录对应一个工具；`tool.json` 保存定义，Lua/Python 脚本分别位于 `main.lua`/`main.py`。HTTP 工具只需要 `tool.json`。
+工具名与目录名必须一致，仅允许英文字母、数字、下划线和连字符，长度 1–64。示例：
+
+```json
+{
+  "id": 1,
+  "name": "fetch_webpage",
+  "description": "读取网页内容",
+  "parameters": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]},
+  "executorType": "lua",
+  "executorConfig": {},
+  "readme": "工具使用说明",
+  "enabled": true
+}
+```
+
+`id` 是前端操作所用的唯一正整数；手动新增时不得与其他工具重复。前端新增会自动分配 ID，`.next-id` 保存分配水位，不能随意删除。
+`parameters` 和 `executorConfig` 在文件里是 JSON 值，不是双重编码的字符串；HTTP 的请求配置放在 `executorConfig`。
+前端添加、编辑、启停、删除和原有单文件导入导出仍可使用。手动编辑后通过后台刷新工具或重启加载；执行中的调用保留旧脚本快照。
+单个工具文件最多 1 MiB；无效目录会记录原因并跳过，不影响其他工具加载。禁止工具目录及定义、脚本文件使用符号链接。
+
+保存使用 `.pending-<id>` 暂存目录和 `.backup-<id>` 旧版本目录，失败时回滚；下次读取时清理未发布的暂存目录并恢复或清理旧版本。
+这些名称为程序保留，不要手动创建。不要让多个程序实例同时写同一个工具目录，也不要在前端保存的同时手工编辑文件。
+
+**升级说明：数据库 Schema 从 v12 升级到 v13。启动时自动删除旧 `custom_tools` 表，不导出或迁移旧工具内容。**
+更新前如需保留旧工具，请先在旧版管理后台导出，更新后重新导入。其他数据库表不受此迁移影响；Python 解释器设置继续保留。
+新版本的备份必须同时保留数据库和 `tools/`（备份整个 `data/` 即可）。
+
 ## Lua 自定义工具
 
 后台中每条 Lua 工具记录包含一个脚本，定义 `run(args, ctx)` 并返回字符串。`args` 对应工具参数 JSON；

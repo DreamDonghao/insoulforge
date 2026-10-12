@@ -256,7 +256,7 @@ MessageService → OneBot API
   全局唯一，冲突时拒绝注册，避免自定义工具覆盖内置工具后出现定义与执行不一致。
 - 工具定义按“类别 → `promptOrder` → 工具名”稳定排序，避免重启或自定义工具刷新后改变 provider 的 prompt cache
   和模型偏好。私聊请求会在注入前排除 `GROUP_ONLY` 工具（当前为 `at_user`、`ban_user`、`send_poke`）。
-- 自定义工具（Lua / Python / HTTP）存储于数据库，启动及后台刷新时加载；Python 工具通过 `sys.argv[1]` 传入参数 JSON 文件路径。Lua 工具每次调用创建独立状态，宿主操作由协程桥接，详见 [TOOLS.md](./TOOLS.md)
+- 自定义工具（Lua / Python / HTTP）存储于数据库同级的 `tools/` 文件夹，启动及后台刷新时加载；Python 工具通过 `sys.argv[1]` 传入参数 JSON 文件路径。Lua 工具每次调用创建独立状态，宿主操作由协程桥接，详见 [TOOLS.md](./TOOLS.md)
 - 拍一拍、撤回、引用回复、表情包收发、定时任务均由上述工具实现，由 Executor 根据上下文自动决策调用；天气、搜索、随机数、时间等能力来自
   `agentTools/` 目录的可导入自定义工具
 
@@ -358,8 +358,8 @@ JSON 损坏则备份为 `config.json.broken.<时间戳>` 后重建；缺失或�
 
 SQLite 文件位于 `data/insoulforge.db`（`Database`
 单例，以读写锁保护）。存储包括完整消息恢复副本、短期/长期记忆、记忆与好感度维护任务、提示词、会话配置、管理员、全局 QQ
-黑名单、表情与自定义工具。全局运行配置不属于数据库，位于同目录的
-`config.json`。
+黑名单和表情。全局运行配置与自定义工具不属于数据库，分别位于同目录的
+`config.json` 和 `tools/`；Python 解释器路径仍保存在数据库的 `settings` 表。
 
 调试时可用任意 SQLite 客户端查看：
 
@@ -424,7 +424,7 @@ Dockerfile 的运行阶段安装 `python3`，供自定义工具使用；不在 C
 网页读取和 Bing 搜索示例使用 Python 标准库调用 PageWeave，默认地址为 `http://172.31.100.240:7779/extract`。
 参数、服务地址覆盖和容器解释器配置见[PageWeave 网页工具](TOOLS.md#pageweave-网页工具)。
 修改这些脚本后执行 `python3 -m unittest discover -s tests -p 'test_pageweave_tools.py'`；
-JSON 文件导入后保存在数据库，修改仓库文件不会自动替换已保存的工具脚本。
+JSON 文件导入后写入 `data/tools/`，修改仓库文件不会自动替换已保存的工具脚本。
 
 也可直接编写 JSON 配置文件放入 `agentTools/` 后从后台导入，格式：
 
