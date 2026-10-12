@@ -18,7 +18,7 @@ Executor（`ExecutorAgent`）在单个 Agent 循环中通过工具调用生成�
 若最大轮数设为 1，第一轮就是仅回复模式。工具结果日志仍保留。
 
 内置三组分别归属 `builtin.reply`、`builtin.info`、`builtin.action` 插件，由 `ToolPluginCatalog`
-显式加载；自定义工具（Lua / Python / HTTP）归属 `custom` 插件并统一注册为 `INFORMATION`。同名工具不能跨插件覆盖；刷新自定义工具只会替换
+显式加载；自定义工具（Lua）归属 `custom` 插件并统一注册为 `INFORMATION`。同名工具不能跨插件覆盖；刷新自定义工具只会替换
 `custom` 的工具。
 
 注入顺序固定为“类别 → `promptOrder` → 工具名”，避免重启或刷新后顺序漂移。私聊注入时会排除仅群聊的 `at_user`、`ban_user`、
@@ -133,10 +133,10 @@ data/tools/
 │   └── main.lua
 └── search_web/
     ├── tool.json
-    └── main.py
+    └── main.lua
 ```
 
-每个目录对应一个工具；`tool.json` 保存定义，Lua/Python 脚本分别位于 `main.lua`/`main.py`。HTTP 工具只需要 `tool.json`。
+每个目录对应一个工具；`tool.json` 保存定义，`main.lua` 保存 Lua 脚本。自定义工具仅支持 Lua，网络请求使用 `http.request()`。
 工具名与目录名必须一致，仅允许英文字母、数字、下划线和连字符，长度 1–64。示例：
 
 ```json
@@ -146,14 +146,13 @@ data/tools/
   "description": "读取网页内容",
   "parameters": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]},
   "executorType": "lua",
-  "executorConfig": {},
   "readme": "工具使用说明",
   "enabled": true
 }
 ```
 
 `id` 是前端操作所用的唯一正整数；手动新增时不得与其他工具重复。前端新增会自动分配 ID，`.next-id` 保存分配水位，不能随意删除。
-`parameters` 和 `executorConfig` 在文件里是 JSON 值，不是双重编码的字符串；HTTP 的请求配置放在 `executorConfig`。
+`parameters` 在文件里是 JSON 对象，不是双重编码的字符串。旧 Python/HTTP 工具目录会记录不支持的执行类型并跳过加载，不会自动删除文件；请改写为 Lua 工具。
 前端添加、编辑、启停、删除和原有单文件导入导出仍可使用。手动编辑后通过后台刷新工具或重启加载；执行中的调用保留旧脚本快照。
 单个工具文件最多 1 MiB；无效目录会记录原因并跳过，不影响其他工具加载。禁止工具目录及定义、脚本文件使用符号链接。
 
@@ -161,7 +160,7 @@ data/tools/
 这些名称为程序保留，不要手动创建。不要让多个程序实例同时写同一个工具目录，也不要在前端保存的同时手工编辑文件。
 
 **升级说明：数据库 Schema 从 v12 升级到 v13。启动时自动删除旧 `custom_tools` 表，不导出或迁移旧工具内容。**
-更新前如需保留旧工具，请先在旧版管理后台导出，更新后重新导入。其他数据库表不受此迁移影响；Python 解释器设置继续保留。
+更新前如需保留旧工具，请先在旧版管理后台导出，更新后重新导入。其他业务数据不受此迁移影响。Schema v13 → v14 会清理旧 `custom_tool_python` 设置；旧 Python/HTTP 工具文件只跳过加载，不自动删除。
 新版本的备份必须同时保留数据库和 `tools/`（备份整个 `data/` 即可）。
 
 ## Lua 自定义工具
@@ -220,8 +219,8 @@ HTTP 接口可访问容器网络中的内部服务，不是 SSRF 安全隔离层
 
 ## PageWeave 网页工具
 
-`agentTools/fetch_webpage.json` 和 `agentTools/search_web.json` 是可导入的 Python 自定义工具，不属于 C++ 内置工具。
-这两个现有工具仍使用 Python 标准库请求 PageWeave，无需 Jina Reader、DuckDuckGo 或第三方 Python 包；也可以使用 Lua 的 `http.request` 编写同类工具。
+`agentTools/fetch_webpage.json` 和 `agentTools/search_web.json` 是可导入的 Lua 自定义工具，不属于 C++ 内置工具。
+工具通过 Lua 的异步 `http.request()` 请求 PageWeave，不需要 Python 或额外第三方包。
 
 | 工具 | 参数 | 行为 |
 |------|------|------|
@@ -238,23 +237,14 @@ HTTP 错误向模型返回状态码、PageWeave 错误码、原因和请求 ID�
 
 ### 配置和部署
 
-1. Docker 运行镜像包含 Python 3，可使用默认的 `python3` 解释器；本地运行需自行安装，并按需在后台“自定义工具 → Python 配置”中设置路径。
-2. 确认该环境能访问 `http://172.31.100.240:7779/health/ready`，响应应为 `{"status":"ok"}`。
-3. 导入两个 JSON 文件并启用；有同名旧工具时编辑其脚本和参数，或先删除再导入。
-4. 测试读取 `{"url":"example.com"}` 和搜索 `{"query":"InSoulForge GitHub"}`。
+1. 确认机器人容器能访问 `http://172.31.100.240:7779/health/ready`。
+2. 修改脚本中的 `endpoint` 为实际 PageWeave 接口地址，默认 `http://172.31.100.240:7779/extract`。
+3. 导入两个 JSON 文件并启用；同名旧工具需要删除后重新导入或直接修改文件。
+4. 实际调用读取 `{"url":"example.com"}` 和搜索 `{"query":"InSoulForge GitHub"}`。
 
-脚本默认服务地址为 `http://172.31.100.240:7779/extract`。可修改各脚本的默认值，
-或在启动机器人时设置 `PAGEWEAVE_URL` 为完整 HTTP/HTTPS 接口地址。脚本请求超时为 30 秒，PageWeave 的服务预算应短于此值。
-Docker 里 `127.0.0.1` 指向机器人容器自身，不能因为两个服务在同一宿主机就使用回环地址互访。
-
-按当前 Dockerfile 构建的镜像在运行阶段安装 `python3`，无需另建派生镜像；已有镜像需重新构建或更新到包含此更改的版本。
-网页读取和 Bing 搜索只使用标准库；其他脚本若依赖第三方包，仍需自行准备相应环境。
-
-网页工具的参数和错误契约测试无需 C++ 构建：
-
-```bash
-python3 -m unittest discover -s tests -p 'test_pageweave_tools.py'
-```
+请求超时为 30 秒，不自动重试。Docker 中的 `127.0.0.1` 指向容器自身，不能用它访问其他容器或宿主机服务。
+后台测试模式模拟 HTTP，不访问 PageWeave；真实网络请求需要通过实际工具调用验证。
+示例脚本校验及参数契约测试纳入 C++ 的 `message_contracts`，运行环境不需要 Python。
 
 ## 共同模式
 
@@ -267,9 +257,8 @@ python3 -m unittest discover -s tests -p 'test_pageweave_tools.py'
   参数中的常见凭据和图片数据会省略，单次参数超过 2048 字节时明确标注省略，不保存完整工具结果。
   新记录中的 `decision` 表示 `no_reply` 形成决策，`rejected` 表示最后一轮拒绝调用；
   `returned` 只表示工具处理器返回，不能仅凭它判断业务成功。此前查询不含完整结果，需要时仍可重新核实。
-- **调用日志**：Executor 记录工具名称，并在 debug 级别记录工具结果；不打印脚本源码或 Python 启动命令。
-  Python 执行失败时保留退出状态和输出日志，具体输出摘要继续作为工具结果回传给模型。
-- **错误反馈**：普通工具的结果会作为 `tool` 消息回传给 Executor。处理器抛异常时，`ToolRegistry` 将异常摘要（最多 500 字符）转为工具结果，不让异常中断整轮调用；回复工具的参数错误则由 Executor 自行回传。Python 工具失败时附带退出状态与输出摘要，HTTP 自定义工具附带传输错误或 HTTP 状态及服务端错误消息。仅返回布尔成功状态的 OneBot 接口无法提供更细的失败原因，工具会返回相应的通用提示。异步工具启动后的执行错误通过新的系统消息反馈，不作为原工具调用的即时结果。
+- **调用日志**：Executor 记录工具名称，并在 debug 级别记录工具结果；不打印脚本源码。
+- **错误反馈**：普通工具的结果会作为 `tool` 消息回传给 Executor。处理器抛异常时，`ToolRegistry` 将异常摘要（最多 500 字符）转为工具结果，不让异常中断整轮调用；回复工具的参数错误则由 Executor 自行回传。Lua HTTP 接口返回传输错误或原始 HTTP 响应，由脚本将具体原因回传模型。仅返回布尔成功状态的 OneBot 接口无法提供更细的失败原因，工具会返回相应的通用提示。异步工具启动后的执行错误通过新的系统消息反馈，不作为原工具调用的即时结果。
 - **会话上下文**：所有工具签名统一为 `(json args, ToolCallContext)`，会话 ID 从 `ctx.sessionId` 取得；`ctx.messageSnapshot`
   是本轮冻结的完整消息快照，媒体工具可用它按 `message_id` 与 `image_index` 解析图片来源。群操作类工具统一做私聊拦截与
   `sessionId == 0` 校验

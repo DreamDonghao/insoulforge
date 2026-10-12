@@ -3,7 +3,7 @@
  * @file CustomTools.vue
  * @brief 自定义工具管理组件
  */
-import {computed, inject, nextTick, onMounted, reactive, ref, type Ref} from 'vue'
+import {inject, nextTick, onMounted, reactive, ref, type Ref} from 'vue'
 import {marked} from 'marked'
 import type {ApiResponse} from '../../vite-env'
 
@@ -14,8 +14,7 @@ interface CustomTool {
   name: string
   description: string
   parameters: string
-  executorType: 'python' | 'http' | 'lua'
-  executorConfig: string
+  executorType: 'lua'
   scriptContent: string
   readme: string
   enabled: boolean
@@ -39,23 +38,6 @@ const showReadmeDialog: Ref<boolean> = ref(false)
 const currentReadme: Ref<string> = ref('')
 const currentToolName: Ref<string> = ref('')
 
-// Python 配置
-const showConfig: Ref<boolean> = ref(false)
-const pythonPath: Ref<string> = ref('python3')
-const savingConfig: Ref<boolean> = ref(false)
-
-const defaultPythonScript = `# Python 工具脚本
-import sys
-import json
-
-args = {}
-if len(sys.argv) > 1:
-    with open(sys.argv[1]) as f:
-        args = json.load(f)
-
-result = {"status": "ok", "args": args}
-print(json.dumps(result, ensure_ascii=False))`
-
 const defaultLuaScript = `function run(args, ctx)
     return "会话 " .. ctx.session_id .. "：" .. (args.text or "你好")
 end
@@ -70,9 +52,8 @@ const editTool = reactive<CustomTool>({
   name: '',
   description: '',
   parameters: '{"type":"object","properties":{},"required":[]}',
-  executorType: 'python',
-  executorConfig: '',
-  scriptContent: defaultPythonScript,
+  executorType: 'lua',
+  scriptContent: defaultLuaScript,
   readme: '',
   enabled: true
 })
@@ -86,43 +67,6 @@ const loadTools = async (): Promise<void> => {
     tools.value = await resp.json()
   } finally {
     loading.value = false
-  }
-}
-
-const loadConfig = async (): Promise<void> => {
-  try {
-    const resp = await fetch('/admin/api/custom-tool-config')
-    const data = await resp.json()
-    if (data.pythonPath) {
-      pythonPath.value = data.pythonPath
-    }
-  } catch {
-    // ignore
-  }
-}
-
-const saveConfig = async (): Promise<void> => {
-  if (!pythonPath.value.trim()) {
-    showToast!('请填写Python解释器路径', true)
-    return
-  }
-
-  savingConfig.value = true
-  try {
-    const resp = await fetch('/admin/api/custom-tool-config', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({pythonPath: pythonPath.value.trim()})
-    })
-    const data: ApiResponse = await resp.json()
-    if (data.success) {
-      showToast!('配置已保存')
-      showConfig.value = false
-    } else {
-      showToast!(data.error || '保存失败', true)
-    }
-  } finally {
-    savingConfig.value = false
   }
 }
 
@@ -149,9 +93,8 @@ const openAddDialog = (): void => {
     name: '',
     description: '',
     parameters: '{"type":"object","properties":{},"required":[]}',
-    executorType: 'python',
-    executorConfig: '',
-    scriptContent: defaultPythonScript,
+    executorType: 'lua',
+    scriptContent: defaultLuaScript,
     readme: '',
     enabled: true
   })
@@ -174,17 +117,6 @@ const closeDialog = (): void => {
   showDialog.value = false
 }
 
-const onExecutorTypeChange = (): void => {
-  if (editTool.executorType === 'lua' &&
-      (editTool.scriptContent === defaultPythonScript || !editTool.scriptContent)) {
-    editTool.scriptContent = defaultLuaScript
-  } else if (editTool.executorType === 'python' &&
-      (editTool.scriptContent === defaultLuaScript || !editTool.scriptContent)) {
-    editTool.scriptContent = defaultPythonScript
-  }
-  resizeAllTextareas()
-}
-
 const saveTool = async (): Promise<void> => {
   if (!editTool.name) {
     showToast!('请填写工具名称', true)
@@ -194,12 +126,8 @@ const saveTool = async (): Promise<void> => {
     showToast!('请填写工具描述', true)
     return
   }
-  if ((editTool.executorType === 'python' || editTool.executorType === 'lua') && !editTool.scriptContent) {
+  if (!editTool.scriptContent) {
     showToast!('请填写脚本内容', true)
-    return
-  }
-  if (editTool.executorType === 'http' && !editTool.executorConfig) {
-    showToast!('请填写执行配置', true)
     return
   }
 
@@ -208,14 +136,6 @@ const saveTool = async (): Promise<void> => {
   } catch {
     showToast!('参数定义 JSON 格式错误', true)
     return
-  }
-  if (editTool.executorType === 'http') {
-    try {
-      JSON.parse(editTool.executorConfig)
-    } catch {
-      showToast!('执行配置 JSON 格式错误', true)
-      return
-    }
   }
 
   saving.value = true
@@ -362,7 +282,6 @@ const testCurrentTool = async (): Promise<void> => {
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
         executorType: editTool.executorType,
-        executorConfig: editTool.executorConfig,
         scriptContent: editTool.scriptContent,
         args: testArgsJson
       })
@@ -378,11 +297,9 @@ const testCurrentTool = async (): Promise<void> => {
   }
 }
 
-const dialogWidth = computed(() => editTool.executorType === 'http' ? '600px' : '900px')
 
 onMounted(() => {
   loadTools()
-  loadConfig()
 })
 </script>
 
@@ -397,7 +314,6 @@ onMounted(() => {
       <div class="card-header">
         <h3 class="card-title">工具管理</h3>
         <div style="display: flex; gap: 8px;">
-          <button class="btn btn-secondary btn-sm" @click="showConfig = true">⚙️ Python配置</button>
           <button class="btn btn-secondary btn-sm" @click="openImportDialog">📥 导入</button>
           <button class="btn btn-primary btn-sm" @click="reloadTools">重新加载</button>
           <button class="btn btn-success btn-sm" @click="openAddDialog">添加工具</button>
@@ -432,7 +348,7 @@ onMounted(() => {
                       @click="toggleTool(tool.id)">
                 {{ tool.enabled ? '禁用' : '启用' }}
               </button>
-              <button v-if="tool.executorType !== 'http'" class="btn btn-secondary btn-sm" style="margin-left: 4px;"
+              <button class="btn btn-secondary btn-sm" style="margin-left: 4px;"
                       @click="exportTool(tool.id, tool.name)">导出
               </button>
               <button class="btn btn-primary btn-sm" style="margin-left: 4px;" @click="openEditDialog(tool)">编辑
@@ -450,39 +366,6 @@ onMounted(() => {
           <div class="empty-icon">🔧</div>
           <p>暂无自定义工具</p>
           <button class="btn btn-success" @click="openAddDialog">添加工具</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Python 配置对话框 -->
-    <div v-if="showConfig" class="dialog-overlay">
-      <div class="dialog" style="width: 500px;">
-        <div class="dialog-header">
-          <h3>Python 解释器配置</h3>
-          <button class="dialog-close" @click="showConfig = false">×</button>
-        </div>
-        <div class="dialog-body">
-          <div class="form-group">
-            <label class="form-label">Python 解释器路径</label>
-            <input v-model="pythonPath" class="form-input" placeholder="例如: python3 或 /home/user/myenv/bin/python">
-            <small class="form-hint">
-              默认使用系统 python3。如需使用第三方包，请先创建虚拟环境并在此配置路径。
-            </small>
-          </div>
-          <div class="config-example">
-            <strong>创建虚拟环境示例：</strong>
-            <pre>python3 -m venv ~/my_bot_env
-source ~/my_bot_env/bin/activate
-pip install requests numpy  # 安装需要的包</pre>
-            <p>然后配置路径为: <code>~/my_bot_env/bin/python</code> 或
-              <code>/home/你的用户名/my_bot_env/bin/python</code></p>
-          </div>
-        </div>
-        <div class="dialog-footer">
-          <button class="btn btn-secondary" @click="showConfig = false">取消</button>
-          <button :disabled="savingConfig" class="btn btn-success" @click="saveConfig">
-            {{ savingConfig ? '保存中...' : '保存' }}
-          </button>
         </div>
       </div>
     </div>
@@ -510,7 +393,8 @@ pip install requests numpy  # 安装需要的包</pre>
   "name": "random",
   "description": "生成随机数",
   "parameters": {"type": "object", "properties": {...}},
-  "scriptContent": "import json\n..."
+  "executorType": "lua",
+  "scriptContent": "function run(args, ctx)\n    return '完成'\nend"
 }</pre>
           </div>
         </div>
@@ -525,7 +409,7 @@ pip install requests numpy  # 安装需要的包</pre>
 
     <!-- 添加/编辑对话框 -->
     <div v-if="showDialog" class="dialog-overlay">
-      <div :style="{ width: dialogWidth }" class="dialog">
+      <div style="width: 900px" class="dialog">
         <div class="dialog-header">
           <h3>{{ isEdit ? '编辑工具' : '添加工具' }}</h3>
           <button class="dialog-close" @click="closeDialog">×</button>
@@ -538,14 +422,6 @@ pip install requests numpy  # 安装需要的包</pre>
               <label class="form-label">工具名称 *</label>
               <input v-model="editTool.name" :disabled="isEdit" class="form-input"
                      placeholder="如: search_web, calculate">
-            </div>
-            <div class="form-group" style="width: 120px;">
-              <label class="form-label">执行类型</label>
-              <select v-model="editTool.executorType" class="form-input" @change="onExecutorTypeChange">
-                <option value="python">Python</option>
-                <option value="http">HTTP</option>
-                <option value="lua">Lua</option>
-              </select>
             </div>
           </div>
 
@@ -560,15 +436,7 @@ pip install requests numpy  # 安装需要的包</pre>
                       @input="autoResize"></textarea>
           </div>
 
-          <!-- Python 脚本编辑器 -->
-          <div v-if="editTool.executorType === 'python'" class="form-group">
-            <label class="form-label">Python 脚本</label>
-            <textarea v-model="editTool.scriptContent" class="form-input code-input auto-height" spellcheck="false"
-                      @input="autoResize"></textarea>
-            <small class="form-hint">参数通过 sys.argv[1] 传入 JSON 文件路径</small>
-          </div>
-
-          <div v-if="editTool.executorType === 'lua'" class="form-group">
+          <div class="form-group">
             <label class="form-label">Lua 脚本</label>
             <textarea v-model="editTool.scriptContent" class="form-input code-input auto-height" spellcheck="false"
                       @input="autoResize"></textarea>
@@ -581,14 +449,6 @@ pip install requests numpy  # 安装需要的包</pre>
             <textarea v-model="editTool.readme" class="form-input auto-height" placeholder="作者、用法、联系方式等信息..."
                       style="min-height: 80px;" @input="autoResize"></textarea>
             <small class="form-hint">可选填写作者、使用示例、联系方式等，便于分享和查阅</small>
-          </div>
-
-          <!-- HTTP 配置 -->
-          <div v-if="editTool.executorType === 'http'" class="form-group">
-            <label class="form-label">HTTP 配置 (JSON)</label>
-            <textarea v-model="editTool.executorConfig" class="form-input code-input auto-height"
-                      @input="autoResize"></textarea>
-            <small class="form-hint">示例: {"url": "http://api.example.com", "method": "POST"}</small>
           </div>
 
           <!-- 测试区域 -->
@@ -660,16 +520,6 @@ pip install requests numpy  # 安装需要的包</pre>
   border-radius: 4px;
   font-size: 12px;
   font-weight: 500;
-}
-
-.tag-python {
-  background: #3776ab;
-  color: white;
-}
-
-.tag-http {
-  background: var(--success-btn);
-  color: white;
 }
 
 .tag-lua {
@@ -871,29 +721,6 @@ pip install requests numpy  # 安装需要的包</pre>
   gap: 6px;
   cursor: pointer;
   font-size: 13px;
-}
-
-.config-example {
-  margin-top: 12px;
-  padding: 12px;
-  background: var(--bg-secondary);
-  border-radius: 6px;
-  font-size: 12px;
-}
-
-.config-example pre {
-  background: var(--code-bg);
-  color: var(--code-text);
-  padding: 8px 12px;
-  border-radius: 4px;
-  font-size: 11px;
-  margin: 8px 0;
-  overflow-x: auto;
-}
-
-.config-example p {
-  margin: 8px 0 0 0;
-  color: var(--text-secondary);
 }
 
 .import-example {

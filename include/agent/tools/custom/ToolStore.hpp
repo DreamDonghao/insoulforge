@@ -1,6 +1,6 @@
 /// @file ToolStore.hpp
 /// @brief 自定义工具存储
-/// @details 工具定义和脚本位于数据库同级 tools 目录；settings 表只保存 Python 解释器路径。
+/// @details 工具定义和 Lua 脚本位于数据库同级 tools 目录。
 
 #pragma once
 
@@ -19,9 +19,8 @@ namespace insoulforge {
             std::string name; ///< 工具名，如 search_web
             std::string description; ///< 提供给模型的工具说明
             std::string parameters; ///< JSON Schema 字符串
-            std::string executorType; ///< python、http 或 lua
-            std::string executorConfig; ///< HTTP 执行配置 JSON
-            std::string scriptContent; ///< Python 或 Lua 脚本内容
+            std::string executorType; ///< lua
+            std::string scriptContent; ///< Lua 脚本内容
             std::string readme; ///< 面向管理员的 Markdown 说明
             bool enabled = true;
         };
@@ -47,10 +46,5 @@ namespace insoulforge {
         /// @brief 检查工具名是否已存在
         [[nodiscard]] auto hasCustomTool(const std::string &name) -> bool;
 
-        /// @brief 获取自定义工具使用的 Python 解释器路径
-        [[nodiscard]] auto getCustomToolPython() -> std::string;
-
-        /// @brief 设置自定义工具使用的 Python 解释器路径
-        void setCustomToolPython(const std::string &pythonPath);
     } // namespace ToolStore
 } // namespace insoulforge

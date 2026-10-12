@@ -430,6 +430,10 @@ namespace {
 
         sqlite3_exec(db, "PRAGMA user_version = 6", nullptr, nullptr, nullptr);
         sqlite3_exec(db,
+          "CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT); "
+          "INSERT INTO settings VALUES('custom_tool_python','python3'),('other','preserved')",
+          nullptr, nullptr, nullptr);
+        sqlite3_exec(db,
           "CREATE TABLE custom_tools (id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, description TEXT NOT NULL, "
           "parameters TEXT, executor_type TEXT NOT NULL CHECK(executor_type IN ('python', 'http')), "
           "executor_config TEXT, script_content TEXT, readme TEXT, enabled INTEGER DEFAULT 1, "
@@ -456,6 +460,15 @@ namespace {
           "migration removes legacy tool storage", kTestName);
         sqlite3_finalize(stmt);
         insoulforge::SchemaMigrator::migrate(db);
+        check(sqlite3_prepare_v2(db, "SELECT value FROM settings WHERE key='custom_tool_python'", -1, &stmt, nullptr) ==
+                  SQLITE_OK &&
+                sqlite3_step(stmt) == SQLITE_DONE,
+          "upgrade removes obsolete Python setting", kTestName);
+        sqlite3_finalize(stmt);
+        check(sqlite3_prepare_v2(db, "SELECT value FROM settings WHERE key='other'", -1, &stmt, nullptr) == SQLITE_OK &&
+                sqlite3_step(stmt) == SQLITE_ROW,
+          "upgrade preserves unrelated settings", kTestName);
+        sqlite3_finalize(stmt);
         sqlite3_exec(db, "CREATE TABLE custom_tools(id INTEGER); PRAGMA user_version=12", nullptr, nullptr, nullptr);
         insoulforge::SchemaMigrator::migrate(db);
         check(sqlite3_prepare_v2(db, "SELECT * FROM custom_tools", -1, &stmt, nullptr) != SQLITE_OK,
@@ -517,8 +530,69 @@ namespace {
         tool.parameters = "{}";
         const auto newId = store::addCustomTool(tool);
         check(newId > tool.id, "deleted IDs are not reused", kTestName);
+        auto httpTool = tool;
+        httpTool.name = "legacy_http";
+        httpTool.executorType = "http";
+        try {
+            std::ignore = store::addCustomTool(httpTool);
+            check(false, "rejects HTTP executor", kTestName);
+        } catch (const std::exception &) {
+            check(!std::filesystem::exists(directory / "tools/legacy_http"), "HTTP tool is not saved", kTestName);
+        }
+        std::filesystem::create_directory(directory / "tools/legacy_http");
+        {
+            std::ofstream metadata(directory / "tools/legacy_http/tool.json");
+            metadata << R"({"id":999,"name":"legacy_http","description":"old","executorType":"http"})";
+        }
+        check(store::getCustomTools().size() == 1 && std::filesystem::exists(directory / "tools/legacy_http/tool.json"),
+          "legacy HTTP tool is skipped without deleting user files", kTestName);
+        auto pythonTool = tool;
+        pythonTool.name = "legacy_python";
+        pythonTool.executorType = "python";
+        try {
+            std::ignore = store::addCustomTool(pythonTool);
+            check(false, "rejects Python executor", kTestName);
+        } catch (const std::exception &) {
+            check(!std::filesystem::exists(directory / "tools/legacy_python"), "Python tool is not saved", kTestName);
+        }
+        std::filesystem::create_directory(directory / "tools/legacy_python");
+        {
+            std::ofstream metadata(directory / "tools/legacy_python/tool.json");
+            metadata << R"({"id":998,"name":"legacy_python","description":"old","executorType":"python"})";
+        }
+        check(
+          store::getCustomTools().size() == 1 && std::filesystem::exists(directory / "tools/legacy_python/tool.json"),
+          "legacy Python tool is skipped without deleting user files", kTestName);
         database.close();
         std::filesystem::remove_all(directory);
+    }
+
+    void testLuaToolExamples() {
+        constexpr std::string_view kTestName = "Lua tool examples";
+        const auto root = std::filesystem::path(__FILE__).parent_path().parent_path();
+        const auto load = [&root](const std::string &name) -> std::string {
+            std::ifstream stream(root / "agentTools" / (name + ".json"));
+            insoulforge::json definition;
+            stream >> definition;
+            return definition.at("scriptContent").get<std::string>();
+        };
+        for (const auto &name: {"fetch_webpage", "search_web", "random", "get_weather"}) {
+            check(!insoulforge::LuaToolExecutor::validate(load(name)), "valid Lua example", kTestName);
+        }
+        const auto execute = [&load](const std::string &name, insoulforge::json args) -> std::string {
+            return drogon::sync_wait(
+              insoulforge::LuaToolExecutor::execute(load(name), std::move(args), 123, false, true));
+        };
+        check(execute("random", {{"min", 4}, {"max", 4}}).find("4") != std::string::npos,
+          "random example runs without Python", kTestName);
+        check(execute("fetch_webpage", {{"url", "ftp://example.com"}}).starts_with("错误"),
+          "webpage example rejects unsupported schemes", kTestName);
+        check(execute("fetch_webpage", {{"url", "example.com"}}).find("https://example.com") != std::string::npos,
+          "webpage example supplies HTTPS in mocked request body", kTestName);
+        check(execute("search_web", {{"query", "a &b"}}).find("a+%26b") != std::string::npos,
+          "search example encodes query", kTestName);
+        check(execute("get_weather", {{"city", "New York"}}) == "天气接口响应格式无效",
+          "weather example validates mocked response", kTestName);
     }
 
     void testLuaToolExecutor() {
@@ -1508,6 +1582,7 @@ auto main() -> int {
     testSchemaMigration();
     testFileToolStore();
     testLuaToolExecutor();
+    testLuaToolExamples();
     testToolRegistryReload();
     testFinalRoundToolPolicy();
     testIterationRequestMessages();

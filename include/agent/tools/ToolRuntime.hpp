@@ -28,13 +28,6 @@ namespace insoulforge::ToolRuntime {
     /// @param database 已成功初始化的数据库。
     [[nodiscard]] auto reloadCustomTools(const Database &database) -> std::expected<void, std::string>;
 
-    /// @brief 执行 Python 脚本工具
-    /// @param scriptContent Python脚本内容（直接存储在数据库中）
-    /// @param args 传入参数
-    auto executePythonTool(std::string scriptContent, json args) -> drogon::Task<std::string>;
-
-    /// @brief 执行 HTTP 工具（sessionId 来自工具调用上下文）
-    auto executeHttpTool(std::string config, json args, u64 sessionId) -> drogon::Task<std::string>;
 
     /// @brief 获取 QQ 收藏表情列表（调用 NapCat fetch_custom_face_detail，带60秒缓存）
     /// @return 归一化后的表情数组，失败时返回空数组

@@ -1,5 +1,5 @@
 /// @file ToolStore.cpp
-/// @brief 自定义工具文件存储；数据库只保留 Python 解释器设置
+/// @brief Lua 自定义工具文件存储
 
 #include <algorithm>
 #include <filesystem>
@@ -12,7 +12,6 @@
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
-#include <infrastructure/storage/Statement.hpp>
 
 namespace insoulforge::ToolStore {
     namespace {
@@ -128,14 +127,12 @@ namespace insoulforge::ToolStore {
                     tool.description = metadata.at("description").get<std::string>();
                     tool.parameters = metadata.value("parameters", json::object()).dump();
                     tool.executorType = metadata.at("executorType").get<std::string>();
-                    tool.executorConfig = metadata.value("executorConfig", json::object()).dump();
                     tool.readme = metadata.value("readme", std::string());
                     tool.enabled = metadata.value("enabled", true);
-                    if (tool.executorType == "lua" || tool.executorType == "python")
-                        tool.scriptContent =
-                          readFile(entry.path() / (tool.executorType == "lua" ? "main.lua" : "main.py"));
-                    else if (tool.executorType != "http")
-                        throw std::runtime_error("未知执行器类型");
+                    if (tool.executorType == "lua")
+                        tool.scriptContent = readFile(entry.path() / "main.lua");
+                    else
+                        throw std::runtime_error("不支持的执行器类型: " + tool.executorType + "，仅支持 Lua");
                     if (std::ranges::any_of(tools, [&tool](const auto &other) { return other.id == tool.id; }))
                         throw std::runtime_error("重复工具 ID");
                     tools.push_back(std::move(tool));
@@ -151,8 +148,8 @@ namespace insoulforge::ToolStore {
         /// @brief 先写入完整的新目录，再替换旧目录；失败时恢复旧版本。
         void saveTool(const std::filesystem::path &root, const CustomTool &tool, const std::string &oldName = {}) {
             validateName(tool.name);
-            if (tool.executorType != "lua" && tool.executorType != "python" && tool.executorType != "http")
-                throw std::runtime_error("未知执行器类型");
+            if (tool.executorType != "lua")
+                throw std::runtime_error("不支持的执行器类型: " + tool.executorType + "，仅支持 Lua");
             const auto destination = root / tool.name;
             rejectSymlink(destination);
             if (tool.name != oldName && std::filesystem::exists(destination))
@@ -168,12 +165,9 @@ namespace insoulforge::ToolStore {
             try {
                 const auto metadata = json{{"id", tool.id}, {"name", tool.name}, {"description", tool.description},
                   {"parameters", tool.parameters.empty() ? json::object() : json::parse(tool.parameters)},
-                  {"executorType", tool.executorType},
-                  {"executorConfig", tool.executorConfig.empty() ? json::object() : json::parse(tool.executorConfig)},
-                  {"readme", tool.readme}, {"enabled", tool.enabled}};
+                  {"executorType", tool.executorType}, {"readme", tool.readme}, {"enabled", tool.enabled}};
                 writeFile(staging / "tool.json", metadata.dump(2));
-                if (tool.executorType != "http")
-                    writeFile(staging / (tool.executorType == "lua" ? "main.lua" : "main.py"), tool.scriptContent);
+                writeFile(staging / (tool.executorType == "lua" ? "main.lua" : "main.py"), tool.scriptContent);
                 if (!oldName.empty()) {
                     std::filesystem::rename(root / oldName, backup);
                     movedOld = true;
@@ -262,19 +256,4 @@ namespace insoulforge::ToolStore {
         return std::filesystem::exists(toolsDirectory(Database::instance()) / name);
     }
 
-    auto getCustomToolPython() -> std::string {
-        const auto &db = Database::instance();
-        const auto lock = std::shared_lock(db.mutex());
-        const auto stmt = Statement(db.handle(), "SELECT value FROM settings WHERE key='custom_tool_python'");
-        return stmt.step() ? stmt.getText(0) : "python3";
-    }
-
-    void setCustomToolPython(const std::string &pythonPath) {
-        const auto &db = Database::instance();
-        const auto lock = std::unique_lock(db.mutex());
-        const auto stmt =
-          Statement(db.handle(), "INSERT OR REPLACE INTO settings (key, value) VALUES ('custom_tool_python', ?)");
-        stmt.bind(1, pythonPath);
-        stmt.exec();
-    }
 } // namespace insoulforge::ToolStore

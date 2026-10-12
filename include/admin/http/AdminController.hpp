@@ -160,11 +160,6 @@ namespace insoulforge {
 
         ADD_METHOD_TO(AdminController::importCustomTool, "/admin/api/custom-tool/import", drogon::Post);
 
-        // 自定义工具配置
-        ADD_METHOD_TO(AdminController::getCustomToolConfig, "/admin/api/custom-tool-config", drogon::Get);
-
-        ADD_METHOD_TO(AdminController::saveCustomToolConfig, "/admin/api/custom-tool-config", drogon::Post);
-
         METHOD_LIST_END
 
         /// @brief 获取当前浏览器的管理后台登录状态。
@@ -528,20 +523,6 @@ namespace insoulforge {
         /// @param req HTTP 请求，body 包含 toolId 和 testArgs
         /// @param callback HTTP 响应回调
         auto testCustomTool(drogon::HttpRequestPtr req,
-          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
-
-        // ============== 自定义工具配置 ==============
-
-        /// @brief 获取自定义工具配置（Python解释器路径等）
-        /// @param req HTTP 请求
-        /// @param callback HTTP 响应回调
-        auto getCustomToolConfig(drogon::HttpRequestPtr req,
-          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
-
-        /// @brief 保存自定义工具配置
-        /// @param req HTTP 请求，body 包含 pythonPath
-        /// @param callback HTTP 响应回调
-        auto saveCustomToolConfig(drogon::HttpRequestPtr req,
           std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         // ============== 自定义工具导入导出 ==============
