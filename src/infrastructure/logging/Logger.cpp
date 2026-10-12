@@ -4,11 +4,11 @@
 #include <algorithm>
 #include <filesystem>
 
-#include <fmt/chrono.h>
 #include <fmt/format.h>
 #include <spdlog/async.h>
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/spdlog.h>
 
 #include <admin/logging/LogWebSocketManager.hpp>
 #include <infrastructure/NumericTypes.hpp>
@@ -22,7 +22,7 @@ namespace insoulforge {
         constexpr size_t kLogFileMaxSize = 10 * 1024 * 1024;
         constexpr size_t kLogFileMaxCount = 5;
 
-        [[nodiscard]] spdlog::level::level_enum toSpdlogLevel(const Logger::Level level) {
+        [[nodiscard]] auto toSpdlogLevel(const Logger::Level level) -> spdlog::level::level_enum {
             switch (level) {
                 case Logger::Level::Trace:
                     return spdlog::level::trace;
@@ -40,7 +40,7 @@ namespace insoulforge {
             return spdlog::level::info;
         }
 
-        [[nodiscard]] std::string_view toLevelName(const Logger::Level level) {
+        [[nodiscard]] auto toLevelName(const Logger::Level level) -> std::string_view {
             switch (level) {
                 case Logger::Level::Trace:
                     return "trace";
@@ -58,7 +58,7 @@ namespace insoulforge {
             return "info";
         }
 
-        [[nodiscard]] std::string formatTimestamp(const spdlog::log_clock::time_point timestamp) {
+        [[nodiscard]] auto formatTimestamp(const spdlog::log_clock::time_point timestamp) -> std::string {
             const auto time = spdlog::log_clock::to_time_t(timestamp);
             std::tm localTime{};
 #ifdef _WIN32
@@ -130,7 +130,7 @@ namespace insoulforge {
         write(Level::Critical, sessionId, source, std::move(content));
     }
 
-    bool Logger::setLevel(const std::string_view levelName) {
+    auto Logger::setLevel(const std::string_view levelName) -> bool {
         const auto level = spdlog::level::from_str(std::string(levelName));
         if (level == spdlog::level::off && levelName != "off") {
             return false;
@@ -139,7 +139,7 @@ namespace insoulforge {
         return true;
     }
 
-    std::string Logger::level() {
+    auto Logger::level() -> std::string {
         const auto level = spdlog::level::to_string_view(spdlog::default_logger()->level());
         return {level.data(), level.size()};
     }

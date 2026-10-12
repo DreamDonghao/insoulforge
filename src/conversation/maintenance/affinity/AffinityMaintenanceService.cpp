@@ -129,12 +129,12 @@ namespace insoulforge {
             return std::min(kInitialRetryDelay * (1 << exponent), kMaxRetryDelay);
         }
 
-        auto drainSession(const u64 sessionId) -> drogon::Task<>;
+        auto drainSession(u64 sessionId) -> drogon::Task<>;
 
         [[nodiscard]] auto acquireSessionConsumer(const u64 sessionId) -> bool {
-            auto &state = scheduler();
-            std::lock_guard lock(state.mutex);
-            return state.activeSessions.insert(sessionId).second;
+            auto &[mutex, activeSessions] = scheduler();
+            std::lock_guard lock(mutex);
+            return activeSessions.insert(sessionId).second;
         }
 
         void releaseSessionConsumer(const u64 sessionId) {

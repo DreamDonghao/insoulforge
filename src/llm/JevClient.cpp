@@ -2,7 +2,6 @@
 /// @brief Jev（TypeSafe AI System One）客户端 - 实现
 
 #include <algorithm>
-#include <cmath>
 
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
@@ -28,8 +27,8 @@ namespace insoulforge::JevClient {
         return !api.baseUrl.empty() && !api.path.empty() && !api.model.empty() && !api.apiKey.empty();
     }
 
-    auto requestSystemOne(
-      const LLMApiConfig &api, json state, json questions, const u64 sessionId) -> drogon::Task<std::optional<json>> {
+    auto requestSystemOne(const LLMApiConfig &api, json state, json questions, const u64 sessionId)
+      -> drogon::Task<std::optional<json>> {
         if (!isConfigured(api)) {
             Logger::warn(sessionId, "Jev", "未配置服务地址、请求路径、模型名或密钥，跳过请求");
             co_return std::nullopt;
@@ -37,9 +36,8 @@ namespace insoulforge::JevClient {
 
         json body{{"state", std::move(state)}, {"model", api.model}, {"questions", std::move(questions)}};
 
-        const auto resp =
-          co_await HttpUtil::send("Jev", api.baseUrl, api.path, drogon::Post, std::move(body), api.apiKey,
-            kJevTimeoutSeconds, sessionId);
+        const auto resp = co_await HttpUtil::send(
+          "Jev", api.baseUrl, api.path, drogon::Post, std::move(body), api.apiKey, kJevTimeoutSeconds, sessionId);
         if (!resp) {
             Logger::warn(sessionId, "Jev", "网络异常");
             co_return std::nullopt;
@@ -58,8 +56,7 @@ namespace insoulforge::JevClient {
             co_return std::nullopt;
         }
 
-        const json &answers = atOrNull(parsed, "answers");
-        if (!answers.is_object() || answers.empty()) {
+        if (const json &answers = atOrNull(parsed, "answers"); !answers.is_object() || answers.empty()) {
             Logger::error(sessionId, "Jev", "响应缺少 answers 或为空对象");
             co_return std::nullopt;
         }
@@ -74,18 +71,16 @@ namespace insoulforge::JevClient {
         co_return parsed;
     }
 
-    auto readChoice(
-      const json &response, const std::string &questionName, const std::vector<std::string_view> &validLabels)
-      -> std::optional<std::string> {
+    auto readChoice(const json &response, const std::string &questionName,
+      const std::vector<std::string_view> &validLabels) -> std::optional<std::string> {
         const json &answer = findAnswer(response, questionName);
         const json &choiceValue = atOrNull(answer, "choice");
         if (!choiceValue.is_string()) {
             return std::nullopt;
         }
-        const std::string label = choiceValue.get<std::string>();
-        const bool isValid = std::ranges::any_of(validLabels, [&label](const std::string_view valid) {
-            return valid == label;
-        });
+        auto label = choiceValue.get<std::string>();
+        const bool isValid =
+          std::ranges::any_of(validLabels, [&label](const std::string_view valid) -> bool { return valid == label; });
         if (!isValid) {
             return std::nullopt;
         }

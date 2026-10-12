@@ -101,7 +101,7 @@ namespace insoulforge::ImageDescriptionService {
         }
 
         /// @brief 下载 URL 的原始媒体字节，不写入 HTTP 跟踪日志以避免二进制内容进入内存日志。
-        auto download(std::string sourceUrl, const u64 sessionId, const size_t maxBytes)
+        auto download(const std::string sourceUrl, const u64 sessionId, const size_t maxBytes)
           -> drogon::Task<std::optional<DownloadedMedia>> {
             static const std::regex urlPattern(R"(^(https?://[^/]+)(/.*)?$)", std::regex::icase);
             std::smatch match;
@@ -146,7 +146,7 @@ namespace insoulforge::ImageDescriptionService {
                 std::iota(all.begin(), all.end(), 0);
                 return all;
             }
-            std::vector<i32> delays(count, 1);
+            std::vector delays(count, 1);
             i64 totalDelay = 0;
             for (size_t i = 0; i < count; ++i) {
                 GraphicsControlBlock control{};
@@ -173,7 +173,7 @@ namespace insoulforge::ImageDescriptionService {
             return {selected.begin(), selected.end()};
         }
 
-        void writePng(png_structp png, png_bytep data, png_size_t length) {
+        void writePng(png_structp png, png_bytep data, const png_size_t length) {
             auto &output = *static_cast<std::string *>(png_get_io_ptr(png));
             output.append(reinterpret_cast<const char *>(data), length);
         }
@@ -242,7 +242,7 @@ namespace insoulforge::ImageDescriptionService {
             const i32 width = gif->SWidth;
             const i32 height = gif->SHeight;
             const auto selected = selectGifFrames(*gif);
-            const std::set<size_t> selectedSet(selected.begin(), selected.end());
+            const std::set selectedSet(selected.begin(), selected.end());
             std::vector<u8> canvas(static_cast<size_t>(width * height * 4), 0);
             std::vector<std::string> frames;
             for (i32 frameIndex = 0; frameIndex < gif->ImageCount; ++frameIndex) {
@@ -284,8 +284,8 @@ namespace insoulforge::ImageDescriptionService {
                     for (i32 y = 0; y < desc.Height; ++y) {
                         for (i32 x = 0; x < desc.Width; ++x) {
                             const i32 targetX = desc.Left + x;
-                            const i32 targetY = desc.Top + y;
-                            if (targetX >= 0 && targetX < width && targetY >= 0 && targetY < height)
+                            if (const i32 targetY = desc.Top + y;
+                              targetX >= 0 && targetX < width && targetY >= 0 && targetY < height)
                                 std::fill_n(canvas.data() + static_cast<size_t>((targetY * width + targetX) * 4), 4, 0);
                         }
                     }
@@ -406,8 +406,7 @@ namespace insoulforge::ImageDescriptionService {
     }
 
     auto describe(std::string sourceUrl, const u64 sessionId) -> drogon::Task<std::optional<ImageDescriptionResult>> {
-        const auto &config = Config::instance();
-        if (!LlmClient::isConfigured(config.image)) {
+        if (const auto &config = Config::instance(); !LlmClient::isConfigured(config.image)) {
             Logger::debug(sessionId, "Media", fmt::format("图片识别模型未配置，跳过识别"));
             co_return std::nullopt;
         }

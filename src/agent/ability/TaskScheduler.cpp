@@ -185,10 +185,9 @@ namespace insoulforge {
             }
 
             const auto now = Clock::now();
-            const auto fireTime = Clock::from_time_t(m_heap.top().fireTime);
-            if (fireTime > now) {
+            if (const auto fireTime = Clock::from_time_t(m_heap.top().fireTime); fireTime > now) {
                 // 不直接等待到数小时后的绝对时刻。系统时间被校正后，至多一分钟便会重新计算剩余时间。
-                const auto maximumWait = std::chrono::duration_cast<Clock::duration>(kMaximumWait);
+                constexpr auto maximumWait = std::chrono::duration_cast<Clock::duration>(kMaximumWait);
                 m_cv.wait_for(lock, std::min(fireTime - now, maximumWait));
                 continue;
             }

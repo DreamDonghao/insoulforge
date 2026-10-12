@@ -85,8 +85,8 @@ namespace insoulforge::HttpUtil {
             return result;
         }
         if (value.is_string()) {
-            const auto &content = value.get_ref<const std::string &>();
-            if (content.find(";base64,") != std::string::npos || content.starts_with("base64://") ||
+            if (const auto &content = value.get_ref<const std::string &>();
+              content.find(";base64,") != std::string::npos || content.starts_with("base64://") ||
                 (content.size() > 1024 && content.size() % 4 == 0 &&
                   content.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=") ==
                     std::string::npos)) {

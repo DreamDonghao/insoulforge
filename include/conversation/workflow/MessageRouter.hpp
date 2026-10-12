@@ -37,5 +37,5 @@ namespace insoulforge::MessageRouter {
     ///          滑动会让聊天记录部分几乎每轮都变，命中率显著下降。
     ///          优先路径（Jev）与兜底路径（LLM）共用这一语义，均通过本函数取窗口起点。
     ///          导出到头文件用于支持无网络的离线测试，保持 route() 的既有签名不变。
-    [[nodiscard]] auto windowStartIndex(const size_t snapshotSize) -> size_t;
+    [[nodiscard]] auto windowStartIndex(size_t snapshotSize) -> size_t;
 } // namespace insoulforge::MessageRouter

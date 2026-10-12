@@ -100,7 +100,7 @@ namespace insoulforge::MemoryMaintenanceStore {
             return std::nullopt;
         }
         const i64 jobId = select.getInt64(0);
-        const size_t removeCount = static_cast<size_t>(std::max(select.getInt64(1), i64{0}));
+        const size_t removeCount = std::max(select.getInt64(1), i64{0});
         const Statement remove(handle, "DELETE FROM memory_maintenance_jobs WHERE id = ?");
         remove.bind(1, jobId);
         remove.execOrThrow();

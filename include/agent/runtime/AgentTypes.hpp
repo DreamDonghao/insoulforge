@@ -11,8 +11,6 @@
 #include <string>
 #include <string_view>
 
-#include <fmt/core.h>
-
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
 

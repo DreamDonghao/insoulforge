@@ -6,9 +6,9 @@
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 
-namespace insoulforge {
-    namespace TaskStore {
-        i64 addScheduledTask(const ScheduledTask &task) {
+
+    namespace insoulforge::TaskStore {
+        auto addScheduledTask(const ScheduledTask &task) -> i64 {
             const auto &db = Database::instance();
             std::unique_lock lock(db.mutex());
             const Statement stmt(db.handle(),
@@ -23,7 +23,7 @@ namespace insoulforge {
             return Statement::lastInsertRowId(db.handle());
         }
 
-        std::vector<ScheduledTask> getPendingScheduledTasks() {
+        auto getPendingScheduledTasks() -> std::vector<ScheduledTask> {
             const auto &db = Database::instance();
             std::shared_lock lock(db.mutex());
             std::vector<ScheduledTask> tasks;
@@ -43,8 +43,8 @@ namespace insoulforge {
             return tasks;
         }
 
-        std::vector<ScheduledTask> getPendingScheduledTasksByTarget(
-          const std::string &sessionType, const u64 targetId) {
+        auto getPendingScheduledTasksByTarget(
+          const std::string &sessionType, const u64 targetId) -> std::vector<ScheduledTask> {
             const auto &db = Database::instance();
             std::shared_lock lock(db.mutex());
             std::vector<ScheduledTask> tasks;
@@ -66,7 +66,7 @@ namespace insoulforge {
             return tasks;
         }
 
-        bool cancelScheduledTask(const i64 id) {
+        auto cancelScheduledTask(const i64 id) -> bool {
             const auto &db = Database::instance();
             std::unique_lock lock(db.mutex());
             const Statement stmt(
@@ -76,7 +76,7 @@ namespace insoulforge {
             return Statement::changes(db.handle()) > 0;
         }
 
-        bool rescheduleDailyTask(const i64 id, const i64 nextTime) {
+        auto rescheduleDailyTask(const i64 id, const i64 nextTime) -> bool {
             const auto &db = Database::instance();
             std::unique_lock lock(db.mutex());
             // 条件限定 pending：触发途中被取消时不复活任务
@@ -97,5 +97,5 @@ namespace insoulforge {
             stmt.bind(1, id);
             stmt.exec();
         }
-    } // namespace TaskStore
-} // namespace insoulforge
+    } // namespace insoulforge::TaskStore
+

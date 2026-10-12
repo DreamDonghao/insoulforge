@@ -16,7 +16,7 @@
 | SQLite3、spdlog、fmt、OpenSSL | 开发包                                         | 存储、日志、格式化、加密                               |
 | nlohmann-json                 | 头文件或 CMake 包                              | JSON；CMake 找不到包时会直接查找头文件                 |
 | libpng、giflib                | 开发包                                         | 图片与 GIF 解码                                        |
-| Lua                          | 5.4 或更新的兼容版本                          | 进程内自定义工具执行器                                 |
+| Lua                           | 5.4 或更新的兼容版本                           | 进程内自定义工具执行器                                 |
 
 `ninja` 不是必需依赖，但与 Dockerfile 一致，推荐作为 CMake 生成器使用。
 

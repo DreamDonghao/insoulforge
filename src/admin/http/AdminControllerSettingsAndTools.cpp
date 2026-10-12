@@ -1,9 +1,6 @@
 /// @file AdminControllerSettingsAndTools.cpp
 /// @brief 管理后台 REST API 控制器 - 模型、执行流程、提示词和自定义工具设置
 
-#include <cmath>
-#include <stdexcept>
-
 #include <admin/http/AdminController.hpp>
 #include <admin/http/AdminResponse.hpp>
 #include <agent/tools/ToolRuntime.hpp>
@@ -33,7 +30,7 @@ auto AdminController::saveLLMConfig(
     const auto body = parseJsonBody(req);
     if (!body || !body->is_object() || !body->contains("name")) {
         callback(AdminResponse::configErrorResponse(
-          {ConfigErrorType::InvalidArgument, "模型配置必须是包含 name 字段的 JSON 对象"}));
+          {.type = ConfigErrorType::InvalidArgument, .message = "模型配置必须是包含 name 字段的 JSON 对象"}));
         co_return;
     }
 
@@ -91,7 +88,7 @@ auto AdminController::getPrompts(HttpRequestPtr req, std::function<void(const Ht
 
 auto AdminController::savePrompt(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
   -> Task<> {
-    auto body = parseJsonBody(req);
+    const auto body = parseJsonBody(req);
     if (!body || !body->contains("key") || !body->contains("content")) {
         callback(jsonResponse(AdminResponse::errorJson("缺少key或content字段")));
         co_return;
@@ -118,21 +115,21 @@ auto AdminController::savePrompt(HttpRequestPtr req, std::function<void(const Ht
 
 // ==================== 自定义工具 ====================
 
-auto AdminController::getCustomTools(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
+auto AdminController::getCustomTools(HttpRequestPtr req, const std::function<void(const HttpResponsePtr &)> callback) const
   -> Task<> {
     const auto tools = ToolStore::getCustomTools();
 
     json result(json::array());
-    for (const auto &tool: tools) {
+    for (const auto &[id, name, description, parameters, executorType, scriptContent, readme, enabled]: tools) {
         json item;
-        item["id"] = tool.id;
-        item["name"] = tool.name;
-        item["description"] = tool.description;
-        item["parameters"] = tool.parameters;
-        item["executorType"] = tool.executorType;
-        item["scriptContent"] = tool.scriptContent;
-        item["readme"] = tool.readme;
-        item["enabled"] = tool.enabled;
+        item["id"] = id;
+        item["name"] = name;
+        item["description"] = description;
+        item["parameters"] = parameters;
+        item["executorType"] = executorType;
+        item["scriptContent"] = scriptContent;
+        item["readme"] = readme;
+        item["enabled"] = enabled;
         result.push_back(item);
     }
     callback(jsonResponse(result));
@@ -150,8 +147,7 @@ auto AdminController::addCustomTool(HttpRequestPtr req, std::function<void(const
     const std::string name = getStr(*body, "name");
 
     // 检查是否与内置工具名冲突
-    const auto &registry = ToolRegistry::instance();
-    if (registry.hasTool(name)) {
+    if (const auto &registry = ToolRegistry::instance(); registry.hasTool(name)) {
         callback(jsonResponse(AdminResponse::errorJson("工具名 '" + name + "' 已存在（内置工具或自定义工具）")));
         co_return;
     }
@@ -199,8 +195,7 @@ auto AdminController::addCustomTool(HttpRequestPtr req, std::function<void(const
     co_return;
 }
 
-auto AdminController::updateCustomTool(
-  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &id) const -> Task<> {
+auto AdminController::updateCustomTool(const HttpRequestPtr req, const std::function<void(const HttpResponsePtr &)> callback, const std::string &id) const -> Task<> {
     const auto body = parseJsonBody(req);
     if (!body || !body->contains("name") || !body->contains("executorType")) {
         callback(jsonResponse(AdminResponse::errorJson("缺少必要字段 (name, executorType)")));
@@ -249,7 +244,7 @@ auto AdminController::updateCustomTool(
 }
 
 auto AdminController::deleteCustomTool(
-  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &id) const -> Task<> {
+  HttpRequestPtr req, const std::function<void(const HttpResponsePtr &)> callback, const std::string &id) const -> Task<> {
     const i32 toolId = std::stoi(id);
     try {
         ToolStore::deleteCustomTool(toolId);
@@ -273,7 +268,7 @@ auto AdminController::deleteCustomTool(
 }
 
 auto AdminController::toggleCustomTool(
-  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &id) const -> Task<> {
+  HttpRequestPtr req, const std::function<void(const HttpResponsePtr &)> callback, const std::string &id) const -> Task<> {
     const i32 toolId = std::stoi(id);
     try {
         ToolStore::toggleCustomTool(toolId);
@@ -296,7 +291,7 @@ auto AdminController::toggleCustomTool(
     co_return;
 }
 
-auto AdminController::reloadCustomTools(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
+auto AdminController::reloadCustomTools(HttpRequestPtr req, const std::function<void(const HttpResponsePtr &)> callback) const
   -> Task<> {
     if (auto result = ToolRuntime::reloadCustomTools(Database::instance()); !result) {
         Logger::error(0, "Tool", result.error());
@@ -367,7 +362,7 @@ auto AdminController::testCustomTool(HttpRequestPtr req, std::function<void(cons
 // ============== 自定义工具导入导出 ==============
 
 auto AdminController::exportCustomTool(
-  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &id) const -> Task<> {
+  HttpRequestPtr req, const std::function<void(const HttpResponsePtr &)> callback, const std::string &id) const -> Task<> {
     i32 toolId = std::stoi(id);
     auto tools = ToolStore::getCustomTools();
 

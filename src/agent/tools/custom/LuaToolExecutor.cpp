@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <cstdlib>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -71,7 +70,7 @@ namespace insoulforge::LuaToolExecutor {
             size_t used = 0;
         };
 
-        auto allocate(void *userData, void *pointer, size_t oldSize, size_t newSize) -> void * {
+        auto allocate(void *userData, void *pointer, const size_t oldSize, const size_t newSize) -> void * {
             auto &budget = *static_cast<MemoryBudget *>(userData);
             const size_t previous = pointer ? oldSize : 0;
             if (newSize == 0) {
@@ -140,7 +139,7 @@ namespace insoulforge::LuaToolExecutor {
             }
         }
 
-        [[nodiscard]] auto readJson(lua_State *state, i32 index, i32 depth, std::unordered_set<const void *> &ancestors)
+        [[nodiscard]] auto readJson(lua_State *state, i32 index, const i32 depth, std::unordered_set<const void *> &ancestors)
           -> json {
             if (depth > kMaxJsonDepth) {
                 throw std::runtime_error("Lua 表嵌套过深");
@@ -195,8 +194,8 @@ namespace insoulforge::LuaToolExecutor {
                 const json item = readJson(state, -1, depth + 1, ancestors);
                 if (lua_type(state, -2) == LUA_TNUMBER && lua_isinteger(state, -2)) {
                     hasNumericKey = true;
-                    const lua_Integer key = lua_tointeger(state, -2);
-                    if (key > 0 && static_cast<size_t>(key) <= length) {
+                    if (const lua_Integer key = lua_tointeger(state, -2);
+                      key > 0 && static_cast<size_t>(key) <= length) {
                         array[static_cast<size_t>(key - 1)] = item;
                     } else {
                         isArray = false;
@@ -265,7 +264,7 @@ namespace insoulforge::LuaToolExecutor {
 
             ~LuaState() { lua_close(m_state); }
 
-            void load(const std::string_view source) {
+            void load(const std::string_view source) const {
                 if (source.size() > kMaxSourceBytes) {
                     throw std::runtime_error("Lua 脚本超过 256 KiB");
                 }
@@ -315,8 +314,8 @@ namespace insoulforge::LuaToolExecutor {
                 const auto authorityStart = schemeEnd + 3;
                 const auto pathStart = address.find_first_of("/?#", authorityStart);
                 const auto origin = address.substr(0, pathStart);
-                const auto authority = origin.substr(authorityStart);
-                if (authority.empty() || authority.find('@') != std::string::npos) {
+                if (const auto authority = origin.substr(authorityStart);
+                  authority.empty() || authority.find('@') != std::string::npos) {
                     throw std::runtime_error("URL 主机不能为空，也不能包含用户名密码");
                 }
                 auto path = pathStart == std::string::npos ? std::string("/") : address.substr(pathStart);
@@ -361,7 +360,7 @@ namespace insoulforge::LuaToolExecutor {
                         throw std::runtime_error("HTTP 请求头格式无效");
                     }
                     auto normalizedName = name;
-                    std::ranges::transform(normalizedName, normalizedName.begin(), [](const unsigned char c) {
+                    std::ranges::transform(normalizedName, normalizedName.begin(), [](const unsigned char c) -> char {
                         return static_cast<char>(c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c);
                     });
                     // Drogon 序列化请求时使用独立的内容类型字段，不能只添加普通请求头。
@@ -398,7 +397,7 @@ namespace insoulforge::LuaToolExecutor {
 
     auto validate(const std::string_view source) -> std::optional<std::string> {
         try {
-            LuaState vm;
+            const LuaState vm;
             vm.load(source);
             if (!vm.hasFunction("run")) {
                 return "Lua 脚本必须定义 run(args, ctx)";
@@ -479,8 +478,7 @@ namespace insoulforge::LuaToolExecutor {
                     response = {{"ok", false}, {"error", error.what()}};
                 }
             } else if (operation == "send_message") {
-                const std::string text = getStr(request, "text");
-                if (text.empty()) {
+                if (const std::string text = getStr(request, "text"); text.empty()) {
                     response = {{"ok", false}, {"error", "消息内容为空"}};
                 } else if (testMode) {
                     response = {{"ok", true}, {"message_id", "test-message"}};
@@ -495,8 +493,7 @@ namespace insoulforge::LuaToolExecutor {
                                     : json{{"ok", false}, {"error", "消息发送失败"}};
                 }
             } else if (operation == "start_task") {
-                const std::string description = getStr(request, "description");
-                if (description.empty()) {
+                if (const std::string description = getStr(request, "description"); description.empty()) {
                     response = {{"status", "error"}, {"error", "任务描述为空"}};
                 } else if (!vm.hasFunction("background")) {
                     response = {{"status", "error"}, {"error", "Lua 脚本缺少 background 入口"}};

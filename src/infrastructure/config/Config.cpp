@@ -2,7 +2,6 @@
 /// @brief 全局配置管理 - 实现
 
 #include <array>
-#include <cmath>
 #include <limits>
 
 #include <infrastructure/config/Config.hpp>
@@ -15,43 +14,46 @@ namespace insoulforge {
         /// @brief 检查已知字段，避免类型转换静默截断小数、溢出或使用空字符串。
         auto validateFields(const json &value) -> std::expected<void, ConfigError> {
             if (!value.is_object()) {
-                return std::unexpected(ConfigError{ConfigErrorType::InvalidArgument, "配置必须是 JSON 对象"});
+                return std::unexpected(
+                  ConfigError{.type = ConfigErrorType::InvalidArgument, .message = "配置必须是 JSON 对象"});
             }
-            constexpr std::array integerFields{"maxTokens", "contextWindowLimit", "memorySummaryTriggerCount",
-              "memorySummaryBatchSize", "memorySummaryContextCount", "routerWindowTriggerCount",
-              "routerWindowKeepCount", "shortTermMemoryMax", "maxToolRounds"};
-            constexpr std::array floatFields{
-              "temperature", "topP", "top_P", "minConfidence", "longTermRecallThreshold", "longTermInjectThreshold"};
-            constexpr std::array stringFields{"apiKey", "baseUrl", "path", "model", "reasoningEffort", "accessToken",
-              "oneBotTransport", "qqHttpHost", "qqWebSocketHost", "botName"};
             for (const auto &[key, field]: value.items()) {
+                constexpr std::array floatFields{"temperature", "topP", "top_P", "minConfidence",
+                  "longTermRecallThreshold", "longTermInjectThreshold"};
+                constexpr std::array stringFields{"apiKey", "baseUrl", "path", "model", "reasoningEffort",
+                  "accessToken", "oneBotTransport", "qqHttpHost", "qqWebSocketHost", "botName"};
+                constexpr std::array integerFields{"maxTokens", "contextWindowLimit", "memorySummaryTriggerCount",
+                  "memorySummaryBatchSize", "memorySummaryContextCount", "routerWindowTriggerCount",
+                  "routerWindowKeepCount", "shortTermMemoryMax", "maxToolRounds"};
                 if (std::ranges::find(integerFields, key) != integerFields.end()) {
                     if (!field.is_number_integer() ||
                         (field.is_number_unsigned()
                             ? field.get<u64>() > static_cast<u64>(std::numeric_limits<i32>::max())
                             : field.get<i64>() < std::numeric_limits<i32>::min() ||
                                 field.get<i64>() > std::numeric_limits<i32>::max())) {
-                        return std::unexpected(
-                          ConfigError{ConfigErrorType::InvalidArgument, key + " 必须是 i32 范围内的整数"});
+                        return std::unexpected(ConfigError{
+                          .type = ConfigErrorType::InvalidArgument, .message = key + " 必须是 i32 范围内的整数"});
                     }
                 } else if (key == "selfQQNumber") {
                     if (!field.is_number_integer() || (!field.is_number_unsigned() && field.get<i64>() < 0)) {
-                        return std::unexpected(
-                          ConfigError{ConfigErrorType::InvalidArgument, "selfQQNumber 必须是非负整数"});
+                        return std::unexpected(ConfigError{
+                          .type = ConfigErrorType::InvalidArgument, .message = "selfQQNumber 必须是非负整数"});
                     }
                 } else if (std::ranges::find(floatFields, key) != floatFields.end()) {
                     if (!field.is_number() || !std::isfinite(field.get<f64>())) {
-                        return std::unexpected(ConfigError{ConfigErrorType::InvalidArgument, key + " 必须是有限数值"});
+                        return std::unexpected(
+                          ConfigError{.type = ConfigErrorType::InvalidArgument, .message = key + " 必须是有限数值"});
                     }
-                    const auto number = field.get<f64>();
-                    if ((key == "temperature" && (number < 0.0 || number > 2.0)) ||
-                        ((key == "topP" || key == "top_P" || key == "minConfidence") &&
-                          (number < 0.0 || number > 1.0))) {
-                        return std::unexpected(ConfigError{ConfigErrorType::InvalidArgument, key + " 超出允许范围"});
+                    if (const auto number = field.get<f64>();
+                      (key == "temperature" && (number < 0.0 || number > 2.0)) ||
+                      ((key == "topP" || key == "top_P" || key == "minConfidence") && (number < 0.0 || number > 1.0))) {
+                        return std::unexpected(
+                          ConfigError{.type = ConfigErrorType::InvalidArgument, .message = key + " 超出允许范围"});
                     }
                 } else if (std::ranges::find(stringFields, key) != stringFields.end()) {
                     if (!field.is_string()) {
-                        return std::unexpected(ConfigError{ConfigErrorType::InvalidArgument, key + " 必须是字符串"});
+                        return std::unexpected(
+                          ConfigError{.type = ConfigErrorType::InvalidArgument, .message = key + " 必须是字符串"});
                     }
                 }
             }
@@ -121,7 +123,7 @@ namespace insoulforge {
           std::memory_order_relaxed);
 
         // 加载记忆配置
-        if (const auto memCfg = value.at("memory"); !memCfg.is_null()) {
+        if (const auto &memCfg = value.at("memory"); !memCfg.is_null()) {
             contextWindowLimit = getInt(memCfg, "contextWindowLimit");
             memorySummaryTriggerCount = getInt(memCfg, "memorySummaryTriggerCount");
             memorySummaryBatchSize = getInt(memCfg, "memorySummaryBatchSize");
@@ -151,7 +153,7 @@ namespace insoulforge {
         }
 
         // 加载 QQ Bot 配置
-        if (const auto qqCfg = value.at("qq"); !qqCfg.is_null()) {
+        if (const auto &qqCfg = value.at("qq"); !qqCfg.is_null()) {
             accessToken = trim(getStr(qqCfg, "accessToken"));
             selfQQNumber = qqCfg.at("selfQQNumber").get<u64>();
             oneBotTransport = getStr(qqCfg, "oneBotTransport", "http");
@@ -169,35 +171,35 @@ namespace insoulforge {
     }
 
 
-    void Config::applyValues(Config &&value) {
+    void Config::applyValues(Config &value) {
         for (const auto *role:
           {"router", "executor", "executorThinking", "image", "imageGeneration", "memory", "embedding", "jev"}) {
-            applyLLMValues(role, std::move(value));
+            applyLLMValues(role, value);
         }
-        applyQQValues(std::move(value));
+        applyQQValues(value);
         applyMemoryValues(value);
         execution.maxToolRounds.store(
           value.execution.maxToolRounds.load(std::memory_order_relaxed), std::memory_order_relaxed);
     }
 
-    void Config::applyLLMValues(const std::string_view name, Config &&value) {
+    void Config::applyLLMValues(const std::string_view name, Config &value) {
         if (name == "router") {
             router = std::move(value.router);
-            routerParams = std::move(value.routerParams);
+            routerParams = value.routerParams;
         } else if (name == "executor") {
             executor = std::move(value.executor);
-            executorParams = std::move(value.executorParams);
+            executorParams = value.executorParams;
         } else if (name == "executorThinking") {
             executorThinking = std::move(value.executorThinking);
-            executorThinkingParams = std::move(value.executorThinkingParams);
+            executorThinkingParams = value.executorThinkingParams;
         } else if (name == "image") {
             image = std::move(value.image);
-            imageParams = std::move(value.imageParams);
+            imageParams = value.imageParams;
         } else if (name == "imageGeneration") {
             imageGeneration = std::move(value.imageGeneration);
         } else if (name == "memory") {
             memory = std::move(value.memory);
-            memoryParams = std::move(value.memoryParams);
+            memoryParams = value.memoryParams;
         } else if (name == "embedding") {
             embedding = std::move(value.embedding);
         } else if (name == "jev") {
@@ -206,7 +208,7 @@ namespace insoulforge {
         }
     }
 
-    void Config::applyQQValues(Config &&value) {
+    void Config::applyQQValues(Config &value) {
         accessToken = std::move(value.accessToken);
         selfQQNumber = value.selfQQNumber;
         oneBotTransport = std::move(value.oneBotTransport);
@@ -230,10 +232,10 @@ namespace insoulforge {
     auto Config::initialize(const std::string_view path) -> std::expected<void, ConfigError> {
         std::scoped_lock lock(m_updateMutex);
         Config next;
-        return ConfigStore::initialize(path, [&next](const json &value) {
+        return ConfigStore::initialize(path, [&next](const json &value) -> std::expected<void, ConfigError> {
             return next.loadValues(value);
-        }).transform([this, &next] {
-            applyValues(std::move(next));
+        }).transform([this, &next] -> void {
+            applyValues(next);
             Logger::info(0, "Config", "配置读取和运行时加载完成");
         });
     }
@@ -250,9 +252,9 @@ namespace insoulforge {
             return result;
         }
         Config next;
-        return ConfigStore::saveLLMConfig(name, value, [&next](const json &stored) {
+        return ConfigStore::saveLLMConfig(name, value, [&next](const json &stored) -> std::expected<void, ConfigError> {
             return next.loadValues(stored);
-        }).transform([this, &next, &name] { applyLLMValues(name, std::move(next)); });
+        }).transform([this, &next, &name] -> void { applyLLMValues(name, next); });
     }
 
     auto Config::saveQQConfig(const json &value) -> std::expected<void, ConfigError> {
@@ -261,12 +263,12 @@ namespace insoulforge {
             return result;
         }
         json normalized = value;
-        auto transport = getStr(value, "oneBotTransport", "http");
+        const auto transport = getStr(value, "oneBotTransport", "http");
         normalized["oneBotTransport"] = transport == "websocket" ? "websocket" : "http";
         Config next;
-        return ConfigStore::saveQQConfig(normalized, [&next](const json &stored) {
+        return ConfigStore::saveQQConfig(normalized, [&next](const json &stored) -> std::expected<void, ConfigError> {
             return next.loadValues(stored);
-        }).transform([this, &next] { applyQQValues(std::move(next)); });
+        }).transform([this, &next] -> void { applyQQValues(next); });
     }
 
     auto Config::saveMemoryConfig(const json &value) -> std::expected<void, ConfigError> {
@@ -276,41 +278,41 @@ namespace insoulforge {
         }
         json normalized = value;
         if (getInt(normalized, "contextWindowLimit") <= 0) {
-            (normalized)["contextWindowLimit"] = contextWindowLimit;
+            normalized["contextWindowLimit"] = contextWindowLimit;
         }
         if (getInt(normalized, "memorySummaryTriggerCount") <= 0) {
-            (normalized)["memorySummaryTriggerCount"] = memorySummaryTriggerCount;
+            normalized["memorySummaryTriggerCount"] = memorySummaryTriggerCount;
         }
         if (getInt(normalized, "memorySummaryBatchSize") <= 0 ||
             getInt(normalized, "memorySummaryBatchSize") > getInt(normalized, "memorySummaryTriggerCount")) {
-            (normalized)["memorySummaryBatchSize"] = getInt(normalized, "memorySummaryTriggerCount") / 2;
+            normalized["memorySummaryBatchSize"] = getInt(normalized, "memorySummaryTriggerCount") / 2;
         }
         if (getInt(normalized, "memorySummaryContextCount") < 0) {
-            (normalized)["memorySummaryContextCount"] = memorySummaryContextCount;
+            normalized["memorySummaryContextCount"] = memorySummaryContextCount;
         }
         // Router 子窗口校验: 保留条数必须小于触发条数
         if (getInt(normalized, "routerWindowTriggerCount") <= 0) {
-            (normalized)["routerWindowTriggerCount"] = routerWindowTriggerCount;
+            normalized["routerWindowTriggerCount"] = routerWindowTriggerCount;
         }
         if (getInt(normalized, "routerWindowKeepCount") <= 0 ||
             getInt(normalized, "routerWindowKeepCount") >= getInt(normalized, "routerWindowTriggerCount")) {
-            (normalized)["routerWindowKeepCount"] = getInt(normalized, "routerWindowTriggerCount") / 2;
+            normalized["routerWindowKeepCount"] = getInt(normalized, "routerWindowTriggerCount") / 2;
         }
         // 召回阈值: 必须在 (0,1) 开区间内
         if (getDouble(normalized, "longTermRecallThreshold") <= 0.0 ||
             getDouble(normalized, "longTermRecallThreshold") >= 1.0) {
-            (normalized)["longTermRecallThreshold"] = longTermRecallThreshold;
+            normalized["longTermRecallThreshold"] = longTermRecallThreshold;
         }
         // 注入阈值: 必须在 (0,1) 开区间内
         if (getDouble(normalized, "longTermInjectThreshold") <= 0.0 ||
             getDouble(normalized, "longTermInjectThreshold") >= 1.0) {
-            (normalized)["longTermInjectThreshold"] = longTermInjectThreshold;
+            normalized["longTermInjectThreshold"] = longTermInjectThreshold;
         }
 
         Config next;
-        return ConfigStore::saveMemoryConfig(normalized, [&next](const json &stored) {
-            return next.loadValues(stored);
-        }).transform([this, &next] { applyMemoryValues(next); });
+        return ConfigStore::saveMemoryConfig(normalized,
+          [&next](const json &stored) -> std::expected<void, ConfigError> { return next.loadValues(stored); })
+          .transform([this, &next] -> void { applyMemoryValues(next); });
     }
 
     auto Config::saveExecutionConfig(const json &value) -> std::expected<void, ConfigError> {
@@ -319,9 +321,9 @@ namespace insoulforge {
             return result;
         }
         Config next;
-        return ConfigStore::saveExecutionConfig(value, [&next](const json &stored) {
+        return ConfigStore::saveExecutionConfig(value, [&next](const json &stored) -> std::expected<void, ConfigError> {
             return next.loadValues(stored);
-        }).transform([this, &next] {
+        }).transform([this, &next] -> void {
             execution.maxToolRounds.store(
               next.execution.maxToolRounds.load(std::memory_order_relaxed), std::memory_order_relaxed);
         });

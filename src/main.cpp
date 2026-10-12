@@ -35,7 +35,7 @@ namespace {
             if (result == 0) {
                 continue;
             }
-            if (result < 0 || (input.revents & (POLLERR | POLLHUP | POLLNVAL))) {
+            if (result < 0 || input.revents & (POLLERR | POLLHUP | POLLNVAL)) {
                 return;
             }
             if (!(input.revents & POLLIN) || !(std::cin >> command)) {

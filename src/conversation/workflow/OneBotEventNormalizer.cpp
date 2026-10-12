@@ -81,7 +81,7 @@ namespace insoulforge::OneBotEventNormalizer {
                 }
                 segments.push_back(std::move(event));
             } else if (type == "reply") {
-                if (const std::string replyId = jsonToString(atOrNull(data, "id")); !replyId.empty()) {
+                if (auto replyId = jsonToString(atOrNull(data, "id")); !replyId.empty()) {
                     return replyId;
                 }
             } else if (!type.empty()) {
@@ -184,15 +184,15 @@ namespace insoulforge::OneBotEventNormalizer {
         }
     } // namespace
 
-    auto normalize(json body) -> std::optional<json> {
+    auto normalize(const json &body) -> std::optional<json> {
         std::optional<json> record;
         if (getStr(body, "post_type") == "message") {
             record = normalizeMessage(body);
         } else if (getStr(body, "notice_type") == "notify" && getStr(body, "sub_type") == "poke") {
             record = normalizePokeNotice(body);
         } else {
-            const std::string noticeType = getStr(body, "notice_type");
-            if (noticeType == "group_increase" || noticeType == "group_decrease") {
+            if (const std::string noticeType = getStr(body, "notice_type");
+              noticeType == "group_increase" || noticeType == "group_decrease") {
                 record = normalizeMembershipNotice(body);
             }
         }

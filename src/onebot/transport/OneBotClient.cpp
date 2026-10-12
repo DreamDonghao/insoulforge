@@ -17,16 +17,15 @@ namespace insoulforge::OneBotClient {
         /// @param timeout 超时秒数
         /// @return 响应 JSON（含 status/retcode/data）；请求失败或 status != ok 时返回 nullopt（已记日志）
         [[nodiscard]] auto callApi(std::string_view tag, std::string api, json params,
-          std::optional<u64> sessionId = std::nullopt, f64 timeout = 30.0) -> drogon::Task<std::optional<json>> {
+          const std::optional<u64> sessionId = std::nullopt, const f64 timeout = 30.0) -> drogon::Task<std::optional<json>> {
             json body;
-            const auto &config = Config::instance();
-            if (config.oneBotTransport == "websocket") {
+            if (const auto &config = Config::instance(); config.oneBotTransport == "websocket") {
                 const auto response =
                   co_await OneBotWebSocketClient::instance().callApi(api, std::move(params), timeout);
                 if (!response) {
                     co_return std::nullopt;
                 }
-                body = std::move(*response);
+                body = *response;
             } else {
                 const auto response = co_await HttpUtil::send(tag, config.qqHttpHost, "/" + api, drogon::Post,
                   std::move(params), config.accessToken, timeout, sessionId);
@@ -54,7 +53,7 @@ namespace insoulforge::OneBotClient {
         }
 
         /// @brief 发送消息的公共实现（群聊/私聊共用，仅 API 名与目标字段不同）
-        auto sendMessage(std::string api, std::string targetKey, const u64 targetId, std::string message,
+        auto sendMessage(std::string api, const std::string targetKey, const u64 targetId, std::string message,
           const std::optional<u64> sessionId) -> drogon::Task<std::optional<u64>> {
             const bool isBase64Image = message.starts_with("[CQ:image,file=base64://");
             json params;
@@ -92,8 +91,7 @@ namespace insoulforge::OneBotClient {
         params["user_id"] = userId;
         params["duration"] = duration;
 
-        const auto resp = co_await callApi("[Ban]", "set_group_ban", params, groupId);
-        if (!resp) {
+        if (const auto resp = co_await callApi("[Ban]", "set_group_ban", params, groupId); !resp) {
             co_return false;
         }
         Logger::info(groupId, "OneBot", fmt::format("禁言成功: 用户{} 时长{}秒", userId, duration));
@@ -121,8 +119,7 @@ namespace insoulforge::OneBotClient {
         params["group_id"] = groupId;
         params["user_id"] = userId;
 
-        const auto resp = co_await callApi("[Poke]", "send_poke", params, groupId);
-        if (!resp) {
+        if (const auto resp = co_await callApi("[Poke]", "send_poke", params, groupId); !resp) {
             co_return false;
         }
         Logger::info(groupId, "OneBot", fmt::format("拍一拍成功: 用户{}", userId));
@@ -133,8 +130,7 @@ namespace insoulforge::OneBotClient {
         json params;
         params["message_id"] = messageId;
 
-        const auto resp = co_await callApi("[Recall]", "delete_msg", params, sessionId);
-        if (!resp) {
+        if (const auto resp = co_await callApi("[Recall]", "delete_msg", params, sessionId); !resp) {
             co_return false;
         }
         Logger::info(sessionId.value_or(0), "OneBot", fmt::format("撤回消息成功: message_id={}", messageId));
@@ -167,8 +163,7 @@ namespace insoulforge::OneBotClient {
         json params;
         params["file"] = file;
 
-        const auto resp = co_await callApi("[Sticker]", "add_custom_face", params, sessionId);
-        if (!resp) {
+        if (const auto resp = co_await callApi("[Sticker]", "add_custom_face", params, sessionId); !resp) {
             Logger::error(0, "Sticker", fmt::format("保存收藏表情失败: {}", file));
             co_return false;
         }

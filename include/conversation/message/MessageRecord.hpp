@@ -39,7 +39,7 @@ namespace insoulforge::MessageRecord {
       std::string senderName, json toolHistory, std::string status, std::string reason = {}) -> json;
 
     /// @brief 保存单次工具名称、脱敏且限长的参数和处理状态，不复制完整工具结果。
-    [[nodiscard]] auto createToolHistoryEntry(std::string name, json arguments, std::string status) -> json;
+    [[nodiscard]] auto createToolHistoryEntry(std::string name, const json& arguments, std::string status) -> json;
 
     /// @brief 按段出现顺序拼接记录中的文本内容
     /// @param record 统一聊天记录

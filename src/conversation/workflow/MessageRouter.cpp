@@ -2,7 +2,6 @@
 /// @brief 基于完整消息快照的 Router 实现
 
 #include <algorithm>
-#include <cmath>
 #include <ranges>
 #include <utility>
 

@@ -395,7 +395,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
                 Logger::info(sessionId, "Executor", fmt::format("工具: {}", name));
 
                 const json args = parseToolArguments(toolCall);
-                const auto recordCall = [&](const std::string &status) {
+                const auto recordCall = [&](const std::string &status) -> void {
                     // 正文和引用目标已保存在助手消息中，不重复记录发送内容的回复工具。
                     if (name == "reply" || name == "reply_with_quote") {
                         return;

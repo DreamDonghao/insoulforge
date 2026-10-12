@@ -47,8 +47,8 @@ namespace insoulforge {
         {
             std::lock_guard lock(m_mutex);
             for (const auto &conn: m_connections) {
-                const auto subscription = m_subscriptions.find(conn);
-                if (subscription != m_subscriptions.end() && matches(subscription->second, entry)) {
+                if (const auto subscription = m_subscriptions.find(conn);
+                  subscription != m_subscriptions.end() && matches(subscription->second, entry)) {
                     recipients.push_back(conn);
                 }
             }

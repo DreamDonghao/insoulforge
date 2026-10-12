@@ -20,7 +20,7 @@ namespace insoulforge::MessageRecord {
                 for (auto &[key, item]: value.items()) {
                     auto normalized = key;
                     std::ranges::transform(normalized, normalized.begin(),
-                      [](const unsigned char character) { return static_cast<char>(std::tolower(character)); });
+                      [](const unsigned char character) -> char { return static_cast<char>(std::tolower(character)); });
                     if (normalized == "apikey" || normalized == "api_key" || normalized == "token" ||
                         normalized == "accesstoken" || normalized == "access_token" || normalized == "authorization" ||
                         normalized == "password" || normalized == "cookie" || normalized == "secret") {
@@ -89,8 +89,7 @@ namespace insoulforge::MessageRecord {
                 mention["target"] = target;
                 return mention;
             }
-            const std::string qq = getStr(segment, "qq");
-            if (qq == "0") {
+            if (const std::string qq = getStr(segment, "qq"); qq == "0") {
                 mention["target"] = {{"kind", "all"}};
             } else {
                 json target;
@@ -246,7 +245,7 @@ namespace insoulforge::MessageRecord {
         return record;
     }
 
-    auto createToolHistoryEntry(std::string name, json arguments, std::string status) -> json {
+    auto createToolHistoryEntry(std::string name, const json& arguments, std::string status) -> json {
         auto sanitized = redactToolArguments(HttpUtil::redactImagePayloads(arguments));
         if (dumpJson(sanitized).size() > 2048) {
             sanitized = {{"_omitted", "参数超过 2048 字节，已省略"}};
@@ -352,8 +351,8 @@ namespace insoulforge::MessageRecord {
         if (const json &sourceMemories = atOrNull(record, "memories"); sourceMemories.is_array()) {
             json memories = json::array();
             for (const json &memory: sourceMemories) {
-                const std::string content = memory.is_string() ? jsonToString(memory) : getStr(memory, "content");
-                if (!content.empty()) {
+                if (const std::string content = memory.is_string() ? jsonToString(memory) : getStr(memory, "content");
+                  !content.empty()) {
                     memories.push_back(content);
                 }
             }

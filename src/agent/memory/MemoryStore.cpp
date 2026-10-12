@@ -6,7 +6,7 @@
 #include <infrastructure/storage/Statement.hpp>
 
 namespace insoulforge::MemoryStore {
-    std::string getShortTermMemory(const u64 sessionId) {
+    auto getShortTermMemory(const u64 sessionId) -> std::string {
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
         const Statement stmt(db.handle(), "SELECT memory_content FROM short_term_memory WHERE group_id = ?");
