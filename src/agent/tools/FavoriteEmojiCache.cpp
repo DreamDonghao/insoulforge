@@ -62,7 +62,7 @@ namespace insoulforge {
         co_return result;
     }
 
-    auto ToolRuntime::findFavoriteEmoji(std::string name, const std::optional<u64> sessionId) -> drogon::Task<json> {
+    auto ToolRuntime::findFavoriteEmoji(const std::string name, const std::optional<u64> sessionId) -> drogon::Task<json> {
         for (const json emojis = co_await fetchFavoriteEmojis(sessionId); const auto &emoji: emojis) {
             if (getStr(emoji, "name") == name || getStr(emoji, "summary") == name) {
                 co_return emoji;

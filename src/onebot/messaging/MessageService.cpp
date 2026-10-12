@@ -61,6 +61,8 @@ namespace insoulforge {
         /// @param processedMessage 已完成 CQ 码转换的消息内容
         /// @param sessionId 会话 ID
         /// @param channelName 日志中的渠道名（"群消息"/"私聊消息"）
+        /// @param imageDescription
+        /// @param toolHistory
         /// @return 发送成功返回 message_id；失败不记聊天记录，返回 nullopt（已记日志）
         auto afterSendMessage(drogon::Task<std::optional<u64>> sendTask, std::string processedMessage,
           const u64 sessionId, std::string_view channelName, std::optional<std::string> imageDescription,

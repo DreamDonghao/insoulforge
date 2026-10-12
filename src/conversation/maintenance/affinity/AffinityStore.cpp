@@ -1,13 +1,14 @@
 /// @file AffinityStore.cpp
 /// @brief 好感度存储 - 实现
 
+#include <conversation/maintenance/affinity/AffinityStore.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 
 
 namespace insoulforge::AffinityStore {
-    std::unordered_map<u64, i32> getAffinityMap(const u64 sessionId) {
+    auto getAffinityMap(const u64 sessionId) -> std::unordered_map<u64, i32> {
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
         const Statement stmt(db.handle(), "SELECT qq_number, affinity FROM group_affinity WHERE group_id = ?");

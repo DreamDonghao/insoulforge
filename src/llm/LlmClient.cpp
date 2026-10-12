@@ -28,7 +28,7 @@ namespace insoulforge {
         auto isRetryableStatus(const i32 status) -> bool { return status == 503 || status == 429 || status == 500; }
 
         /// @brief 通用 API 请求函数
-        auto requestStr(json messages, LLMApiConfig api, LLMModelParams params, std::string role,
+        auto requestStr(json messages, const LLMApiConfig api, const LLMModelParams params, const std::string role,
           const std::optional<u64> sessionId, const f64 timeoutSeconds) -> drogon::Task<std::optional<std::string>> {
             if (!LlmClient::isConfigured(api)) {
                 if (sessionId) {
@@ -92,8 +92,7 @@ namespace insoulforge {
             if (!tryParseJson(resp->body(), parsed))
                 return std::nullopt;
             // choices 必须为非空数组（调用方直接按 [choices][0] 取 message）
-            const json &choices = atOrNull(parsed, "choices");
-            if (!choices.is_array() || choices.empty())
+            if (const json &choices = atOrNull(parsed, "choices"); !choices.is_array() || choices.empty())
                 return std::nullopt;
             return parsed;
         }
@@ -179,7 +178,7 @@ namespace insoulforge {
             co_return std::nullopt;
         }
 
-        LlmClient::logUsage(respJson, config.model, "embedding", sessionId);
+        logUsage(respJson, config.model, "embedding", sessionId);
 
         std::vector<f32> embedding;
         for (const auto &value: atOrNull(data[0], "embedding")) {

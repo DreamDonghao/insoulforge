@@ -16,7 +16,6 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <utility>
 
 #include <drogon/HttpRequest.h>
@@ -51,6 +50,7 @@ namespace insoulforge {
     }
 
     /// @brief 序列化为紧凑 JSON（与聊天记录等既有存储格式一致）
+    /// @param value
     /// @param emitUtf8 是否原样输出非 ASCII 字符（false 时转义为 \\uXXXX）
     /// @param indent 缩进宽度（-1 表示紧凑输出）
     /// @details 无效 UTF-8 字节替换为 U+FFFD 而不是抛异常：日志/LLM/自定义工具输出可能

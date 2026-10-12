@@ -9,7 +9,6 @@
 #include <utility>
 #include <vector>
 
-#include <ctime>
 #include <fmt/format.h>
 
 #include <agent/ability/AsyncTaskManager.hpp>
@@ -43,7 +42,7 @@ namespace insoulforge {
 
         /// @brief 将任务结果作为新系统消息加入入站队列，按定时任务相同的流程触发回复。
         void enqueueResultStatus(const u64 sessionId, const std::string &text) {
-            static std::atomic<i64> nextMessageId{
+            static std::atomic nextMessageId{
               std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch())
                 .count()};
             json event;
@@ -61,7 +60,7 @@ namespace insoulforge {
                 event["group_id"] = sessionId;
             }
             event["message"] = json::array({{{"type", "text"}, {"data", {{"text", text}}}}});
-            OneBotEventWorkflow::instance().enqueueOneBotEvent(std::move(event));
+            OneBotEventWorkflow::instance().enqueueOneBotEvent(event);
         }
     } // namespace
 
@@ -78,10 +77,10 @@ namespace insoulforge {
         {
             std::lock_guard lock(m_mutex);
             if (m_stopping) {
-                return {StartResult::Status::Stopping, {}};
+                return {.status = StartResult::Status::Stopping, .taskId = {}};
             }
             if (const auto active = m_active.find(sessionId); active != m_active.end()) {
-                return {StartResult::Status::Busy, active->second};
+                return {.status = StartResult::Status::Busy, .taskId = active->second};
             }
             m_active.emplace(sessionId, taskId);
             try {
@@ -109,28 +108,28 @@ namespace insoulforge {
             throw;
         }
         Logger::info(sessionId, "AsyncTask", fmt::format("任务 #{} 已启动", taskId));
-        return {StartResult::Status::Started, taskId};
+        return {.status = StartResult::Status::Started, .taskId = taskId};
     }
 
-    auto AsyncTaskManager::run(const u64 sessionId, std::string taskId, Handler handler) -> drogon::Task<> {
+    auto AsyncTaskManager::run(const u64 sessionId, std::string taskId, const Handler handler) -> drogon::Task<> {
         std::string failureReason;
         try {
-            const Result result = co_await handler();
+            const auto [content, imageDescription] = co_await handler();
             bool maySend;
             {
                 std::lock_guard lock(m_mutex);
                 maySend = !m_stopping && m_active.contains(sessionId) && m_active.at(sessionId) == taskId;
             }
             if (maySend) {
-                if (result.content.empty()) {
+                if (content.empty()) {
                     throw std::runtime_error("任务结果为空");
                 }
                 std::optional<u64> sent;
                 if (SessionId::isPrivate(sessionId)) {
                     sent = co_await MessageService::sendPrivateMsg(
-                      SessionId::privateUserId(sessionId), result.content, result.imageDescription);
+                      SessionId::privateUserId(sessionId), content, imageDescription);
                 } else {
-                    sent = co_await MessageService::sendGroupMsg(sessionId, result.content, result.imageDescription);
+                    sent = co_await MessageService::sendGroupMsg(sessionId, content, imageDescription);
                 }
                 if (!sent) {
                     throw std::runtime_error("结果发送失败");

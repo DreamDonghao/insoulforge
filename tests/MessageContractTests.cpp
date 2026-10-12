@@ -104,7 +104,7 @@ namespace {
         insoulforge::json selfEvent = body;
         selfEvent["message_id"] = 8;
         selfEvent["sender"] = {{"user_id", 42}, {"nickname", "Bot"}};
-        const auto selfRecord = insoulforge::OneBotEventNormalizer::normalize(std::move(selfEvent));
+        const auto selfRecord = insoulforge::OneBotEventNormalizer::normalize(selfEvent);
         check(selfRecord.has_value(), "bot echo is supported", kTestName);
         if (selfRecord) {
             check((*selfRecord)["sender"]["qq"] == "self", "bot echo is marked as self", kTestName);
@@ -583,7 +583,7 @@ namespace {
             return drogon::sync_wait(
               insoulforge::LuaToolExecutor::execute(load(name), std::move(args), 123, false, true));
         };
-        check(execute("random", {{"min", 4}, {"max", 4}}).find("4") != std::string::npos,
+        check(execute("random", {{"min", 4}, {"max", 4}}).find('4') != std::string::npos,
           "random example runs without Python", kTestName);
         check(execute("fetch_webpage", {{"url", "ftp://example.com"}}).starts_with("错误"),
           "webpage example rejects unsupported schemes", kTestName);
@@ -647,8 +647,8 @@ namespace {
     void testToolRegistryReload() {
         constexpr std::string_view kTestName = "tool registry reload";
         auto &registry = insoulforge::ToolRegistry::instance();
-        const auto registerVersion = [&registry](std::string pluginId, std::string result) {
-            return registry.registerPlugin(std::move(pluginId), [&result](insoulforge::ToolRegistry &staged) {
+        const auto registerVersion = [&registry](std::string pluginId, std::string result) -> bool {
+            return registry.registerPlugin(std::move(pluginId), [&result](insoulforge::ToolRegistry &staged) -> void {
                 staged.registerTool(
                   {.name = "contract_reload_tool",
                     .description = "test",
@@ -677,7 +677,7 @@ namespace {
             co_return "executed";
         };
         check(registry.registerPlugin("contract.round-policy",
-                [&](insoulforge::ToolRegistry &staged) {
+                [&](insoulforge::ToolRegistry &staged) -> void {
                     staged.registerTool(
                       {.name = "contract_round_reply", .handler = handler}, insoulforge::ToolCategory::REPLY);
                     staged.registerTool({.name = "contract_round_group_reply",
@@ -691,7 +691,7 @@ namespace {
                 }),
           "policy tools register", kTestName);
 
-        const auto names = [](const insoulforge::json &tools) {
+        const auto names = [](const insoulforge::json &tools) -> std::vector<std::string> {
             std::vector<std::string> result;
             for (const auto &tool: tools) {
                 result.push_back(tool["function"]["name"].get<std::string>());
@@ -761,7 +761,7 @@ namespace {
         constexpr std::string_view kTestName = "tool handler error result";
         auto &registry = insoulforge::ToolRegistry::instance();
         check(registry.registerPlugin("contract.error",
-                [](insoulforge::ToolRegistry &staged) {
+                [](insoulforge::ToolRegistry &staged) -> void {
                     staged.registerTool(
                       {.name = "contract_error_tool",
                         .description = "test",
@@ -783,7 +783,7 @@ namespace {
           "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9d1QAAAABJRU5ErkJggg==";
         std::string image(encoded.size() / 4 * 3, '\0');
         const i32 decoded = EVP_DecodeBlock(reinterpret_cast<unsigned char *>(image.data()),
-          reinterpret_cast<const unsigned char *>(encoded.data()), static_cast<i32>(encoded.size()));
+          reinterpret_cast<const unsigned char *>(encoded.data()), encoded.size());
         check(decoded > 0, "test PNG decodes", kTestName);
         image.resize(static_cast<size_t>(decoded) - 2);
 
@@ -845,7 +845,7 @@ namespace {
         constexpr std::string_view kTestName = "self image tool reference";
         auto &registry = insoulforge::ToolRegistry::instance();
         check(registry.registerPlugin("contract.character-image",
-                [](insoulforge::ToolRegistry &staged) {
+                [](insoulforge::ToolRegistry &staged) -> void {
                     insoulforge::ActionToolsPlugin{"test-bot"}.registerTools(staged);
                 }),
           "action tools register", kTestName);
@@ -979,8 +979,7 @@ namespace {
           "successful Agent initialization marks ready", kTestName);
         bool foundScheduleTool = false;
         for (const auto &tool: insoulforge::ToolRegistry::instance().getAllTools()) {
-            const auto &function = tool["function"];
-            if (function["name"] == "create_scheduled_task") {
+            if (const auto &function = tool["function"]; function["name"] == "create_scheduled_task") {
                 foundScheduleTool = true;
                 check(function["parameters"]["properties"]["content"]["description"].get<std::string>().find(
                         "explicit-bot-name") != std::string::npos,
@@ -1022,8 +1021,8 @@ namespace {
                 bool continued = false;
                 drogon::HttpResponsePtr rejected;
                 AdminAccessToken::checkRequestAccess(
-                  request, [&rejected](const drogon::HttpResponsePtr &response) { rejected = response; },
-                  [&continued] { continued = true; });
+                  request, [&rejected](const drogon::HttpResponsePtr &response) -> void { rejected = response; },
+                  [&continued] -> void { continued = true; });
                 const bool allowed = !protectedRoute || publicAuth || authenticated;
                 check(continued == allowed && static_cast<bool>(rejected) == !allowed,
                   "calls exactly one routing callback", kTestName);
@@ -1093,7 +1092,7 @@ namespace {
           "failed startup conversion preserves existing runtime and storage", kTestName);
         {
             std::ifstream input(invalidPath);
-            const std::string content{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+            const std::string content{std::istreambuf_iterator(input), std::istreambuf_iterator<char>()};
             check(content == invalidContent, "conversion failure does not overwrite the source file", kTestName);
         }
         config.executor.model = "unrelated-runtime-model";
@@ -1129,13 +1128,13 @@ namespace {
 
         const insoulforge::AdminController controller;
         drogon::HttpResponsePtr response;
-        const auto callback = [&response](const drogon::HttpResponsePtr &value) { response = value; };
+        const auto callback = [&response](const drogon::HttpResponsePtr &value) -> void { response = value; };
         drogon::sync_wait(controller.getExecutionConfig(drogon::HttpRequest::newHttpRequest(), callback));
         check(response->getStatusCode() == drogon::k200OK &&
                 insoulforge::parseJson(std::string(response->body()))["maxToolRounds"] == 8,
           "GET returns stored execution settings", kTestName);
 
-        const auto save = [&](const std::string &body) {
+        const auto save = [&](const std::string &body) -> void {
             auto request = drogon::HttpRequest::newHttpRequest();
             request->setContentTypeCode(drogon::CT_APPLICATION_JSON);
             request->setBody(body);

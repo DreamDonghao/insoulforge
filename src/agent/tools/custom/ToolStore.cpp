@@ -34,7 +34,7 @@ namespace insoulforge::ToolStore {
         }
 
         void validateName(const std::string &name) {
-            if (name.empty() || name.size() > 64 || !std::ranges::all_of(name, [](const unsigned char c) {
+            if (name.empty() || name.size() > 64 || !std::ranges::all_of(name, [](const unsigned char c) -> bool {
                     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' ||
                            c == '-';
                 }))
@@ -133,7 +133,7 @@ namespace insoulforge::ToolStore {
                         tool.scriptContent = readFile(entry.path() / "main.lua");
                     else
                         throw std::runtime_error("不支持的执行器类型: " + tool.executorType + "，仅支持 Lua");
-                    if (std::ranges::any_of(tools, [&tool](const auto &other) { return other.id == tool.id; }))
+                    if (std::ranges::any_of(tools, [&tool](const auto &other) -> auto { return other.id == tool.id; }))
                         throw std::runtime_error("重复工具 ID");
                     tools.push_back(std::move(tool));
                 } catch (const std::exception &error) {
@@ -199,11 +199,11 @@ namespace insoulforge::ToolStore {
     auto getEnabledCustomTools(const Database &database) -> std::vector<CustomTool> {
         const auto lock = std::lock_guard(storageMutex);
         // 内存数据库用于契约测试，没有可持久化的工具目录。
-        const auto filename = sqlite3_db_filename(database.handle(), "main");
-        if (filename && !*filename)
+        if (const auto filename = sqlite3_db_filename(database.handle(), "main"); filename && !*filename) {
             return {};
+        }
         auto tools = loadTools(toolsDirectory(database));
-        std::erase_if(tools, [](const auto &tool) { return !tool.enabled; });
+        std::erase_if(tools, [](const auto &tool) -> auto { return !tool.enabled; });
         return tools;
     }
 

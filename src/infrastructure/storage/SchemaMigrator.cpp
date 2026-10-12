@@ -25,13 +25,13 @@ namespace insoulforge {
                 execSQL(db, sql);
         }
 
-        auto tableExists(sqlite3 *db, std::string_view name) -> bool {
+        auto tableExists(sqlite3 *db, const std::string_view name) -> bool {
             const Statement stmt(db, "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?");
             stmt.bind(1, name);
             return stmt.step();
         }
 
-        auto columnExists(sqlite3 *db, std::string_view table, std::string_view column) -> bool {
+        auto columnExists(sqlite3 *db, std::string_view table, const std::string_view column) -> bool {
             const Statement stmt(db, fmt::format("PRAGMA table_info({})", table));
             while (stmt.step()) {
                 if (stmt.getText(1) == column)
@@ -54,7 +54,7 @@ namespace insoulforge {
             execSQL(db, fmt::format("ALTER TABLE {} DROP COLUMN {}", table, column));
         }
 
-        void storeSetting(sqlite3 *db, std::string_view key, const json &value) {
+        void storeSetting(sqlite3 *db, const std::string_view key, const json &value) {
             const std::string payload = dumpJson(value);
 
             const Statement stmt(db, "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");

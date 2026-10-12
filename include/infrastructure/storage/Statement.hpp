@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include <fmt/format.h>
 #include <sqlite3.h>
 
 #include <infrastructure/NumericTypes.hpp>
@@ -19,7 +20,7 @@ namespace insoulforge {
     /// @brief 数据库错误异常
     class DbError : public std::runtime_error {
     public:
-        explicit DbError(std::string_view msg) : std::runtime_error(std::string(msg)) {}
+        explicit DbError(const std::string_view msg) : std::runtime_error(std::string(msg)) {}
     };
 
     /// @brief SQLite Statement RAII 封装，自动管理 sqlite3_stmt 生命周期
@@ -67,13 +68,15 @@ namespace insoulforge {
             sqlite3_bind_text(m_stmt, idx, v.c_str(), static_cast<i32>(v.size()), SQLITE_TRANSIENT);
         }
 
-        void bind(i32 idx, const std::string_view v) const noexcept {
+        void bind(const i32 idx, const std::string_view v) const noexcept {
             sqlite3_bind_text(m_stmt, idx, v.data(), static_cast<i32>(v.size()), SQLITE_TRANSIENT);
         }
 
-        void bind(i32 idx, const char *v) const noexcept { sqlite3_bind_text(m_stmt, idx, v, -1, SQLITE_TRANSIENT); }
+        void bind(const i32 idx, const char *v) const noexcept {
+            sqlite3_bind_text(m_stmt, idx, v, -1, SQLITE_TRANSIENT);
+        }
 
-        void bind(i32 idx, const std::vector<u8> &data) const noexcept {
+        void bind(const i32 idx, const std::vector<u8> &data) const noexcept {
             if (data.empty()) {
                 sqlite3_bind_null(m_stmt, idx);
             } else {
@@ -81,7 +84,7 @@ namespace insoulforge {
             }
         }
 
-        void bindNull(i32 idx) const noexcept { sqlite3_bind_null(m_stmt, idx); }
+        void bindNull(const i32 idx) const noexcept { sqlite3_bind_null(m_stmt, idx); }
 
         /// @brief 推进一步：true=有行可读，false=完成或出错（错误仅记日志）
         [[nodiscard]] auto step() const noexcept -> bool {
@@ -109,22 +112,22 @@ namespace insoulforge {
             sqlite3_clear_bindings(m_stmt);
         }
 
-        [[nodiscard]] auto getInt64(i32 col) const noexcept -> i64 { return sqlite3_column_int64(m_stmt, col); }
+        [[nodiscard]] auto getInt64(const i32 col) const noexcept -> i64 { return sqlite3_column_int64(m_stmt, col); }
 
-        [[nodiscard]] auto getInt(i32 col) const noexcept -> i32 { return sqlite3_column_int(m_stmt, col); }
+        [[nodiscard]] auto getInt(const i32 col) const noexcept -> i32 { return sqlite3_column_int(m_stmt, col); }
 
-        [[nodiscard]] auto getDouble(i32 col) const noexcept -> f64 { return sqlite3_column_double(m_stmt, col); }
+        [[nodiscard]] auto getDouble(const i32 col) const noexcept -> f64 { return sqlite3_column_double(m_stmt, col); }
 
-        [[nodiscard]] auto getText(i32 col) const noexcept -> std::string {
+        [[nodiscard]] auto getText(const i32 col) const noexcept -> std::string {
             const auto *p = sqlite3_column_text(m_stmt, col);
             return p ? reinterpret_cast<const char *>(p) : "";
         }
 
-        [[nodiscard]] auto isNull(i32 col) const noexcept -> bool {
+        [[nodiscard]] auto isNull(const i32 col) const noexcept -> bool {
             return sqlite3_column_type(m_stmt, col) == SQLITE_NULL;
         }
 
-        [[nodiscard]] auto getBlob(i32 col) const noexcept -> std::vector<u8> {
+        [[nodiscard]] auto getBlob(const i32 col) const noexcept -> std::vector<u8> {
             const auto *p = static_cast<const u8 *>(sqlite3_column_blob(m_stmt, col));
             i32 size = sqlite3_column_bytes(m_stmt, col);
             if (!p || size <= 0)

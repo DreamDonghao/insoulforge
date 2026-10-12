@@ -104,9 +104,9 @@ namespace insoulforge {
     private:
         Config() = default;
         auto loadValues(const json &value) -> std::expected<void, ConfigError>;
-        void applyValues(Config &&value);
-        void applyLLMValues(std::string_view name, Config &&value);
-        void applyQQValues(Config &&value);
+        void applyValues(Config &value);
+        void applyLLMValues(std::string_view name, Config &value);
+        void applyQQValues(Config &value);
         void applyMemoryValues(const Config &value);
         std::mutex m_updateMutex; ///< 串行化读取、保存和运行时更新，防止并发保存使状态回退。
     };

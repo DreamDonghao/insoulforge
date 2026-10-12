@@ -202,7 +202,7 @@ namespace insoulforge {
             return;
         }
         if (body.contains("post_type")) {
-            OneBotEventWorkflow::instance().enqueueOneBotEvent(std::move(body));
+            OneBotEventWorkflow::instance().enqueueOneBotEvent(body);
         }
     }
 
@@ -263,7 +263,7 @@ namespace insoulforge {
         return !origin.empty() && path.find('#') == std::string::npos;
     }
 
-    auto OneBotWebSocketClient::takePendingCallbacksLocked() -> std::vector<OneBotWebSocketClient::ResponseCallback> {
+    auto OneBotWebSocketClient::takePendingCallbacksLocked() -> std::vector<ResponseCallback> {
         std::vector<ResponseCallback> callbacks;
         callbacks.reserve(m_pendingRequests.size());
         for (auto &callback: m_pendingRequests | std::views::values) {

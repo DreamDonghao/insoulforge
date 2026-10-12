@@ -32,15 +32,14 @@
 /// @brief 尝试解析无符号整数（非抛出，替代 std::stoull）
 /// @param s 输入字符串
 /// @return 解析结果；允许前导空格或制表符，其余字符必须为数字
-[[nodiscard]] inline auto tryParseUInt64(std::string_view s) -> std::optional<insoulforge::u64> {
+[[nodiscard]] inline auto tryParseUInt64(const std::string_view s) -> std::optional<insoulforge::u64> {
     insoulforge::u64 value = 0;
     const auto *begin = s.data();
     const auto *end = s.data() + s.size();
     // 跳过前导空白（与 stoull 行为一致）
     while (begin < end && (*begin == ' ' || *begin == '\t'))
         ++begin;
-    const auto [ptr, ec] = std::from_chars(begin, end, value);
-    if (ec != std::errc{} || ptr != end)
+    if (const auto [ptr, ec] = std::from_chars(begin, end, value); ec != std::errc{} || ptr != end)
         return std::nullopt;
     return value;
 }
@@ -49,7 +48,7 @@
 /// @param s 输入字符串
 /// @param fallback 解析失败时返回的值
 /// @return 解析结果；允许前导空格或制表符，解析失败时返回 fallback
-[[nodiscard]] inline auto parseUInt64(std::string_view s, insoulforge::u64 fallback = 0) -> insoulforge::u64 {
+[[nodiscard]] inline auto parseUInt64(const std::string_view s, insoulforge::u64 fallback = 0) -> insoulforge::u64 {
     return tryParseUInt64(s).value_or(fallback);
 }
 
@@ -71,10 +70,10 @@ inline auto currentDateTime() -> std::string {
 
 /// @brief unix 秒格式化为本地时间 YYYY-MM-DD HH:MM:SS
 [[nodiscard]] inline auto formatUnixTime(const insoulforge::i64 unixSec) -> std::string {
-    return fmt::format("{:%Y-%m-%d %H:%M:%S}", localTime(static_cast<std::time_t>(unixSec)));
+    return fmt::format("{:%Y-%m-%d %H:%M:%S}", localTime(unixSec));
 }
 
 /// @brief unix 秒格式化为本地时间 HH:MM
 [[nodiscard]] inline auto formatTimeOfDay(const insoulforge::i64 unixSec) -> std::string {
-    return fmt::format("{:%H:%M}", localTime(static_cast<std::time_t>(unixSec)));
+    return fmt::format("{:%H:%M}", localTime(unixSec));
 }

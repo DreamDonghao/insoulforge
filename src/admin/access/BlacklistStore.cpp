@@ -1,6 +1,8 @@
 /// @file BlacklistStore.cpp
 /// @brief 全局 QQ 黑名单持久化实现
 
+#include <fmt/format.h>
+
 #include <admin/access/BlacklistStore.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/logging/Logger.hpp>
@@ -8,7 +10,7 @@
 #include <infrastructure/storage/Statement.hpp>
 
 namespace insoulforge::BlacklistStore {
-    bool contains(const u64 qqNumber) {
+    auto contains(const u64 qqNumber) -> bool {
         const auto &database = Database::instance();
         std::shared_lock lock(database.mutex());
         const Statement statement(database.handle(), "SELECT 1 FROM blacklisted_users WHERE qq_number = ?");
@@ -34,7 +36,7 @@ namespace insoulforge::BlacklistStore {
         Logger::info(0, "Blacklist", fmt::format("已移除: {}", qqNumber));
     }
 
-    std::vector<u64> getAll() {
+    auto getAll() -> std::vector<u64> {
         const auto &database = Database::instance();
         std::shared_lock lock(database.mutex());
         std::vector<u64> users;

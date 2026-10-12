@@ -17,8 +17,8 @@ namespace insoulforge::ImageDescriptionStore {
         }
     } // namespace
 
-    std::optional<CachedImageDescription> find(
-      const std::string &contentHash, const std::string &model, const i32 promptVersion) {
+    auto find(const std::string &contentHash, const std::string &model, const i32 promptVersion)
+      -> std::optional<CachedImageDescription> {
         const auto &db = Database::instance();
         std::unique_lock lock(db.mutex());
         purgeExpiredLocked(db.handle());

@@ -21,8 +21,7 @@ namespace insoulforge {
 
     auto Database::initialize(const std::string &dbPath) -> std::expected<void, std::string> {
         // 创建数据目录
-        const std::filesystem::path p(dbPath);
-        if (p.has_parent_path()) {
+        if (const std::filesystem::path p(dbPath); p.has_parent_path()) {
             std::error_code error;
             std::filesystem::create_directories(p.parent_path(), error);
             if (error) {

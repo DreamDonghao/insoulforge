@@ -32,8 +32,8 @@ namespace insoulforge::CommandProcessor {
     } // namespace
 
     auto isCommand(const json &message) -> bool {
-        const u64 sessionId = getUInt(message, "session_id");
-        if (sessionId == 0 ||
+        if (const u64 sessionId = getUInt(message, "session_id");
+          sessionId == 0 ||
             (!SessionId::isPrivate(sessionId) && !MessageRecord::mentions(message, Config::instance().selfQQNumber))) {
             return false;
         }
@@ -74,9 +74,9 @@ namespace insoulforge::CommandProcessor {
         }
         if (command == "/status" || command == "/状态") {
             const bool enabled = SessionStore::isSessionEnabled(sessionId);
-            const SessionConfig config = SessionConfigManager::getConfig(sessionId);
+            const auto [allMesCount] = SessionConfigManager::getConfig(sessionId);
             co_return fmt::format(
-              "会话 {} 状态:\n- 启用: {}\n- 消息数: {}", sessionId, enabled ? "是" : "否", config.allMesCount);
+              "会话 {} 状态:\n- 启用: {}\n- 消息数: {}", sessionId, enabled ? "是" : "否", allMesCount);
         }
         if (command == "/admins" || command == "/管理员") {
             const auto admins = AdminStore::getAdmins();

@@ -60,8 +60,7 @@ namespace insoulforge::ImageGenerationService {
         }
 
         if (url.starts_with("data:image/")) {
-            const auto marker = url.find(";base64,");
-            if (marker != std::string::npos) {
+            if (const auto marker = url.find(";base64,"); marker != std::string::npos) {
                 return base64ImageCode(std::string_view(url).substr(marker + 8));
             }
         }
@@ -95,9 +94,8 @@ namespace insoulforge::ImageGenerationService {
             throw std::runtime_error("图片生成接口请求失败: " + response.error().substr(0, 500));
         }
         if ((*response)->getStatusCode() != drogon::k200OK) {
-            json errorBody;
             std::string detail;
-            if (tryParseJson((*response)->body(), errorBody)) {
+            if (json errorBody; tryParseJson((*response)->body(), errorBody)) {
                 const auto &error = atOrNull(errorBody, "error");
                 detail = error.is_object() ? getStr(error, "message") : jsonToString(error);
                 if (detail.empty())

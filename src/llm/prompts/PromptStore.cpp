@@ -7,27 +7,27 @@
 
 
 namespace insoulforge::PromptStore {
-    auto getPrompt(const Database &db, const std::string &key, const std::string &defaultValue) -> std::string {
-        std::shared_lock lock(db.mutex());
-        const Statement stmt(db.handle(), "SELECT prompt_content FROM prompts WHERE prompt_key = ?");
+    auto getPrompt(const Database &database, const std::string &key, const std::string &defaultValue) -> std::string {
+        std::shared_lock lock(database.mutex());
+        const Statement stmt(database.handle(), "SELECT prompt_content FROM prompts WHERE prompt_key = ?");
         stmt.bind(1, key);
         return stmt.step() ? stmt.getText(0) : defaultValue;
     }
 
     void setPrompt(
-      const Database &db, const std::string &key, const std::string &content, const std::string &description) {
-        std::unique_lock lock(db.mutex());
+      const Database &database, const std::string &key, const std::string &content, const std::string &description) {
+        std::unique_lock lock(database.mutex());
         const Statement stmt(
-          db.handle(), "INSERT OR REPLACE INTO prompts (prompt_key, prompt_content, description) VALUES (?, ?, ?)");
+          database.handle(), "INSERT OR REPLACE INTO prompts (prompt_key, prompt_content, description) VALUES (?, ?, ?)");
         stmt.bind(1, key);
         stmt.bind(2, content);
         stmt.bind(3, description);
         stmt.exec();
     }
 
-    auto hasPrompt(const Database &db, const std::string &key) -> bool {
-        std::shared_lock lock(db.mutex());
-        const Statement stmt(db.handle(), "SELECT 1 FROM prompts WHERE prompt_key = ?");
+    auto hasPrompt(const Database &database, const std::string &key) -> bool {
+        std::shared_lock lock(database.mutex());
+        const Statement stmt(database.handle(), "SELECT 1 FROM prompts WHERE prompt_key = ?");
         stmt.bind(1, key);
         return stmt.step();
     }
@@ -42,7 +42,7 @@ namespace insoulforge::PromptStore {
 
     auto hasPrompt(const std::string &key) -> bool { return hasPrompt(Database::instance(), key); }
 
-    std::unordered_map<std::string, std::string> getAllPrompts() {
+    auto getAllPrompts() -> std::unordered_map<std::string, std::string> {
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
         std::unordered_map<std::string, std::string> prompts;

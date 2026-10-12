@@ -34,7 +34,7 @@ namespace insoulforge {
                   .description = tool.description,
                   .parameters = std::move(parameters),
                   .handler = [script = tool.scriptContent](
-                               json args, ToolCallContext context) -> drogon::Task<std::string> {
+                               json args, const ToolCallContext context) -> drogon::Task<std::string> {
                       try {
                           co_return co_await LuaToolExecutor::execute(script, std::move(args), context.sessionId);
                       } catch (const std::exception &error) {

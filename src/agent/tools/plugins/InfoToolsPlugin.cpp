@@ -44,7 +44,7 @@ namespace insoulforge {
             .name = "list_stickers",
             .description = "获取QQ收藏表情中所有可用的表情名称列表。",
             .parameters = json(),
-            .handler = [](json, ToolCallContext ctx) -> drogon::Task<std::string> {
+            .handler = [](json, const ToolCallContext ctx) -> drogon::Task<std::string> {
                 const auto sessionId = ctx.sessionId;
                 const json emojis = co_await ToolRuntime::fetchFavoriteEmojis(sessionId);
                 if (emojis.empty()) {
@@ -80,7 +80,7 @@ namespace insoulforge {
             .description = "从长期记忆库中回忆信息。当想不起某人"
                            "喜好、某群习惯、过去的约定时使用。模拟人类回忆过程。",
             .parameters = memoryParams,
-            .handler = [](const json args, ToolCallContext ctx) -> drogon::Task<std::string> {
+            .handler = [](const json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
                 const std::string query = argString(args, "query");
                 if (query.empty())
                     co_return std::string("请提供回忆关键词");

@@ -59,10 +59,9 @@ auto AdminController::getAuthStatus(HttpRequestPtr req, std::function<void(const
 }
 
 auto AdminController::login(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const -> Task<> {
-    const auto body = parseJsonBody(req);
-    if (!body || !body->contains("token") || !(*body)["token"].is_string() ||
+    if (const auto body = parseJsonBody(req); !body || !body->contains("token") || !(*body)["token"].is_string() ||
         !AdminAccessToken::matches((*body)["token"].get<std::string>())) {
-        auto response = jsonResponse(AdminResponse::failJson("访问令牌无效"));
+        const auto response = jsonResponse(AdminResponse::failJson("访问令牌无效"));
         response->setStatusCode(k401Unauthorized);
         callback(response);
         co_return;
@@ -106,26 +105,26 @@ auto AdminController::getLogs(HttpRequestPtr req, std::function<void(const HttpR
     query.beforeId = tryParseUInt64(req->getParameter("beforeId"));
     query.limit = static_cast<i32>(std::clamp<u64>(parseQueryUInt64(req, "limit", 200), 1, 1000));
 
-    const auto result = LogBuffer::instance().query(query);
+    const auto [entries, hasMore, nextAfterId, nextBeforeId, oldestId, newestId] = LogBuffer::instance().query(query);
 
     json resp;
     resp["entries"] = json::array();
-    for (const auto &entry: result.entries) {
+    for (const auto &[id, timestamp, level, sessionId, source, content]: entries) {
         json item;
-        item["id"] = entry.id;
-        item["timestamp"] = entry.timestamp;
-        item["level"] = entry.level;
+        item["id"] = id;
+        item["timestamp"] = timestamp;
+        item["level"] = level;
         // 字符串形式：会话 ID 可能带私聊标志位，超过 JS 安全整数范围。
-        item["sessionId"] = std::to_string(entry.sessionId);
-        item["source"] = entry.source;
-        item["content"] = entry.content;
+        item["sessionId"] = std::to_string(sessionId);
+        item["source"] = source;
+        item["content"] = content;
         resp["entries"].push_back(item);
     }
-    resp["hasMore"] = result.hasMore;
-    resp["nextAfterId"] = result.nextAfterId;
-    resp["nextBeforeId"] = result.nextBeforeId;
-    resp["oldestId"] = result.oldestId;
-    resp["newestId"] = result.newestId;
+    resp["hasMore"] = hasMore;
+    resp["nextAfterId"] = nextAfterId;
+    resp["nextBeforeId"] = nextBeforeId;
+    resp["oldestId"] = oldestId;
+    resp["newestId"] = newestId;
     resp["size"] = LogBuffer::instance().size();
     resp["currentLevel"] = Logger::level();
     callback(jsonResponse(resp));
@@ -142,22 +141,22 @@ auto AdminController::getHttpTraces(HttpRequestPtr req, std::function<void(const
     json resp;
     resp["entries"] = json::array();
     resp["total"] = HttpTrace::instance().size();
-    for (auto &entry: HttpTrace::instance().query(afterId, limit)) {
+    for (auto &[id, timestamp, tag, method, url, requestBody, status, responseBody, sessionId]: HttpTrace::instance().query(afterId, limit)) {
         json item;
-        item["id"] = entry.id;
-        item["timestamp"] = entry.timestamp;
-        item["tag"] = entry.tag;
-        item["method"] = entry.method;
-        item["url"] = entry.url;
-        item["status"] = entry.status;
+        item["id"] = id;
+        item["timestamp"] = timestamp;
+        item["tag"] = tag;
+        item["method"] = method;
+        item["url"] = url;
+        item["status"] = status;
         // 字符串形式：会话 ID 可能带私聊标志位，超过 JS 安全整数范围
-        if (entry.sessionId.has_value()) {
-            item["groupId"] = std::to_string(*entry.sessionId);
+        if (sessionId.has_value()) {
+            item["groupId"] = std::to_string(*sessionId);
         } else {
             item["groupId"] = nullptr;
         }
-        item["requestBody"] = entry.requestBody;
-        item["responseBody"] = entry.responseBody;
+        item["requestBody"] = requestBody;
+        item["responseBody"] = responseBody;
         resp["entries"].push_back(item);
     }
     callback(jsonResponse(resp));
@@ -469,9 +468,9 @@ auto AdminController::refreshSessionName(HttpRequestPtr req, std::function<void(
 
 auto AdminController::refreshAllSessionNames(
   HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const -> Task<> {
-    auto groups = SessionStore::getAllSessionsWithStatus();
 
-    for (const auto &[sessionId, groupName, enabled, messageCount]: groups) {
+    for (auto groups = SessionStore::getAllSessionsWithStatus();
+      const auto &[sessionId, groupName, enabled, messageCount]: groups) {
         co_await MessageService::fetchAndUpdateSessionName(sessionId);
     }
 
@@ -663,8 +662,8 @@ auto AdminController::getSessionAffinity(HttpRequestPtr req, std::function<void(
         // 昵称优先取运行时映射（含自定义昵称），缺失时回退 OneBot 实时查询
         std::string name(QQNameDirectory::getName(qq));
         if (name.empty() || name == "未知") {
-            const auto info = co_await OneBotClient::getStrangerInfo(qq, gid);
-            if (atOrNull(info, "data").contains("nickname")) {
+            if (const auto info = co_await OneBotClient::getStrangerInfo(qq, gid);
+              atOrNull(info, "data").contains("nickname")) {
                 name = getStr(atOrNull(info, "data"), "nickname");
             }
         }
@@ -741,7 +740,7 @@ auto AdminController::saveMemoryConfig(HttpRequestPtr req, std::function<void(co
     // 需就地补默认值，body 须可变
     auto body = parseJsonBody(req);
     if (!body || !body->is_object()) {
-        callback(AdminResponse::configErrorResponse({ConfigErrorType::InvalidArgument, "记忆配置必须是 JSON 对象"}));
+        callback(AdminResponse::configErrorResponse({.type = ConfigErrorType::InvalidArgument, .message = "记忆配置必须是 JSON 对象"}));
         co_return;
     }
 
@@ -768,7 +767,7 @@ auto AdminController::saveQQConfig(HttpRequestPtr req, std::function<void(const 
   -> Task<> {
     const auto body = parseJsonBody(req);
     if (!body || !body->is_object()) {
-        callback(AdminResponse::configErrorResponse({ConfigErrorType::InvalidArgument, "QQ 配置必须是 JSON 对象"}));
+        callback(AdminResponse::configErrorResponse({.type = ConfigErrorType::InvalidArgument, .message = "QQ 配置必须是 JSON 对象"}));
         co_return;
     }
 

@@ -29,6 +29,6 @@ auto insoulforge::OneBotHttpEventController::receiveOneBotEvent(const drogon::Ht
     Logger::debug(0, "OneBot",
       fmt::format("上报已确认: post_type={}, message_id={}", getStr(*body, "post_type"), getStr(*body, "message_id")));
 
-    OneBotEventWorkflow::instance().enqueueOneBotEvent(std::move(*body));
+    OneBotEventWorkflow::instance().enqueueOneBotEvent(*body);
     co_return;
 }

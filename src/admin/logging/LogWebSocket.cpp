@@ -29,8 +29,8 @@ namespace insoulforge {
         if (getStr(msg, "action") == "subscribe") {
             // 线上字段沿用 groupId，以兼容既有前端请求。
             LogSubscription sub;
-            const json &groupIdVal = atOrNull(msg, "groupId");
-            if (groupIdVal.is_string() && groupIdVal.get<std::string>() == "system") {
+            if (const json &groupIdVal = atOrNull(msg, "groupId");
+              groupIdVal.is_string() && groupIdVal.get<std::string>() == "system") {
                 sub.sessionId = 0;
             } else if (!groupIdVal.is_null() && !(groupIdVal.is_string() && groupIdVal.get<std::string>() == "all")) {
                 // sessionId 由前端以字符串形式发送（群号可能超过 JS 安全整数范围），需安全解析

@@ -6,7 +6,7 @@
 #include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
-    MemoryManager::MemoryManager(u64 sessionId) : m_sessionId(sessionId) {}
+    MemoryManager::MemoryManager(const u64 sessionId) : m_sessionId(sessionId) {}
 
     auto MemoryManager::getMemory() const -> std::string { return MemoryStore::getShortTermMemory(m_sessionId); }
 } // namespace insoulforge

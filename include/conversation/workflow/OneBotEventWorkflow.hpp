@@ -73,7 +73,7 @@ namespace insoulforge {
         /// @param body 已通过 HTTP JSON 校验的 OneBot 事件对象
         /// @details 归一化并检查机器人状态、发送者后入队；会话尚无预处理任务时启动协程。
         /// @note 线程安全。函数返回仅表示事件已被接受或丢弃，不表示图片识别、回复或记忆维护已经完成。
-        void enqueueOneBotEvent(json body);
+        void enqueueOneBotEvent(const json &body);
 
     private:
         struct Dependencies {

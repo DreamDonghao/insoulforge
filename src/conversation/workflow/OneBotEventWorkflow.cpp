@@ -107,9 +107,9 @@ namespace insoulforge {
             {
                 std::lock_guard lock(m_sessionsMutex);
                 m_sessions = std::move(sessions);
-                m_dependencies.emplace(Dependencies{database, config, agent});
+                m_dependencies.emplace(Dependencies{.database = database, .config = config, .agent = agent});
             }
-            ConversationMaintenanceService::setMemorySummaryCompletedCallback([this](const u64 sessionId) {
+            ConversationMaintenanceService::setMemorySummaryCompletedCallback([this](const u64 sessionId) -> void {
                 const auto sessionState = getOrCreateSessionState(sessionId);
                 if (const auto batch = sessionState->messageList()->removeCompletedSummaryMessages()) {
                     scheduleConversationMaintenance(
@@ -239,12 +239,12 @@ namespace insoulforge {
         co_return;
     }
 
-    void OneBotEventWorkflow::enqueueOneBotEvent(json body) {
+    void OneBotEventWorkflow::enqueueOneBotEvent(const json &body) {
         if (!m_initialized.load(std::memory_order_acquire)) {
             return;
         }
         // 将上报转换为统一消息，再按会话进入预处理队列。
-        auto normalizedMessage = OneBotEventNormalizer::normalize(std::move(body));
+        auto normalizedMessage = OneBotEventNormalizer::normalize(body);
         if (!normalizedMessage || MessageRecord::isAssistant(*normalizedMessage) || !m_dependencies->agent.isReady()) {
             return;
         }

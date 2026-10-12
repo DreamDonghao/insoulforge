@@ -57,7 +57,7 @@ namespace insoulforge {
 
             for (const ifaddrs *interface = interfaces; interface; interface = interface->ifa_next) {
                 if (!interface->ifa_addr || interface->ifa_addr->sa_family != AF_INET ||
-                    !(interface->ifa_flags & IFF_UP) || (interface->ifa_flags & IFF_LOOPBACK)) {
+                    !(interface->ifa_flags & IFF_UP) || interface->ifa_flags & IFF_LOOPBACK) {
                     continue;
                 }
 
@@ -110,8 +110,8 @@ namespace insoulforge {
         const std::string &path = request->path();
         const bool isAdminApi = path.starts_with("/admin/api/");
         const bool isAdminWebSocket = path == "/admin/ws" || path == "/admin/logs/ws";
-        const bool isPublicAuthEndpoint = path == "/admin/api/auth/login" || path == "/admin/api/auth/status";
-        if ((!isAdminApi && !isAdminWebSocket) || isPublicAuthEndpoint || isAuthorized(request)) {
+        if (const bool isPublicAuthEndpoint = path == "/admin/api/auth/login" || path == "/admin/api/auth/status";
+          (!isAdminApi && !isAdminWebSocket) || isPublicAuthEndpoint || isAuthorized(request)) {
             next();
             return;
         }
