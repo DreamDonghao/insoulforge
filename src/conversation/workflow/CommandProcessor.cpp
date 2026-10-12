@@ -34,7 +34,7 @@ namespace insoulforge::CommandProcessor {
     auto isCommand(const json &message) -> bool {
         if (const u64 sessionId = getUInt(message, "session_id");
           sessionId == 0 ||
-            (!SessionId::isPrivate(sessionId) && !MessageRecord::mentions(message, Config::instance().selfQQNumber))) {
+          (!SessionId::isPrivate(sessionId) && !MessageRecord::mentions(message, Config::instance().selfQQNumber))) {
             return false;
         }
         return !commandText(message).empty();
@@ -56,6 +56,7 @@ namespace insoulforge::CommandProcessor {
                       "/disable [会话ID] - 禁用当前会话（私聊可不带参数）\n"
                       "/groups - 查看启用的会话列表\n"
                       "/status - 查看当前会话状态\n"
+                      "/groupcard on|off - 开启或关闭本群向模型发送群名片\n"
                       "【管理员】\n"
                       "/admins - 查看管理员列表\n"
                       "/addadmin <QQ号> - 添加管理员\n"
@@ -74,9 +75,9 @@ namespace insoulforge::CommandProcessor {
         }
         if (command == "/status" || command == "/状态") {
             const bool enabled = SessionStore::isSessionEnabled(sessionId);
-            const auto [allMesCount] = SessionConfigManager::getConfig(sessionId);
-            co_return fmt::format(
-              "会话 {} 状态:\n- 启用: {}\n- 消息数: {}", sessionId, enabled ? "是" : "否", allMesCount);
+            const auto [allMesCount, sendGroupCard] = SessionConfigManager::getConfig(sessionId);
+            co_return fmt::format("会话 {} 状态:\n- 启用: {}\n- 消息数: {}\n- 发送群名片: {}", sessionId,
+              enabled ? "是" : "否", allMesCount, sendGroupCard ? "是" : "否");
         }
         if (command == "/admins" || command == "/管理员") {
             const auto admins = AdminStore::getAdmins();
@@ -123,6 +124,16 @@ namespace insoulforge::CommandProcessor {
             }
             SessionStore::disableSession(targetSession);
             co_return fmt::format("已禁用会话: {}", targetSession);
+        }
+        if (command == "/groupcard" || command == "/群名片") {
+            if (SessionId::isPrivate(sessionId))
+                co_return "此命令仅限群聊使用";
+            std::string argument, extra;
+            input >> argument;
+            if ((argument != "on" && argument != "off") || (input >> extra))
+                co_return "用法: /groupcard on|off";
+            SessionStore::setSendGroupCard(sessionId, argument == "on");
+            co_return argument == "on" ? "已开启本群向模型发送群名片" : "已关闭本群向模型发送群名片";
         }
         if (command == "/groups" || command == "/群列表") {
             const auto groups = SessionStore::getEnabledGroups();

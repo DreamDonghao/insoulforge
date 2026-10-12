@@ -5,6 +5,7 @@
 #include <conversation/maintenance/affinity/AffinityMaintenanceStore.hpp>
 #include <conversation/message/MessageRecord.hpp>
 #include <conversation/message/SessionId.hpp>
+#include <conversation/session/SessionStore.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
@@ -67,7 +68,9 @@ namespace insoulforge {
             records.reserve(job.messages.size());
             for (const json &message: job.messages) {
                 if (message.is_object()) {
-                    records.push_back({{"content", dumpJson(MessageRecord::projectForAgent(message))}});
+                    records.push_back({{"content", dumpJson(MessageRecord::projectForAgent(message, false,
+                                                     !SessionId::isPrivate(job.sessionId) &&
+                                                       SessionStore::getSessionConfig(job.sessionId).sendGroupCard))}});
                 }
             }
             const size_t limit = std::min(records.size(), kMaxAffinityRecords);

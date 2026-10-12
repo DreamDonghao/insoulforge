@@ -3,7 +3,7 @@
  * @file GroupManager.vue
  * @brief 管理群聊和私聊的启用状态、记录、记忆与定时任务
  */
-import {computed, inject, nextTick, onMounted, onUnmounted, ref, type Ref, watch} from 'vue'
+import {computed, inject, nextTick, onMounted, onUnmounted, reactive, ref, type Ref, watch} from 'vue'
 import type {
   AffinityEntry,
   ApiResponse,
@@ -93,6 +93,29 @@ const loadGroups = async (): Promise<void> => {
 }
 
 // 切换启用状态
+const savingCards = reactive(new Set<string>())
+const setGroupCard = async (group: Group, event: Event): Promise<void> => {
+  const input = event.target as HTMLInputElement
+  const enabled = input.checked
+  const id = sessionKey(group)
+  savingCards.add(id)
+  try {
+    const resp = await fetch(`/admin/api/group/${id}/card`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({sendGroupCard: enabled})
+    })
+    const data: ApiResponse = await resp.json()
+    if (!resp.ok || !data.success) throw new Error(data.error || '保存失败')
+    group.sendGroupCard = enabled
+    showToast?.('群名片设置已保存')
+  } catch (error) {
+    input.checked = group.sendGroupCard === true
+    showToast?.(error instanceof Error ? error.message : '保存失败', true)
+  } finally {
+    savingCards.delete(id)
+  }
+}
+
 const toggleGroup = async (groupId: string): Promise<void> => {
   const resp = await fetch(`/admin/api/group/${groupId}/toggle`, {method: 'POST'})
   const data: ApiResponse = await resp.json()
@@ -636,6 +659,7 @@ onUnmounted(restoreWebSocket)
                 <th>会话</th>
                 <th style="width: 120px;">群号/QQ号</th>
                 <th style="width: 70px;">消息</th>
+                <th style="width: 90px;">发送群名片</th>
                 <th style="width: 360px;">操作</th>
               </tr>
               </thead>
@@ -662,6 +686,12 @@ onUnmounted(restoreWebSocket)
                     isPrivateSession(group) ? group.userId : group.groupId
                   }}</code></td>
                 <td>{{ group.messageCount || 0 }}</td>
+                <td @click.stop>
+                  <input v-if="!isPrivateSession(group)" type="checkbox" :checked="group.sendGroupCard === true"
+                         :disabled="savingCards.has(sessionKey(group))" aria-label="向模型发送本群群名片"
+                         @change="setGroupCard(group, $event)">
+                  <span v-else>-</span>
+                </td>
                 <td style="white-space: nowrap;">
                   <button class="btn btn-primary btn-sm"
                           @click.stop="selectGroup(sessionKey(group), sessionLabel(group))">消息

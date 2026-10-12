@@ -18,6 +18,7 @@
 #include <openssl/evp.h>
 
 #include <admin/access/AdminAccessToken.hpp>
+#include <admin/access/AdminStore.hpp>
 #include <admin/http/AdminController.hpp>
 #include <agent/ability/AsyncTaskManager.hpp>
 #include <agent/memory/LongTermMemoryStore.hpp>
@@ -36,6 +37,7 @@
 #include <conversation/message/MessageRecord.hpp>
 #include <conversation/message/SessionId.hpp>
 #include <conversation/session/QQNameDirectory.hpp>
+#include <conversation/session/SessionStore.hpp>
 #include <conversation/workflow/CommandProcessor.hpp>
 #include <conversation/workflow/MessageList.hpp>
 #include <conversation/workflow/MessageRouter.hpp>
@@ -102,6 +104,30 @@ namespace {
           "private session storage target is preserved", kTestName);
 
         insoulforge::json selfEvent = body;
+        auto cardEvent = body;
+        cardEvent["sender"]["card"] = "Group Alice";
+        const auto cardRecord = insoulforge::OneBotEventNormalizer::normalize(cardEvent);
+        check(
+          cardRecord && (*cardRecord)["sender"]["card"] == "Group Alice" && (*cardRecord)["sender"]["name"] == "Alice",
+          "group card is stored separately from nickname", kTestName);
+        if (cardRecord) {
+            check(!insoulforge::MessageRecord::projectForAgent(*cardRecord)["sender"].contains("card"),
+              "disabled projection omits group card", kTestName);
+            check(
+              insoulforge::MessageRecord::projectForAgent(*cardRecord, false, true)["sender"]["card"] == "Group Alice",
+              "enabled projection includes group card", kTestName);
+            check((*cardRecord)["sender"]["card"] == "Group Alice", "projection preserves stored card", kTestName);
+        }
+        cardEvent.erase("group_id");
+        cardEvent["message_type"] = "private";
+        const auto privateRecord = insoulforge::OneBotEventNormalizer::normalize(cardEvent);
+        check(
+          privateRecord && !(*privateRecord)["sender"].contains("card"), "private messages omit group card", kTestName);
+        cardEvent = body;
+        cardEvent["sender"]["card"] = "";
+        const auto emptyCardRecord = insoulforge::OneBotEventNormalizer::normalize(cardEvent);
+        check(
+          emptyCardRecord && !(*emptyCardRecord)["sender"].contains("card"), "empty group card is omitted", kTestName);
         selfEvent["message_id"] = 8;
         selfEvent["sender"] = {{"user_id", 42}, {"nickname", "Bot"}};
         const auto selfRecord = insoulforge::OneBotEventNormalizer::normalize(selfEvent);
@@ -1107,6 +1133,53 @@ namespace {
         std::filesystem::remove_all(directory);
     }
 
+    void testGroupCardSettings() {
+        constexpr std::string_view kTestName = "group card settings";
+        auto &db = insoulforge::Database::instance();
+        check(db.initialize(":memory:").has_value(), "initializes database", kTestName);
+        check(!insoulforge::SessionStore::getSessionConfig(100).sendGroupCard, "defaults to disabled", kTestName);
+        insoulforge::SessionStore::incrementMessageCount(100);
+        insoulforge::SessionStore::setSendGroupCard(100, true);
+        insoulforge::SessionStore::incrementMessageCount(100);
+        check(insoulforge::SessionStore::getSessionConfig(100).sendGroupCard &&
+                insoulforge::SessionStore::getSessionConfig(100).allMesCount == 2 &&
+                !insoulforge::SessionStore::getSessionConfig(200).sendGroupCard,
+          "groups are independent and statistics preserved", kTestName);
+        insoulforge::SessionStore::enableSession(100);
+        insoulforge::SessionStore::disableSession(100);
+        insoulforge::SessionStore::enableSession(100);
+        check(
+          insoulforge::SessionStore::getSessionConfig(100).sendGroupCard, "enable cycle preserves setting", kTestName);
+        auto command = insoulforge::json{{"session_id", 100}, {"sender", {{"qq", "11"}}},
+          {"segments", insoulforge::json::array({{{"type", "text"}, {"text", "/groupcard off"}}})}};
+        drogon::sync_wait(insoulforge::CommandProcessor::execute(command));
+        check(
+          insoulforge::SessionStore::getSessionConfig(100).sendGroupCard, "non-admin cannot change setting", kTestName);
+        insoulforge::AdminStore::addAdmin(11);
+        drogon::sync_wait(insoulforge::CommandProcessor::execute(command));
+        check(
+          !insoulforge::SessionStore::getSessionConfig(100).sendGroupCard, "admin command disables setting", kTestName);
+        command["segments"][0]["text"] = "/groupcard on";
+        drogon::sync_wait(insoulforge::CommandProcessor::execute(command));
+        check(
+          insoulforge::SessionStore::getSessionConfig(100).sendGroupCard, "admin command enables setting", kTestName);
+        command["session_id"] = insoulforge::SessionId::fromPrivateUser(11);
+        drogon::sync_wait(insoulforge::CommandProcessor::execute(command));
+        check(!insoulforge::SessionStore::hasSessionConfig(insoulforge::SessionId::fromPrivateUser(11)),
+          "private command rejected", kTestName);
+        // Simulate the last schema before the group-card column was introduced.
+        check(sqlite3_exec(db.handle(), "ALTER TABLE group_config DROP COLUMN send_group_card", nullptr, nullptr,
+                nullptr) == SQLITE_OK,
+          "restores old schema", kTestName);
+        check(sqlite3_exec(db.handle(), "PRAGMA user_version = 14", nullptr, nullptr, nullptr) == SQLITE_OK,
+          "sets old schema version", kTestName);
+        insoulforge::SchemaMigrator::migrate(db.handle());
+        check(!insoulforge::SessionStore::getSessionConfig(100).sendGroupCard &&
+                insoulforge::SessionStore::getSessionConfig(100).allMesCount == 2,
+          "migration defaults off and preserves statistics", kTestName);
+        db.close();
+    }
+
     void testExecutionConfig() {
         constexpr std::string_view kTestName = "execution config";
         const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -1121,6 +1194,8 @@ namespace {
           "old files receive the default limit", kTestName);
         check(insoulforge::Config::instance().execution.maxToolRounds.load() == 8, "loads the default runtime limit",
           kTestName);
+        check(
+          insoulforge::Config::instance().executorFallback.model.empty(), "fallback is disabled by default", kTestName);
         check(insoulforge::Config::instance()
                 .saveExecutionConfig({{"maxToolRounds", 8}, {"futureSetting", true}})
                 .has_value(),
@@ -1342,8 +1417,6 @@ namespace {
             .has_value(),
           "saves memory model config", kTestName);
         const auto primaryExecutor = insoulforge::Config::instance().getLLMConfig("executor");
-        check(insoulforge::Config::instance().executorFallback.model.empty(),
-          "fallback is disabled by default", kTestName);
         check(insoulforge::Config::instance()
                 .saveLLMConfig(
                   "executorFallback", {{"apiKey", "fallback-key"}, {"baseUrl", "https://fallback.example.com/v1"},
@@ -1609,6 +1682,7 @@ auto main() -> int {
     testMemoryModelConfigMigration();
     testConfigFacade();
     testExecutionConfig();
+    testGroupCardSettings();
     testToolHistoryRecords();
     testImageDescriptionCacheStore();
     testImageGenerationResponse();

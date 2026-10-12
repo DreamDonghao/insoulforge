@@ -60,7 +60,7 @@ auto AdminController::getAuthStatus(HttpRequestPtr req, std::function<void(const
 
 auto AdminController::login(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const -> Task<> {
     if (const auto body = parseJsonBody(req); !body || !body->contains("token") || !(*body)["token"].is_string() ||
-        !AdminAccessToken::matches((*body)["token"].get<std::string>())) {
+                                              !AdminAccessToken::matches((*body)["token"].get<std::string>())) {
         const auto response = jsonResponse(AdminResponse::failJson("访问令牌无效"));
         response->setStatusCode(k401Unauthorized);
         callback(response);
@@ -141,7 +141,8 @@ auto AdminController::getHttpTraces(HttpRequestPtr req, std::function<void(const
     json resp;
     resp["entries"] = json::array();
     resp["total"] = HttpTrace::instance().size();
-    for (auto &[id, timestamp, tag, method, url, requestBody, status, responseBody, sessionId]: HttpTrace::instance().query(afterId, limit)) {
+    for (auto &[id, timestamp, tag, method, url, requestBody, status, responseBody, sessionId]:
+      HttpTrace::instance().query(afterId, limit)) {
         json item;
         item["id"] = id;
         item["timestamp"] = timestamp;
@@ -394,6 +395,8 @@ auto AdminController::getGroups(HttpRequestPtr req, std::function<void(const Htt
         json group = sessionItemHeader(sessionId);
         group["groupName"] = groupName;
         group["enabled"] = enabled;
+        group["sendGroupCard"] =
+          !SessionId::isPrivate(sessionId) && SessionStore::getSessionConfig(sessionId).sendGroupCard;
         group["messageCount"] = messageCount;
         result.push_back(group);
     }
@@ -434,6 +437,21 @@ auto AdminController::enableSession(HttpRequestPtr req, std::function<void(const
     json resp = AdminResponse::okJson(SessionId::isPrivate(sessionId) ? "私聊已启用" : "群已启用");
     resp["groupName"] = groupName;
     callback(jsonResponse(resp));
+    co_return;
+}
+
+auto AdminController::saveGroupCard(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
+  const std::string &sessionId) const -> Task<> {
+    const auto id = tryParseUInt64(sessionId);
+    const auto body = parseJsonBody(req);
+    if (!id || *id == 0 || SessionId::isPrivate(*id) || !body || !atOrNull(*body, "sendGroupCard").is_boolean()) {
+        auto response = jsonResponse(AdminResponse::errorJson("需要有效群号及布尔类型 sendGroupCard"));
+        response->setStatusCode(drogon::k400BadRequest);
+        callback(response);
+        co_return;
+    }
+    SessionStore::setSendGroupCard(*id, (*body)["sendGroupCard"].get<bool>());
+    callback(jsonResponse(AdminResponse::okJson("群名片设置已保存")));
     co_return;
 }
 
@@ -740,7 +758,8 @@ auto AdminController::saveMemoryConfig(HttpRequestPtr req, std::function<void(co
     // 需就地补默认值，body 须可变
     auto body = parseJsonBody(req);
     if (!body || !body->is_object()) {
-        callback(AdminResponse::configErrorResponse({.type = ConfigErrorType::InvalidArgument, .message = "记忆配置必须是 JSON 对象"}));
+        callback(AdminResponse::configErrorResponse(
+          {.type = ConfigErrorType::InvalidArgument, .message = "记忆配置必须是 JSON 对象"}));
         co_return;
     }
 
@@ -767,7 +786,8 @@ auto AdminController::saveQQConfig(HttpRequestPtr req, std::function<void(const 
   -> Task<> {
     const auto body = parseJsonBody(req);
     if (!body || !body->is_object()) {
-        callback(AdminResponse::configErrorResponse({.type = ConfigErrorType::InvalidArgument, .message = "QQ 配置必须是 JSON 对象"}));
+        callback(AdminResponse::configErrorResponse(
+          {.type = ConfigErrorType::InvalidArgument, .message = "QQ 配置必须是 JSON 对象"}));
         co_return;
     }
 

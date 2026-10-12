@@ -245,7 +245,7 @@ namespace insoulforge::MessageRecord {
         return record;
     }
 
-    auto createToolHistoryEntry(std::string name, const json& arguments, std::string status) -> json {
+    auto createToolHistoryEntry(std::string name, const json &arguments, std::string status) -> json {
         auto sanitized = redactToolArguments(HttpUtil::redactImagePayloads(arguments));
         if (dumpJson(sanitized).size() > 2048) {
             sanitized = {{"_omitted", "参数超过 2048 字节，已省略"}};
@@ -296,7 +296,7 @@ namespace insoulforge::MessageRecord {
         return getStr(atOrNull(record, "sender"), "qq") == std::to_string(SessionId::kSystemAccountId);
     }
 
-    auto projectForAgent(const json &record, const bool includeToolHistory) -> json {
+    auto projectForAgent(const json &record, const bool includeToolHistory, const bool includeGroupCard) -> json {
         if (!record.is_object()) {
             return record;
         }
@@ -306,6 +306,9 @@ namespace insoulforge::MessageRecord {
         }
         if (const json &sender = atOrNull(record, "sender"); sender.is_object()) {
             projected["sender"] = sender;
+            if (!includeGroupCard) {
+                projected["sender"].erase("card");
+            }
         }
         if (record.contains("message_id")) {
             projected["message_id"] = record["message_id"];
