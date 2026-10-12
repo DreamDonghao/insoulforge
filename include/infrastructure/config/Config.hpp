@@ -51,6 +51,8 @@ namespace insoulforge {
         LLMModelParams routerParams;
         LLMApiConfig executor;
         LLMModelParams executorParams;
+        LLMApiConfig executorFallback; // 默认 Executor 请求失败时使用；留空则不启用
+        LLMModelParams executorFallbackParams;
         LLMApiConfig executorThinking; // Executor 思考模型配置
         LLMModelParams executorThinkingParams;
         LLMApiConfig image;

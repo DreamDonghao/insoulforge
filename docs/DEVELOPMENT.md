@@ -319,7 +319,7 @@ MessageService → OneBot API
 
 ### 配置系统
 
-`ConfigStore` 将 LLM API 配置（router / jev / executor / executorThinking / image / imageGeneration / memory / embedding）、QQ Bot 配置、记忆和执行参数统一写入
+`ConfigStore` 将 LLM API 配置（router / jev / executor / executorFallback / executorThinking / image / imageGeneration / memory / embedding）、QQ Bot 配置、记忆和执行参数统一写入
 `data/config.json`。聊天模型可设置 `maxTokens`、`temperature`、`topP` 和 `reasoningEffort`；Embedding、Jev 与图片生成不使用这些采样参数。
 后台上传的角色参考图单独保存在 `data/character-image`，不写入配置或公开静态目录；部署时沿用现有 `data/` 持久化挂载。
 `main` 只调用 `Config::initialize("data/config.json")`，统一完成文件读取、迁移、类型转换和运行时加载。
@@ -341,6 +341,8 @@ Agent 仅在工具和提示词加载完成后标记为就绪，工具重载失�
 Jev 默认指向 OpenRouter Decisions API，API Key 默认为空，因此默认不启用；其 `minConfidence` 默认 0.6，限制在 0～1，
 可在管理后台修改并即时更新运行时配置。启动时若文件不存在则创建默认配置；若
 JSON 损坏则备份为 `config.json.broken.<时间戳>` 后重建；缺失或类型不匹配的字段会补默认值并回写。管理后台保存时先写入临时文件，再原子替换原文件。
+
+`llm.executorFallback` 是可选的回复兜底模型，配置结构与 `executor` 相同，默认留空。每轮先请求默认 Executor；网络错误、HTTP 错误或无效响应导致现有重试失败后，使用相同消息和工具列表请求兜底模型。兜底不额外消耗工具迭代轮数，不重复执行已完成的工具；下一轮及下一次回复仍先请求默认模型。两者均失败时结束本次回复流程，用量以 `executorFallback` 单独统计。
 
 `Config` 单例提供业务使用的运行时配置。提示词由 `PromptService` 管理（`executor_system` /
 `router_system`），支持 `{botName}` 占位符，修改后写回数据库。

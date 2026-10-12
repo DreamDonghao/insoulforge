@@ -50,6 +50,7 @@ namespace insoulforge::ConfigStore {
             return {
               {"llm",
                 {{"router", defaultChatConfig(100, 0.3, 0.9)}, {"executor", defaultChatConfig(150, 0.7, 0.9)},
+                  {"executorFallback", defaultChatConfig(150, 0.7, 0.9)},
                   {"executorThinking", defaultChatConfig(512, 0.7, 0.9)}, {"image", defaultChatConfig(1024, 0.7, 0.9)},
                   {"imageGeneration", defaultImageGenerationConfig()}, {"memory", defaultChatConfig(4000, 0.4, 0.9)},
                   {"embedding", defaultEmbeddingConfig()}, {"jev", defaultJevConfig()}}},
@@ -153,27 +154,26 @@ namespace insoulforge::ConfigStore {
             {
                 std::ofstream output(temporaryPath, std::ios::trunc);
                 if (!output) {
-                    return std::unexpected(
-                      ConfigError{.type = ConfigErrorType::FileOperation, .message = "无法写入配置临时文件: " + temporaryPath.string()});
+                    return std::unexpected(ConfigError{.type = ConfigErrorType::FileOperation,
+                      .message = "无法写入配置临时文件: " + temporaryPath.string()});
                 }
                 output << dumpJson(config, true, 2) << '\n';
                 output.flush();
                 if (!output) {
-                    return std::unexpected(
-                      ConfigError{.type = ConfigErrorType::FileOperation, .message = "配置临时文件写入失败: " + temporaryPath.string()});
+                    return std::unexpected(ConfigError{.type = ConfigErrorType::FileOperation,
+                      .message = "配置临时文件写入失败: " + temporaryPath.string()});
                 }
                 output.close();
                 if (!output) {
-                    return std::unexpected(
-                      ConfigError{.type = ConfigErrorType::FileOperation, .message = "关闭配置临时文件失败: " + temporaryPath.string()});
+                    return std::unexpected(ConfigError{.type = ConfigErrorType::FileOperation,
+                      .message = "关闭配置临时文件失败: " + temporaryPath.string()});
                 }
             }
 
             std::error_code error;
             std::filesystem::rename(temporaryPath, path, error);
             if (error) {
-                return std::unexpected(
-                  ConfigError{
+                return std::unexpected(ConfigError{
                   .type = ConfigErrorType::FileOperation, .message = "无法原子替换配置文件: " + error.message()});
             }
             return {};
@@ -194,7 +194,8 @@ namespace insoulforge::ConfigStore {
         auto saveSection(const std::string_view section, json content, const ConfigValidator &validate)
           -> std::expected<void, ConfigError> {
             if (!content.is_object()) {
-                return std::unexpected(ConfigError{.type = ConfigErrorType::InvalidArgument, .message = "配置必须是 JSON 对象"});
+                return std::unexpected(
+                  ConfigError{.type = ConfigErrorType::InvalidArgument, .message = "配置必须是 JSON 对象"});
             }
             auto &fileState = state();
             std::scoped_lock lock(fileState.mutex);
@@ -223,8 +224,7 @@ namespace insoulforge::ConfigStore {
             std::error_code error;
             std::filesystem::create_directories(configPath.parent_path(), error);
             if (error) {
-                return std::unexpected(
-                  ConfigError{
+                return std::unexpected(ConfigError{
                   .type = ConfigErrorType::FileOperation, .message = "无法创建配置目录: " + error.message()});
             }
         }
@@ -238,8 +238,8 @@ namespace insoulforge::ConfigStore {
         }
         if (!needsWrite) {
             if (std::error_code fileError; !std::filesystem::is_regular_file(configPath, fileError) || fileError) {
-                return std::unexpected(
-                  ConfigError{.type = ConfigErrorType::FileOperation, .message = "配置路径不是可读取的普通文件: " + configPath.string()});
+                return std::unexpected(ConfigError{.type = ConfigErrorType::FileOperation,
+                  .message = "配置路径不是可读取的普通文件: " + configPath.string()});
             }
             std::ifstream input(configPath);
             if (!input) {

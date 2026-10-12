@@ -93,8 +93,8 @@ namespace insoulforge {
 
     auto Config::loadValues(const json &value) -> std::expected<void, ConfigError> {
         const auto &llm = value.at("llm");
-        for (const auto *role:
-          {"router", "executor", "executorThinking", "image", "imageGeneration", "memory", "embedding", "jev"}) {
+        for (const auto *role: {"router", "executor", "executorFallback", "executorThinking", "image",
+               "imageGeneration", "memory", "embedding", "jev"}) {
             if (auto result = validateFields(llm.at(role)); !result) {
                 return result;
             }
@@ -106,6 +106,7 @@ namespace insoulforge {
         }
         loadLLMConfig(llm, "router", router, &routerParams);
         loadLLMConfig(llm, "executor", executor, &executorParams);
+        loadLLMConfig(llm, "executorFallback", executorFallback, &executorFallbackParams);
         loadLLMConfig(llm, "executorThinking", executorThinking, &executorThinkingParams);
         loadLLMConfig(llm, "image", image, &imageParams);
         loadLLMConfig(llm, "imageGeneration", imageGeneration);
@@ -172,8 +173,8 @@ namespace insoulforge {
 
 
     void Config::applyValues(Config &value) {
-        for (const auto *role:
-          {"router", "executor", "executorThinking", "image", "imageGeneration", "memory", "embedding", "jev"}) {
+        for (const auto *role: {"router", "executor", "executorFallback", "executorThinking", "image",
+               "imageGeneration", "memory", "embedding", "jev"}) {
             applyLLMValues(role, value);
         }
         applyQQValues(value);
@@ -189,6 +190,9 @@ namespace insoulforge {
         } else if (name == "executor") {
             executor = std::move(value.executor);
             executorParams = value.executorParams;
+        } else if (name == "executorFallback") {
+            executorFallback = std::move(value.executorFallback);
+            executorFallbackParams = value.executorFallbackParams;
         } else if (name == "executorThinking") {
             executorThinking = std::move(value.executorThinking);
             executorThinkingParams = value.executorThinkingParams;
