@@ -149,10 +149,37 @@ end
 脚本编辑后立即重载；正在执行的调用继续使用启动时的脚本版本。Lua 不开放文件、进程与任意 C++ 对象接口，
 并限制脚本大小、内存、指令数和单次执行时间。这是减少误操作的限制，不是允许不可信用户上传脚本的安全沙箱。
 
+### HTTP、JSON 与 URL
+
+- `http.request(options)`：异步发送 HTTP 请求。`url` 必填，只接受 HTTP/HTTPS，不允许内嵌用户名密码。`method` 默认 `GET`，支持 GET、POST、PUT、PATCH、DELETE、HEAD、OPTIONS。
+- `options.headers` 是字符串键值对象；`body` 是原始字符串，不自动进行 JSON 编码。`timeout_ms` 默认 30000，范围 1–120000。
+- 请求成功返回 `{ok=true, status=200, headers={}, body="..."}`；HTTP 4xx/5xx 仍是 `ok=true`，由脚本检查 `status`。传输或参数错误返回 `{ok=false, error="具体错误"}`。不自动跟随重定向。
+- 请求体最多 1 MiB；响应接收完成后检查大小，超过 1 MiB 不传回 Lua。此检查不限制网络接收阶段的内存使用。
+- `json.encode(value)` 与 `json.decode(text)` 转换 JSON；错误会抛出 Lua 错误，可用 `pcall` 捕获。`json.null` 表示 JSON null；解码得到的数组（包括空数组）再次编码时保留数组类型。普通空表编码为 `{}`，需要空数组时使用 `json.decode("[]")`。
+- `url.encode(text)` 编码查询参数值，空格编码为 `+`，其他特殊字符采用百分号编码；不要用它编码整个网址或路径片段。
+
+```lua
+function run(args, ctx)
+    local result = http.request({
+        url = "https://api.example.com/search?q=" .. url.encode(args.query),
+        headers = { Accept = "application/json" }
+    })
+    if not result.ok then return "请求失败：" .. result.error end
+    if result.status < 200 or result.status >= 300 then
+        return "HTTP " .. result.status .. "：" .. result.body
+    end
+    return result.body
+end
+```
+
+测试按钮不会实际发送 HTTP 请求，而是校验参数并返回状态码 200、空响应头和传入的 body（未传时为空字符串）。
+HTTP 与消息发送、启动任务合计最多 32 次；JSON 和 URL 转换不占此配额，但仍受脚本指令与内存限制。
+HTTP 接口可访问容器网络中的内部服务，不是 SSRF 安全隔离层；只有受信任的管理员应当维护脚本。
+
 ## PageWeave 网页工具
 
 `agentTools/fetch_webpage.json` 和 `agentTools/search_web.json` 是可导入的 Python 自定义工具，不属于 C++ 内置工具。
-Lua 当前没有 HTTP 或 WebSocket 宿主接口，因此这两个工具使用 Python 标准库请求 PageWeave，无需 Jina Reader、DuckDuckGo 或第三方 Python 包。
+这两个现有工具仍使用 Python 标准库请求 PageWeave，无需 Jina Reader、DuckDuckGo 或第三方 Python 包；也可以使用 Lua 的 `http.request` 编写同类工具。
 
 | 工具 | 参数 | 行为 |
 |------|------|------|

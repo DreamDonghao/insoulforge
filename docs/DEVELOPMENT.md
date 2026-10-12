@@ -452,7 +452,7 @@ JSON 文件导入后保存在数据库，修改仓库文件不会自动替换已
 ### 添加自定义工具（Lua）
 
 管理后台选择 Lua 类型，填写 JSON Schema 和脚本，定义 `run(args, ctx)` 返回工具结果字符串。脚本可调用
-`bot.send_message(text)` 和 `bot.start_task(description, payload)`；后台任务另定义 `background(payload, ctx)`。
+`bot.send_message(text)`、`bot.start_task(description, payload)`、异步 `http.request(options)`，以及 JSON 编解码和 URL 编码接口；后台任务另定义 `background(payload, ctx)`。
 详情和返回结构见 [TOOLS.md](./TOOLS.md)。测试接口模拟宿主操作，保存前校验脚本；新脚本无需重新编译或重启程序。
 
 ### 添加管理 API

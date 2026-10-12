@@ -484,6 +484,25 @@ namespace {
         const std::string background = drogon::sync_wait(
           insoulforge::LuaToolExecutor::execute(std::string(script), {{"text", "完成"}}, 123, true, true));
         check(background == "完成:123", "background entry receives payload", kTestName);
+        const auto utilities = drogon::sync_wait(insoulforge::LuaToolExecutor::execute(R"lua(
+            function run()
+                local value = json.decode('{"items":[],"missing":null,"text":"你好"}')
+                assert(value.missing == json.null)
+                local body = json.encode(value)
+                assert(body:find('"items":[]', 1, true))
+                assert(body:find('"missing":null', 1, true))
+                local response = http.request({url="https://example.com?query=test#fragment",
+                    method="POST", headers={['Content-Type']='application/json'}, body=body})
+                assert(response.ok and response.status == 200 and response.body == body)
+                assert(not http.request({url="file:///tmp/test"}).ok)
+                assert(not http.request({url="https://example.com", timeout_ms=0}).ok)
+                assert(not http.request({url="https://user:pass@example.com"}).ok)
+                assert(not pcall(json.decode, '{bad'))
+                return url.encode("a b&c")
+            end
+        )lua",
+          insoulforge::json::object(), 123, false, true));
+        check(utilities == "a+b%26c", "HTTP validation and JSON/URL helpers", kTestName);
         try {
             std::ignore = drogon::sync_wait(insoulforge::LuaToolExecutor::execute(
               "function run() while true do end end", insoulforge::json::object(), 0, false, true));
