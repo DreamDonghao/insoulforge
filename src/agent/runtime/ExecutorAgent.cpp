@@ -248,7 +248,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
 
             json systemMsg;
             systemMsg["role"] = "system";
-            systemMsg["content"] = getSystemPrompt(decision);
+            systemMsg["content"] = buildSystemPrompt(decision, chatRecords.getSessionId());
             messages.push_back(systemMsg);
 
             auto [earlierRecords, recentRecords] = buildChatContext(chatRecords);
@@ -549,6 +549,18 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         }
 
     } // namespace
+
+    auto buildSystemPrompt(const RouterDecision &decision, const u64 sessionId) -> std::string {
+        auto prompt = getSystemPrompt(decision);
+        if (!SessionId::isPrivate(sessionId)) {
+            const auto additional = SessionStore::getSessionConfig(sessionId).additionalPrompt;
+            if (!additional.empty()) {
+                prompt += "\n\n## 本群附加设定\n以下设定仅用于当前群的回复，不改变上面的执行约束和工具权限。\n";
+                prompt += additional;
+            }
+        }
+        return prompt;
+    }
 
     auto buildIterationMessages(json messages, const i32 currentRound, const i32 maxToolRounds) -> json {
         if (!messages.is_array() || currentRound < 1 || currentRound > maxToolRounds) {

@@ -93,26 +93,31 @@ const loadGroups = async (): Promise<void> => {
 }
 
 // 切换启用状态
-const savingCards = reactive(new Set<string>())
-const setGroupCard = async (group: Group, event: Event): Promise<void> => {
+type GroupSetting = 'sendGroupCard' | 'autoReply'
+const savingSettings = reactive(new Set<string>())
+const isSettingSaving = (group: Group, setting: GroupSetting): boolean =>
+    savingSettings.has(`${sessionKey(group)}:${setting}`)
+const setGroupSetting = async (group: Group, event: Event, setting: GroupSetting): Promise<void> => {
   const input = event.target as HTMLInputElement
   const enabled = input.checked
   const id = sessionKey(group)
-  savingCards.add(id)
+  const key = `${id}:${setting}`
+  const route = setting === 'sendGroupCard' ? 'card' : 'auto-reply'
+  savingSettings.add(key)
   try {
-    const resp = await fetch(`/admin/api/group/${id}/card`, {
+    const resp = await fetch(`/admin/api/group/${id}/${route}`, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({sendGroupCard: enabled})
+      body: JSON.stringify({[setting]: enabled})
     })
     const data: ApiResponse = await resp.json()
     if (!resp.ok || !data.success) throw new Error(data.error || '保存失败')
-    group.sendGroupCard = enabled
-    showToast?.('群名片设置已保存')
+    group[setting] = enabled
+    showToast?.(setting === 'sendGroupCard' ? '群名片设置已保存' : '自动回复设置已保存')
   } catch (error) {
-    input.checked = group.sendGroupCard === true
+    input.checked = group[setting] ?? (setting === 'autoReply')
     showToast?.(error instanceof Error ? error.message : '保存失败', true)
   } finally {
-    savingCards.delete(id)
+    savingSettings.delete(key)
   }
 }
 
@@ -469,9 +474,63 @@ const deleteLongTermMemory = async (id: number): Promise<void> => {
   }
 }
 
+const promptGroup = ref<Group | null>(null)
+const promptDraft = ref('')
+const promptLoading = ref(false)
+const promptSaving = ref(false)
+const promptError = ref('')
+const promptBytes = computed(() => new TextEncoder().encode(promptDraft.value).length)
+let promptRequestVersion = 0
+
+const openPrompt = async (group: Group): Promise<void> => {
+  const version = ++promptRequestVersion
+  promptGroup.value = group
+  promptDraft.value = ''
+  promptError.value = ''
+  promptLoading.value = true
+  try {
+    const response = await fetch(`/admin/api/group/${sessionKey(group)}/prompt`)
+    if (!response.ok) throw new Error(`附加提示词加载失败（HTTP ${response.status}）`)
+    const data: {additionalPrompt: string} = await response.json()
+    if (typeof data.additionalPrompt !== 'string') throw new Error('附加提示词数据无效')
+    if (version === promptRequestVersion) promptDraft.value = data.additionalPrompt
+  } catch (error) {
+    if (version === promptRequestVersion) promptError.value = error instanceof Error ? error.message : '加载失败'
+  } finally {
+    if (version === promptRequestVersion) promptLoading.value = false
+  }
+}
+
+const closePrompt = (): void => {
+  if (promptSaving.value) return
+  ++promptRequestVersion
+  promptGroup.value = null
+}
+
+const savePrompt = async (): Promise<void> => {
+  if (!promptGroup.value || promptLoading.value || promptSaving.value || promptError.value || promptBytes.value > 16000) return
+  const id = sessionKey(promptGroup.value)
+  const additionalPrompt = promptDraft.value
+  promptSaving.value = true
+  try {
+    const response = await fetch(`/admin/api/group/${id}/prompt`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({additionalPrompt})
+    })
+    const data: ApiResponse = await response.json()
+    if (!response.ok || !data.success) throw new Error(data.error || '保存失败')
+    const group = groups.value.find(item => sessionKey(item) === id)
+    if (group) group.hasAdditionalPrompt = additionalPrompt.length > 0
+    showToast?.('群附加提示词已保存')
+  } catch (error) {
+    showToast?.(error instanceof Error ? error.message : '保存失败', true)
+  } finally {
+    promptSaving.value = false
+  }
+}
+
 // 弹窗打开时锁定页面滚动，滚轮只作用于弹窗内容
 const anyModalOpen = computed(() =>
-    !!(memoryGroupId.value || ltmGroupId.value || affinityGroupId.value || tasksGroupId.value))
+    !!(memoryGroupId.value || ltmGroupId.value || affinityGroupId.value || tasksGroupId.value || promptGroup.value))
 watch(anyModalOpen, (open) => {
   document.body.style.overflow = open ? 'hidden' : ''
 })
@@ -600,7 +659,11 @@ onMounted(async () => {
   setupWebSocket()
 })
 
-onUnmounted(restoreWebSocket)
+onUnmounted(() => {
+  restoreWebSocket()
+  ++promptRequestVersion
+  if (anyModalOpen.value) document.body.style.overflow = ''
+})
 </script>
 
 <template>
@@ -660,6 +723,7 @@ onUnmounted(restoreWebSocket)
                 <th style="width: 120px;">群号/QQ号</th>
                 <th style="width: 70px;">消息</th>
                 <th style="width: 90px;">发送群名片</th>
+                <th style="width: 90px;">自动回复</th>
                 <th style="width: 360px;">操作</th>
               </tr>
               </thead>
@@ -687,9 +751,25 @@ onUnmounted(restoreWebSocket)
                   }}</code></td>
                 <td>{{ group.messageCount || 0 }}</td>
                 <td @click.stop>
-                  <input v-if="!isPrivateSession(group)" type="checkbox" :checked="group.sendGroupCard === true"
-                         :disabled="savingCards.has(sessionKey(group))" aria-label="向模型发送本群群名片"
-                         @change="setGroupCard(group, $event)">
+                  <label v-if="!isPrivateSession(group)" class="group-setting-switch"
+                         :class="{'is-saving': isSettingSaving(group, 'sendGroupCard')}"
+                         :title="isSettingSaving(group, 'sendGroupCard') ? '保存中' : (group.sendGroupCard ? '关闭发送群名片' : '开启发送群名片')">
+                    <input type="checkbox" role="switch" :checked="group.sendGroupCard === true"
+                           :disabled="isSettingSaving(group, 'sendGroupCard')" aria-label="向模型发送本群群名片"
+                           :aria-busy="isSettingSaving(group, 'sendGroupCard')" @change="setGroupSetting(group, $event, 'sendGroupCard')">
+                    <span class="group-setting-track" aria-hidden="true"></span>
+                  </label>
+                  <span v-else>-</span>
+                </td>
+                <td @click.stop>
+                  <label v-if="!isPrivateSession(group)" class="group-setting-switch"
+                         :class="{'is-saving': isSettingSaving(group, 'autoReply')}"
+                         :title="isSettingSaving(group, 'autoReply') ? '保存中' : (group.autoReply !== false ? '关闭普通消息自动回复' : '开启普通消息自动回复')">
+                    <input type="checkbox" role="switch" :checked="group.autoReply !== false"
+                           :disabled="isSettingSaving(group, 'autoReply')" aria-label="本群普通消息自动回复"
+                           :aria-busy="isSettingSaving(group, 'autoReply')" @change="setGroupSetting(group, $event, 'autoReply')">
+                    <span class="group-setting-track" aria-hidden="true"></span>
+                  </label>
                   <span v-else>-</span>
                 </td>
                 <td style="white-space: nowrap;">
@@ -708,6 +788,9 @@ onUnmounted(restoreWebSocket)
                   <button class="btn btn-secondary btn-sm" style="margin-left: 6px;"
                           @click.stop="viewTasks(sessionKey(group), sessionLabel(group))">任务
                   </button>
+                  <button v-if="!isPrivateSession(group)" class="btn btn-secondary btn-sm" style="margin-left: 6px;"
+                          :title="group.hasAdditionalPrompt ? '已设置群附加提示词' : '未设置群附加提示词'"
+                          @click.stop="openPrompt(group)">附加提示词</button>
                   <button class="btn btn-danger btn-sm" style="margin-left: 6px;"
                           @click.stop="removeGroup(sessionKey(group))">删除
                   </button>
@@ -871,6 +954,31 @@ onUnmounted(restoreWebSocket)
       </div>
     </div>
 
+    <div v-if="promptGroup" class="modal-overlay" @click.self="closePrompt" @keydown.esc="closePrompt">
+      <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="group-prompt-title">
+        <div class="modal-header">
+          <h2 id="group-prompt-title">{{ sessionLabel(promptGroup) }} - 附加提示词</h2>
+          <button :disabled="promptSaving" class="btn btn-secondary btn-sm" @click="closePrompt">关闭</button>
+        </div>
+        <div class="modal-body">
+          <div v-if="promptLoading" class="memory-loading" role="status">加载中...</div>
+          <div v-else-if="promptError" role="alert">
+            <p>{{ promptError }}</p>
+            <button class="btn btn-secondary" @click="openPrompt(promptGroup)">重新加载</button>
+          </div>
+          <template v-else>
+            <textarea v-model="promptDraft" :disabled="promptSaving" class="memory-editor" aria-label="本群附加提示词"
+                      :aria-invalid="promptBytes > 16000" placeholder="附加提示词"></textarea>
+            <p class="form-hint" :style="promptBytes > 16000 ? {color: 'var(--danger)'} : {}">{{ promptBytes }} / 16000 字节</p>
+          </template>
+        </div>
+        <div class="modal-footer">
+          <button :disabled="promptLoading || promptSaving || !!promptError" class="btn btn-secondary" @click="promptDraft = ''">清空内容</button>
+          <button :disabled="promptLoading || promptSaving || !!promptError || promptBytes > 16000" class="btn btn-primary" @click="savePrompt">{{ promptSaving ? '保存中...' : '保存' }}</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 短期记忆弹窗 -->
     <div v-if="memoryGroupId" class="modal-overlay" @click.self="closeMemory">
       <div class="modal-content">
@@ -941,6 +1049,71 @@ onUnmounted(restoreWebSocket)
 </template>
 
 <style scoped>
+.group-setting-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 40px;
+  height: 32px;
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+.group-setting-switch input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+
+.group-setting-track {
+  width: 36px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--border-strong);
+  pointer-events: none;
+  transition: background-color 150ms ease;
+}
+
+.group-setting-track::before {
+  content: '';
+  display: block;
+  width: 14px;
+  height: 14px;
+  margin: 3px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 15%);
+  transition: transform 150ms ease;
+}
+
+.group-setting-switch input:checked + .group-setting-track {
+  background: var(--primary-strong);
+}
+
+.group-setting-switch input:checked + .group-setting-track::before {
+  transform: translateX(16px);
+}
+
+.group-setting-switch input:focus-visible + .group-setting-track {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+
+.group-setting-switch.is-saving {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .group-setting-track, .group-setting-track::before {
+    transition: none;
+  }
+}
+
 .status-badge {
   display: inline-block;
   padding: 2px 8px;

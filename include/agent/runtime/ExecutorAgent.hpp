@@ -11,6 +11,8 @@
 #include <conversation/history/ChatRecordManager.hpp>
 
 namespace insoulforge::ExecutorAgent {
+    /// @brief 构建本次回复的 system 提示词，保留全局内容，仅为群聊追加本群设定。
+    [[nodiscard]] auto buildSystemPrompt(const RouterDecision &decision, u64 sessionId) -> std::string;
     /// @brief 执行层的回复生成接口
     /// @brief 清理模型输出中的工具调用标签等污染内容
     /// @param text 原始内容

@@ -77,6 +77,8 @@ export interface Group {
     groupName: string
     messageCount: number
     sendGroupCard?: boolean
+    autoReply?: boolean
+    hasAdditionalPrompt?: boolean
     enabled?: boolean
     sessionType?: 'private'
     userId?: number
