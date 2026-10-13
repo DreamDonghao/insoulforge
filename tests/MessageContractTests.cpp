@@ -49,6 +49,7 @@
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/SchemaMigrator.hpp>
 #include <llm/JevClient.hpp>
+#include <llm/prompts/PromptService.hpp>
 #include <llm/usage/UsageStore.hpp>
 #include <media/CharacterImageStore.hpp>
 #include <media/ImageDescriptionService.hpp>
@@ -1292,6 +1293,88 @@ namespace {
         std::filesystem::remove(path);
     }
 
+    void testGroupAdditionalPrompt() {
+        constexpr std::string_view kTestName = "group additional prompt";
+        auto &db = insoulforge::Database::instance();
+        const auto path = std::filesystem::temp_directory_path() /
+                          ("insoulforge-group-prompt-" +
+                            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".db");
+        check(db.initialize(path.string()).has_value(), "initializes database", kTestName);
+        insoulforge::PromptService::initialize(db);
+        insoulforge::RouterDecision decision;
+        const auto base = insoulforge::ExecutorAgent::buildSystemPrompt(decision, 100);
+        check(insoulforge::SessionStore::getSessionConfig(100).additionalPrompt.empty(), "defaults empty", kTestName);
+        const std::string prompt = "本群回复使用中文。\n保留专业名词。";
+        insoulforge::SessionStore::setAdditionalPrompt(100, prompt);
+        insoulforge::SessionStore::setSendGroupCard(100, true);
+        insoulforge::SessionStore::setAutoReply(100, false);
+        insoulforge::SessionStore::incrementMessageCount(100);
+        const auto combined = insoulforge::ExecutorAgent::buildSystemPrompt(decision, 100);
+        check(combined.starts_with(base) && combined.ends_with(prompt), "appends without replacing global prompt",
+          kTestName);
+        check(insoulforge::ExecutorAgent::buildSystemPrompt(decision, 200) == base,
+          "other groups do not inherit prompt", kTestName);
+        const auto privateId = insoulforge::SessionId::fromPrivateUser(11);
+        insoulforge::SessionStore::setAdditionalPrompt(privateId, "private-marker");
+        decision.isPrivate = true;
+        check(insoulforge::ExecutorAgent::buildSystemPrompt(decision, privateId).find("private-marker") ==
+                std::string::npos,
+          "private session does not receive group prompt", kTestName);
+        insoulforge::SessionStore::disableSession(100);
+        insoulforge::SessionStore::enableSession(100);
+        check(insoulforge::SessionStore::getSessionConfig(100).additionalPrompt == prompt &&
+                !insoulforge::SessionStore::getSessionConfig(100).autoReply &&
+                insoulforge::SessionStore::getSessionConfig(100).sendGroupCard,
+          "other operations preserve prompt", kTestName);
+
+        const insoulforge::AdminController controller;
+        drogon::HttpResponsePtr response;
+        const auto save = [&](const std::string &id, const insoulforge::json &body) {
+            auto request = drogon::HttpRequest::newHttpRequest();
+            request->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            request->setBody(insoulforge::dumpJson(body));
+            drogon::sync_wait(controller.saveGroupPrompt(request, [&](const auto &value) { response = value; }, id));
+        };
+        save("100", {{"additionalPrompt", prompt}});
+        check(response->getStatusCode() == drogon::k200OK &&
+                insoulforge::SessionStore::getSessionConfig(100).additionalPrompt == prompt,
+          "endpoint saves prompt", kTestName);
+        drogon::sync_wait(controller.getGroupPrompt(
+          drogon::HttpRequest::newHttpRequest(), [&](const auto &value) { response = value; }, "100"));
+        check(insoulforge::parseJson(std::string(response->body()))["additionalPrompt"] == prompt,
+          "endpoint loads prompt", kTestName);
+        save("100", {{"additionalPrompt", 123}});
+        check(response->getStatusCode() == drogon::k400BadRequest, "rejects non-string", kTestName);
+        save(std::to_string(privateId), {{"additionalPrompt", "disallowed"}});
+        check(response->getStatusCode() == drogon::k400BadRequest, "endpoint rejects private session", kTestName);
+        save("100", {{"additionalPrompt", std::string(insoulforge::SessionStore::kMaxAdditionalPromptBytes + 1, 'a')}});
+        check(response->getStatusCode() == drogon::k400BadRequest &&
+                insoulforge::SessionStore::getSessionConfig(100).additionalPrompt == prompt,
+          "oversized prompt preserves old setting", kTestName);
+        save("100", {{"additionalPrompt", ""}});
+        check(response->getStatusCode() == drogon::k200OK &&
+                insoulforge::SessionStore::getSessionConfig(100).additionalPrompt.empty(),
+          "endpoint clears prompt", kTestName);
+        insoulforge::SessionStore::setAdditionalPrompt(100, prompt);
+        db.close();
+        check(db.initialize(path.string()).has_value() &&
+                insoulforge::SessionStore::getSessionConfig(100).additionalPrompt == prompt,
+          "prompt survives restart", kTestName);
+        check(
+          sqlite3_exec(db.handle(), "ALTER TABLE group_config DROP COLUMN additional_prompt; PRAGMA user_version = 16",
+            nullptr, nullptr, nullptr) == SQLITE_OK,
+          "restores v16 schema", kTestName);
+        db.close();
+        check(db.initialize(path.string()).has_value() &&
+                insoulforge::SessionStore::getSessionConfig(100).additionalPrompt.empty() &&
+                !insoulforge::SessionStore::getSessionConfig(100).autoReply &&
+                insoulforge::SessionStore::getSessionConfig(100).sendGroupCard &&
+                insoulforge::SessionStore::getSessionConfig(100).allMesCount == 1,
+          "migration adds empty prompt and preserves existing settings", kTestName);
+        db.close();
+        std::filesystem::remove(path);
+    }
+
     void testExecutionConfig() {
         constexpr std::string_view kTestName = "execution config";
         const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -1796,6 +1879,7 @@ auto main() -> int {
     testExecutionConfig();
     testGroupCardSettings();
     testGroupAutoReply();
+    testGroupAdditionalPrompt();
     testToolHistoryRecords();
     testImageDescriptionCacheStore();
     testImageGenerationResponse();

@@ -76,9 +76,10 @@ namespace insoulforge::CommandProcessor {
         }
         if (command == "/status" || command == "/状态") {
             const bool enabled = SessionStore::isSessionEnabled(sessionId);
-            const auto [allMesCount, sendGroupCard, autoReply] = SessionConfigManager::getConfig(sessionId);
+            const auto config = SessionConfigManager::getConfig(sessionId);
             co_return fmt::format("会话 {} 状态:\n- 启用: {}\n- 消息数: {}\n- 发送群名片: {}\n- 自动回复: {}",
-              sessionId, enabled ? "是" : "否", allMesCount, sendGroupCard ? "是" : "否", autoReply ? "是" : "否");
+              sessionId, enabled ? "是" : "否", config.allMesCount, config.sendGroupCard ? "是" : "否",
+              config.autoReply ? "是" : "否");
         }
         if (command == "/admins" || command == "/管理员") {
             const auto admins = AdminStore::getAdmins();

@@ -474,9 +474,63 @@ const deleteLongTermMemory = async (id: number): Promise<void> => {
   }
 }
 
+const promptGroup = ref<Group | null>(null)
+const promptDraft = ref('')
+const promptLoading = ref(false)
+const promptSaving = ref(false)
+const promptError = ref('')
+const promptBytes = computed(() => new TextEncoder().encode(promptDraft.value).length)
+let promptRequestVersion = 0
+
+const openPrompt = async (group: Group): Promise<void> => {
+  const version = ++promptRequestVersion
+  promptGroup.value = group
+  promptDraft.value = ''
+  promptError.value = ''
+  promptLoading.value = true
+  try {
+    const response = await fetch(`/admin/api/group/${sessionKey(group)}/prompt`)
+    if (!response.ok) throw new Error(`附加提示词加载失败（HTTP ${response.status}）`)
+    const data: {additionalPrompt: string} = await response.json()
+    if (typeof data.additionalPrompt !== 'string') throw new Error('附加提示词数据无效')
+    if (version === promptRequestVersion) promptDraft.value = data.additionalPrompt
+  } catch (error) {
+    if (version === promptRequestVersion) promptError.value = error instanceof Error ? error.message : '加载失败'
+  } finally {
+    if (version === promptRequestVersion) promptLoading.value = false
+  }
+}
+
+const closePrompt = (): void => {
+  if (promptSaving.value) return
+  ++promptRequestVersion
+  promptGroup.value = null
+}
+
+const savePrompt = async (): Promise<void> => {
+  if (!promptGroup.value || promptLoading.value || promptSaving.value || promptError.value || promptBytes.value > 16000) return
+  const id = sessionKey(promptGroup.value)
+  const additionalPrompt = promptDraft.value
+  promptSaving.value = true
+  try {
+    const response = await fetch(`/admin/api/group/${id}/prompt`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({additionalPrompt})
+    })
+    const data: ApiResponse = await response.json()
+    if (!response.ok || !data.success) throw new Error(data.error || '保存失败')
+    const group = groups.value.find(item => sessionKey(item) === id)
+    if (group) group.hasAdditionalPrompt = additionalPrompt.length > 0
+    showToast?.('群附加提示词已保存')
+  } catch (error) {
+    showToast?.(error instanceof Error ? error.message : '保存失败', true)
+  } finally {
+    promptSaving.value = false
+  }
+}
+
 // 弹窗打开时锁定页面滚动，滚轮只作用于弹窗内容
 const anyModalOpen = computed(() =>
-    !!(memoryGroupId.value || ltmGroupId.value || affinityGroupId.value || tasksGroupId.value))
+    !!(memoryGroupId.value || ltmGroupId.value || affinityGroupId.value || tasksGroupId.value || promptGroup.value))
 watch(anyModalOpen, (open) => {
   document.body.style.overflow = open ? 'hidden' : ''
 })
@@ -605,7 +659,11 @@ onMounted(async () => {
   setupWebSocket()
 })
 
-onUnmounted(restoreWebSocket)
+onUnmounted(() => {
+  restoreWebSocket()
+  ++promptRequestVersion
+  if (anyModalOpen.value) document.body.style.overflow = ''
+})
 </script>
 
 <template>
@@ -730,6 +788,9 @@ onUnmounted(restoreWebSocket)
                   <button class="btn btn-secondary btn-sm" style="margin-left: 6px;"
                           @click.stop="viewTasks(sessionKey(group), sessionLabel(group))">任务
                   </button>
+                  <button v-if="!isPrivateSession(group)" class="btn btn-secondary btn-sm" style="margin-left: 6px;"
+                          :title="group.hasAdditionalPrompt ? '已设置群附加提示词' : '未设置群附加提示词'"
+                          @click.stop="openPrompt(group)">附加提示词</button>
                   <button class="btn btn-danger btn-sm" style="margin-left: 6px;"
                           @click.stop="removeGroup(sessionKey(group))">删除
                   </button>
@@ -889,6 +950,31 @@ onUnmounted(restoreWebSocket)
           <div v-else class="memory-loading">
             <p>暂无待触发的定时任务，可在群聊中让 AI 设置提醒</p>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="promptGroup" class="modal-overlay" @click.self="closePrompt" @keydown.esc="closePrompt">
+      <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="group-prompt-title">
+        <div class="modal-header">
+          <h2 id="group-prompt-title">{{ sessionLabel(promptGroup) }} - 附加提示词</h2>
+          <button :disabled="promptSaving" class="btn btn-secondary btn-sm" @click="closePrompt">关闭</button>
+        </div>
+        <div class="modal-body">
+          <div v-if="promptLoading" class="memory-loading" role="status">加载中...</div>
+          <div v-else-if="promptError" role="alert">
+            <p>{{ promptError }}</p>
+            <button class="btn btn-secondary" @click="openPrompt(promptGroup)">重新加载</button>
+          </div>
+          <template v-else>
+            <textarea v-model="promptDraft" :disabled="promptSaving" class="memory-editor" aria-label="本群附加提示词"
+                      :aria-invalid="promptBytes > 16000" placeholder="附加提示词"></textarea>
+            <p class="form-hint" :style="promptBytes > 16000 ? {color: 'var(--danger)'} : {}">{{ promptBytes }} / 16000 字节</p>
+          </template>
+        </div>
+        <div class="modal-footer">
+          <button :disabled="promptLoading || promptSaving || !!promptError" class="btn btn-secondary" @click="promptDraft = ''">清空内容</button>
+          <button :disabled="promptLoading || promptSaving || !!promptError || promptBytes > 16000" class="btn btn-primary" @click="savePrompt">{{ promptSaving ? '保存中...' : '保存' }}</button>
         </div>
       </div>
     </div>

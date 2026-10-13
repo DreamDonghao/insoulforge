@@ -399,6 +399,7 @@ auto AdminController::getGroups(HttpRequestPtr req, std::function<void(const Htt
         group["sendGroupCard"] = !SessionId::isPrivate(sessionId) && config.sendGroupCard;
         group["messageCount"] = messageCount;
         group["autoReply"] = config.autoReply;
+        group["hasAdditionalPrompt"] = !SessionId::isPrivate(sessionId) && !config.additionalPrompt.empty();
         result.push_back(group);
     }
     callback(jsonResponse(result));
@@ -438,6 +439,41 @@ auto AdminController::enableSession(HttpRequestPtr req, std::function<void(const
     json resp = AdminResponse::okJson(SessionId::isPrivate(sessionId) ? "私聊已启用" : "群已启用");
     resp["groupName"] = groupName;
     callback(jsonResponse(resp));
+    co_return;
+}
+
+auto AdminController::getGroupPrompt(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
+  const std::string &sessionId) const -> Task<> {
+    const auto id = tryParseUInt64(sessionId);
+    if (!id || *id == 0 || SessionId::isPrivate(*id)) {
+        auto response = jsonResponse(AdminResponse::errorJson("群号无效"));
+        response->setStatusCode(drogon::k400BadRequest);
+        callback(response);
+        co_return;
+    }
+    callback(jsonResponse({{"additionalPrompt", SessionStore::getSessionConfig(*id).additionalPrompt}}));
+    co_return;
+}
+
+auto AdminController::saveGroupPrompt(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
+  const std::string &sessionId) const -> Task<> {
+    const auto id = tryParseUInt64(sessionId);
+    const auto body = parseJsonBody(req);
+    if (!id || *id == 0 || SessionId::isPrivate(*id) || !body || !atOrNull(*body, "additionalPrompt").is_string()) {
+        auto response = jsonResponse(AdminResponse::errorJson("需要有效群号及字符串类型 additionalPrompt"));
+        response->setStatusCode(drogon::k400BadRequest);
+        callback(response);
+        co_return;
+    }
+    const auto prompt = getStr(*body, "additionalPrompt");
+    if (prompt.size() > SessionStore::kMaxAdditionalPromptBytes) {
+        auto response = jsonResponse(AdminResponse::errorJson("附加提示词不能超过 16000 字节"));
+        response->setStatusCode(drogon::k400BadRequest);
+        callback(response);
+        co_return;
+    }
+    SessionStore::setAdditionalPrompt(*id, prompt);
+    callback(jsonResponse(AdminResponse::okJson("群附加提示词已保存")));
     co_return;
 }
 

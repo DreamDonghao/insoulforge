@@ -4,7 +4,9 @@
 
 #pragma once
 
+#include <cstddef>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <vector>
 
@@ -16,12 +18,16 @@ namespace insoulforge {
         u64 allMesCount = 0; ///< 已完成主处理的入站消息总数
         bool sendGroupCard = false; ///< 向模型发送本群群名片，默认关闭
         bool autoReply = true; ///< 允许普通群消息进入模型路由判断，默认开启
+        std::string additionalPrompt; ///< 本群附加回复提示词，默认留空
     };
 
     /// @brief 会话统计与启用状态的数据库接口
     /// @details 统计数据写入 `group_config`；会话启用状态及显示名称写入 `enabled_groups`。
     ///          未存在启用状态记录的会话视为未启用。
     namespace SessionStore {
+        inline constexpr size_t kMaxAdditionalPromptBytes = 16000;
+        /// @brief 保存本群附加提示词，空字符串清空设置，超长文本抛出 invalid_argument。
+        void setAdditionalPrompt(u64 sessionId, std::string_view prompt);
         /// @brief 单独保存群名片开关，不改变消息统计或会话启用状态。
         void setSendGroupCard(u64 sessionId, bool enabled);
         /// @brief 单独保存自动回复开关，不影响其他群设置或消息统计。

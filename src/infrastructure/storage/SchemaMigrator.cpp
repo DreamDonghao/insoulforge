@@ -69,7 +69,8 @@ namespace insoulforge {
         group_id INTEGER PRIMARY KEY,
         all_mes_count INTEGER DEFAULT 0,
         send_group_card INTEGER NOT NULL DEFAULT 0,
-        auto_reply INTEGER NOT NULL DEFAULT 1
+        auto_reply INTEGER NOT NULL DEFAULT 1,
+        additional_prompt TEXT NOT NULL DEFAULT ''
     ))",
           R"(CREATE TABLE IF NOT EXISTS chat_records (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -490,6 +491,12 @@ namespace insoulforge {
             execSQL(db, "DROP TABLE IF EXISTS custom_tools");
         }
 
+        void migrateV16ToV17(sqlite3 *db) {
+            execSQL(db, "CREATE TABLE IF NOT EXISTS group_config (group_id INTEGER PRIMARY KEY, all_mes_count INTEGER "
+                        "DEFAULT 0)");
+            ensureColumn(db, "group_config", "additional_prompt", "additional_prompt TEXT NOT NULL DEFAULT ''");
+        }
+
         void migrateV15ToV16(sqlite3 *db) {
             execSQL(db, "CREATE TABLE IF NOT EXISTS group_config (group_id INTEGER PRIMARY KEY, all_mes_count INTEGER "
                         "DEFAULT 0)");
@@ -541,6 +548,7 @@ namespace insoulforge {
               &migrateV13ToV14, // 删除已停用的 Python 解释器设置
               &migrateV14ToV15, // 群名片发送开关按会话保存
               &migrateV15ToV16, // 群普通消息自动回复开关，默认开启
+              &migrateV16ToV17, // 群独立附加提示词，默认留空
             };
 
             for (i32 v = version; v < kLatestVersion; ++v) {
