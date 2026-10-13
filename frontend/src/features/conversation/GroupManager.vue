@@ -687,9 +687,14 @@ onUnmounted(restoreWebSocket)
                   }}</code></td>
                 <td>{{ group.messageCount || 0 }}</td>
                 <td @click.stop>
-                  <input v-if="!isPrivateSession(group)" type="checkbox" :checked="group.sendGroupCard === true"
-                         :disabled="savingCards.has(sessionKey(group))" aria-label="向模型发送本群群名片"
-                         @change="setGroupCard(group, $event)">
+                  <label v-if="!isPrivateSession(group)" class="group-card-switch"
+                         :class="{'is-saving': savingCards.has(sessionKey(group))}"
+                         :title="savingCards.has(sessionKey(group)) ? '保存中' : (group.sendGroupCard ? '关闭发送群名片' : '开启发送群名片')">
+                    <input type="checkbox" role="switch" :checked="group.sendGroupCard === true"
+                           :disabled="savingCards.has(sessionKey(group))" aria-label="向模型发送本群群名片"
+                           :aria-busy="savingCards.has(sessionKey(group))" @change="setGroupCard(group, $event)">
+                    <span class="group-card-track" aria-hidden="true"></span>
+                  </label>
                   <span v-else>-</span>
                 </td>
                 <td style="white-space: nowrap;">
@@ -941,6 +946,71 @@ onUnmounted(restoreWebSocket)
 </template>
 
 <style scoped>
+.group-card-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 40px;
+  height: 32px;
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+.group-card-switch input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+
+.group-card-track {
+  width: 36px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--border-strong);
+  pointer-events: none;
+  transition: background-color 150ms ease;
+}
+
+.group-card-track::before {
+  content: '';
+  display: block;
+  width: 14px;
+  height: 14px;
+  margin: 3px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 15%);
+  transition: transform 150ms ease;
+}
+
+.group-card-switch input:checked + .group-card-track {
+  background: var(--primary-strong);
+}
+
+.group-card-switch input:checked + .group-card-track::before {
+  transform: translateX(16px);
+}
+
+.group-card-switch input:focus-visible + .group-card-track {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+
+.group-card-switch.is-saving {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .group-card-track, .group-card-track::before {
+    transition: none;
+  }
+}
+
 .status-badge {
   display: inline-block;
   padding: 2px 8px;
