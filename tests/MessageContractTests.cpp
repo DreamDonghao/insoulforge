@@ -217,6 +217,8 @@ namespace {
 
     void testNewWorkflowRouterHardRules() {
         constexpr std::string_view kTestName = "new workflow router hard rules";
+        auto &database = insoulforge::Database::instance();
+        check(database.initialize(":memory:").has_value(), "initializes session settings", kTestName);
         auto &config = insoulforge::Config::instance();
         const u64 originalSelfId = config.selfQQNumber;
         config.selfQQNumber = 42;
@@ -262,6 +264,7 @@ namespace {
           "async task result reaches the original private session", kTestName);
 
         config.selfQQNumber = originalSelfId;
+        database.close();
     }
 
     void testJevUnconfiguredFallsBackToExistingBehavior() {
@@ -1180,6 +1183,115 @@ namespace {
         db.close();
     }
 
+    void testGroupAutoReply() {
+        constexpr std::string_view kTestName = "group auto reply";
+        auto &db = insoulforge::Database::instance();
+        const auto path = std::filesystem::temp_directory_path() /
+                          ("insoulforge-auto-reply-" +
+                            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".db");
+        check(db.initialize(path.string()).has_value(), "initializes database", kTestName);
+        check(insoulforge::SessionStore::getSessionConfig(100).autoReply, "new groups default on", kTestName);
+        insoulforge::SessionStore::incrementMessageCount(100);
+        insoulforge::SessionStore::setSendGroupCard(100, true);
+        insoulforge::SessionStore::setAutoReply(100, false);
+        insoulforge::SessionStore::incrementMessageCount(100);
+        check(!insoulforge::SessionStore::getSessionConfig(100).autoReply &&
+                insoulforge::SessionStore::getSessionConfig(200).autoReply &&
+                insoulforge::SessionStore::getSessionConfig(100).sendGroupCard &&
+                insoulforge::SessionStore::getSessionConfig(100).allMesCount == 2,
+          "settings are independent and statistics preserved", kTestName);
+        insoulforge::SessionStore::disableSession(100);
+        insoulforge::SessionStore::enableSession(100);
+        check(!insoulforge::SessionStore::getSessionConfig(100).autoReply, "enable cycle preserves setting", kTestName);
+
+        auto &config = insoulforge::Config::instance();
+        const auto originalSelf = config.selfQQNumber;
+        const auto originalRouter = config.router;
+        config.selfQQNumber = 42;
+        config.router = {};
+        auto message = insoulforge::json{{"message_id", "auto-test"}, {"sender", {{"qq", "11"}}},
+          {"segments", insoulforge::json::array({{{"type", "text"}, {"text", "ordinary group message"}}})}};
+        const auto route = [&]() {
+            return drogon::sync_wait(
+              insoulforge::MessageRouter::route(100, "auto-test", insoulforge::json::array({message})));
+        };
+        check(route().action == insoulforge::RouterDecision::Action::SKIP, "normal messages skip without model request",
+          kTestName);
+        message["segments"].push_back({{"type", "at"}, {"target", {{"qq", "99"}}}});
+        check(route().action == insoulforge::RouterDecision::Action::SKIP, "mentioning another user still skips",
+          kTestName);
+        message["segments"].back()["target"]["qq"] = "42";
+        check(route().action == insoulforge::RouterDecision::Action::REPLY, "bot mention still replies", kTestName);
+        message["segments"].erase(1);
+        message["sender"]["qq"] = std::to_string(insoulforge::SessionId::kSystemAccountId);
+        check(route().action == insoulforge::RouterDecision::Action::REPLY, "system tasks still reply", kTestName);
+        message["sender"]["qq"] = "11";
+        const auto privateId = insoulforge::SessionId::fromPrivateUser(11);
+        insoulforge::SessionStore::setAutoReply(privateId, false);
+        check(drogon::sync_wait(
+                insoulforge::MessageRouter::route(privateId, "auto-test", insoulforge::json::array({message})))
+                  .action == insoulforge::RouterDecision::Action::REPLY,
+          "private replies are unaffected", kTestName);
+        config.selfQQNumber = originalSelf;
+        config.router = originalRouter;
+
+        auto command = insoulforge::json{{"session_id", 100}, {"sender", {{"qq", "11"}}},
+          {"segments", insoulforge::json::array({{{"type", "text"}, {"text", "/autoreply on"}}})}};
+        drogon::sync_wait(insoulforge::CommandProcessor::execute(command));
+        check(
+          !insoulforge::SessionStore::getSessionConfig(100).autoReply, "non-admin cannot change setting", kTestName);
+        insoulforge::AdminStore::addAdmin(11);
+        drogon::sync_wait(insoulforge::CommandProcessor::execute(command));
+        check(insoulforge::SessionStore::getSessionConfig(100).autoReply, "admin command enables setting", kTestName);
+        command["segments"][0]["text"] = "/autoreply off";
+        drogon::sync_wait(insoulforge::CommandProcessor::execute(command));
+        check(!insoulforge::SessionStore::getSessionConfig(100).autoReply, "admin command disables setting", kTestName);
+        command["segments"][0]["text"] = "/autoreply invalid";
+        drogon::sync_wait(insoulforge::CommandProcessor::execute(command));
+        check(
+          !insoulforge::SessionStore::getSessionConfig(100).autoReply, "invalid argument preserves setting", kTestName);
+        command["session_id"] = privateId;
+        command["segments"][0]["text"] = "/autoreply on";
+        drogon::sync_wait(insoulforge::CommandProcessor::execute(command));
+        check(!insoulforge::SessionStore::getSessionConfig(privateId).autoReply, "private command rejected", kTestName);
+
+        const insoulforge::AdminController controller;
+        drogon::HttpResponsePtr response;
+        const auto save = [&](const std::string &id, const insoulforge::json &body) {
+            auto request = drogon::HttpRequest::newHttpRequest();
+            request->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            request->setBody(insoulforge::dumpJson(body));
+            drogon::sync_wait(controller.saveGroupAutoReply(request, [&](const auto &value) { response = value; }, id));
+        };
+        save("100", {{"autoReply", true}});
+        check(response->getStatusCode() == drogon::k200OK && insoulforge::SessionStore::getSessionConfig(100).autoReply,
+          "web endpoint enables setting", kTestName);
+        save("100", {{"autoReply", false}});
+        check(
+          response->getStatusCode() == drogon::k200OK && !insoulforge::SessionStore::getSessionConfig(100).autoReply,
+          "web endpoint disables setting", kTestName);
+        save("100", {{"autoReply", "false"}});
+        check(response->getStatusCode() == drogon::k400BadRequest, "rejects non-boolean value", kTestName);
+        save(std::to_string(privateId), {{"autoReply", true}});
+        check(response->getStatusCode() == drogon::k400BadRequest, "web endpoint rejects private session", kTestName);
+        save("0", {{"autoReply", true}});
+        check(response->getStatusCode() == drogon::k400BadRequest, "web endpoint rejects invalid group", kTestName);
+
+        db.close();
+        check(db.initialize(path.string()).has_value() && !insoulforge::SessionStore::getSessionConfig(100).autoReply,
+          "setting survives restart", kTestName);
+        check(sqlite3_exec(db.handle(), "ALTER TABLE group_config DROP COLUMN auto_reply; PRAGMA user_version = 15",
+                nullptr, nullptr, nullptr) == SQLITE_OK,
+          "restores v15 schema", kTestName);
+        db.close();
+        check(db.initialize(path.string()).has_value() && insoulforge::SessionStore::getSessionConfig(100).autoReply &&
+                insoulforge::SessionStore::getSessionConfig(100).sendGroupCard &&
+                insoulforge::SessionStore::getSessionConfig(100).allMesCount == 2,
+          "v15 upgrade defaults on and preserves other fields", kTestName);
+        db.close();
+        std::filesystem::remove(path);
+    }
+
     void testExecutionConfig() {
         constexpr std::string_view kTestName = "execution config";
         const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -1683,6 +1795,7 @@ auto main() -> int {
     testConfigFacade();
     testExecutionConfig();
     testGroupCardSettings();
+    testGroupAutoReply();
     testToolHistoryRecords();
     testImageDescriptionCacheStore();
     testImageGenerationResponse();

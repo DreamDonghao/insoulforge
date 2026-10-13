@@ -88,6 +88,7 @@ namespace insoulforge {
 
         ADD_METHOD_TO(AdminController::toggleSession, "/admin/api/group/{groupId}/toggle", drogon::Post);
         ADD_METHOD_TO(AdminController::saveGroupCard, "/admin/api/group/{groupId}/card", drogon::Post);
+        ADD_METHOD_TO(AdminController::saveGroupAutoReply, "/admin/api/group/{groupId}/auto-reply", drogon::Post);
 
         ADD_METHOD_TO(AdminController::removeSession, "/admin/api/group/{groupId}", drogon::Delete);
 
@@ -330,6 +331,10 @@ namespace insoulforge {
         /// @brief 保存单个群向模型发送群名片的开关，拒绝私聊和无效参数。
         auto saveGroupCard(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback,
           const std::string &sessionId) const -> drogon::Task<>;
+        /// @brief 保存单个群的普通消息自动回复开关，拒绝私聊和无效参数。
+        auto saveGroupAutoReply(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &sessionId) const
+          -> drogon::Task<>;
 
         /// @brief 从启用列表移除会话
         /// @param req HTTP 请求

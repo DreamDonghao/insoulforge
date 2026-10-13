@@ -338,6 +338,10 @@ namespace insoulforge::MessageRouter {
         if (MessageRecord::mentions(*trigger, Config::instance().selfQQNumber)) {
             co_return applySessionType(makeDecision(RouterDecision::Action::REPLY, "用户@提及", 100, true), sessionId);
         }
+        // 只阻止普通群消息的自动路由；明确提及和系统任务已经在上方处理。
+        if (!SessionId::isPrivate(sessionId) && !SessionStore::getSessionConfig(sessionId).autoReply) {
+            co_return makeDecision(RouterDecision::Action::SKIP, "本群已关闭自动回复");
+        }
         if (!SessionId::isPrivate(sessionId) && isSpam(*trigger)) {
             co_return applySessionType(makeDecision(RouterDecision::Action::SKIP, "刷屏或短文本"), sessionId);
         }

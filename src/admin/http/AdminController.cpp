@@ -392,12 +392,13 @@ auto AdminController::getGroups(HttpRequestPtr req, std::function<void(const Htt
 
     json result(json::array());
     for (const auto &[sessionId, groupName, enabled, messageCount]: groups) {
+        const auto config = SessionStore::getSessionConfig(sessionId);
         json group = sessionItemHeader(sessionId);
         group["groupName"] = groupName;
         group["enabled"] = enabled;
-        group["sendGroupCard"] =
-          !SessionId::isPrivate(sessionId) && SessionStore::getSessionConfig(sessionId).sendGroupCard;
+        group["sendGroupCard"] = !SessionId::isPrivate(sessionId) && config.sendGroupCard;
         group["messageCount"] = messageCount;
+        group["autoReply"] = config.autoReply;
         result.push_back(group);
     }
     callback(jsonResponse(result));
@@ -437,6 +438,21 @@ auto AdminController::enableSession(HttpRequestPtr req, std::function<void(const
     json resp = AdminResponse::okJson(SessionId::isPrivate(sessionId) ? "私聊已启用" : "群已启用");
     resp["groupName"] = groupName;
     callback(jsonResponse(resp));
+    co_return;
+}
+
+auto AdminController::saveGroupAutoReply(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
+  const std::string &sessionId) const -> Task<> {
+    const auto id = tryParseUInt64(sessionId);
+    const auto body = parseJsonBody(req);
+    if (!id || *id == 0 || SessionId::isPrivate(*id) || !body || !atOrNull(*body, "autoReply").is_boolean()) {
+        auto response = jsonResponse(AdminResponse::errorJson("需要有效群号及布尔类型 autoReply"));
+        response->setStatusCode(drogon::k400BadRequest);
+        callback(response);
+        co_return;
+    }
+    SessionStore::setAutoReply(*id, (*body)["autoReply"].get<bool>());
+    callback(jsonResponse(AdminResponse::okJson("自动回复设置已保存")));
     co_return;
 }
 

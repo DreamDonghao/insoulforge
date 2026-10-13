@@ -325,6 +325,12 @@ MessageService → OneBot API
 按开关保留或移除 `card`，不修改原始消息。旧记录没有该字段时不补造，私聊不发送群名片。
 数据库 v14 → v15 自动补充字段，保留消息统计；禁用及重新启用群聊不清除该设置。
 
+`group_config.auto_reply` 控制每个群的普通消息自动回复，默认开启。数据库 v15 → v16 自动新增字段，保持旧群行为。
+Router 在系统消息和明确 @ 机器人规则之后、Jev/Router 模型请求之前检查开关；关闭时直接返回 SKIP，
+不影响入站消息保存、上下文和记忆维护。私聊不使用此开关，已开始的回复也不取消。
+后台通过 `POST /admin/api/group/{groupId}/auto-reply` 保存布尔值 `autoReply`，群内管理员通过 `/autoreply on|off` 修改。
+开关单独更新，不改变群名片设置、消息统计和会话启用状态。
+
 `ConfigStore` 将 LLM API 配置（router / jev / executor / executorFallback / executorThinking / image / imageGeneration / memory / embedding）、QQ Bot 配置、记忆和执行参数统一写入
 `data/config.json`。聊天模型可设置 `maxTokens`、`temperature`、`topP` 和 `reasoningEffort`；Embedding、Jev 与图片生成不使用这些采样参数。
 后台上传的角色参考图单独保存在 `data/character-image`，不写入配置或公开静态目录；部署时沿用现有 `data/` 持久化挂载。

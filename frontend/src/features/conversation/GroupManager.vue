@@ -93,26 +93,31 @@ const loadGroups = async (): Promise<void> => {
 }
 
 // 切换启用状态
-const savingCards = reactive(new Set<string>())
-const setGroupCard = async (group: Group, event: Event): Promise<void> => {
+type GroupSetting = 'sendGroupCard' | 'autoReply'
+const savingSettings = reactive(new Set<string>())
+const isSettingSaving = (group: Group, setting: GroupSetting): boolean =>
+    savingSettings.has(`${sessionKey(group)}:${setting}`)
+const setGroupSetting = async (group: Group, event: Event, setting: GroupSetting): Promise<void> => {
   const input = event.target as HTMLInputElement
   const enabled = input.checked
   const id = sessionKey(group)
-  savingCards.add(id)
+  const key = `${id}:${setting}`
+  const route = setting === 'sendGroupCard' ? 'card' : 'auto-reply'
+  savingSettings.add(key)
   try {
-    const resp = await fetch(`/admin/api/group/${id}/card`, {
+    const resp = await fetch(`/admin/api/group/${id}/${route}`, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({sendGroupCard: enabled})
+      body: JSON.stringify({[setting]: enabled})
     })
     const data: ApiResponse = await resp.json()
     if (!resp.ok || !data.success) throw new Error(data.error || '保存失败')
-    group.sendGroupCard = enabled
-    showToast?.('群名片设置已保存')
+    group[setting] = enabled
+    showToast?.(setting === 'sendGroupCard' ? '群名片设置已保存' : '自动回复设置已保存')
   } catch (error) {
-    input.checked = group.sendGroupCard === true
+    input.checked = group[setting] ?? (setting === 'autoReply')
     showToast?.(error instanceof Error ? error.message : '保存失败', true)
   } finally {
-    savingCards.delete(id)
+    savingSettings.delete(key)
   }
 }
 
@@ -660,6 +665,7 @@ onUnmounted(restoreWebSocket)
                 <th style="width: 120px;">群号/QQ号</th>
                 <th style="width: 70px;">消息</th>
                 <th style="width: 90px;">发送群名片</th>
+                <th style="width: 90px;">自动回复</th>
                 <th style="width: 360px;">操作</th>
               </tr>
               </thead>
@@ -687,13 +693,24 @@ onUnmounted(restoreWebSocket)
                   }}</code></td>
                 <td>{{ group.messageCount || 0 }}</td>
                 <td @click.stop>
-                  <label v-if="!isPrivateSession(group)" class="group-card-switch"
-                         :class="{'is-saving': savingCards.has(sessionKey(group))}"
-                         :title="savingCards.has(sessionKey(group)) ? '保存中' : (group.sendGroupCard ? '关闭发送群名片' : '开启发送群名片')">
+                  <label v-if="!isPrivateSession(group)" class="group-setting-switch"
+                         :class="{'is-saving': isSettingSaving(group, 'sendGroupCard')}"
+                         :title="isSettingSaving(group, 'sendGroupCard') ? '保存中' : (group.sendGroupCard ? '关闭发送群名片' : '开启发送群名片')">
                     <input type="checkbox" role="switch" :checked="group.sendGroupCard === true"
-                           :disabled="savingCards.has(sessionKey(group))" aria-label="向模型发送本群群名片"
-                           :aria-busy="savingCards.has(sessionKey(group))" @change="setGroupCard(group, $event)">
-                    <span class="group-card-track" aria-hidden="true"></span>
+                           :disabled="isSettingSaving(group, 'sendGroupCard')" aria-label="向模型发送本群群名片"
+                           :aria-busy="isSettingSaving(group, 'sendGroupCard')" @change="setGroupSetting(group, $event, 'sendGroupCard')">
+                    <span class="group-setting-track" aria-hidden="true"></span>
+                  </label>
+                  <span v-else>-</span>
+                </td>
+                <td @click.stop>
+                  <label v-if="!isPrivateSession(group)" class="group-setting-switch"
+                         :class="{'is-saving': isSettingSaving(group, 'autoReply')}"
+                         :title="isSettingSaving(group, 'autoReply') ? '保存中' : (group.autoReply !== false ? '关闭普通消息自动回复' : '开启普通消息自动回复')">
+                    <input type="checkbox" role="switch" :checked="group.autoReply !== false"
+                           :disabled="isSettingSaving(group, 'autoReply')" aria-label="本群普通消息自动回复"
+                           :aria-busy="isSettingSaving(group, 'autoReply')" @change="setGroupSetting(group, $event, 'autoReply')">
+                    <span class="group-setting-track" aria-hidden="true"></span>
                   </label>
                   <span v-else>-</span>
                 </td>
@@ -946,7 +963,7 @@ onUnmounted(restoreWebSocket)
 </template>
 
 <style scoped>
-.group-card-switch {
+.group-setting-switch {
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -956,7 +973,7 @@ onUnmounted(restoreWebSocket)
   cursor: pointer;
 }
 
-.group-card-switch input {
+.group-setting-switch input {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -966,7 +983,7 @@ onUnmounted(restoreWebSocket)
   cursor: inherit;
 }
 
-.group-card-track {
+.group-setting-track {
   width: 36px;
   height: 20px;
   border-radius: 10px;
@@ -975,7 +992,7 @@ onUnmounted(restoreWebSocket)
   transition: background-color 150ms ease;
 }
 
-.group-card-track::before {
+.group-setting-track::before {
   content: '';
   display: block;
   width: 14px;
@@ -987,26 +1004,26 @@ onUnmounted(restoreWebSocket)
   transition: transform 150ms ease;
 }
 
-.group-card-switch input:checked + .group-card-track {
+.group-setting-switch input:checked + .group-setting-track {
   background: var(--primary-strong);
 }
 
-.group-card-switch input:checked + .group-card-track::before {
+.group-setting-switch input:checked + .group-setting-track::before {
   transform: translateX(16px);
 }
 
-.group-card-switch input:focus-visible + .group-card-track {
+.group-setting-switch input:focus-visible + .group-setting-track {
   outline: 2px solid var(--primary);
   outline-offset: 3px;
 }
 
-.group-card-switch.is-saving {
+.group-setting-switch.is-saving {
   opacity: 0.55;
   cursor: wait;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .group-card-track, .group-card-track::before {
+  .group-setting-track, .group-setting-track::before {
     transition: none;
   }
 }

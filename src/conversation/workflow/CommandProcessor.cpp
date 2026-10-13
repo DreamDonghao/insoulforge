@@ -57,6 +57,7 @@ namespace insoulforge::CommandProcessor {
                       "/groups - 查看启用的会话列表\n"
                       "/status - 查看当前会话状态\n"
                       "/groupcard on|off - 开启或关闭本群向模型发送群名片\n"
+                      "/autoreply on|off - 开启或关闭本群普通消息自动回复\n"
                       "【管理员】\n"
                       "/admins - 查看管理员列表\n"
                       "/addadmin <QQ号> - 添加管理员\n"
@@ -75,9 +76,9 @@ namespace insoulforge::CommandProcessor {
         }
         if (command == "/status" || command == "/状态") {
             const bool enabled = SessionStore::isSessionEnabled(sessionId);
-            const auto [allMesCount, sendGroupCard] = SessionConfigManager::getConfig(sessionId);
-            co_return fmt::format("会话 {} 状态:\n- 启用: {}\n- 消息数: {}\n- 发送群名片: {}", sessionId,
-              enabled ? "是" : "否", allMesCount, sendGroupCard ? "是" : "否");
+            const auto [allMesCount, sendGroupCard, autoReply] = SessionConfigManager::getConfig(sessionId);
+            co_return fmt::format("会话 {} 状态:\n- 启用: {}\n- 消息数: {}\n- 发送群名片: {}\n- 自动回复: {}",
+              sessionId, enabled ? "是" : "否", allMesCount, sendGroupCard ? "是" : "否", autoReply ? "是" : "否");
         }
         if (command == "/admins" || command == "/管理员") {
             const auto admins = AdminStore::getAdmins();
@@ -124,6 +125,17 @@ namespace insoulforge::CommandProcessor {
             }
             SessionStore::disableSession(targetSession);
             co_return fmt::format("已禁用会话: {}", targetSession);
+        }
+        if (command == "/autoreply" || command == "/自动回复") {
+            if (SessionId::isPrivate(sessionId))
+                co_return "此命令仅限群聊使用";
+            std::string argument, extra;
+            input >> argument;
+            if ((argument != "on" && argument != "off") || (input >> extra))
+                co_return "用法: /autoreply on|off";
+            SessionStore::setAutoReply(sessionId, argument == "on");
+            co_return argument == "on" ? "已开启本群普通消息自动回复"
+                                       : "已关闭本群普通消息自动回复，@机器人仍可触发回复";
         }
         if (command == "/groupcard" || command == "/群名片") {
             if (SessionId::isPrivate(sessionId))

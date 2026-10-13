@@ -1,6 +1,6 @@
 /// @file SessionStore.hpp
 /// @brief 群聊与私聊的统计、启用状态和名称存储
-/// @details 表：group_config（消息统计和群名片设置）、enabled_groups（启用状态与群名称）
+/// @details 表：group_config（消息统计及群设置）、enabled_groups（启用状态与群名称）
 
 #pragma once
 
@@ -15,6 +15,7 @@ namespace insoulforge {
     struct SessionConfig {
         u64 allMesCount = 0; ///< 已完成主处理的入站消息总数
         bool sendGroupCard = false; ///< 向模型发送本群群名片，默认关闭
+        bool autoReply = true; ///< 允许普通群消息进入模型路由判断，默认开启
     };
 
     /// @brief 会话统计与启用状态的数据库接口
@@ -23,14 +24,16 @@ namespace insoulforge {
     namespace SessionStore {
         /// @brief 单独保存群名片开关，不改变消息统计或会话启用状态。
         void setSendGroupCard(u64 sessionId, bool enabled);
-        /// @brief 获取会话的消息统计及群名片设置
+        /// @brief 单独保存自动回复开关，不影响其他群设置或消息统计。
+        void setAutoReply(u64 sessionId, bool enabled);
+        /// @brief 获取会话的消息统计及群设置
         /// @param sessionId 统一会话 ID
-        /// @return 已保存的配置；不存在时消息数为 0，群名片开关关闭
+        /// @return 已保存的配置；不存在时消息数为 0，群名片关闭，自动回复开启
         [[nodiscard]] auto getSessionConfig(u64 sessionId) -> SessionConfig;
 
-        /// @brief 覆盖保存会话的消息统计及群名片设置
+        /// @brief 覆盖保存会话的消息统计及群设置
         /// @param sessionId 统一会话 ID
-        /// @param config 待保存的消息数和群名片开关
+        /// @param config 待保存的消息数、群名片及自动回复开关
         void saveSessionConfig(u64 sessionId, const SessionConfig &config);
 
         /// @brief 原子递增会话消息数

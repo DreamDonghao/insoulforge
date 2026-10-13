@@ -14,11 +14,13 @@ namespace insoulforge::SessionStore {
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
         SessionConfig config;
-        const Statement stmt(db.handle(), "SELECT all_mes_count, send_group_card FROM group_config WHERE group_id = ?");
+        const Statement stmt(
+          db.handle(), "SELECT all_mes_count, send_group_card, auto_reply FROM group_config WHERE group_id = ?");
         stmt.bind(1, sessionId);
         if (stmt.step()) {
             config.allMesCount = stmt.getInt64(0);
             config.sendGroupCard = stmt.getInt(1) != 0;
+            config.autoReply = stmt.getInt(2) != 0;
         }
         return config;
     }
@@ -26,11 +28,12 @@ namespace insoulforge::SessionStore {
     void saveSessionConfig(const u64 sessionId, const SessionConfig &config) {
         const auto &db = Database::instance();
         std::unique_lock lock(db.mutex());
-        const Statement stmt(db.handle(),
-          "INSERT OR REPLACE INTO group_config (group_id, all_mes_count, send_group_card) VALUES (?, ?, ?)");
+        const Statement stmt(db.handle(), "INSERT OR REPLACE INTO group_config (group_id, all_mes_count, "
+                                          "send_group_card, auto_reply) VALUES (?, ?, ?, ?)");
         stmt.bind(1, sessionId);
         stmt.bind(2, config.allMesCount);
         stmt.bind(3, config.sendGroupCard ? 1 : 0);
+        stmt.bind(4, config.autoReply ? 1 : 0);
         stmt.exec();
     }
 
@@ -40,6 +43,16 @@ namespace insoulforge::SessionStore {
         const Statement stmt(db.handle(),
           "INSERT INTO group_config (group_id, send_group_card) VALUES (?, ?) "
           "ON CONFLICT(group_id) DO UPDATE SET send_group_card = excluded.send_group_card");
+        stmt.bind(1, sessionId);
+        stmt.bind(2, enabled ? 1 : 0);
+        stmt.exec();
+    }
+
+    void setAutoReply(const u64 sessionId, const bool enabled) {
+        const auto &db = Database::instance();
+        std::unique_lock lock(db.mutex());
+        const Statement stmt(db.handle(), "INSERT INTO group_config (group_id, auto_reply) VALUES (?, ?) "
+                                          "ON CONFLICT(group_id) DO UPDATE SET auto_reply = excluded.auto_reply");
         stmt.bind(1, sessionId);
         stmt.bind(2, enabled ? 1 : 0);
         stmt.exec();
