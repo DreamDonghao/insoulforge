@@ -16,6 +16,7 @@ interface Status {
   loaded: boolean
   loading: boolean
   toolCount: number
+  tools?: {name: string; description: string}[]
   error: string
 }
 
@@ -281,6 +282,16 @@ onUnmounted(() => {
           <button class="btn btn-secondary btn-sm" :disabled="busy" @click="open(index)">编辑</button>
           <button class="btn btn-danger btn-sm" :disabled="busy" @click="remove(index)">删除</button>
         </div>
+        <details v-if="statusByName.get(server.name)?.loaded" class="mcp-tools">
+          <summary>支持的工具（{{ statusByName.get(server.name)?.toolCount }}）</summary>
+          <ul v-if="statusByName.get(server.name)?.tools?.length">
+            <li v-for="tool in statusByName.get(server.name)?.tools" :key="tool.name">
+              <code>{{ tool.name }}</code>
+              <p v-if="tool.description">{{ tool.description }}</p>
+            </li>
+          </ul>
+          <p v-else class="mcp-status">暂无工具</p>
+        </details>
       </article>
     </div>
     <div v-if="dialog" class="mcp-overlay" @click.self="!busy && (dialog = false)">
@@ -318,6 +329,13 @@ onUnmounted(() => {
 .mcp-details h2, .mcp-dialog h2 {font-size: 18px; margin: 0 0 12px}
 .mcp-url, .mcp-status, .mcp-description {overflow-wrap: anywhere; margin: 6px 0; color: var(--text-secondary)}
 .mcp-error {color: var(--danger)}
+.mcp-tools {flex: 1 1 100%; min-width: 0}
+.mcp-tools summary {cursor: pointer; color: var(--text-secondary); padding: 8px 0}
+.mcp-tools summary:focus-visible {outline: 2px solid var(--primary-strong); outline-offset: 3px}
+.mcp-tools ul {list-style: none; padding: 0; margin: 0; max-height: 360px; overflow-y: auto}
+.mcp-tools li {padding: 12px 0; border-top: 1px solid var(--border); overflow-wrap: anywhere}
+.mcp-tools code {font-size: 13px}
+.mcp-tools li p {margin: 6px 0 0; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere}
 .mcp-switch {appearance: none; width: 36px; height: 20px; border-radius: 10px; background: var(--border-strong); cursor: pointer; position: relative; flex: none}
 .mcp-switch::after {content: ''; position: absolute; width: 14px; height: 14px; top: 3px; left: 3px; border-radius: 50%; background: white}
 .mcp-switch:checked {background: var(--primary-strong)}

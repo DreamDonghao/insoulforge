@@ -195,9 +195,15 @@ namespace insoulforge {
     auto McpTools::status() -> json {
         const auto lock = std::scoped_lock{m_mutex};
         auto result = json::array();
-        for (const auto &server: m_servers)
+        for (const auto &server: m_servers) {
+            auto tools = json::array();
+            if (server->catalog) {
+                for (const auto &tool: server->catalog->tools)
+                    tools.push_back({{"name", tool.at("name")}, {"description", tool.value("description", std::string{})}});
+            }
             result.push_back({{"name", server->name}, {"loaded", server->loaded}, {"loading", server->loading},
-              {"toolCount", server->catalog ? server->catalog->tools.size() : 0}, {"error", server->error}});
+              {"toolCount", tools.size()}, {"tools", std::move(tools)}, {"error", server->error}});
+        }
         return result;
     }
 
