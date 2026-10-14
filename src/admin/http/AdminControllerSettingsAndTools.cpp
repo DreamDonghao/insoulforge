@@ -4,6 +4,7 @@
 #include <admin/http/AdminController.hpp>
 #include <admin/http/AdminResponse.hpp>
 #include <agent/tools/ToolRuntime.hpp>
+#include <agent/tools/mcp/McpTools.hpp>
 #include <agent/tools/custom/LuaToolExecutor.hpp>
 #include <agent/tools/custom/ToolStore.hpp>
 #include <include/agent/tools/ToolRegistry.hpp>
@@ -73,6 +74,42 @@ auto AdminController::saveExecutionConfig(
 }
 
 // ==================== 提示词 ====================
+
+auto AdminController::getMcpConfig(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
+  -> Task<> {
+    auto result = Config::instance().getMcpConfig();
+    result["status"] = McpTools::instance().status();
+    auto response = jsonResponse(result);
+    response->addHeader("Cache-Control", "no-store");
+    callback(response);
+    co_return;
+}
+
+auto AdminController::saveMcpConfig(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
+  -> Task<> {
+    const auto body = parseJsonBody(req);
+    if (!body || !body->is_object()) {
+        callback(AdminResponse::configErrorResponse({.type = ConfigErrorType::InvalidArgument, .message = "MCP 配置必须是 JSON 对象"}));
+        co_return;
+    }
+    if (auto result = McpTools::instance().saveConfig(*body, Config::instance()); !result) {
+        callback(AdminResponse::configErrorResponse(result.error()));
+        co_return;
+    }
+    // 配置已持久化并生效，网络发现不占用保存请求的等待时间。
+    drogon::async_run([]() -> Task<> { co_await McpTools::instance().ensureTools(); });
+    callback(jsonResponse(AdminResponse::okJson("MCP 配置已保存并生效")));
+    co_return;
+}
+
+auto AdminController::refreshMcpTools(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
+  -> Task<> {
+    co_await McpTools::instance().refreshTools();
+    auto result = AdminResponse::okJson("MCP 工具刷新完成");
+    result["status"] = McpTools::instance().status();
+    callback(jsonResponse(result));
+    co_return;
+}
 
 auto AdminController::getPrompts(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
   -> Task<> {

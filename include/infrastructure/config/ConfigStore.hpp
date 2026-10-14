@@ -54,6 +54,11 @@ namespace insoulforge::ConfigStore {
     /// @brief 获取独立的执行流程配置。
     [[nodiscard]] auto getExecutionConfig() -> json;
 
+    /// @brief 获取持久化的 MCP 服务列表快照。
+    [[nodiscard]] auto getMcpConfig() -> json;
+    [[nodiscard]] auto saveMcpConfig(const json &config, const ConfigValidator &validate)
+      -> std::expected<void, ConfigError>;
+
     /// @brief 保存执行配置；运行时更新由 Config 完成。
     /// @return 参数无效或文件写入失败时返回具体错误。
     [[nodiscard]] auto saveExecutionConfig(const json &config, const ConfigValidator &validate)

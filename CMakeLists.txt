@@ -116,6 +116,20 @@ if (SQLITE3_STATIC_LIB)
 endif ()
 
 include(CTest)
+
+# 手动构建的 MCP 交互示例，不启动机器人、不进入默认发布产物。
+add_executable(insoulforge_mcp_example EXCLUDE_FROM_ALL
+        tests/manual/McpClientExample.cpp
+        src/infrastructure/mcp/Client.cpp
+        src/infrastructure/mcp/Protocol.cpp)
+target_include_directories(insoulforge_mcp_example PRIVATE include)
+target_link_libraries(insoulforge_mcp_example PRIVATE Drogon::Drogon)
+if(nlohmann_json_FOUND)
+    target_link_libraries(insoulforge_mcp_example PRIVATE nlohmann_json::nlohmann_json)
+else()
+    target_include_directories(insoulforge_mcp_example PRIVATE ${NLOHMANN_JSON_INCLUDE_DIR})
+endif()
+
 if (BUILD_TESTING)
     add_subdirectory(tests)
 endif ()

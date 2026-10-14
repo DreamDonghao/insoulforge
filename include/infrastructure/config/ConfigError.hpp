@@ -5,8 +5,8 @@
 #include <string>
 
 namespace insoulforge {
-    /// @brief 区分配置内容无效与文件操作失败。
-    enum class ConfigErrorType { InvalidArgument, FileOperation };
+    /// @brief 区分配置无效、文件操作失败和并发保存冲突。
+    enum class ConfigErrorType { InvalidArgument, FileOperation, Conflict };
 
     /// @brief 配置操作失败的类别与可供日志、管理接口使用的具体原因。
     struct ConfigError {
