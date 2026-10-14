@@ -230,9 +230,10 @@ namespace drogonmcp {
         const auto guard = OperationGuard{m_busy};
         m_sessionId.clear();
         m_protocolVersion.clear();
-        auto result = co_await exchange(Json{{"jsonrpc", "2.0"}, {"id", m_nextId++}, {"method", "initialize"},
+        auto request = Json{{"jsonrpc", "2.0"}, {"id", m_nextId++}, {"method", "initialize"},
           {"params", {{"protocolVersion", kProtocolVersion}, {"capabilities", Json::object()},
-                       {"clientInfo", {{"name", m_options.name}, {"version", m_options.version}}}}}});
+                       {"clientInfo", {{"name", m_options.name}, {"version", m_options.version}}}}}};
+        auto result = co_await exchange(std::move(request));
         if (!result)
             co_return result;
         if (!result->is_object() || !result->contains("protocolVersion") || !(*result)["protocolVersion"].is_string() ||
@@ -250,7 +251,8 @@ namespace drogonmcp {
         m_capabilities = (*result)["capabilities"];
         if (m_capabilities.contains("tools") && !m_capabilities["tools"].is_object())
             co_return failure(ErrorKind::Protocol, "Invalid tools capability");
-        auto notified = co_await exchange(Json{{"jsonrpc", "2.0"}, {"method", "notifications/initialized"}}, true);
+        auto notification = Json{{"jsonrpc", "2.0"}, {"method", "notifications/initialized"}};
+        auto notified = co_await exchange(std::move(notification), true);
         if (!notified)
             co_return std::unexpected(notified.error());
         m_initialized = true;
@@ -272,8 +274,9 @@ namespace drogonmcp {
             auto params = Json::object();
             if (!cursor.empty())
                 params["cursor"] = cursor;
-            auto result = co_await exchange(
-              Json{{"jsonrpc", "2.0"}, {"id", m_nextId++}, {"method", "tools/list"}, {"params", std::move(params)}});
+            auto request =
+              Json{{"jsonrpc", "2.0"}, {"id", m_nextId++}, {"method", "tools/list"}, {"params", std::move(params)}};
+            auto result = co_await exchange(std::move(request));
             if (!result)
                 co_return std::unexpected(result.error());
             if (!result->is_object() || !result->contains("tools") || !(*result)["tools"].is_array())
@@ -309,8 +312,9 @@ namespace drogonmcp {
         if (name.empty() || !arguments.is_object())
             co_return failure(ErrorKind::Configuration, "Tool name and arguments are invalid");
         const auto guard = OperationGuard{m_busy};
-        auto result = co_await exchange(Json{{"jsonrpc", "2.0"}, {"id", m_nextId++}, {"method", "tools/call"},
-          {"params", {{"name", std::move(name)}, {"arguments", std::move(arguments)}}}});
+        auto request = Json{{"jsonrpc", "2.0"}, {"id", m_nextId++}, {"method", "tools/call"},
+          {"params", {{"name", std::move(name)}, {"arguments", std::move(arguments)}}}};
+        auto result = co_await exchange(std::move(request));
         if (result && (!result->is_object() || !result->contains("content") || !(*result)["content"].is_array() ||
                         (result->contains("isError") && !(*result)["isError"].is_boolean())))
             co_return failure(ErrorKind::Protocol, "Invalid tools/call result");

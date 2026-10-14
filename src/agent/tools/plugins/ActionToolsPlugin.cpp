@@ -461,7 +461,8 @@ namespace insoulforge {
                 // 记录已有表情的 res_id，以便保存后找出新表情。
                 ToolRuntime::invalidateFavoriteEmojiCache();
                 std::set<std::string> beforeIds;
-                for (const auto &e: co_await ToolRuntime::fetchFavoriteEmojis(sessionId)) {
+                const auto beforeEmojis = co_await ToolRuntime::fetchFavoriteEmojis(sessionId);
+                for (const auto &e: beforeEmojis) {
                     if (const std::string rid = getStr(e, "res_id"); !rid.empty()) {
                         beforeIds.insert(rid);
                     }
@@ -475,7 +476,8 @@ namespace insoulforge {
                 // 找到新增的表情并设置描述。
                 ToolRuntime::invalidateFavoriteEmojiCache();
                 json newItem;
-                for (const auto &e: co_await ToolRuntime::fetchFavoriteEmojis(sessionId)) {
+                const auto afterEmojis = co_await ToolRuntime::fetchFavoriteEmojis(sessionId);
+                for (const auto &e: afterEmojis) {
                     if (const std::string rid = getStr(e, "res_id"); !rid.empty() && !beforeIds.contains(rid)) {
                         newItem = e;
                         break;
