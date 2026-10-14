@@ -325,6 +325,10 @@ MessageService → OneBot API
 ### 配置系统
 
 群消息的 `sender.card` 保存 OneBot 上报的群名片，与 `sender.name`（QQ 昵称）独立；空群名片和私聊不保存该字段。
+
+群消息的 `sender.role` 保留 OneBot 上报的群身份：`owner` 为群主，`admin` 为群管理员，`member` 为普通成员。
+该字段随消息发送到模型上下文，不受群名片开关影响；缺失、无效身份和私聊不添加该字段，旧消息不补造身份。
+群身份不等同于机器人管理员权限，不能作为工具操作的授权依据。
 每个群的 `group_config.send_group_card` 默认关闭，在后台“会话管理”或群内管理员命令 `/groupcard on|off` 中设置。
 消息记录始终保留已有群名片；构建模型上下文时读取本群设置，并传入 `MessageRecord::projectForAgent`，
 按开关保留或移除 `card`，不修改原始消息。旧记录没有该字段时不补造，私聊不发送群名片。

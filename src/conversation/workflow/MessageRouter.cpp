@@ -67,6 +67,8 @@ namespace insoulforge::MessageRouter {
             json compact;
             if (const auto card = getStr(atOrNull(projected, "sender"), "card"); !card.empty())
                 compact["card"] = card;
+            if (const auto role = getStr(atOrNull(projected, "sender"), "role"); !role.empty())
+                compact["role"] = role;
             compact["message_id"] = getStr(message, "message_id");
             if (const std::string name = getStr(atOrNull(projected, "sender"), "name"); !name.empty()) {
                 compact["sender"] = name;
@@ -160,6 +162,8 @@ namespace insoulforge::MessageRouter {
             }
             if (const auto card = getStr(atOrNull(projected, "sender"), "card"); !card.empty())
                 record["card"] = card;
+            if (const auto role = getStr(atOrNull(projected, "sender"), "role"); !role.empty())
+                record["role"] = role;
             record["text"] = std::move(text);
             if (const json &replyTo = atOrNull(projected, "reply_to"); !replyTo.is_null() && !replyTo.empty()) {
                 record["reply_to"] = replyTo;
