@@ -106,6 +106,29 @@ namespace {
 
         insoulforge::json selfEvent = body;
         auto cardEvent = body;
+        for (const auto role : {"owner", "admin", "member"}) {
+            auto roleEvent = body;
+            roleEvent["sender"]["role"] = role;
+            const auto roleRecord = insoulforge::OneBotEventNormalizer::normalize(roleEvent);
+            check(roleRecord && (*roleRecord)["sender"]["role"] == role,
+              "group role is preserved", kTestName);
+            if (roleRecord) {
+                check(insoulforge::MessageRecord::projectForAgent(*roleRecord)["sender"]["role"] == role,
+                  "agent context includes group role", kTestName);
+            }
+            roleEvent.erase("group_id");
+            roleEvent["message_type"] = "private";
+            const auto privateRoleRecord = insoulforge::OneBotEventNormalizer::normalize(roleEvent);
+            check(privateRoleRecord && !(*privateRoleRecord)["sender"].contains("role"),
+              "private messages omit group role", kTestName);
+        }
+        for (const auto role : {"", "unknown"}) {
+            auto roleEvent = body;
+            roleEvent["sender"]["role"] = role;
+            const auto roleRecord = insoulforge::OneBotEventNormalizer::normalize(roleEvent);
+            check(roleRecord && !(*roleRecord)["sender"].contains("role"),
+              "invalid group role is omitted", kTestName);
+        }
         cardEvent["sender"]["card"] = "Group Alice";
         const auto cardRecord = insoulforge::OneBotEventNormalizer::normalize(cardEvent);
         check(

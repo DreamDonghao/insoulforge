@@ -97,6 +97,10 @@ namespace insoulforge::OneBotEventNormalizer {
               {"sender", {{"name", senderName}, {"qq", std::to_string(senderId)}}},
               {"message_id", std::to_string(messageId)}, {"segments", json::array()}};
             if (getUInt(body, "group_id") != 0) {
+                if (auto role = getStr(atOrNull(body, "sender"), "role");
+                    role == "owner" || role == "admin" || role == "member") {
+                    record["sender"]["role"] = std::move(role);
+                }
                 if (auto card = getStr(atOrNull(body, "sender"), "card"); !card.empty()) {
                     record["sender"]["card"] = std::move(card);
                 }
