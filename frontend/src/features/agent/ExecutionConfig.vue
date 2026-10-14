@@ -3,12 +3,20 @@ import {computed, inject, onMounted, reactive, ref} from 'vue'
 import type {ApiResponse, ExecutionConfig} from '../../vite-env.d'
 
 const showToast = inject<(message: string, isError?: boolean) => void>('showToast')
-const config = reactive<ExecutionConfig>({maxToolRounds: 8})
+const config = reactive<ExecutionConfig>({maxToolRounds: 8, mcpToolPageSize: 10, mcpMaxToolsPerEnable: 4, mcpMaxToolsPerReply: 12})
+const mcpFields = [
+  {key: 'mcpToolPageSize', label: '查询每页工具数量', maximum: 50},
+  {key: 'mcpMaxToolsPerEnable', label: '单次启用工具上限', maximum: 20},
+  {key: 'mcpMaxToolsPerReply', label: '本次回复启用工具上限', maximum: 64}
+] as const
 const loading = ref(true)
 const saving = ref(false)
 const loadError = ref('')
 const validRounds = computed(() => Number.isInteger(config.maxToolRounds) &&
     config.maxToolRounds >= 1 && config.maxToolRounds <= 100)
+const validConfig = computed(() => validRounds.value &&
+    mcpFields.every(field => Number.isInteger(config[field.key]) && config[field.key] >= 1 && config[field.key] <= field.maximum) &&
+    config.mcpMaxToolsPerEnable <= config.mcpMaxToolsPerReply)
 
 const loadConfig = async (): Promise<void> => {
   loading.value = true
@@ -21,6 +29,11 @@ const loadConfig = async (): Promise<void> => {
       throw new Error('执行配置数据无效')
     }
     config.maxToolRounds = data.maxToolRounds
+    for (const field of mcpFields) {
+      if (!Number.isInteger(data[field.key]) || data[field.key] < 1 || data[field.key] > field.maximum) throw new Error('MCP 数量配置无效')
+      config[field.key] = data[field.key]
+    }
+    if (config.mcpMaxToolsPerEnable > config.mcpMaxToolsPerReply) throw new Error('单次启用上限不能大于本次回复上限')
   } catch (error) {
     loadError.value = error instanceof Error ? error.message : '无法连接管理服务'
   } finally {
@@ -29,7 +42,7 @@ const loadConfig = async (): Promise<void> => {
 }
 
 const saveConfig = async (): Promise<void> => {
-  if (!validRounds.value || saving.value || loading.value || loadError.value) return
+  if (!validConfig.value || saving.value || loading.value || loadError.value) return
   saving.value = true
   try {
     const response = await fetch('/admin/api/execution-config', {
@@ -72,7 +85,15 @@ onMounted(loadConfig)
                type="number" min="1" max="100" step="1" required>
         <p id="rounds-range" :class="{'invalid-range': !validRounds}" class="form-hint">1～100 轮</p>
       </div>
-      <button :disabled="saving || !validRounds" class="btn btn-primary" type="submit">
+      <h2 class="card-title mcp-heading">MCP 工具按需启用</h2>
+      <div v-for="field in mcpFields" :key="field.key" class="form-group rounds-field">
+        <label class="form-label" :for="field.key">{{ field.label }}</label>
+        <input :id="field.key" v-model.number="config[field.key]" class="form-input" type="number" min="1"
+               :max="field.maximum" step="1" required :disabled="saving">
+        <p class="form-hint">1～{{ field.maximum }}</p>
+      </div>
+      <p v-if="config.mcpMaxToolsPerEnable > config.mcpMaxToolsPerReply" class="invalid-range" role="alert">单次启用上限不能大于本次回复上限</p>
+      <button :disabled="saving || !validConfig" class="btn btn-primary" type="submit">
         {{ saving ? '保存中...' : '保存配置' }}
       </button>
     </form>
@@ -83,6 +104,7 @@ onMounted(loadConfig)
 .rounds-field {
   max-width: 360px;
 }
+.mcp-heading {margin: 24px 0 16px; padding-top: 20px; border-top: 1px solid var(--border)}
 
 .load-error {
   margin-bottom: 16px;

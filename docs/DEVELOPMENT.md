@@ -257,6 +257,11 @@ MessageService → OneBot API
 - 工具定义按“类别 → `promptOrder` → 工具名”稳定排序，避免重启或自定义工具刷新后改变 provider 的 prompt cache
   和模型偏好。私聊请求会在注入前排除 `GROUP_ONLY` 工具（当前为 `at_user`、`ban_user`、`send_poke`）。
 - 自定义工具仅支持 Lua，存储于数据库同级的 `tools/` 文件夹，启动及后台刷新时加载。每次调用创建独立 Lua 状态，宿主网络和消息操作由协程桥接，详见 [TOOLS.md](./TOOLS.md)
+- MCP 远程工具由 `agent/tools/mcp/McpTools` 适配，协议和 HTTP 客户端位于 `infrastructure/mcp`。
+  在 config.json 的 mcp.servers 或后台“MCP 服务”页面配置名称和用途描述，异步发现并缓存，按服务插件注册。
+  Executor 仅注入目录及查询/启用工具，具体工具在本次回复选中后的下一轮才开放；选择不跨会话或回复共享，
+  执行时校验本轮授权和缓存版本。调用使用独立会话，最后一轮禁止 MCP 查询、启用和执行。
+  数量限制在“执行配置”页设置。配置方式和当前 SSE 限制见 [MCP.md](./MCP.md)。
 - 拍一拍、撤回、引用回复、表情包收发、定时任务均由上述工具实现，由 Executor 根据上下文自动决策调用；天气、搜索、随机数、时间等能力来自
   `agentTools/` 目录的可导入自定义工具
 

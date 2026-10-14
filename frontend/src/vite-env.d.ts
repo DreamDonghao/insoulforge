@@ -36,6 +36,9 @@ export interface MemoryConfig {
 
 export interface ExecutionConfig {
     maxToolRounds: number
+  mcpToolPageSize: number
+  mcpMaxToolsPerEnable: number
+  mcpMaxToolsPerReply: number
 }
 
 export interface LongTermMemoryEntry {

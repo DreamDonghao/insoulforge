@@ -118,6 +118,15 @@ namespace insoulforge {
         std::vector<const RegisteredTool *> visibleTools;
         visibleTools.reserve(m_tools.size());
         for (const auto &registered: m_tools | std::views::values) {
+            if (!query.includeAllMcp) {
+                if (registered.tool.mcpManagement && !query.mcpManagement)
+                    continue;
+                if (registered.tool.mcpVersion != 0) {
+                    const auto selected = query.mcpTools.find(registered.tool.name);
+                    if (selected == query.mcpTools.end() || selected->second != registered.tool.mcpVersion)
+                        continue;
+                }
+            }
             if (query.isPrivateSession && registered.tool.scope == ToolScope::GROUP_ONLY)
                 continue;
             if (query.replyOnly && registered.category != ToolCategory::REPLY)
@@ -135,7 +144,7 @@ namespace insoulforge {
         return tools;
     }
 
-    auto ToolRegistry::getAllTools() const -> json { return getTools({}); }
+    auto ToolRegistry::getAllTools() const -> json { return getTools({.includeAllMcp = true}); }
 
     auto ToolRegistry::executeTool(const std::string name, json args, ToolCallContext ctx) const
       -> drogon::Task<std::string> {
@@ -147,6 +156,13 @@ namespace insoulforge {
                     Logger::warn(ctx.sessionId, "Tool", fmt::format("最后一轮拒绝非回复工具: {}", name));
                     co_return "最后一轮只允许回复类工具，未执行: " + name;
                 }
+                const auto offered = ctx.offeredMcpTools.find(name);
+                if (it->second.tool.mcpVersion != 0 || offered != ctx.offeredMcpTools.end()) {
+                    if (offered == ctx.offeredMcpTools.end() || offered->second != it->second.tool.mcpVersion)
+                        co_return "MCP 工具未在本轮开放或定义已更新，请查询并启用后在下一轮调用：" + name;
+                }
+                if (it->second.tool.mcpManagement && !ctx.mcpSelection)
+                    co_return "MCP 管理工具缺少当前回复的选择状态";
                 handler = it->second.tool.handler;
             }
         }

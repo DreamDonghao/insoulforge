@@ -249,6 +249,14 @@ namespace insoulforge {
     auto Config::getQQConfig() const -> json { return ConfigStore::getQQConfig(); }
     auto Config::getMemoryConfig() const -> json { return ConfigStore::getMemoryConfig(); }
     auto Config::getExecutionConfig() const -> json { return ConfigStore::getExecutionConfig(); }
+    auto Config::getMcpConfig() const -> json { return ConfigStore::getMcpConfig(); }
+    auto Config::saveMcpConfig(const json &value) -> std::expected<void, ConfigError> {
+        std::scoped_lock lock(m_updateMutex);
+        Config next;
+        return ConfigStore::saveMcpConfig(value, [&next](const json &stored) -> std::expected<void, ConfigError> {
+            return next.loadValues(stored);
+        });
+    }
 
     auto Config::saveLLMConfig(const std::string &name, const json &value) -> std::expected<void, ConfigError> {
         std::scoped_lock lock(m_updateMutex);

@@ -2,7 +2,9 @@
 /// @brief 全局配置文件存储 - 实现
 
 #include <algorithm>
+#include <array>
 #include <fstream>
+#include <utility>
 
 #include <cassert>
 
@@ -61,7 +63,9 @@ namespace insoulforge::ConfigStore {
                 {{"contextWindowLimit", 100}, {"memorySummaryTriggerCount", 100}, {"memorySummaryBatchSize", 50},
                   {"memorySummaryContextCount", 10}, {"routerWindowTriggerCount", 20}, {"routerWindowKeepCount", 10},
                   {"shortTermMemoryMax", 15}, {"longTermRecallThreshold", 0.65}, {"longTermInjectThreshold", 0.45}}},
-              {"execution", {{"maxToolRounds", ExecutionSettings::kDefaultMaxToolRounds}}}};
+              {"execution", {{"maxToolRounds", ExecutionSettings::kDefaultMaxToolRounds}, {"mcpToolPageSize", 10},
+                              {"mcpMaxToolsPerEnable", 4}, {"mcpMaxToolsPerReply", 12}}},
+              {"mcp", {{"servers", json::array()}}}};
         }
 
         auto validToolRounds(const json &value) -> bool {
@@ -69,11 +73,37 @@ namespace insoulforge::ConfigStore {
                    value <= ExecutionSettings::kMaxToolRounds;
         }
 
+        auto validInteger(const json &value, i32 maximum) -> bool {
+            return value.is_number_integer() && value >= 1 && value <= maximum;
+        }
+
+        auto validMcpLimits(const json &value) -> bool {
+            return validInteger(atOrNull(value, "mcpToolPageSize"), 50) &&
+                   validInteger(atOrNull(value, "mcpMaxToolsPerEnable"), 20) &&
+                   validInteger(atOrNull(value, "mcpMaxToolsPerReply"), 64) &&
+                   value["mcpMaxToolsPerEnable"] <= value["mcpMaxToolsPerReply"];
+        }
+
         /// @brief 启动时修复整数类型以外或越界的执行参数，不截断小数。
         auto normalizeExecutionConfig(json &config) -> bool {
+            bool changed = false;
+            auto &execution = config["execution"];
+            const auto defaults = defaultConfig()["execution"];
+            for (const auto &[key, maximum]: std::array<std::pair<const char *, i32>, 3>{
+                   {{"mcpToolPageSize", 50}, {"mcpMaxToolsPerEnable", 20}, {"mcpMaxToolsPerReply", 64}}}) {
+                if (!validInteger(execution[key], maximum)) {
+                    execution[key] = defaults[key];
+                    changed = true;
+                }
+            }
+            if (execution["mcpMaxToolsPerEnable"] > execution["mcpMaxToolsPerReply"]) {
+                execution["mcpMaxToolsPerEnable"] = defaults["mcpMaxToolsPerEnable"];
+                execution["mcpMaxToolsPerReply"] = defaults["mcpMaxToolsPerReply"];
+                changed = true;
+            }
             auto &rounds = config["execution"]["maxToolRounds"];
             if (validToolRounds(rounds)) {
-                return false;
+                return changed;
             }
             rounds = ExecutionSettings::kDefaultMaxToolRounds;
             return true;
@@ -354,6 +384,15 @@ namespace insoulforge::ConfigStore {
 
     auto getExecutionConfig() -> json { return getSection("execution"); }
 
+    auto getMcpConfig() -> json { return getSection("mcp"); }
+    auto saveMcpConfig(const json &config, const ConfigValidator &validate) -> std::expected<void, ConfigError> {
+        if (!config.is_object() || !config.contains("servers") || !config["servers"].is_array()) {
+            return std::unexpected(
+              ConfigError{.type = ConfigErrorType::InvalidArgument, .message = "mcp.servers 必须是数组"});
+        }
+        return saveSection("mcp", config, validate);
+    }
+
     auto saveExecutionConfig(const json &config, const ConfigValidator &validate) -> std::expected<void, ConfigError> {
         if (!config.is_object() || !validToolRounds(atOrNull(config, "maxToolRounds"))) {
             return std::unexpected(ConfigError{
@@ -365,6 +404,10 @@ namespace insoulforge::ConfigStore {
         requireInitializedLocked();
         auto nextConfig = fileState.content;
         nextConfig["execution"].update(config);
+        if (!validMcpLimits(nextConfig["execution"])) {
+            return std::unexpected(ConfigError{.type = ConfigErrorType::InvalidArgument,
+              .message = "MCP 每页数量须为 1～50，单次启用数量须为 1～20，总启用数量须为 1～64，且单次不能超过总数"});
+        }
         if (auto result = validate(nextConfig); !result) {
             return result;
         }

@@ -133,6 +133,9 @@ namespace insoulforge {
         ADD_METHOD_TO(AdminController::getExecutionConfig, "/admin/api/execution-config", drogon::Get);
 
         ADD_METHOD_TO(AdminController::saveExecutionConfig, "/admin/api/execution-config", drogon::Post);
+        ADD_METHOD_TO(AdminController::getMcpConfig, "/admin/api/mcp-config", drogon::Get);
+        ADD_METHOD_TO(AdminController::saveMcpConfig, "/admin/api/mcp-config", drogon::Post);
+        ADD_METHOD_TO(AdminController::refreshMcpTools, "/admin/api/mcp-config/refresh", drogon::Post);
 
         // 长期记忆
         ADD_METHOD_TO(AdminController::getLongTermMemories, "/admin/api/long-term-memory", drogon::Get);
@@ -466,6 +469,16 @@ namespace insoulforge {
 
         /// @brief 保存执行配置；无效参数不会改变配置文件或运行时值。
         auto saveExecutionConfig(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
+
+        /// @brief 获取 MCP 服务配置与加载状态，受后台访问认证保护。
+        auto getMcpConfig(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
+        /// @brief 保存服务列表并立即卸载删除或修改的服务工具。
+        auto saveMcpConfig(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
+        /// @brief 重新发现启用服务的工具，响应中返回各服务状态。
+        auto refreshMcpTools(drogon::HttpRequestPtr req,
           std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         /// @brief 分页查询长期记忆

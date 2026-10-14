@@ -19,6 +19,7 @@ const PromptEditor = defineAsyncComponent(() => import('./features/llm/PromptEdi
 const UsageStats = defineAsyncComponent(() => import('./features/llm/UsageStats.vue'))
 const OneBotConfig = defineAsyncComponent(() => import('./features/onebot/OneBotConfig.vue'))
 const CustomTools = defineAsyncComponent(() => import('./features/tools/CustomTools.vue'))
+const McpServers = defineAsyncComponent(() => import('./features/tools/McpServers.vue'))
 const EmojiManager = defineAsyncComponent(() => import('./features/tools/EmojiManager.vue'))
 const LogViewer = defineAsyncComponent(() => import('./features/diagnostics/LogViewer.vue'))
 const RequestDebug = defineAsyncComponent(() => import('./features/diagnostics/RequestDebug.vue'))
@@ -36,6 +37,7 @@ const systemNavItems: NavItem[] = [
   {key: 'qqConfig', label: 'OneBot 配置', icon: 'qq'},
   {key: 'prompts', label: '提示词', icon: 'prompts'},
   {key: 'customTools', label: '自定义工具', icon: 'tool'},
+  {key: 'mcpServers', label: 'MCP 服务', icon: 'tool'},
   {key: 'memoryConfig', label: '记忆与上下文', icon: 'memory'}
 ]
 
@@ -427,6 +429,7 @@ onUnmounted(disconnectWebSocket)
       <ExecutionConfig v-else-if="currentView === 'executionConfig'"/>
       <PromptEditor v-else-if="currentView === 'prompts'"/>
       <CustomTools v-else-if="currentView === 'customTools'"/>
+      <McpServers v-else-if="currentView === 'mcpServers'"/>
       <EmojiManager v-else-if="currentView === 'emojis'"/>
       <AccessManager v-else-if="currentView === 'admins'"/>
       <GroupManager v-else-if="currentView === 'groups'"/>

@@ -14,6 +14,8 @@
 #include <agent/ability/AsyncTaskManager.hpp>
 #include <agent/ability/TaskScheduler.hpp>
 #include <agent/runtime/AgentSystem.hpp>
+#include <agent/tools/ToolRegistry.hpp>
+#include <agent/tools/mcp/McpTools.hpp>
 #include <conversation/session/QQNameDirectory.hpp>
 #include <conversation/workflow/OneBotEventWorkflow.hpp>
 #include <infrastructure/NumericTypes.hpp>
@@ -89,6 +91,11 @@ auto main() -> int {
         // 注册工具并加载提示词；工具说明需要已经加载的机器人名称。
         if (auto result = agentSystem.initialize(database, config.botName); !result) {
             Logger::error(0, "Agent", result.error());
+            return EXIT_FAILURE;
+        }
+        // 这里只校验 MCP 配置；远程工具在首次回复前异步加载，不阻塞程序启动。
+        if (auto result = McpTools::instance().initialize(config.getMcpConfig(), ToolRegistry::instance()); !result) {
+            Logger::error(0, "MCP", result.error());
             return EXIT_FAILURE;
         }
         auto &workflow = OneBotEventWorkflow::instance();

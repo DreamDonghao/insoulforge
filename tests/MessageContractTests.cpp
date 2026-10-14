@@ -1387,8 +1387,15 @@ namespace {
         check(insoulforge::Config::instance().initialize(path.string()).has_value(), "initializes config", kTestName);
         check(insoulforge::Config::instance().getExecutionConfig()["maxToolRounds"] == 8,
           "old files receive the default limit", kTestName);
+        check(insoulforge::Config::instance().getMcpConfig()["servers"].is_array() &&
+                insoulforge::Config::instance().getMcpConfig()["servers"].empty(),
+          "old files receive disabled MCP configuration", kTestName);
         check(insoulforge::Config::instance().execution.maxToolRounds.load() == 8, "loads the default runtime limit",
           kTestName);
+        check(insoulforge::Config::instance().getExecutionConfig()["mcpToolPageSize"] == 10 &&
+                insoulforge::Config::instance().getExecutionConfig()["mcpMaxToolsPerEnable"] == 4 &&
+                insoulforge::Config::instance().getExecutionConfig()["mcpMaxToolsPerReply"] == 12,
+          "old files receive MCP defaults", kTestName);
         check(
           insoulforge::Config::instance().executorFallback.model.empty(), "fallback is disabled by default", kTestName);
         check(insoulforge::Config::instance()
@@ -1423,7 +1430,20 @@ namespace {
         check(insoulforge::Config::instance().getQQConfig()["botName"] == "existing-bot",
           "saving leaves other configuration sections unchanged", kTestName);
 
+        save(R"({"maxToolRounds":100,"mcpToolPageSize":50,"mcpMaxToolsPerEnable":20,"mcpMaxToolsPerReply":64})");
+        check(response->getStatusCode() == drogon::k200OK && insoulforge::Config::instance().getExecutionConfig()["mcpMaxToolsPerReply"] == 64,
+          "MCP boundaries save", kTestName);
+        save(R"({"maxToolRounds":100,"mcpToolPageSize":10,"mcpMaxToolsPerEnable":4,"mcpMaxToolsPerReply":12})");
         const auto stored = insoulforge::Config::instance().getExecutionConfig();
+        const auto invalidMcpValues = insoulforge::json{{"mcpToolPageSize", {0, 51, 1.5, "10"}},
+                 {"mcpMaxToolsPerEnable", {0, 21, 13}}, {"mcpMaxToolsPerReply", {0, 65, 3}}};
+        for (const auto &[field, badValues] : invalidMcpValues.items()) {
+            for (const auto &value : badValues) {
+                save(insoulforge::dumpJson({{"maxToolRounds", 100}, {field, value}}));
+                check(response->getStatusCode() == drogon::k400BadRequest && insoulforge::Config::instance().getExecutionConfig() == stored,
+                  "invalid MCP limits preserve configuration", kTestName);
+            }
+        }
         const auto invalidValues =
           insoulforge::json::array({0, -1, 101, 8.0, 8.5, "8", true, nullptr, std::numeric_limits<u64>::max()});
         for (const auto &value: invalidValues) {
@@ -1507,6 +1527,15 @@ namespace {
             const auto repaired = insoulforge::json::parse(input);
             check(repaired["execution"]["maxToolRounds"] == 8, "startup persists the repaired default", kTestName);
         }
+        {
+            std::ofstream output(path);
+            output << R"({"execution":{"maxToolRounds":8,"mcpToolPageSize":0,"mcpMaxToolsPerEnable":20,"mcpMaxToolsPerReply":1}})";
+        }
+        check(insoulforge::Config::instance().initialize(path.string()).has_value(), "repairs MCP limits", kTestName);
+        check(insoulforge::Config::instance().getExecutionConfig()["mcpToolPageSize"] == 10 &&
+                insoulforge::Config::instance().getExecutionConfig()["mcpMaxToolsPerEnable"] == 4 &&
+                insoulforge::Config::instance().getExecutionConfig()["mcpMaxToolsPerReply"] == 12,
+          "startup restores invalid and contradictory MCP limits", kTestName);
         std::filesystem::remove(path);
     }
 

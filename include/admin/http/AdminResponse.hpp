@@ -35,8 +35,17 @@ namespace insoulforge::AdminResponse {
     /// @brief 将配置保存错误转换为管理接口的失败响应。
     inline auto configErrorResponse(const ConfigError &error) -> drogon::HttpResponsePtr {
         auto response = jsonResponse(failJson(error.message));
-        response->setStatusCode(
-          error.type == ConfigErrorType::InvalidArgument ? drogon::k400BadRequest : drogon::k500InternalServerError);
+        switch (error.type) {
+            case ConfigErrorType::InvalidArgument:
+                response->setStatusCode(drogon::k400BadRequest);
+                break;
+            case ConfigErrorType::Conflict:
+                response->setStatusCode(drogon::k409Conflict);
+                break;
+            case ConfigErrorType::FileOperation:
+                response->setStatusCode(drogon::k500InternalServerError);
+                break;
+        }
         return response;
     }
 } // namespace insoulforge::AdminResponse

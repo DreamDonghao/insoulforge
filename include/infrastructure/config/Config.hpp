@@ -95,6 +95,10 @@ namespace insoulforge {
         [[nodiscard]] auto getQQConfig() const -> json;
         [[nodiscard]] auto getMemoryConfig() const -> json;
         [[nodiscard]] auto getExecutionConfig() const -> json;
+        /// @brief 获取 MCP 服务配置快照。
+        [[nodiscard]] auto getMcpConfig() const -> json;
+        /// @brief 持久化 MCP 配置；动态服务更新由 McpTools 协调。
+        [[nodiscard]] auto saveMcpConfig(const json &value) -> std::expected<void, ConfigError>;
 
         /// @brief 校验并保存配置，写入成功后更新运行时值；失败不应用新配置。
         [[nodiscard]] auto saveLLMConfig(const std::string &name, const json &value)

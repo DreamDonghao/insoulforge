@@ -11,8 +11,11 @@
 #include <conversation/history/ChatRecordManager.hpp>
 
 namespace insoulforge::ExecutorAgent {
-    /// @brief 构建本次回复的 system 提示词，保留全局内容，仅为群聊追加本群设定。
+    /// @brief 构建回复 system 提示词，保留全局内容，追加群设定和可用 MCP 服务目录。
     [[nodiscard]] auto buildSystemPrompt(const RouterDecision &decision, u64 sessionId) -> std::string;
+    /// @brief 使用本次回复冻结的 MCP 目录，不在组装过程中重新读取服务配置。
+    [[nodiscard]] auto buildSystemPrompt(const RouterDecision &decision, u64 sessionId, const json &mcpDirectory)
+      -> std::string;
     /// @brief 执行层的回复生成接口
     /// @brief 清理模型输出中的工具调用标签等污染内容
     /// @param text 原始内容
