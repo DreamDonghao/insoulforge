@@ -247,8 +247,6 @@ namespace insoulforge {
             execAll(db, v3Tables);
             execAll(db, v6Tables);
             execAll(db, v7Tables);
-            execAll(db, v8Tables);
-            execAll(db, v10Tables);
             execAll(db, v11Tables);
             execAll(db, indexes);
             execSQL(db, "DROP TABLE IF EXISTS custom_tools");
@@ -491,6 +489,12 @@ namespace insoulforge {
             execSQL(db, "DROP TABLE IF EXISTS custom_tools");
         }
 
+        void migrateV17ToV18(sqlite3 *db) {
+            Logger::info(0, "Storage", "执行迁移: 记忆维护改用内存任务，删除旧维护队列");
+            execSQL(db, "DROP TABLE IF EXISTS memory_maintenance_jobs");
+            execSQL(db, "DROP TABLE IF EXISTS affinity_maintenance_jobs");
+        }
+
         void migrateV16ToV17(sqlite3 *db) {
             execSQL(db, "CREATE TABLE IF NOT EXISTS group_config (group_id INTEGER PRIMARY KEY, all_mes_count INTEGER "
                         "DEFAULT 0)");
@@ -549,6 +553,7 @@ namespace insoulforge {
               &migrateV14ToV15, // 群名片发送开关按会话保存
               &migrateV15ToV16, // 群普通消息自动回复开关，默认开启
               &migrateV16ToV17, // 群独立附加提示词，默认留空
+              &migrateV17ToV18, // 删除记忆与好感度维护任务队列
             };
 
             for (i32 v = version; v < kLatestVersion; ++v) {

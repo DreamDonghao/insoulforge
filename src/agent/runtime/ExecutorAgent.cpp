@@ -7,7 +7,7 @@
 
 #include <agent/runtime/ExecutorAgent.hpp>
 #include <agent/tools/mcp/McpTools.hpp>
-#include <conversation/maintenance/affinity/AffinityStore.hpp>
+#include <agent/memory/affinity/AffinityStore.hpp>
 #include <conversation/message/MessageRecord.hpp>
 #include <conversation/message/SessionId.hpp>
 #include <conversation/session/SessionStore.hpp>

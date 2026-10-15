@@ -245,7 +245,10 @@ const deleteRecord = async (recordId: number): Promise<void> => {
 // 清空当前会话的聊天记录
 const clearGroupRecords = async (): Promise<void> => {
   if (!selectedGroup.value) return
-  if (!confirm('确定清空该会话的所有聊天记录？此操作不可恢复！')) return
+  if (!confirm(
+    '确定清空该会话的所有聊天记录？此操作不可恢复！\n' +
+    '若当前有记忆总结任务正在执行，清空后收到的新消息也可能在该任务完成时被删除。这不会撤回群内消息。',
+  )) return
 
   try {
     const resp = await fetch(`/admin/api/chat-records/${selectedGroup.value}/clear`, {method: 'DELETE'})

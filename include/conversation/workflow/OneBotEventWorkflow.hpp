@@ -31,12 +31,12 @@ namespace insoulforge {
         /// @note 线程安全。C++ 保证函数内静态对象只初始化一次；取得实例后仍应遵循各公开成员函数的并发约束。
         [[nodiscard]] static auto instance() -> OneBotEventWorkflow &;
 
-        /// @brief 显式恢复会话并调度遗留维护任务；获取单例不会触发恢复。
+        /// @brief 显式恢复会话消息列表；获取单例不会触发恢复。
         /// @param database 已成功打开并完成迁移的数据库。
         /// @param config 已成功加载的运行时配置。
         /// @param agent 已成功初始化的 Agent，用于检查是否允许处理消息。
         /// @note 仅在启动期、接收事件前调用；依赖对象必须比工作流存活更久。
-        /// 同一组依赖重复初始化不会重复恢复或调度任务。
+        /// 同一组依赖重复初始化不会重复恢复消息。
         [[nodiscard]] auto initialize(const Database &database, const Config &config, const AgentSystem &agent)
           -> std::expected<void, std::string>;
 
@@ -48,7 +48,7 @@ namespace insoulforge {
         /// @param sessionId 所属会话 ID
         /// @param message 完整助手消息 JSON
         /// @details OneBot 确认发送成功后调用；消息会进入内存列表并推送给管理后台。
-        /// @note 线程安全。函数完成时消息已写入内存列表；若触发记忆总结，任务已持久化并交给异步消费者。
+        /// @note 线程安全。函数完成时消息已写入内存列表；追加本身不触发记忆维护。
         void appendDeliveredAssistantMessage(u64 sessionId, json message);
 
         /// @brief 将后台任务系统状态写入完整消息列表，不触发 Router 或 Executor

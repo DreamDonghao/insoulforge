@@ -115,9 +115,11 @@ cd frontend && npm run type-check
 契约测试默认不参与常规构建。执行测试时先显式构建测试目标，再运行 CTest：
 
 ```bash
-cmake --build cmake-build-debug --target insoulforge_message_contract_tests -j8
+cmake --build cmake-build-debug --target insoulforge_message_contract_tests insoulforge_mcp_tests insoulforge_memory_tests -j8
 ctest --test-dir cmake-build-debug --output-on-failure
 ```
+
+记忆维护测试使用本机临时 HTTP 接口模拟模型，不访问外部服务；测试结束后自动关闭。
 
 ## 项目结构
 
@@ -127,7 +129,9 @@ insoulforge/
 ├── include/                  # 头文件（按模块分目录）
 │   ├── agent/
 │   │   ├── ability/          # 定时任务、后台耗时任务及其存储
-│   │   ├── memory/           # Agent 记忆的查询、召回与存储
+│   │   ├── memory/           # 记忆的查询、召回与存储
+│   │   │   ├── maintenance/  # 记忆维护调度、聊天记忆总结与任务存储
+│   │   │   └── affinity/     # 好感度评估与存储
 │   │   ├── runtime/          # AgentSystem / ExecutorAgent / AgentTypes
 │   │   └── tools/            # 工具运行时、插件、自定义工具与表情缓存
 │   │       ├── custom/       # 自定义工具执行与存储
@@ -139,7 +143,6 @@ insoulforge/
 │   │   └── logging/          # 实时日志推送
 │   ├── conversation/
 │   │   ├── history/          # 聊天记录及其存储
-│   │   ├── maintenance/      # 派生状态维护任务协调、记忆维护与好感度维护
 │   │   ├── message/          # 统一消息模型与会话 ID
 │   │   ├── session/          # 会话配置、存储与昵称目录
 │   │   └── workflow/         # OneBot 消息处理工作流
@@ -224,8 +227,8 @@ MessageService → OneBot API
 - 回复阶段与消息预处理阶段解耦。已有回复任务时，@机器人和系统任务进入回复队列，普通消息仅完成预处理、记录 `AgentBusy`
   ，不会打断正在生成的回复。
 - `MessageList` 是 Router、Executor 和工具的唯一运行时消息源。它保存完整消息，但快照始终最多暴露
-  `contextWindowLimit` 条近期消息。达到 `memorySummaryTriggerCount` 时，它选取最旧的
-  `memorySummaryBatchSize` 条创建总结任务；任务完成后才删除这批消息。启动时从数据库恢复，正常退出时调用
+  `contextWindowLimit` 条近期消息。预处理结束后，若消息数达到或超过 `memorySummaryTriggerCount` 且没有执行中的维护任务，
+  则选取最旧的 `memorySummaryBatchSize` 条启动内存维护任务；全部结果提交成功后才按条数删除队首消息。启动时从数据库恢复消息，正常退出时调用
   `flushToStorage()` 覆盖持久化恢复副本。
 - 拍一拍、入群、退群均归一化为类型化消息段：`poke`、`member_event`。拍一拍不再按参与者区分，所有拍一拍通知均与普通消息一样交由
   Router 决策。
@@ -239,7 +242,7 @@ MessageService → OneBot API
 - 预处理、路由、执行或发送的异常均限制在当前消息或当前回复任务内，不能使同会话队列停滞。工作流不使用轮询或忙等待。
 
 新增主处理步骤时，先确定其属于消息预处理阶段还是回复阶段，再在 `OneBotEventWorkflow` 的对应队列处理函数中调用一个职责单一的组件。
-不得跨阶段持有锁或修改已交给回复队列的消息快照；需要扩展的后处理应优先消费持久化的维护任务，或在工作流中定义明确的调用边界。
+不得跨阶段持有锁或修改已交给回复队列的消息快照；需要扩展的后处理应在工作流中定义明确的调用边界。
 
 ### 工具系统
 
@@ -298,23 +301,33 @@ MessageService → OneBot API
 
 `HttpUtil::send` 返回 `std::expected<HttpResponsePtr, std::string>`：网络、地址或超时失败在 `error()` 中，收到的 HTTP 4xx/5xx 仍是有效响应，由调用方检查状态码。调试记录保持原有脱敏规则；对模型只回传必要、限长的错误详情。
 
-此管理器与 `TaskScheduler`（到点触发）及 `ConversationMaintenanceService`（持久化、重试和重启恢复）用途不同。每个会话仅有一个
+此管理器与 `TaskScheduler`（到点触发）及 `MemoryMaintenanceCoordinator`（聊天记忆与好感度维护）用途不同。每个会话仅有一个
 运行中的耗时任务，不同会话可以并行；正常退出时 `main` 在 `MessageList` 落库前调用 `stop()` 记录中断，但不会等待处理器
 完成。需要重启恢复、取消或进度查询的实际能力应另外设计持久化状态，不能假设该接口已有这些保证。
 
-### 会话派生状态维护
+### 记忆维护
+
+记忆模块包括聊天记忆和好感度：前者保存对话中值得记住的信息，后者保存机器人对用户的互动印象。
+统一入口负责依次计算聊天记忆和好感度，全部成功后一起保存。
 
 - **短期记忆**：`MemoryManager` 按统一会话 ID 从 SQLite 读取当前短期记忆，供 Executor 构建提示词。
 - **长期记忆**：`LongTermMemory` 封装 `long_term_memory` 表的读取与向量检索；embedding 以 `f32` 数组存入 BLOB。
-- **维护批次**：`MessageList` 到达 `memorySummaryTriggerCount` 后，选取最旧的 `memorySummaryBatchSize` 条消息作为待总结内容，并复制随后最多
+- **维护批次**：工作流在每条消息预处理结束后检查消息列表；达到或超过 `memorySummaryTriggerCount` 且没有待处理总结任务时，
+  选取最旧的 `memorySummaryBatchSize` 条消息作为待总结内容，并复制随后最多
   `memorySummaryContextCount` 条只读上下文。待总结消息在任务成功前继续保留在列表中。
-- **任务持久化与恢复**：`ConversationMaintenanceService` 通过 `ConversationMaintenanceStore` 在同一 SQLite 事务中创建
-  `memory_maintenance_jobs` 与 `affinity_maintenance_jobs`，随后分别异步调度消费者。两类任务各自按会话串行、退避重试，并在启动时由
-  `resumePending(database)` 恢复；它们互不依赖。
-- **记忆维护**：`MemoryMaintenanceService` 提取并归类短期/长期记忆；它会按 `longTermRecallThreshold`
-  召回相似长期记忆，用于合并、去重和替换。embedding 完成后，在同一事务中更新短期记忆、写入长期记忆、删除被取代条目并确认任务完成。只有该任务成功并确认后，
-  `MessageList` 才删除对应的最旧前缀。
-- **好感度维护**：`AffinityMaintenanceService` 消费同一待总结批次，但独立评估、重试和恢复；任务完成时以事务应用分数并删除任务，避免重试重复叠加。
+  追加机器人回复或内部记录不会单独触发总结；任务成功收尾只清理已总结消息，下一批由后续消息预处理触发。
+  启动时不恢复维护任务，也不为历史消息主动创建新批次。
+- **内存任务**：`MemoryMaintenanceCoordinator` 先计算聊天记忆，再评估同批消息的好感度；两项全部成功后，
+  由 `MemoryMaintenanceStore` 在同一 SQLite 事务中保存结果。任务本身不写入数据库，不保存完成状态或重试次数。
+  数据库升级到 v18 时删除旧维护任务表，不迁移未完成任务；已有消息、记忆和好感度结果保留。
+- **聊天记忆总结**：`MemoryMaintenanceService` 提取并归类短期/长期记忆，按 `longTermRecallThreshold`
+  召回相似长期记忆，用于合并、去重和替换；计算期间不写入结果。
+  未配置向量模型时只维护短期记忆；已配置但向量化失败时，本批次不提交，等待后续消息重新触发。
+- **好感度评估**：`AffinityMaintenanceService` 返回同批消息的好感度变化，计算期间不累计分数。
+- **任务收尾**：同一会话最多执行一个维护任务。全部成功并提交后，按批次条数删除消息列表队首；失败保留消息并释放执行状态，
+  等下一条消息重新触发，不自动循环重试。重启后不恢复任务，后续消息会根据恢复的消息列表重新触发。
+- **清空消息**：不会取消执行中的维护任务；旧任务成功后仍按原批次数量删除队首，可能删除清空后收到的新消息。
+  前端清空确认框会提示此行为，不影响群内实际发送的消息。
 - 记忆提取、整理与好感度评分使用独立 memory 模型（`LlmClient::requestMaintenance`，好感度请求限制为 256 个输出 token）；向量化使用独立 embedding 配置（
   `LlmClient::requestEmbedding`）。`recall_memory` 工具按余弦相似度（阈值 0.3）检索长期记忆，Router 另有
   `routerWindowTriggerCount` / `routerWindowKeepCount` 子窗口参数。
@@ -387,7 +400,7 @@ JSON 损坏则备份为 `config.json.broken.<时间戳>` 后重建；缺失或�
 ### 数据库
 
 SQLite 文件位于 `data/insoulforge.db`（`Database`
-单例，以读写锁保护）。存储包括完整消息恢复副本、短期/长期记忆、记忆与好感度维护任务、提示词、会话配置、管理员、全局 QQ
+单例，以读写锁保护）。存储包括完整消息恢复副本、短期/长期记忆、好感度、提示词、会话配置、管理员、全局 QQ
 黑名单和表情。全局运行配置与自定义工具不属于数据库，分别位于同目录的
 `config.json` 和 `tools/`。
 

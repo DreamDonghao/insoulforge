@@ -46,3 +46,20 @@ else()
 endif()
 add_test(NAME mcp_client COMMAND insoulforge_mcp_tests)
 set_tests_properties(mcp_client PROPERTIES TIMEOUT 30)
+
+add_executable(insoulforge_memory_tests EXCLUDE_FROM_ALL
+        MemoryMaintenanceTests.cpp
+        $<TARGET_OBJECTS:${PROJECT_NAME}_backend>)
+target_compile_features(insoulforge_memory_tests PRIVATE cxx_std_23)
+target_include_directories(insoulforge_memory_tests PRIVATE
+        ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(insoulforge_memory_tests PRIVATE
+        Drogon::Drogon spdlog::spdlog_header_only fmt::fmt-header-only
+        SQLite3_lib OpenSSL::Crypto PNG::PNG ${GIFLIB_LIBRARY} ${LUA_LIBRARIES})
+if(nlohmann_json_FOUND)
+    target_link_libraries(insoulforge_memory_tests PRIVATE nlohmann_json::nlohmann_json)
+else()
+    target_include_directories(insoulforge_memory_tests PRIVATE ${NLOHMANN_JSON_INCLUDE_DIR})
+endif()
+add_test(NAME memory_maintenance COMMAND insoulforge_memory_tests)
+set_tests_properties(memory_maintenance PROPERTIES TIMEOUT 30)

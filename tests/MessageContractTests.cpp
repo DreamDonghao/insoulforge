@@ -23,6 +23,10 @@
 #include <agent/ability/AsyncTaskManager.hpp>
 #include <agent/memory/LongTermMemoryStore.hpp>
 #include <agent/memory/MemoryStore.hpp>
+#include <agent/memory/affinity/AffinityMaintenanceService.hpp>
+#include <agent/memory/affinity/AffinityStore.hpp>
+#include <agent/memory/maintenance/MemoryMaintenanceService.hpp>
+#include <agent/memory/maintenance/MemoryMaintenanceStore.hpp>
 #include <agent/runtime/AgentSystem.hpp>
 #include <agent/runtime/ExecutorAgent.hpp>
 #include <agent/tools/ToolRegistry.hpp>
@@ -30,10 +34,6 @@
 #include <agent/tools/custom/ToolStore.hpp>
 #include <agent/tools/plugins/ActionToolsPlugin.hpp>
 #include <conversation/history/ChatRecordStore.hpp>
-#include <conversation/maintenance/ConversationMaintenanceStore.hpp>
-#include <conversation/maintenance/affinity/AffinityMaintenanceStore.hpp>
-#include <conversation/maintenance/affinity/AffinityStore.hpp>
-#include <conversation/maintenance/memory/MemoryMaintenanceStore.hpp>
 #include <conversation/message/MessageRecord.hpp>
 #include <conversation/message/SessionId.hpp>
 #include <conversation/session/QQNameDirectory.hpp>
@@ -48,6 +48,7 @@
 #include <infrastructure/http/HttpUtil.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/SchemaMigrator.hpp>
+#include <infrastructure/storage/Statement.hpp>
 #include <llm/JevClient.hpp>
 #include <llm/prompts/PromptService.hpp>
 #include <llm/usage/UsageStore.hpp>
@@ -106,12 +107,11 @@ namespace {
 
         insoulforge::json selfEvent = body;
         auto cardEvent = body;
-        for (const auto role : {"owner", "admin", "member"}) {
+        for (const auto role: {"owner", "admin", "member"}) {
             auto roleEvent = body;
             roleEvent["sender"]["role"] = role;
             const auto roleRecord = insoulforge::OneBotEventNormalizer::normalize(roleEvent);
-            check(roleRecord && (*roleRecord)["sender"]["role"] == role,
-              "group role is preserved", kTestName);
+            check(roleRecord && (*roleRecord)["sender"]["role"] == role, "group role is preserved", kTestName);
             if (roleRecord) {
                 check(insoulforge::MessageRecord::projectForAgent(*roleRecord)["sender"]["role"] == role,
                   "agent context includes group role", kTestName);
@@ -122,12 +122,11 @@ namespace {
             check(privateRoleRecord && !(*privateRoleRecord)["sender"].contains("role"),
               "private messages omit group role", kTestName);
         }
-        for (const auto role : {"", "unknown"}) {
+        for (const auto role: {"", "unknown"}) {
             auto roleEvent = body;
             roleEvent["sender"]["role"] = role;
             const auto roleRecord = insoulforge::OneBotEventNormalizer::normalize(roleEvent);
-            check(roleRecord && !(*roleRecord)["sender"].contains("role"),
-              "invalid group role is omitted", kTestName);
+            check(roleRecord && !(*roleRecord)["sender"].contains("role"), "invalid group role is omitted", kTestName);
         }
         cardEvent["sender"]["card"] = "Group Alice";
         const auto cardRecord = insoulforge::OneBotEventNormalizer::normalize(cardEvent);
@@ -503,11 +502,11 @@ namespace {
         sqlite3_finalize(stmt);
         const i32 jobPrepareResult = sqlite3_prepare_v2(
           db, "SELECT messages, attempt_count FROM memory_maintenance_jobs LIMIT 1", -1, &stmt, nullptr);
-        check(jobPrepareResult == SQLITE_OK, "migration creates durable memory maintenance jobs", kTestName);
+        check(jobPrepareResult != SQLITE_OK, "migration removes memory maintenance jobs", kTestName);
         sqlite3_finalize(stmt);
         const i32 affinityJobPrepareResult = sqlite3_prepare_v2(
           db, "SELECT messages, attempt_count FROM affinity_maintenance_jobs LIMIT 1", -1, &stmt, nullptr);
-        check(affinityJobPrepareResult == SQLITE_OK, "migration creates durable affinity maintenance jobs", kTestName);
+        check(affinityJobPrepareResult != SQLITE_OK, "migration removes affinity maintenance jobs", kTestName);
         sqlite3_finalize(stmt);
         check(sqlite3_prepare_v2(db, "SELECT * FROM custom_tools", -1, &stmt, nullptr) != SQLITE_OK,
           "migration removes legacy tool storage", kTestName);
@@ -917,57 +916,74 @@ namespace {
     }
 
     void testMemoryMaintenanceStore() {
-        constexpr std::string_view kTestName = "memory maintenance store";
+        constexpr std::string_view kTestName = "memory maintenance results";
         auto &database = insoulforge::Database::instance();
         check(database.initialize(":memory:").has_value(), "initializes database", kTestName);
-
-        const insoulforge::json messages = {{{"message_id", "1"}, {"segments", insoulforge::json::array()}}};
-        const i64 firstJob = insoulforge::MemoryMaintenanceStore::enqueue(100, messages, insoulforge::json::array(), 2);
-        const auto pending = insoulforge::MemoryMaintenanceStore::pendingSessionIds();
-        check(pending == std::vector<u64>{100}, "pending session survives storage boundary", kTestName);
-        const auto first = insoulforge::MemoryMaintenanceStore::next(100);
-        check(first && first->id == firstJob && first->messages == messages, "loads oldest persisted job", kTestName);
-
-        insoulforge::MemoryMaintenanceStore::incrementAttempt(firstJob);
-        const auto retried = insoulforge::MemoryMaintenanceStore::next(100);
-        check(retried && retried->attemptCount == 1, "persists retry count", kTestName);
-
-        insoulforge::MemoryMaintenanceStore::complete(firstJob, 100, std::string("近期状态\n"), {});
-        check(!insoulforge::MemoryMaintenanceStore::next(100), "completed job is no longer executable", kTestName);
-        check(insoulforge::MemoryMaintenanceStore::takeCompleted(100) == 2,
-          "completed job reports its deferred removal count", kTestName);
-        check(insoulforge::MemoryStore::getShortTermMemory(100) == "近期状态\n", "completion commits short-term memory",
-          kTestName);
-
-        const i64 secondJob =
-          insoulforge::MemoryMaintenanceStore::enqueue(100, messages, insoulforge::json::array(), 0);
+        const auto noTaskTables = [&]() -> bool {
+            sqlite3_stmt *stmt = nullptr;
+            const bool prepared = sqlite3_prepare_v2(database.handle(),
+                                    "SELECT COUNT(*) FROM sqlite_master WHERE name IN "
+                                    "('memory_maintenance_jobs','affinity_maintenance_jobs')",
+                                    -1, &stmt, nullptr) == SQLITE_OK;
+            const bool absent = prepared && sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_int(stmt, 0) == 0;
+            sqlite3_finalize(stmt);
+            return absent;
+        };
+        check(noTaskTables(), "fresh schema has no maintenance queues", kTestName);
         const insoulforge::PreparedLongTermMemory longTerm{
           .content = "Alice 喜欢 C++", .embedding = {0.1F, 0.2F}, .replacedIds = {}};
-        insoulforge::MemoryMaintenanceStore::complete(secondJob, 100, std::nullopt, {longTerm});
-        check(insoulforge::LongTermMemoryStore::countMemories(100) == 1,
-          "completion commits long-term memory in the same transaction", kTestName);
-        database.close();
-    }
-
-    void testConversationMaintenanceStore() {
-        constexpr std::string_view kTestName = "conversation maintenance store";
-        auto &database = insoulforge::Database::instance();
-        check(database.initialize(":memory:").has_value(), "initializes database", kTestName);
-
-        const insoulforge::json messages = {{{"message_id", "1"}, {"segments", insoulforge::json::array()}}};
-        const insoulforge::json context = {{{"message_id", "2"}, {"segments", insoulforge::json::array()}}};
-        insoulforge::ConversationMaintenanceStore::enqueue(100, messages, context);
-
-        const auto memoryJob = insoulforge::MemoryMaintenanceStore::next(100);
-        const auto affinityJob = insoulforge::AffinityMaintenanceStore::next(100);
-        check(memoryJob && memoryJob->messages == messages && memoryJob->contextMessages == context,
-          "creates memory task with its summary context", kTestName);
-        check(affinityJob && affinityJob->messages == messages, "creates affinity task from the same batch", kTestName);
-
-        insoulforge::AffinityMaintenanceStore::complete(affinityJob->id, 100, {{11, 3}});
-        check(!insoulforge::AffinityMaintenanceStore::next(100), "completed affinity task is removed", kTestName);
-        check(insoulforge::AffinityStore::getAffinityMap(100)[11] == 3,
-          "completion applies affinity changes atomically", kTestName);
+        insoulforge::MemoryMaintenanceStore::apply(
+          database, 100, {.shortTerm = "近期状态", .longTerm = {longTerm}}, {{11, 3}});
+        const auto resultsPreserved = [&]() -> bool {
+            return insoulforge::MemoryStore::getShortTermMemory(100) == "近期状态" &&
+                   insoulforge::LongTermMemoryStore::countMemories(100) == 1 &&
+                   insoulforge::AffinityStore::getAffinityMap(100)[11] == 3;
+        };
+        check(resultsPreserved(), "commits memory and affinity together", kTestName);
+        check(sqlite3_exec(database.handle(),
+                "CREATE TRIGGER reject_affinity BEFORE INSERT ON group_affinity BEGIN SELECT RAISE(ABORT, 'test'); END",
+                nullptr, nullptr, nullptr) == SQLITE_OK,
+          "creates failure fixture", kTestName);
+        bool failed = false;
+        try {
+            insoulforge::MemoryMaintenanceStore::apply(
+              database, 100, {.shortTerm = "不能保存", .longTerm = {longTerm}}, {{12, 5}});
+        } catch (const insoulforge::DbError &) {
+            failed = true;
+        }
+        check(failed && resultsPreserved(), "affinity failure rolls back all memory writes", kTestName);
+        check(sqlite3_exec(database.handle(), "DROP TRIGGER reject_affinity", nullptr, nullptr, nullptr) == SQLITE_OK,
+          "removes failure fixture", kTestName);
+        insoulforge::MemoryMaintenanceStore::apply(database, 100, {}, {});
+        check(resultsPreserved(), "empty result preserves saved memory", kTestName);
+        const auto memory = drogon::sync_wait(
+          insoulforge::MemoryMaintenanceService::prepare(100, insoulforge::json::array(), insoulforge::json::array()));
+        const auto affinity =
+          drogon::sync_wait(insoulforge::AffinityMaintenanceService::prepare(100, insoulforge::json::array()));
+        check(memory.has_value() && affinity && affinity->empty(), "empty input is a successful empty calculation",
+          kTestName);
+        check(sqlite3_exec(database.handle(),
+                "CREATE TABLE memory_maintenance_jobs(id INTEGER PRIMARY KEY);"
+                "INSERT INTO memory_maintenance_jobs VALUES(1);"
+                "CREATE TABLE affinity_maintenance_jobs(id INTEGER PRIMARY KEY);"
+                "INSERT INTO affinity_maintenance_jobs VALUES(1);"
+                "PRAGMA user_version = 17",
+                nullptr, nullptr, nullptr) == SQLITE_OK,
+          "creates v17 queues", kTestName);
+        insoulforge::SchemaMigrator::migrate(database.handle());
+        check(noTaskTables() && resultsPreserved(), "upgrade removes old tasks but preserves results", kTestName);
+        insoulforge::MemoryMaintenanceStore::apply(database, 200, {.longTerm = {longTerm}}, {});
+        const auto oldEntries = insoulforge::LongTermMemoryStore::listMemories(200, 1, 0);
+        const i64 sourceId = oldEntries.front().id;
+        const insoulforge::PreparedLongTermMemory replacementA{
+          .content = "Alice 喜欢编程", .embedding = {0.1F, 0.2F}, .replacedIds = {sourceId, sourceId}};
+        const insoulforge::PreparedLongTermMemory replacementB{
+          .content = "Alice 使用 C++", .embedding = {0.2F, 0.3F}, .replacedIds = {sourceId}};
+        insoulforge::MemoryMaintenanceStore::apply(database, 200, {.longTerm = {replacementA, replacementB}}, {});
+        const auto replacements = insoulforge::LongTermMemoryStore::listMemories(200, 10, 0);
+        check(replacements.size() == 2 &&
+                std::ranges::none_of(replacements, [sourceId](const auto &entry) { return entry.id == sourceId; }),
+          "store deduplicates replacement IDs across all new memories", kTestName);
         database.close();
     }
 
@@ -1454,16 +1470,18 @@ namespace {
           "saving leaves other configuration sections unchanged", kTestName);
 
         save(R"({"maxToolRounds":100,"mcpToolPageSize":50,"mcpMaxToolsPerEnable":20,"mcpMaxToolsPerReply":64})");
-        check(response->getStatusCode() == drogon::k200OK && insoulforge::Config::instance().getExecutionConfig()["mcpMaxToolsPerReply"] == 64,
+        check(response->getStatusCode() == drogon::k200OK &&
+                insoulforge::Config::instance().getExecutionConfig()["mcpMaxToolsPerReply"] == 64,
           "MCP boundaries save", kTestName);
         save(R"({"maxToolRounds":100,"mcpToolPageSize":10,"mcpMaxToolsPerEnable":4,"mcpMaxToolsPerReply":12})");
         const auto stored = insoulforge::Config::instance().getExecutionConfig();
         const auto invalidMcpValues = insoulforge::json{{"mcpToolPageSize", {0, 51, 1.5, "10"}},
-                 {"mcpMaxToolsPerEnable", {0, 21, 13}}, {"mcpMaxToolsPerReply", {0, 65, 3}}};
-        for (const auto &[field, badValues] : invalidMcpValues.items()) {
-            for (const auto &value : badValues) {
+          {"mcpMaxToolsPerEnable", {0, 21, 13}}, {"mcpMaxToolsPerReply", {0, 65, 3}}};
+        for (const auto &[field, badValues]: invalidMcpValues.items()) {
+            for (const auto &value: badValues) {
                 save(insoulforge::dumpJson({{"maxToolRounds", 100}, {field, value}}));
-                check(response->getStatusCode() == drogon::k400BadRequest && insoulforge::Config::instance().getExecutionConfig() == stored,
+                check(response->getStatusCode() == drogon::k400BadRequest &&
+                        insoulforge::Config::instance().getExecutionConfig() == stored,
                   "invalid MCP limits preserve configuration", kTestName);
             }
         }
@@ -1552,7 +1570,8 @@ namespace {
         }
         {
             std::ofstream output(path);
-            output << R"({"execution":{"maxToolRounds":8,"mcpToolPageSize":0,"mcpMaxToolsPerEnable":20,"mcpMaxToolsPerReply":1}})";
+            output
+              << R"({"execution":{"maxToolRounds":8,"mcpToolPageSize":0,"mcpMaxToolsPerEnable":20,"mcpMaxToolsPerReply":1}})";
         }
         check(insoulforge::Config::instance().initialize(path.string()).has_value(), "repairs MCP limits", kTestName);
         check(insoulforge::Config::instance().getExecutionConfig()["mcpToolPageSize"] == 10 &&
@@ -1604,8 +1623,8 @@ namespace {
         check(database.initialize(":memory:").has_value(), "initializes database", kTestName);
         insoulforge::MessageList messages(987654, database, insoulforge::Config::instance());
         const auto update = messages.append(record);
-        check(update && update->messageSnapshot.back()["tool_history"] == history,
-          "no_reply history enters the context snapshot", kTestName);
+        check(update && update->back()["tool_history"] == history, "no_reply history enters the context snapshot",
+          kTestName);
         messages.flushToStorage();
         insoulforge::MessageList restored(987654, database, insoulforge::Config::instance());
         check(restored.fullSnapshot() == messages.fullSnapshot(), "no_reply survives persistence and restoration",
@@ -1767,31 +1786,27 @@ namespace {
 
         insoulforge::MessageList messages(100, database, config);
         const auto first = messages.append(makeMessage(1));
+        check(!messages.createSummaryBatch(), "does not summarize below threshold", kTestName);
         static_cast<void>(messages.append(makeMessage(2)));
-        const auto third = messages.append(makeMessage(3));
+        static_cast<void>(messages.append(makeMessage(3)));
         const auto fourth = messages.append(makeMessage(4));
+        check(!messages.append(makeMessage(4)), "duplicate message ID returns no snapshot", kTestName);
+        const auto batch = messages.createSummaryBatch();
 
-        check(first->messageSnapshot.size() == 1, "first snapshot stays immutable after later appends", kTestName);
-        check(third->summaryBatch.has_value(), "reaches trigger by reserving a summary batch", kTestName);
-        check(third->summaryBatch->messages.size() == 2, "summary batch has configured size", kTestName);
-        check(
-          third->summaryBatch->messages[0]["message_id"] == "1", "summary batch keeps chronological order", kTestName);
-        check(third->summaryBatch->contextMessages.size() == 1, "summary batch includes configured context", kTestName);
-        check(!fourth->summaryBatch, "does not create another summary while one is pending", kTestName);
-        check(fourth->messageSnapshot.size() == 2, "snapshot retains configured recent window", kTestName);
-        check(
-          fourth->messageSnapshot[0]["message_id"] == "3", "snapshot starts at configured context limit", kTestName);
-        check(fourth->messageSnapshot[1]["assets"]["images"][0]["source"]["url"] == "https://example.com/image.jpg",
+        check(first->size() == 1, "first snapshot stays immutable after later appends", kTestName);
+        check(batch.has_value(), "reserves summary when message count exceeds threshold", kTestName);
+        check(batch->messages.size() == 2, "summary batch has configured size", kTestName);
+        check(batch->messages[0]["message_id"] == "1", "summary batch keeps chronological order", kTestName);
+        check(batch->contextMessages.size() == 1, "summary batch includes configured context", kTestName);
+        check(!messages.createSummaryBatch(), "does not create another summary while one is pending", kTestName);
+        check(fourth->size() == 2, "snapshot retains configured recent window", kTestName);
+        check((*fourth)[0]["message_id"] == "3", "snapshot starts at configured context limit", kTestName);
+        check((*fourth)[1]["assets"]["images"][0]["source"]["url"] == "https://example.com/image.jpg",
           "complete image source remains available to tools", kTestName);
         check(insoulforge::ChatRecordStore::getChatRecords(100).empty(), "runtime append does not write database",
           kTestName);
 
-        insoulforge::MemoryMaintenanceStore::enqueue(100, third->summaryBatch->messages,
-          third->summaryBatch->contextMessages, third->summaryBatch->messages.size());
-        const auto job = insoulforge::MemoryMaintenanceStore::next(100);
-        check(job.has_value(), "reserved summary batch is persistable", kTestName);
-        insoulforge::MemoryMaintenanceStore::complete(job->id, 100, std::nullopt, {});
-        static_cast<void>(messages.removeCompletedSummaryMessages());
+        messages.finishSummaryBatch(batch->messages.size());
         check(messages.snapshot().size() == 2, "completed summary deletes only its oldest batch", kTestName);
         check(messages.snapshot()[0]["message_id"] == "3", "completed summary retains newer messages", kTestName);
 
@@ -1799,8 +1814,7 @@ namespace {
         const auto restoredRecords = insoulforge::ChatRecordStore::getChatRecords(100);
         check(restoredRecords.size() == 2, "flush persists only retained messages", kTestName);
         insoulforge::MessageList restored(100, database, config);
-        check(
-          restored.snapshot() == fourth->messageSnapshot, "startup restoration rebuilds retained snapshot", kTestName);
+        check(restored.snapshot() == (*fourth), "startup restoration rebuilds retained snapshot", kTestName);
 
         messages.clear();
         check(messages.fullSnapshot().empty(), "clear removes runtime messages", kTestName);
@@ -1811,16 +1825,33 @@ namespace {
 
         static_cast<void>(messages.append(makeMessage(5)));
         static_cast<void>(messages.append(makeMessage(6)));
-        const auto pending = messages.append(makeMessage(7));
-        insoulforge::MemoryMaintenanceStore::enqueue(100, pending->summaryBatch->messages,
-          pending->summaryBatch->contextMessages, pending->summaryBatch->messages.size());
-        const auto oldJob = insoulforge::MemoryMaintenanceStore::next(100);
+        static_cast<void>(messages.append(makeMessage(7)));
+        const auto pending = messages.createSummaryBatch();
+        check(pending.has_value(), "reserves summary at exact threshold", kTestName);
         messages.clear();
         static_cast<void>(messages.append(makeMessage(8)));
-        insoulforge::MemoryMaintenanceStore::complete(oldJob->id, 100, std::nullopt, {});
-        static_cast<void>(messages.removeCompletedSummaryMessages());
-        check(messages.fullSnapshot().size() == 1 && messages.fullSnapshot()[0]["message_id"] == "8",
-          "old summary completion cannot delete messages received after clear", kTestName);
+        check(!messages.createSummaryBatch(), "clear does not release an active task", kTestName);
+        messages.finishSummaryBatch(pending->messages.size());
+        check(messages.fullSnapshot().empty(), "old completion deletes the current prefix even after manual clear",
+          kTestName);
+
+        static_cast<void>(messages.append(makeMessage(9)));
+        static_cast<void>(messages.append(makeMessage(10)));
+        static_cast<void>(messages.append(makeMessage(11)));
+        check(messages.createSummaryBatch().has_value(), "starts a batch at threshold", kTestName);
+        messages.finishSummaryBatch(0);
+        check(messages.fullSnapshot().size() == 3, "failed task preserves messages", kTestName);
+        const auto retried = messages.createSummaryBatch();
+        check(retried.has_value(), "a later preparation check can retry a failed batch", kTestName);
+        static_cast<void>(messages.append(makeMessage(12)));
+        static_cast<void>(messages.append(makeMessage(13)));
+        messages.finishSummaryBatch(retried->messages.size());
+        check(messages.fullSnapshot().size() == 3, "success deletes only the reserved count", kTestName);
+        check(messages.createSummaryBatch().has_value(), "completion does not reserve the next batch", kTestName);
+        messages.flushToStorage();
+        insoulforge::MessageList restarted(100, database, config);
+        check(
+          restarted.createSummaryBatch().has_value(), "restart does not restore in-memory execution state", kTestName);
 
         config.contextWindowLimit = originalContextLimit;
         config.memorySummaryTriggerCount = originalTriggerCount;
@@ -1925,7 +1956,6 @@ auto main() -> int {
     testHttpTraceImageRedaction();
     testCharacterImageToolRequiresUpload();
     testMemoryMaintenanceStore();
-    testConversationMaintenanceStore();
     testMemoryModelConfigMigration();
     testConfigFacade();
     testExecutionConfig();
