@@ -1,10 +1,9 @@
 /// @file MemoryMaintenanceCoordinator.hpp
-/// @brief 记忆维护的统一入口，负责调度聊天记忆总结和好感度评估
+/// @brief 计算聊天记忆与好感度，全部成功后统一保存
 
 #pragma once
 
-#include <functional>
-#include <optional>
+#include <drogon/utils/coroutine.h>
 
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
@@ -14,28 +13,7 @@ namespace insoulforge {
 }
 
 namespace insoulforge::MemoryMaintenanceCoordinator {
-    /// @brief 使用指定数据库创建聊天记忆总结和好感度评估任务，并启动处理。
-    void enqueue(const Database &database, u64 sessionId, const json &messages, const json &contextMessages);
-    [[nodiscard]] auto hasPendingMemorySummary(const Database &database, u64 sessionId) -> bool;
-    [[nodiscard]] auto takeCompletedMemorySummary(const Database &database, u64 sessionId) -> std::optional<size_t>;
-
-    /// @brief 在同一事务中创建聊天记忆总结和好感度评估任务，并启动处理
-    /// @param sessionId 会话 ID
-    /// @param messages 参与记忆提取与好感度评估的完整消息
-    /// @param contextMessages 仅供记忆提取理解语境的后续消息
-    void enqueue(u64 sessionId, const json &messages, const json &contextMessages);
-
-    /// @brief 注册记忆任务完成后的通知回调
-    /// @details 回调用于让消息列表删除已完成总结的前缀；回调不得抛出异常。
-    void setMemorySummaryCompletedCallback(std::function<void(u64)> callback);
-
-    /// @brief 判断会话是否存在尚未完成或尚未应用删除的记忆总结任务
-    [[nodiscard]] auto hasPendingMemorySummary(u64 sessionId) -> bool;
-
-    /// @brief 确认已完成总结的消息前缀删除，并返回其数量
-    /// @return 没有待确认的已完成任务时返回空值
-    [[nodiscard]] auto takeCompletedMemorySummary(u64 sessionId) -> std::optional<size_t>;
-
-    /// @brief 恢复并调度尚未完成的聊天记忆总结和好感度评估任务
-    void resumePending(const Database &database);
+    /// @brief 处理一个内存批次；失败不提交结果，由后续消息重新触发
+    /// @note 调用方负责同会话互斥、异常处理和消息列表收尾。
+    auto process(const Database &database, u64 sessionId, json messages, json contextMessages) -> drogon::Task<bool>;
 } // namespace insoulforge::MemoryMaintenanceCoordinator

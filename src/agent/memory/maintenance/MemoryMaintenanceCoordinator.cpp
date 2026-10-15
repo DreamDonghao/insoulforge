@@ -1,57 +1,26 @@
 /// @file MemoryMaintenanceCoordinator.cpp
-/// @brief 记忆维护入口实现，调度聊天记忆总结和好感度评估
+/// @brief 记忆维护批次计算与统一提交
 
-
-#include <agent/memory/maintenance/MemoryMaintenanceQueueStore.hpp>
 #include <agent/memory/affinity/AffinityMaintenanceService.hpp>
-#include <agent/memory/affinity/AffinityMaintenanceStore.hpp>
+#include <agent/memory/maintenance/MemoryMaintenanceCoordinator.hpp>
 #include <agent/memory/maintenance/MemoryMaintenanceService.hpp>
 #include <agent/memory/maintenance/MemoryMaintenanceStore.hpp>
-#include <infrastructure/NumericTypes.hpp>
-#include <infrastructure/storage/Database.hpp>
+#include <infrastructure/logging/Logger.hpp>
 
 namespace insoulforge::MemoryMaintenanceCoordinator {
-    void enqueue(const Database &database, const u64 sessionId, const json &messages, const json &contextMessages) {
-        MemoryMaintenanceQueueStore::enqueue(database, sessionId, messages, contextMessages);
-        drogon::async_run(
-          [sessionId]() -> drogon::Task<> { co_await MemoryMaintenanceService::processPending(sessionId); });
-        drogon::async_run(
-          [sessionId]() -> drogon::Task<> { co_await AffinityMaintenanceService::processPending(sessionId); });
-    }
-
-    void setMemorySummaryCompletedCallback(std::function<void(u64)> callback) {
-        MemoryMaintenanceService::setSummaryCompletedCallback(std::move(callback));
-    }
-
-    auto hasPendingMemorySummary(const Database &database, const u64 sessionId) -> bool {
-        return MemoryMaintenanceStore::hasUnfinished(database, sessionId);
-    }
-
-    auto takeCompletedMemorySummary(const Database &database, const u64 sessionId) -> std::optional<size_t> {
-        return MemoryMaintenanceStore::takeCompleted(database, sessionId);
-    }
-
-    void resumePending(const Database &database) {
-        // 先读取两类任务，避免第二次查询失败时已经启动了一部分消费者。
-        const auto memorySessions = MemoryMaintenanceStore::pendingSessionIds(database);
-        const auto affinitySessions = AffinityMaintenanceStore::pendingSessionIds(database);
-        for (const u64 sessionId: memorySessions) {
-            drogon::async_run(
-              [sessionId]() -> drogon::Task<> { co_await MemoryMaintenanceService::processPending(sessionId); });
+    auto process(const Database &database, const u64 sessionId, json messages, json contextMessages)
+      -> drogon::Task<bool> {
+        const auto memory = co_await MemoryMaintenanceService::prepare(sessionId, messages, std::move(contextMessages));
+        if (!memory) {
+            co_return false;
         }
-        for (const u64 sessionId: affinitySessions) {
-            drogon::async_run(
-              [sessionId]() -> drogon::Task<> { co_await AffinityMaintenanceService::processPending(sessionId); });
+        const auto affinity = co_await AffinityMaintenanceService::prepare(sessionId, std::move(messages));
+        if (!affinity) {
+            co_return false;
         }
-    }
-
-    void enqueue(const u64 sessionId, const json &messages, const json &contextMessages) {
-        enqueue(Database::instance(), sessionId, messages, contextMessages);
-    }
-    auto hasPendingMemorySummary(const u64 sessionId) -> bool {
-        return hasPendingMemorySummary(Database::instance(), sessionId);
-    }
-    auto takeCompletedMemorySummary(const u64 sessionId) -> std::optional<size_t> {
-        return takeCompletedMemorySummary(Database::instance(), sessionId);
+        MemoryMaintenanceStore::apply(database, sessionId, *memory, *affinity);
+        Logger::info(sessionId, "Memory",
+          fmt::format("记忆维护完成: 长期记忆 +{}，好感度更新 {} 人", memory->longTerm.size(), affinity->size()));
+        co_return true;
     }
 } // namespace insoulforge::MemoryMaintenanceCoordinator

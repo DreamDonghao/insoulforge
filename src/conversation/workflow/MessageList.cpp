@@ -3,7 +3,6 @@
 
 
 #include <conversation/history/ChatRecordStore.hpp>
-#include <agent/memory/maintenance/MemoryMaintenanceCoordinator.hpp>
 #include <conversation/workflow/MessageList.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
@@ -18,10 +17,9 @@ namespace insoulforge {
                 m_messages.push_back(std::move(message));
             }
         }
-        m_summaryBatchPending = MemoryMaintenanceCoordinator::hasPendingMemorySummary(m_database, sessionId);
     }
 
-    auto MessageList::append(json message) -> std::optional<MessageListAppendResult> {
+    auto MessageList::append(json message) -> std::optional<json> {
         message.erase("session_id");
         const std::string messageId = getStr(message, "message_id");
         std::lock_guard lock(m_mutex);
@@ -31,27 +29,16 @@ namespace insoulforge {
             return std::nullopt;
         }
         m_messages.push_back(std::move(message));
-        return MessageListAppendResult{.messageSnapshot = snapshotLocked(), .summaryBatch = createSummaryBatchLocked()};
+        return snapshotLocked();
     }
 
-    auto MessageList::removeCompletedSummaryMessages() -> std::optional<MemorySummaryBatch> {
+    void MessageList::finishSummaryBatch(const size_t removeCount) {
         std::lock_guard lock(m_mutex);
-        while (
-          const auto completed = MemoryMaintenanceCoordinator::takeCompletedMemorySummary(m_database, m_sessionId)) {
-            const size_t count = m_discardSummaryRemoval ? 0 : std::min(*completed, m_messages.size());
-            for (size_t index = 0; index < count; ++index) {
-                m_messages.pop_front();
-            }
-            m_summaryBatchPending = false;
-            m_discardSummaryRemoval = false;
+        const size_t count = std::min(removeCount, m_messages.size());
+        for (size_t index = 0; index < count; ++index) {
+            m_messages.pop_front();
         }
-        return createSummaryBatchLocked();
-    }
-
-    void MessageList::cancelSummaryBatch() {
-        std::lock_guard lock(m_mutex);
         m_summaryBatchPending = false;
-        m_discardSummaryRemoval = false;
     }
 
     auto MessageList::snapshot() const -> json {
@@ -79,8 +66,6 @@ namespace insoulforge {
         std::lock_guard lock(m_mutex);
         ChatRecordStore::clearSessionChatRecords(m_database, m_sessionId);
         m_messages.clear();
-        // 保留旧任务的占位，待完成后再允许新批次，避免完成计数作用于新消息。
-        m_discardSummaryRemoval = m_summaryBatchPending;
     }
 
     auto MessageList::snapshotLocked() const -> json {
@@ -101,7 +86,8 @@ namespace insoulforge {
         return result;
     }
 
-    auto MessageList::createSummaryBatchLocked() -> std::optional<MemorySummaryBatch> {
+    auto MessageList::createSummaryBatch() -> std::optional<MemorySummaryBatch> {
+        std::lock_guard lock(m_mutex);
         const auto &config = m_config;
         if (const size_t trigger = static_cast<size_t>(std::max(config.memorySummaryTriggerCount, 1));
           m_summaryBatchPending || m_messages.size() < trigger) {

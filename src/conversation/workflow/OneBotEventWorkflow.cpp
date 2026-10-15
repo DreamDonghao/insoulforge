@@ -56,17 +56,34 @@ namespace insoulforge {
             }
         }
 
-        /// @brief 在同一事务中创建记忆维护任务，再分别启动聊天记忆总结和好感度评估
-        void scheduleMemoryMaintenance(const Database &database, const u64 sessionId,
-          const std::shared_ptr<MessageList> &messageList, const MemorySummaryBatch &batch) {
+        /// @brief 预留一个内存批次并启动后台维护，成功后删除对应数量的队首消息
+        void scheduleMemoryMaintenance(
+          const Database &database, const u64 sessionId, const std::shared_ptr<MessageList> &messageList) {
+            auto batch = messageList->createSummaryBatch();
+            if (!batch) {
+                return;
+            }
             try {
-                MemoryMaintenanceCoordinator::enqueue(database, sessionId, batch.messages, batch.contextMessages);
-            } catch (const std::exception &error) {
-                messageList->cancelSummaryBatch();
-                Logger::error(sessionId, "Workflow", fmt::format("记忆维护任务持久化失败: {}", error.what()));
+                drogon::async_run(
+                  [&database, sessionId, messageList, batch = std::move(*batch)]() mutable -> drogon::Task<> {
+                      const size_t removeCount = batch.messages.size();
+                      bool completed = false;
+                      try {
+                          completed = co_await MemoryMaintenanceCoordinator::process(
+                            database, sessionId, std::move(batch.messages), std::move(batch.contextMessages));
+                      } catch (const std::exception &error) {
+                          Logger::error(sessionId, "Memory", fmt::format("记忆维护失败: {}", error.what()));
+                      } catch (...) {
+                          Logger::error(sessionId, "Memory", "记忆维护失败: 未知异常");
+                      }
+                      messageList->finishSummaryBatch(completed ? removeCount : 0);
+                      if (!completed) {
+                          Logger::warn(sessionId, "Memory", "本次记忆维护未完成，等待后续消息重新触发");
+                      }
+                  });
             } catch (...) {
-                messageList->cancelSummaryBatch();
-                Logger::error(sessionId, "Workflow", fmt::format("记忆维护任务持久化失败: 未知异常"));
+                messageList->finishSummaryBatch(0);
+                throw;
             }
         }
     } // namespace
@@ -97,35 +114,16 @@ namespace insoulforge {
             for (const auto sessionId: ChatRecordStore::getSessionIds(database)) {
                 sessions.emplace(sessionId, std::make_shared<SessionWorkflowState>(sessionId, database, config));
             }
-            // 先完成恢复查询，再发布会话索引，避免查询失败留下部分恢复状态。
-            std::vector<std::pair<u64, MemorySummaryBatch>> summaryBatches;
-            for (const auto &[sessionId, sessionState]: sessions) {
-                if (auto batch = sessionState->messageList()->removeCompletedSummaryMessages()) {
-                    summaryBatches.emplace_back(sessionId, std::move(*batch));
-                }
-            }
             {
                 std::lock_guard lock(m_sessionsMutex);
                 m_sessions = std::move(sessions);
                 m_dependencies.emplace(Dependencies{.database = database, .config = config, .agent = agent});
             }
-            MemoryMaintenanceCoordinator::setMemorySummaryCompletedCallback([this](const u64 sessionId) -> void {
-                const auto sessionState = getOrCreateSessionState(sessionId);
-                if (const auto batch = sessionState->messageList()->removeCompletedSummaryMessages()) {
-                    scheduleMemoryMaintenance(m_dependencies->database, sessionId, sessionState->messageList(), *batch);
-                }
-            });
             m_initialized.store(true, std::memory_order_release);
-            MemoryMaintenanceCoordinator::resumePending(database);
-            for (const auto &[sessionId, batch]: summaryBatches) {
-                scheduleMemoryMaintenance(
-                  database, sessionId, getOrCreateSessionState(sessionId)->messageList(), batch);
-            }
             Logger::info(0, "Workflow", "事件工作流初始化完成");
             return {};
         } catch (const DbError &error) {
             m_initialized.store(false, std::memory_order_release);
-            MemoryMaintenanceCoordinator::setMemorySummaryCompletedCallback({});
             std::lock_guard lock(m_sessionsMutex);
             m_sessions.clear();
             m_dependencies.reset();
@@ -152,11 +150,7 @@ namespace insoulforge {
         if (!update) {
             return;
         }
-        pushRecordedMessage(sessionId, update->messageSnapshot.back());
-        if (update->summaryBatch) {
-            scheduleMemoryMaintenance(
-              m_dependencies->database, sessionId, sessionState->messageList(), *update->summaryBatch);
-        }
+        pushRecordedMessage(sessionId, update->back());
     }
 
     void OneBotEventWorkflow::appendAssistantExecutionRecord(const u64 sessionId, json message) {
@@ -169,11 +163,7 @@ namespace insoulforge {
         if (!update) {
             return;
         }
-        pushRecordedMessage(sessionId, update->messageSnapshot.back());
-        if (update->summaryBatch) {
-            scheduleMemoryMaintenance(
-              m_dependencies->database, sessionId, sessionState->messageList(), *update->summaryBatch);
-        }
+        pushRecordedMessage(sessionId, update->back());
     }
 
     auto OneBotEventWorkflow::getSessionMessages(const u64 sessionId) -> std::optional<json> {
@@ -217,7 +207,7 @@ namespace insoulforge {
         if (!update) {
             co_return;
         }
-        pushRecordedMessage(sessionId, update->messageSnapshot.back());
+        pushRecordedMessage(sessionId, update->back());
 
         try {
             const auto response = co_await CommandProcessor::execute(message);
@@ -230,10 +220,6 @@ namespace insoulforge {
             Logger::error(sessionId, "Workflow", fmt::format("命令执行或回复失败: {}", error.what()));
         } catch (...) {
             Logger::error(sessionId, "Workflow", fmt::format("命令执行或回复失败: 未知错误"));
-        }
-        if (update->summaryBatch) {
-            scheduleMemoryMaintenance(
-              m_dependencies->database, sessionId, sessionState->messageList(), *update->summaryBatch);
         }
         co_return;
     }
@@ -275,41 +261,37 @@ namespace insoulforge {
                     Logger::info(
                       sessionId, "Command", fmt::format("执行: {}", MessageRecord::extractText(currentMessage)));
                     co_await executeCommand(currentMessage);
+                } else if (!SessionStore::isSessionEnabled(sessionId)) {
                     continue;
-                }
-                if (!SessionStore::isSessionEnabled(sessionId)) {
-                    continue;
-                }
-
-                Logger::info(sessionId, "Message",
-                  fmt::format("收到: {}", dumpJson(MessageRecord::projectForAgent(currentMessage))));
-
-                currentMessage = co_await MessageContentEnricher::enrichImages(std::move(currentMessage), sessionId);
-                currentMessage = co_await MessageContentEnricher::injectMemories(std::move(currentMessage), sessionId);
-                currentMessage.erase("session_id");
-
-                const auto update = sessionState->messageList()->append(std::move(currentMessage));
-                if (!update) {
-                    continue;
-                }
-
-                pushRecordedMessage(sessionId, update->messageSnapshot.back());
-
-                if (update->summaryBatch) {
-                    scheduleMemoryMaintenance(
-                      m_dependencies->database, sessionId, sessionState->messageList(), *update->summaryBatch);
-                }
-
-                const auto triggerMessageId = getStr(update->messageSnapshot.back(), "message_id");
-                if (const auto replyTrigger = sessionState->requestReplyProcessing(triggerMessageId,
-                      shouldQueueWhileReplying(update->messageSnapshot.back(), m_dependencies->config));
-                  replyTrigger) {
-                    drogon::async_run([this, sessionId, triggerMessageId = *replyTrigger]() -> drogon::Task<> {
-                        co_await processReplyWorkflow(sessionId, triggerMessageId);
-                    });
                 } else {
-                    recordMessageProcessingStats(sessionId);
+                    Logger::info(sessionId, "Message",
+                      fmt::format("收到: {}", dumpJson(MessageRecord::projectForAgent(currentMessage))));
+
+                    currentMessage =
+                      co_await MessageContentEnricher::enrichImages(std::move(currentMessage), sessionId);
+                    currentMessage =
+                      co_await MessageContentEnricher::injectMemories(std::move(currentMessage), sessionId);
+                    currentMessage.erase("session_id");
+
+                    const auto update = sessionState->messageList()->append(std::move(currentMessage));
+                    if (!update) {
+                        continue;
+                    }
+
+                    pushRecordedMessage(sessionId, update->back());
+
+                    const auto triggerMessageId = getStr(update->back(), "message_id");
+                    if (const auto replyTrigger = sessionState->requestReplyProcessing(
+                          triggerMessageId, shouldQueueWhileReplying(update->back(), m_dependencies->config));
+                      replyTrigger) {
+                        drogon::async_run([this, sessionId, triggerMessageId = *replyTrigger]() -> drogon::Task<> {
+                            co_await processReplyWorkflow(sessionId, triggerMessageId);
+                        });
+                    } else {
+                        recordMessageProcessingStats(sessionId);
+                    }
                 }
+                scheduleMemoryMaintenance(m_dependencies->database, sessionId, sessionState->messageList());
             } catch (const std::exception &error) {
                 // 单条消息富化或收尾失败不能阻塞同会话后续消息。
                 Logger::error(sessionId, "Workflow", fmt::format("消息处理失败: {}", error.what()));
