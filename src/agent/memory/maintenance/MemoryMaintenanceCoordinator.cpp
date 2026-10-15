@@ -1,18 +1,18 @@
-/// @file ConversationMaintenanceService.cpp
-/// @brief 会话派生状态维护的统一入口实现
+/// @file MemoryMaintenanceCoordinator.cpp
+/// @brief 记忆维护入口实现，调度聊天记忆总结和好感度评估
 
 
-#include <conversation/maintenance/ConversationMaintenanceStore.hpp>
-#include <conversation/maintenance/affinity/AffinityMaintenanceService.hpp>
-#include <conversation/maintenance/affinity/AffinityMaintenanceStore.hpp>
-#include <conversation/maintenance/memory/MemoryMaintenanceService.hpp>
-#include <conversation/maintenance/memory/MemoryMaintenanceStore.hpp>
+#include <agent/memory/maintenance/MemoryMaintenanceQueueStore.hpp>
+#include <agent/memory/affinity/AffinityMaintenanceService.hpp>
+#include <agent/memory/affinity/AffinityMaintenanceStore.hpp>
+#include <agent/memory/maintenance/MemoryMaintenanceService.hpp>
+#include <agent/memory/maintenance/MemoryMaintenanceStore.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/storage/Database.hpp>
 
-namespace insoulforge::ConversationMaintenanceService {
+namespace insoulforge::MemoryMaintenanceCoordinator {
     void enqueue(const Database &database, const u64 sessionId, const json &messages, const json &contextMessages) {
-        ConversationMaintenanceStore::enqueue(database, sessionId, messages, contextMessages);
+        MemoryMaintenanceQueueStore::enqueue(database, sessionId, messages, contextMessages);
         drogon::async_run(
           [sessionId]() -> drogon::Task<> { co_await MemoryMaintenanceService::processPending(sessionId); });
         drogon::async_run(
@@ -54,4 +54,4 @@ namespace insoulforge::ConversationMaintenanceService {
     auto takeCompletedMemorySummary(const u64 sessionId) -> std::optional<size_t> {
         return takeCompletedMemorySummary(Database::instance(), sessionId);
     }
-} // namespace insoulforge::ConversationMaintenanceService
+} // namespace insoulforge::MemoryMaintenanceCoordinator

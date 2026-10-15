@@ -1,7 +1,7 @@
 /// @file MemoryMaintenanceStore.cpp
 /// @brief 记忆维护任务及其提交结果的持久化存储实现
 
-#include <conversation/maintenance/memory/MemoryMaintenanceStore.hpp>
+#include <agent/memory/maintenance/MemoryMaintenanceStore.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>

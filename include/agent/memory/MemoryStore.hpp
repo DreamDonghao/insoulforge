@@ -8,7 +8,6 @@
 
 #include <infrastructure/NumericTypes.hpp>
 
-
 /// @brief 短期记忆存储
 namespace insoulforge::MemoryStore {
     /// @brief 读取会话短期记忆；不存在时返回空字符串

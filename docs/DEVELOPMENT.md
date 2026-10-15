@@ -127,7 +127,9 @@ insoulforge/
 ├── include/                  # 头文件（按模块分目录）
 │   ├── agent/
 │   │   ├── ability/          # 定时任务、后台耗时任务及其存储
-│   │   ├── memory/           # Agent 记忆的查询、召回与存储
+│   │   ├── memory/           # 记忆的查询、召回与存储
+│   │   │   ├── maintenance/  # 记忆维护调度、聊天记忆总结与任务存储
+│   │   │   └── affinity/     # 好感度评估与存储
 │   │   ├── runtime/          # AgentSystem / ExecutorAgent / AgentTypes
 │   │   └── tools/            # 工具运行时、插件、自定义工具与表情缓存
 │   │       ├── custom/       # 自定义工具执行与存储
@@ -139,7 +141,6 @@ insoulforge/
 │   │   └── logging/          # 实时日志推送
 │   ├── conversation/
 │   │   ├── history/          # 聊天记录及其存储
-│   │   ├── maintenance/      # 派生状态维护任务协调、记忆维护与好感度维护
 │   │   ├── message/          # 统一消息模型与会话 ID
 │   │   ├── session/          # 会话配置、存储与昵称目录
 │   │   └── workflow/         # OneBot 消息处理工作流
@@ -298,23 +299,26 @@ MessageService → OneBot API
 
 `HttpUtil::send` 返回 `std::expected<HttpResponsePtr, std::string>`：网络、地址或超时失败在 `error()` 中，收到的 HTTP 4xx/5xx 仍是有效响应，由调用方检查状态码。调试记录保持原有脱敏规则；对模型只回传必要、限长的错误详情。
 
-此管理器与 `TaskScheduler`（到点触发）及 `ConversationMaintenanceService`（持久化、重试和重启恢复）用途不同。每个会话仅有一个
+此管理器与 `TaskScheduler`（到点触发）及 `MemoryMaintenanceCoordinator`（持久化、重试和重启恢复）用途不同。每个会话仅有一个
 运行中的耗时任务，不同会话可以并行；正常退出时 `main` 在 `MessageList` 落库前调用 `stop()` 记录中断，但不会等待处理器
 完成。需要重启恢复、取消或进度查询的实际能力应另外设计持久化状态，不能假设该接口已有这些保证。
 
-### 会话派生状态维护
+### 记忆维护
+
+记忆模块包括聊天记忆和好感度：前者保存对话中值得记住的信息，后者保存机器人对用户的互动印象。
+统一入口负责调度聊天记忆总结和好感度评估，两类任务独立处理。
 
 - **短期记忆**：`MemoryManager` 按统一会话 ID 从 SQLite 读取当前短期记忆，供 Executor 构建提示词。
 - **长期记忆**：`LongTermMemory` 封装 `long_term_memory` 表的读取与向量检索；embedding 以 `f32` 数组存入 BLOB。
 - **维护批次**：`MessageList` 到达 `memorySummaryTriggerCount` 后，选取最旧的 `memorySummaryBatchSize` 条消息作为待总结内容，并复制随后最多
   `memorySummaryContextCount` 条只读上下文。待总结消息在任务成功前继续保留在列表中。
-- **任务持久化与恢复**：`ConversationMaintenanceService` 通过 `ConversationMaintenanceStore` 在同一 SQLite 事务中创建
+- **任务持久化与恢复**：`MemoryMaintenanceCoordinator` 通过 `MemoryMaintenanceQueueStore` 在同一 SQLite 事务中创建
   `memory_maintenance_jobs` 与 `affinity_maintenance_jobs`，随后分别异步调度消费者。两类任务各自按会话串行、退避重试，并在启动时由
   `resumePending(database)` 恢复；它们互不依赖。
-- **记忆维护**：`MemoryMaintenanceService` 提取并归类短期/长期记忆；它会按 `longTermRecallThreshold`
+- **聊天记忆总结**：`MemoryMaintenanceService` 提取并归类短期/长期记忆；它会按 `longTermRecallThreshold`
   召回相似长期记忆，用于合并、去重和替换。embedding 完成后，在同一事务中更新短期记忆、写入长期记忆、删除被取代条目并确认任务完成。只有该任务成功并确认后，
   `MessageList` 才删除对应的最旧前缀。
-- **好感度维护**：`AffinityMaintenanceService` 消费同一待总结批次，但独立评估、重试和恢复；任务完成时以事务应用分数并删除任务，避免重试重复叠加。
+- **好感度评估**：`AffinityMaintenanceService` 消费同一待总结批次，但独立评估、重试和恢复；任务完成时以事务应用分数并删除任务，避免重试重复叠加。
 - 记忆提取、整理与好感度评分使用独立 memory 模型（`LlmClient::requestMaintenance`，好感度请求限制为 256 个输出 token）；向量化使用独立 embedding 配置（
   `LlmClient::requestEmbedding`）。`recall_memory` 工具按余弦相似度（阈值 0.3）检索长期记忆，Router 另有
   `routerWindowTriggerCount` / `routerWindowKeepCount` 子窗口参数。

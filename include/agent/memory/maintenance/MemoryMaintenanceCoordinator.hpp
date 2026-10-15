@@ -1,5 +1,5 @@
-/// @file ConversationMaintenanceService.hpp
-/// @brief 会话派生状态维护的统一入口
+/// @file MemoryMaintenanceCoordinator.hpp
+/// @brief 记忆维护的统一入口，负责调度聊天记忆总结和好感度评估
 
 #pragma once
 
@@ -13,13 +13,13 @@ namespace insoulforge {
     class Database;
 }
 
-namespace insoulforge::ConversationMaintenanceService {
-    /// @brief 使用指定数据库持久化和恢复工作流依赖的维护状态。
+namespace insoulforge::MemoryMaintenanceCoordinator {
+    /// @brief 使用指定数据库创建聊天记忆总结和好感度评估任务，并启动处理。
     void enqueue(const Database &database, u64 sessionId, const json &messages, const json &contextMessages);
     [[nodiscard]] auto hasPendingMemorySummary(const Database &database, u64 sessionId) -> bool;
     [[nodiscard]] auto takeCompletedMemorySummary(const Database &database, u64 sessionId) -> std::optional<size_t>;
 
-    /// @brief 原子持久化一批会话派生状态维护任务并启动消费者
+    /// @brief 在同一事务中创建聊天记忆总结和好感度评估任务，并启动处理
     /// @param sessionId 会话 ID
     /// @param messages 参与记忆提取与好感度评估的完整消息
     /// @param contextMessages 仅供记忆提取理解语境的后续消息
@@ -36,6 +36,6 @@ namespace insoulforge::ConversationMaintenanceService {
     /// @return 没有待确认的已完成任务时返回空值
     [[nodiscard]] auto takeCompletedMemorySummary(u64 sessionId) -> std::optional<size_t>;
 
-    /// @brief 恢复并调度所有遗留的会话派生状态维护任务
+    /// @brief 恢复并调度尚未完成的聊天记忆总结和好感度评估任务
     void resumePending(const Database &database);
-} // namespace insoulforge::ConversationMaintenanceService
+} // namespace insoulforge::MemoryMaintenanceCoordinator

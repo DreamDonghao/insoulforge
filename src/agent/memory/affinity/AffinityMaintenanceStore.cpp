@@ -1,7 +1,7 @@
 /// @file AffinityMaintenanceStore.cpp
 /// @brief 好感度维护任务的持久化存储实现
 
-#include <conversation/maintenance/affinity/AffinityMaintenanceStore.hpp>
+#include <agent/memory/affinity/AffinityMaintenanceStore.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>

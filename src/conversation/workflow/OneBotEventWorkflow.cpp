@@ -5,10 +5,10 @@
 
 #include <admin/access/BlacklistStore.hpp>
 #include <admin/events/WebSocketManager.hpp>
+#include <agent/memory/maintenance/MemoryMaintenanceCoordinator.hpp>
 #include <agent/runtime/AgentSystem.hpp>
 #include <agent/runtime/ExecutorAgent.hpp>
 #include <conversation/history/ChatRecordStore.hpp>
-#include <conversation/maintenance/ConversationMaintenanceService.hpp>
 #include <conversation/message/MessageRecord.hpp>
 #include <conversation/message/SessionId.hpp>
 #include <conversation/session/SessionConfigManager.hpp>
@@ -56,17 +56,17 @@ namespace insoulforge {
             }
         }
 
-        /// @brief 原子持久化会话派生状态任务，再分别启动异步消费者
-        void scheduleConversationMaintenance(const Database &database, const u64 sessionId,
+        /// @brief 在同一事务中创建记忆维护任务，再分别启动聊天记忆总结和好感度评估
+        void scheduleMemoryMaintenance(const Database &database, const u64 sessionId,
           const std::shared_ptr<MessageList> &messageList, const MemorySummaryBatch &batch) {
             try {
-                ConversationMaintenanceService::enqueue(database, sessionId, batch.messages, batch.contextMessages);
+                MemoryMaintenanceCoordinator::enqueue(database, sessionId, batch.messages, batch.contextMessages);
             } catch (const std::exception &error) {
                 messageList->cancelSummaryBatch();
-                Logger::error(sessionId, "Workflow", fmt::format("会话派生状态维护任务持久化失败: {}", error.what()));
+                Logger::error(sessionId, "Workflow", fmt::format("记忆维护任务持久化失败: {}", error.what()));
             } catch (...) {
                 messageList->cancelSummaryBatch();
-                Logger::error(sessionId, "Workflow", fmt::format("会话派生状态维护任务持久化失败: 未知异常"));
+                Logger::error(sessionId, "Workflow", fmt::format("记忆维护任务持久化失败: 未知异常"));
             }
         }
     } // namespace
@@ -109,24 +109,23 @@ namespace insoulforge {
                 m_sessions = std::move(sessions);
                 m_dependencies.emplace(Dependencies{.database = database, .config = config, .agent = agent});
             }
-            ConversationMaintenanceService::setMemorySummaryCompletedCallback([this](const u64 sessionId) -> void {
+            MemoryMaintenanceCoordinator::setMemorySummaryCompletedCallback([this](const u64 sessionId) -> void {
                 const auto sessionState = getOrCreateSessionState(sessionId);
                 if (const auto batch = sessionState->messageList()->removeCompletedSummaryMessages()) {
-                    scheduleConversationMaintenance(
-                      m_dependencies->database, sessionId, sessionState->messageList(), *batch);
+                    scheduleMemoryMaintenance(m_dependencies->database, sessionId, sessionState->messageList(), *batch);
                 }
             });
             m_initialized.store(true, std::memory_order_release);
-            ConversationMaintenanceService::resumePending(database);
+            MemoryMaintenanceCoordinator::resumePending(database);
             for (const auto &[sessionId, batch]: summaryBatches) {
-                scheduleConversationMaintenance(
+                scheduleMemoryMaintenance(
                   database, sessionId, getOrCreateSessionState(sessionId)->messageList(), batch);
             }
             Logger::info(0, "Workflow", "事件工作流初始化完成");
             return {};
         } catch (const DbError &error) {
             m_initialized.store(false, std::memory_order_release);
-            ConversationMaintenanceService::setMemorySummaryCompletedCallback({});
+            MemoryMaintenanceCoordinator::setMemorySummaryCompletedCallback({});
             std::lock_guard lock(m_sessionsMutex);
             m_sessions.clear();
             m_dependencies.reset();
@@ -155,7 +154,7 @@ namespace insoulforge {
         }
         pushRecordedMessage(sessionId, update->messageSnapshot.back());
         if (update->summaryBatch) {
-            scheduleConversationMaintenance(
+            scheduleMemoryMaintenance(
               m_dependencies->database, sessionId, sessionState->messageList(), *update->summaryBatch);
         }
     }
@@ -172,7 +171,7 @@ namespace insoulforge {
         }
         pushRecordedMessage(sessionId, update->messageSnapshot.back());
         if (update->summaryBatch) {
-            scheduleConversationMaintenance(
+            scheduleMemoryMaintenance(
               m_dependencies->database, sessionId, sessionState->messageList(), *update->summaryBatch);
         }
     }
@@ -233,7 +232,7 @@ namespace insoulforge {
             Logger::error(sessionId, "Workflow", fmt::format("命令执行或回复失败: 未知错误"));
         }
         if (update->summaryBatch) {
-            scheduleConversationMaintenance(
+            scheduleMemoryMaintenance(
               m_dependencies->database, sessionId, sessionState->messageList(), *update->summaryBatch);
         }
         co_return;
@@ -297,7 +296,7 @@ namespace insoulforge {
                 pushRecordedMessage(sessionId, update->messageSnapshot.back());
 
                 if (update->summaryBatch) {
-                    scheduleConversationMaintenance(
+                    scheduleMemoryMaintenance(
                       m_dependencies->database, sessionId, sessionState->messageList(), *update->summaryBatch);
                 }
 

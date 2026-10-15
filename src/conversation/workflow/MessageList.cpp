@@ -3,7 +3,7 @@
 
 
 #include <conversation/history/ChatRecordStore.hpp>
-#include <conversation/maintenance/ConversationMaintenanceService.hpp>
+#include <agent/memory/maintenance/MemoryMaintenanceCoordinator.hpp>
 #include <conversation/workflow/MessageList.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
@@ -18,7 +18,7 @@ namespace insoulforge {
                 m_messages.push_back(std::move(message));
             }
         }
-        m_summaryBatchPending = ConversationMaintenanceService::hasPendingMemorySummary(m_database, sessionId);
+        m_summaryBatchPending = MemoryMaintenanceCoordinator::hasPendingMemorySummary(m_database, sessionId);
     }
 
     auto MessageList::append(json message) -> std::optional<MessageListAppendResult> {
@@ -37,7 +37,7 @@ namespace insoulforge {
     auto MessageList::removeCompletedSummaryMessages() -> std::optional<MemorySummaryBatch> {
         std::lock_guard lock(m_mutex);
         while (
-          const auto completed = ConversationMaintenanceService::takeCompletedMemorySummary(m_database, m_sessionId)) {
+          const auto completed = MemoryMaintenanceCoordinator::takeCompletedMemorySummary(m_database, m_sessionId)) {
             const size_t count = m_discardSummaryRemoval ? 0 : std::min(*completed, m_messages.size());
             for (size_t index = 0; index < count; ++index) {
                 m_messages.pop_front();

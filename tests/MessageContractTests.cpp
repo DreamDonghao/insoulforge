@@ -30,10 +30,10 @@
 #include <agent/tools/custom/ToolStore.hpp>
 #include <agent/tools/plugins/ActionToolsPlugin.hpp>
 #include <conversation/history/ChatRecordStore.hpp>
-#include <conversation/maintenance/ConversationMaintenanceStore.hpp>
-#include <conversation/maintenance/affinity/AffinityMaintenanceStore.hpp>
-#include <conversation/maintenance/affinity/AffinityStore.hpp>
-#include <conversation/maintenance/memory/MemoryMaintenanceStore.hpp>
+#include <agent/memory/maintenance/MemoryMaintenanceQueueStore.hpp>
+#include <agent/memory/affinity/AffinityMaintenanceStore.hpp>
+#include <agent/memory/affinity/AffinityStore.hpp>
+#include <agent/memory/maintenance/MemoryMaintenanceStore.hpp>
 #include <conversation/message/MessageRecord.hpp>
 #include <conversation/message/SessionId.hpp>
 #include <conversation/session/QQNameDirectory.hpp>
@@ -949,14 +949,14 @@ namespace {
         database.close();
     }
 
-    void testConversationMaintenanceStore() {
+    void testMemoryMaintenanceQueueStore() {
         constexpr std::string_view kTestName = "conversation maintenance store";
         auto &database = insoulforge::Database::instance();
         check(database.initialize(":memory:").has_value(), "initializes database", kTestName);
 
         const insoulforge::json messages = {{{"message_id", "1"}, {"segments", insoulforge::json::array()}}};
         const insoulforge::json context = {{{"message_id", "2"}, {"segments", insoulforge::json::array()}}};
-        insoulforge::ConversationMaintenanceStore::enqueue(100, messages, context);
+        insoulforge::MemoryMaintenanceQueueStore::enqueue(100, messages, context);
 
         const auto memoryJob = insoulforge::MemoryMaintenanceStore::next(100);
         const auto affinityJob = insoulforge::AffinityMaintenanceStore::next(100);
@@ -1925,7 +1925,7 @@ auto main() -> int {
     testHttpTraceImageRedaction();
     testCharacterImageToolRequiresUpload();
     testMemoryMaintenanceStore();
-    testConversationMaintenanceStore();
+    testMemoryMaintenanceQueueStore();
     testMemoryModelConfigMigration();
     testConfigFacade();
     testExecutionConfig();

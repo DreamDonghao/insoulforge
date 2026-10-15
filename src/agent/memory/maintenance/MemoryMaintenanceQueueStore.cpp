@@ -1,12 +1,12 @@
-/// @file ConversationMaintenanceStore.cpp
-/// @brief 会话派生状态维护任务的原子持久化边界实现
+/// @file MemoryMaintenanceQueueStore.cpp
+/// @brief 记忆维护任务存储实现，在同一事务中创建两类任务
 
-#include <conversation/maintenance/ConversationMaintenanceStore.hpp>
+#include <agent/memory/maintenance/MemoryMaintenanceQueueStore.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 
-namespace insoulforge::ConversationMaintenanceStore {
+namespace insoulforge::MemoryMaintenanceQueueStore {
     namespace {
         void executeOrThrow(sqlite3 *database, const char *sql) {
             char *error = nullptr;
@@ -48,4 +48,4 @@ namespace insoulforge::ConversationMaintenanceStore {
     void enqueue(const u64 sessionId, const json &messages, const json &contextMessages) {
         enqueue(Database::instance(), sessionId, messages, contextMessages);
     }
-} // namespace insoulforge::ConversationMaintenanceStore
+} // namespace insoulforge::MemoryMaintenanceQueueStore

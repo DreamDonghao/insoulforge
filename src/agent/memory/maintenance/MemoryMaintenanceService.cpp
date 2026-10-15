@@ -3,8 +3,8 @@
 
 #include <agent/memory/LongTermMemoryStore.hpp>
 #include <agent/memory/MemoryStore.hpp>
-#include <conversation/maintenance/memory/MemoryMaintenanceService.hpp>
-#include <conversation/maintenance/memory/MemoryMaintenanceStore.hpp>
+#include <agent/memory/maintenance/MemoryMaintenanceService.hpp>
+#include <agent/memory/maintenance/MemoryMaintenanceStore.hpp>
 #include <conversation/message/MessageRecord.hpp>
 #include <conversation/message/SessionId.hpp>
 #include <conversation/session/SessionStore.hpp>

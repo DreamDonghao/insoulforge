@@ -1,8 +1,8 @@
 /// @file AffinityMaintenanceService.cpp
 /// @brief 基于持久化消息批次的好感度维护实现
 
-#include <conversation/maintenance/affinity/AffinityMaintenanceService.hpp>
-#include <conversation/maintenance/affinity/AffinityMaintenanceStore.hpp>
+#include <agent/memory/affinity/AffinityMaintenanceService.hpp>
+#include <agent/memory/affinity/AffinityMaintenanceStore.hpp>
 #include <conversation/message/MessageRecord.hpp>
 #include <conversation/message/SessionId.hpp>
 #include <conversation/session/SessionStore.hpp>
