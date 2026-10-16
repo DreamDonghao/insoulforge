@@ -70,6 +70,7 @@ namespace insoulforge {
         all_mes_count INTEGER DEFAULT 0,
         send_group_card INTEGER NOT NULL DEFAULT 0,
         auto_reply INTEGER NOT NULL DEFAULT 1,
+        command_enabled INTEGER NOT NULL DEFAULT 1,
         additional_prompt TEXT NOT NULL DEFAULT ''
     ))",
           R"(CREATE TABLE IF NOT EXISTS chat_records (
@@ -489,6 +490,10 @@ namespace insoulforge {
             execSQL(db, "DROP TABLE IF EXISTS custom_tools");
         }
 
+        void migrateV18ToV19(sqlite3 *db) {
+            ensureColumn(db, "group_config", "command_enabled", "command_enabled INTEGER NOT NULL DEFAULT 1");
+        }
+
         void migrateV17ToV18(sqlite3 *db) {
             Logger::info(0, "Storage", "执行迁移: 记忆维护改用内存任务，删除旧维护队列");
             execSQL(db, "DROP TABLE IF EXISTS memory_maintenance_jobs");
@@ -554,6 +559,7 @@ namespace insoulforge {
               &migrateV15ToV16, // 群普通消息自动回复开关，默认开启
               &migrateV16ToV17, // 群独立附加提示词，默认留空
               &migrateV17ToV18, // 删除记忆与好感度维护任务队列
+              &migrateV18ToV19, // 群命令解析开关，默认开启
             };
 
             for (i32 v = version; v < kLatestVersion; ++v) {

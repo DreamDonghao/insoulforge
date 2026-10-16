@@ -358,6 +358,12 @@ Router 在系统消息和明确 @ 机器人规则之后、Jev/Router 模型请�
 后台通过 `POST /admin/api/group/{groupId}/auto-reply` 保存布尔值 `autoReply`，群内管理员通过 `/autoreply on|off` 修改。
 开关单独更新，不改变群名片设置、消息统计和会话启用状态。
 
+`group_config.command_enabled` 控制每个群是否解析管理命令，默认开启，数据库 v18 → v19 自动补充。
+后台“会话管理”的“命令解析”开关通过 `POST /admin/api/group/{groupId}/command-enabled`
+保存布尔值 `commandEnabled`。关闭后，包含 @ 机器人及 `/` 前缀的消息也按普通消息处理，
+仍受会话启用状态和原有回复规则约束；不执行管理操作，不改变私聊命令行为。
+该设置仅在后台修改；关闭后需要从后台重新开启，群内 `/enable` 等管理命令也不再生效。
+
 `group_config.additional_prompt` 保存每群独立的附加回复提示词，默认空字符串，UTF-8 内容最多 16000 字节。
 数据库 v16 → v17 自动新增字段并保留已有统计和开关。Executor 在构建本次回复的第一条 system 消息时，
 将该内容附加到全局人设和执行约束之后；默认模型和兜底模型共用这份消息，下一次回复读取最新设置。

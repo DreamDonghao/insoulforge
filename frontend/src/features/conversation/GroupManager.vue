@@ -93,7 +93,12 @@ const loadGroups = async (): Promise<void> => {
 }
 
 // 切换启用状态
-type GroupSetting = 'sendGroupCard' | 'autoReply'
+const groupSettings = {
+  sendGroupCard: {route: 'card', message: '群名片设置已保存', defaultValue: false},
+  autoReply: {route: 'auto-reply', message: '自动回复设置已保存', defaultValue: true},
+  commandEnabled: {route: 'command-enabled', message: '命令解析设置已保存', defaultValue: true}
+} as const
+type GroupSetting = keyof typeof groupSettings
 const savingSettings = reactive(new Set<string>())
 const isSettingSaving = (group: Group, setting: GroupSetting): boolean =>
     savingSettings.has(`${sessionKey(group)}:${setting}`)
@@ -102,7 +107,8 @@ const setGroupSetting = async (group: Group, event: Event, setting: GroupSetting
   const enabled = input.checked
   const id = sessionKey(group)
   const key = `${id}:${setting}`
-  const route = setting === 'sendGroupCard' ? 'card' : 'auto-reply'
+  const {route, message, defaultValue} = groupSettings[setting]
+  if (savingSettings.has(key)) return
   savingSettings.add(key)
   try {
     const resp = await fetch(`/admin/api/group/${id}/${route}`, {
@@ -112,9 +118,9 @@ const setGroupSetting = async (group: Group, event: Event, setting: GroupSetting
     const data: ApiResponse = await resp.json()
     if (!resp.ok || !data.success) throw new Error(data.error || '保存失败')
     group[setting] = enabled
-    showToast?.(setting === 'sendGroupCard' ? '群名片设置已保存' : '自动回复设置已保存')
+    showToast?.(message)
   } catch (error) {
-    input.checked = group[setting] ?? (setting === 'autoReply')
+    input.checked = group[setting] ?? defaultValue
     showToast?.(error instanceof Error ? error.message : '保存失败', true)
   } finally {
     savingSettings.delete(key)
@@ -736,6 +742,7 @@ onUnmounted(() => {
                 <th style="width: 70px;">消息</th>
                 <th style="width: 90px;">发送群名片</th>
                 <th style="width: 90px;">自动回复</th>
+                <th style="width: 90px;">命令解析</th>
                 <th class="session-actions-heading">操作</th>
               </tr>
               </thead>
@@ -781,6 +788,17 @@ onUnmounted(() => {
                     <input type="checkbox" role="switch" :checked="group.autoReply !== false"
                            :disabled="isSettingSaving(group, 'autoReply')" aria-label="本群普通消息自动回复"
                            :aria-busy="isSettingSaving(group, 'autoReply')" @change="setGroupSetting(group, $event, 'autoReply')">
+                    <span class="group-setting-track" aria-hidden="true"></span>
+                  </label>
+                  <span v-else>-</span>
+                </td>
+                <td @click.stop>
+                  <label v-if="!isPrivateSession(group)" class="group-setting-switch"
+                         :class="{'is-saving': isSettingSaving(group, 'commandEnabled')}"
+                         :title="isSettingSaving(group, 'commandEnabled') ? '保存中' : (group.commandEnabled !== false ? '关闭命令解析，命令将按普通消息处理' : '开启命令解析')">
+                    <input type="checkbox" role="switch" :checked="group.commandEnabled !== false"
+                           :disabled="isSettingSaving(group, 'commandEnabled')" aria-label="本群命令解析"
+                           :aria-busy="isSettingSaving(group, 'commandEnabled')" @change="setGroupSetting(group, $event, 'commandEnabled')">
                     <span class="group-setting-track" aria-hidden="true"></span>
                   </label>
                   <span v-else>-</span>

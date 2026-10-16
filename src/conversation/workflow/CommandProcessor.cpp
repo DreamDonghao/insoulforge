@@ -7,6 +7,7 @@
 #include <conversation/message/MessageRecord.hpp>
 #include <conversation/message/SessionId.hpp>
 #include <conversation/session/SessionConfigManager.hpp>
+#include <conversation/session/SessionStore.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <media/ImageDescriptionStore.hpp>
@@ -32,12 +33,14 @@ namespace insoulforge::CommandProcessor {
     } // namespace
 
     auto isCommand(const json &message) -> bool {
-        if (const u64 sessionId = getUInt(message, "session_id");
-          sessionId == 0 ||
-          (!SessionId::isPrivate(sessionId) && !MessageRecord::mentions(message, Config::instance().selfQQNumber))) {
+        const auto sessionId = getUInt(message, "session_id");
+        if (sessionId == 0 ||
+            (!SessionId::isPrivate(sessionId) && !MessageRecord::mentions(message, Config::instance().selfQQNumber))) {
             return false;
         }
-        return !commandText(message).empty();
+        if (commandText(message).empty())
+            return false;
+        return SessionId::isPrivate(sessionId) || SessionStore::getSessionConfig(sessionId).commandEnabled;
     }
 
     auto execute(const json &message) -> drogon::Task<std::string> {

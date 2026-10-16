@@ -91,6 +91,8 @@ namespace insoulforge {
         ADD_METHOD_TO(AdminController::toggleSession, "/admin/api/group/{groupId}/toggle", drogon::Post);
         ADD_METHOD_TO(AdminController::saveGroupCard, "/admin/api/group/{groupId}/card", drogon::Post);
         ADD_METHOD_TO(AdminController::saveGroupAutoReply, "/admin/api/group/{groupId}/auto-reply", drogon::Post);
+        ADD_METHOD_TO(
+          AdminController::saveGroupCommandEnabled, "/admin/api/group/{groupId}/command-enabled", drogon::Post);
         ADD_METHOD_TO(AdminController::getGroupPrompt, "/admin/api/group/{groupId}/prompt", drogon::Get);
         ADD_METHOD_TO(AdminController::saveGroupPrompt, "/admin/api/group/{groupId}/prompt", drogon::Post);
 
@@ -354,6 +356,11 @@ namespace insoulforge {
           const std::string &sessionId) const -> drogon::Task<>;
         /// @brief 保存单个群的普通消息自动回复开关，拒绝私聊和无效参数。
         auto saveGroupAutoReply(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &sessionId) const
+          -> drogon::Task<>;
+
+        /// @brief 保存单个群的命令解析开关，拒绝私聊和无效参数。
+        auto saveGroupCommandEnabled(drogon::HttpRequestPtr req,
           std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &sessionId) const
           -> drogon::Task<>;
 

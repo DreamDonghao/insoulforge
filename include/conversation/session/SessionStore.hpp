@@ -18,6 +18,7 @@ namespace insoulforge {
         u64 allMesCount = 0; ///< 已完成主处理的入站消息总数
         bool sendGroupCard = false; ///< 向模型发送本群群名片，默认关闭
         bool autoReply = true; ///< 允许普通群消息进入模型路由判断，默认开启
+        bool commandEnabled = true; ///< 解析本群管理命令，关闭后按普通消息处理
         std::string additionalPrompt; ///< 本群附加回复提示词，默认留空
     };
 
@@ -32,14 +33,16 @@ namespace insoulforge {
         void setSendGroupCard(u64 sessionId, bool enabled);
         /// @brief 单独保存自动回复开关，不影响其他群设置或消息统计。
         void setAutoReply(u64 sessionId, bool enabled);
+        /// @brief 单独保存群命令解析开关，不影响其他设置。
+        void setCommandEnabled(u64 sessionId, bool enabled);
         /// @brief 获取会话的消息统计及群设置
         /// @param sessionId 统一会话 ID
-        /// @return 已保存的配置；不存在时消息数为 0，群名片关闭，自动回复开启
+        /// @return 已保存的配置；不存在时消息数为 0，群名片关闭，自动回复及命令解析开启
         [[nodiscard]] auto getSessionConfig(u64 sessionId) -> SessionConfig;
 
         /// @brief 覆盖保存会话的消息统计及群设置
         /// @param sessionId 统一会话 ID
-        /// @param config 待保存的消息数、群名片及自动回复开关
+        /// @param config 待保存的消息数、群设置开关及附加提示词
         void saveSessionConfig(u64 sessionId, const SessionConfig &config);
 
         /// @brief 原子递增会话消息数

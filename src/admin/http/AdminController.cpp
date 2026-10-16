@@ -427,6 +427,7 @@ auto AdminController::getGroups(HttpRequestPtr req, std::function<void(const Htt
         group["sendGroupCard"] = !SessionId::isPrivate(sessionId) && config.sendGroupCard;
         group["messageCount"] = messageCount;
         group["autoReply"] = config.autoReply;
+        group["commandEnabled"] = config.commandEnabled;
         group["hasAdditionalPrompt"] = !SessionId::isPrivate(sessionId) && !config.additionalPrompt.empty();
         result.push_back(group);
     }
@@ -517,6 +518,21 @@ auto AdminController::saveGroupAutoReply(HttpRequestPtr req, std::function<void(
     }
     SessionStore::setAutoReply(*id, (*body)["autoReply"].get<bool>());
     callback(jsonResponse(AdminResponse::okJson("自动回复设置已保存")));
+    co_return;
+}
+
+auto AdminController::saveGroupCommandEnabled(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
+  const std::string &sessionId) const -> Task<> {
+    const auto id = tryParseUInt64(sessionId);
+    const auto body = parseJsonBody(req);
+    if (!id || *id == 0 || SessionId::isPrivate(*id) || !body || !atOrNull(*body, "commandEnabled").is_boolean()) {
+        auto response = jsonResponse(AdminResponse::errorJson("需要有效群号及布尔类型 commandEnabled"));
+        response->setStatusCode(drogon::k400BadRequest);
+        callback(response);
+        co_return;
+    }
+    SessionStore::setCommandEnabled(*id, (*body)["commandEnabled"].get<bool>());
+    callback(jsonResponse(AdminResponse::okJson("命令解析设置已保存")));
     co_return;
 }
 
