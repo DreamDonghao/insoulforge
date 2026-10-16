@@ -10,7 +10,7 @@
 namespace insoulforge::CommandProcessor {
     /// @brief 判断统一消息是否为发给机器人的管理命令
     /// @param message 统一消息 JSON
-    /// @return 私聊命令或 @ 机器人且以 `/` 开头的群聊命令返回 true
+    /// @return 私聊命令或启用命令解析的群内 @ 机器人且以 `/` 开头的消息返回 true
     [[nodiscard]] auto isCommand(const json &message) -> bool;
 
     /// @brief 执行统一消息中的管理命令

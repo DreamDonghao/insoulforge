@@ -191,6 +191,8 @@ namespace {
 
     void testNewWorkflowDetectsCommands() {
         constexpr std::string_view kTestName = "new workflow command detection";
+        auto &db = insoulforge::Database::instance();
+        check(db.initialize(":memory:").has_value(), "initializes database", kTestName);
         auto &config = insoulforge::Config::instance();
         const u64 originalSelfId = config.selfQQNumber;
         config.selfQQNumber = 42;
@@ -207,7 +209,20 @@ namespace {
           {"session_id", 1ULL << 63 | 11ULL}, {"segments", {{{"type", "text"}, {"text", "\t/help"}}}}};
         check(insoulforge::CommandProcessor::isCommand(privateCommand), "private command needs no mention", kTestName);
 
+        insoulforge::SessionStore::setCommandEnabled(100, false);
+        check(!insoulforge::CommandProcessor::isCommand(groupCommand), "disabled commands use ordinary message path",
+          kTestName);
+        check(
+          insoulforge::SessionStore::getSessionConfig(200).commandEnabled, "other groups remain enabled", kTestName);
+        insoulforge::SessionStore::setCommandEnabled(insoulforge::SessionId::fromPrivateUser(11), false);
+        check(
+          insoulforge::CommandProcessor::isCommand(privateCommand), "private commands ignore group setting", kTestName);
+        insoulforge::SessionStore::setCommandEnabled(100, true);
+        check(
+          insoulforge::CommandProcessor::isCommand(groupCommand), "re-enabling restores command parsing", kTestName);
+
         config.selfQQNumber = originalSelfId;
+        db.close();
     }
 
     void testMessageRecordSemanticQueries() {
@@ -1332,6 +1347,71 @@ namespace {
         std::filesystem::remove(path);
     }
 
+    void testGroupCommandSettings() {
+        constexpr std::string_view kTestName = "group command settings";
+        auto &db = insoulforge::Database::instance();
+        const auto path = std::filesystem::temp_directory_path() /
+                          ("insoulforge-command-settings-" +
+                            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".db");
+        check(db.initialize(path.string()).has_value(), "initializes database", kTestName);
+        check(insoulforge::SessionStore::getSessionConfig(100).commandEnabled, "defaults on", kTestName);
+        insoulforge::SessionStore::setSendGroupCard(100, true);
+        insoulforge::SessionStore::setAutoReply(100, false);
+        insoulforge::SessionStore::setAdditionalPrompt(100, "test prompt");
+        insoulforge::SessionStore::incrementMessageCount(100);
+        insoulforge::SessionStore::setCommandEnabled(100, false);
+        auto saved = insoulforge::SessionStore::getSessionConfig(100);
+        check(!saved.commandEnabled && saved.sendGroupCard && !saved.autoReply && saved.allMesCount == 1 &&
+                saved.additionalPrompt == "test prompt",
+          "single-field update preserves other settings", kTestName);
+        insoulforge::SessionStore::saveSessionConfig(100, saved);
+        insoulforge::SessionStore::disableSession(100);
+        insoulforge::SessionStore::enableSession(100);
+        check(!insoulforge::SessionStore::getSessionConfig(100).commandEnabled,
+          "full save and enable cycle preserve setting", kTestName);
+
+        const insoulforge::AdminController controller;
+        drogon::HttpResponsePtr response;
+        const auto save = [&](const std::string &id, const insoulforge::json &body) {
+            auto request = drogon::HttpRequest::newHttpRequest();
+            request->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            request->setBody(insoulforge::dumpJson(body));
+            drogon::sync_wait(
+              controller.saveGroupCommandEnabled(request, [&](const auto &value) { response = value; }, id));
+        };
+        save("100", {{"commandEnabled", true}});
+        check(response->getStatusCode() == drogon::k200OK &&
+                insoulforge::SessionStore::getSessionConfig(100).commandEnabled,
+          "web endpoint enables setting", kTestName);
+        save("100", {{"commandEnabled", false}});
+        check(response->getStatusCode() == drogon::k200OK &&
+                !insoulforge::SessionStore::getSessionConfig(100).commandEnabled,
+          "web endpoint disables setting", kTestName);
+        for (const auto &id:
+          {std::string{"0"}, std::string{"invalid"}, std::to_string(insoulforge::SessionId::fromPrivateUser(11))}) {
+            save(id, {{"commandEnabled", true}});
+            check(response->getStatusCode() == drogon::k400BadRequest, "rejects invalid group", kTestName);
+        }
+        save("100", {{"commandEnabled", "false"}});
+        check(response->getStatusCode() == drogon::k400BadRequest, "rejects non-boolean setting", kTestName);
+        db.close();
+        check(
+          db.initialize(path.string()).has_value() && !insoulforge::SessionStore::getSessionConfig(100).commandEnabled,
+          "setting survives restart", kTestName);
+        check(
+          sqlite3_exec(db.handle(), "ALTER TABLE group_config DROP COLUMN command_enabled; PRAGMA user_version = 18",
+            nullptr, nullptr, nullptr) == SQLITE_OK,
+          "restores v18 schema", kTestName);
+        db.close();
+        check(db.initialize(path.string()).has_value(), "upgrades v18 schema", kTestName);
+        saved = insoulforge::SessionStore::getSessionConfig(100);
+        check(saved.commandEnabled && saved.sendGroupCard && !saved.autoReply && saved.allMesCount == 1 &&
+                saved.additionalPrompt == "test prompt",
+          "migration defaults on and preserves existing data", kTestName);
+        db.close();
+        std::filesystem::remove(path);
+    }
+
     void testGroupAdditionalPrompt() {
         constexpr std::string_view kTestName = "group additional prompt";
         auto &db = insoulforge::Database::instance();
@@ -1976,6 +2056,7 @@ auto main() -> int {
     testExecutionConfig();
     testGroupCardSettings();
     testGroupAutoReply();
+    testGroupCommandSettings();
     testGroupAdditionalPrompt();
     testToolHistoryRecords();
     testImageDescriptionCacheStore();
