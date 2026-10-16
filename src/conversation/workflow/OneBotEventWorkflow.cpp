@@ -93,7 +93,6 @@ namespace insoulforge {
         return workflow;
     }
 
-
     auto OneBotEventWorkflow::initialize(const Database &database, const Config &config, const AgentSystem &agent)
       -> std::expected<void, std::string> {
         if (m_initialized.load(std::memory_order_acquire)) {
@@ -329,20 +328,12 @@ namespace insoulforge {
                         const auto replyDecision =
                           co_await ExecutorAgent::execute(records, memory, std::move(routerDecision), messageSnapshot);
                         if (replyDecision && replyDecision->shouldReply && !replyDecision->content.empty()) {
-                            std::optional<u64> sentMessageId;
                             if (SessionId::isPrivate(sessionId)) {
-                                sentMessageId =
-                                  co_await MessageService::sendPrivateMsg(SessionId::privateUserId(sessionId),
-                                    replyDecision->content, std::nullopt, replyDecision->toolHistory);
+                                co_await MessageService::sendPrivateMsg(SessionId::privateUserId(sessionId),
+                                  replyDecision->content, std::nullopt, replyDecision->toolHistory);
                             } else {
-                                sentMessageId = co_await MessageService::sendGroupMsg(
+                                co_await MessageService::sendGroupMsg(
                                   sessionId, replyDecision->content, std::nullopt, replyDecision->toolHistory);
-                            }
-                            if (!sentMessageId) {
-                                appendAssistantExecutionRecord(sessionId,
-                                  MessageRecord::createAssistantExecutionRecord(m_dependencies->config.botName + "(我)",
-                                    replyDecision->toolHistory, "send_failed",
-                                    "OneBot 未确认发送成功，不能认为回复已送达"));
                             }
                         } else {
                             Logger::info(sessionId, "Executor", "未生成可发送的回复");

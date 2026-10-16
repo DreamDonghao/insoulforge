@@ -178,7 +178,8 @@ namespace insoulforge::MessageRecord {
 
     auto getSessionId(const json &record) -> u64 { return getUInt(record, "session_id"); }
 
-    auto createAssistantRecord(std::string senderName, const u64 messageId, const std::string &content) -> json {
+    auto createAssistantRecord(std::string senderName, const std::optional<u64> messageId, const std::string &content)
+      -> json {
         json segments = json::array();
         std::optional<std::string> replyTo;
         static const std::regex cqPattern(R"(\[CQ:([^,\]]+)(?:,([^\]]*))?\])");
@@ -229,7 +230,9 @@ namespace insoulforge::MessageRecord {
         json record;
         record["time"] = currentDateTime();
         record["sender"] = {{"name", std::move(senderName)}, {"qq", "self"}};
-        record["message_id"] = std::to_string(messageId);
+        if (messageId) {
+            record["message_id"] = std::to_string(*messageId);
+        }
         record["segments"] = std::move(segments);
         if (replyTo) {
             record["reply_to"] = std::move(*replyTo);
@@ -238,7 +241,7 @@ namespace insoulforge::MessageRecord {
     }
 
     auto createAssistantGeneratedImageRecord(
-      std::string senderName, const u64 messageId, const std::string &description) -> json {
+      std::string senderName, const std::optional<u64> messageId, const std::string &description) -> json {
         auto record = createAssistantRecord(std::move(senderName), messageId, "[CQ:image]");
         record["segments"][0]["recognition_status"] = "generated";
         record["segments"][0]["description"] = description;
@@ -309,6 +312,9 @@ namespace insoulforge::MessageRecord {
             if (!includeGroupCard) {
                 projected["sender"].erase("card");
             }
+        }
+        if (isAssistant(record) && record.contains("send_error")) {
+            projected["send_error"] = record["send_error"];
         }
         if (record.contains("message_id")) {
             projected["message_id"] = record["message_id"];

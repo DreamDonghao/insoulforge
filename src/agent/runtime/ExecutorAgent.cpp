@@ -5,9 +5,9 @@
 #include <memory>
 #include <stdexcept>
 
+#include <agent/memory/affinity/AffinityStore.hpp>
 #include <agent/runtime/ExecutorAgent.hpp>
 #include <agent/tools/mcp/McpTools.hpp>
-#include <agent/memory/affinity/AffinityStore.hpp>
 #include <conversation/message/MessageRecord.hpp>
 #include <conversation/message/SessionId.hpp>
 #include <conversation/session/SessionStore.hpp>
@@ -30,6 +30,7 @@ namespace insoulforge::ExecutorAgent {
 你收到的上下文是键顺序固定的 JSON，earlier_conversation 与 recent_conversation 均按时间从旧到新排列：
 
 助手记录中的 tool_history 按处理顺序保存工具名、参数和状态；returned 只表示处理器返回了结果，不等于业务成功。
+助手记录带 send_error 时，正文仅为尝试发送的内容，不代表已送达；该字段记录发送错误，超时表示交付结果未知。不要引用这类记录或声称对方已收到。
 record_type=tool_execution 的记录是内部执行记录，没有 QQ 消息 ID，不能引用、撤回或认为向群友发送了消息。
 execution_status=no_reply 表示当时选择不回复；failed/send_failed 表示执行或发送未完成。
 不要声称未确认成功的操作已完成。历史查询记录不含完整结果，必要时可以重新核实来源。

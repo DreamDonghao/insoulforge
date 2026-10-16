@@ -63,28 +63,32 @@ namespace insoulforge {
         /// @param channelName 日志中的渠道名（"群消息"/"私聊消息"）
         /// @param imageDescription
         /// @param toolHistory
-        /// @return 发送成功返回 message_id；失败不记聊天记录，返回 nullopt（已记日志）
-        auto afterSendMessage(drogon::Task<std::optional<u64>> sendTask, std::string processedMessage,
+        /// @return 发送成功返回 message_id；失败保留带 send_error 的上下文记录，并返回具体错误。
+        auto afterSendMessage(drogon::Task<std::expected<u64, std::string>> sendTask, std::string processedMessage,
           const u64 sessionId, std::string_view channelName, std::optional<std::string> imageDescription,
-          json toolHistory) -> drogon::Task<std::optional<u64>> {
+          json toolHistory) -> drogon::Task<std::expected<u64, std::string>> {
             const auto messageId = co_await std::move(sendTask);
-            if (!messageId) {
-                co_return std::nullopt;
-            }
+            const auto recordMessageId = messageId ? std::optional<u64>{*messageId} : std::nullopt;
 
             const auto storedMessage =
               processedMessage.starts_with("[CQ:image,file=base64://") ? std::string("[生成图片]") : processedMessage;
             const auto senderName = Config::instance().botName + "(我)";
             json record =
               imageDescription && processedMessage.starts_with("[CQ:image,file=")
-                ? MessageRecord::createAssistantGeneratedImageRecord(senderName, *messageId, *imageDescription)
-                : MessageRecord::createAssistantRecord(senderName, *messageId, storedMessage);
+                ? MessageRecord::createAssistantGeneratedImageRecord(senderName, recordMessageId, *imageDescription)
+                : MessageRecord::createAssistantRecord(senderName, recordMessageId, storedMessage);
+            if (!messageId) {
+                record["send_error"] = messageId.error();
+            }
             if (toolHistory.is_array() && !toolHistory.empty()) {
                 record["tool_history"] = std::move(toolHistory);
             }
-            // 发送成功后写入所属会话的内存消息列表；列表在正常退出时统一持久化。
-            OneBotEventWorkflow::instance().appendDeliveredAssistantMessage(sessionId, record);
-
+            // 发送结果写入上下文，但不作为新消息触发回复，避免失败后循环重试。
+            if (!messageId) {
+                OneBotEventWorkflow::instance().appendAssistantExecutionRecord(sessionId, std::move(record));
+                co_return std::unexpected(messageId.error());
+            }
+            OneBotEventWorkflow::instance().appendDeliveredAssistantMessage(sessionId, std::move(record));
             Logger::info(sessionId, "OneBot",
               fmt::format("成功发送{}: {} (message_id={})", channelName, storedMessage, *messageId));
             co_return *messageId;
@@ -92,7 +96,7 @@ namespace insoulforge {
     } // namespace
 
     auto MessageService::sendGroupMsg(const u64 groupId, std::string message,
-      std::optional<std::string> imageDescription, json toolHistory) -> drogon::Task<std::optional<u64>> {
+      std::optional<std::string> imageDescription, json toolHistory) -> drogon::Task<std::expected<u64, std::string>> {
         // 转换 @[QQ:xxx] 为 CQ 码
         const std::string processedMessage =
           message.starts_with("[CQ:image,file=base64://") ? std::move(message) : convertAtToCQCode(std::move(message));
@@ -101,7 +105,7 @@ namespace insoulforge {
     }
 
     auto MessageService::sendPrivateMsg(const u64 userId, std::string message,
-      std::optional<std::string> imageDescription, json toolHistory) -> drogon::Task<std::optional<u64>> {
+      std::optional<std::string> imageDescription, json toolHistory) -> drogon::Task<std::expected<u64, std::string>> {
         const std::string processedMessage =
           message.starts_with("[CQ:image,file=base64://") ? std::move(message) : convertAtToCQCode(std::move(message));
         co_return co_await afterSendMessage(
