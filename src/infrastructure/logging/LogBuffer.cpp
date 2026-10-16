@@ -45,7 +45,6 @@ namespace insoulforge {
 
         std::lock_guard lock(m_mutex);
         m_entries.clear();
-        m_entries.reserve(loaded.size());
         for (auto &entry: loaded) {
             entry.id = m_nextId++;
             m_entries.push_back(std::move(entry));
@@ -56,7 +55,7 @@ namespace insoulforge {
         std::lock_guard lock(m_mutex);
         entry.id = m_nextId++;
         if (m_entries.size() >= kMaxEntries) {
-            m_entries.erase(m_entries.begin());
+            m_entries.pop_front();
         }
         m_entries.push_back(entry);
         return entry;

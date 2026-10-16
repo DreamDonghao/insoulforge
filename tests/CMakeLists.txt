@@ -1,5 +1,12 @@
 # Tests are organized as a CMake subproject to keep production targets separate.
 
+add_executable(insoulforge_log_buffer_tests EXCLUDE_FROM_ALL
+        LogBufferTests.cpp
+        ${PROJECT_SOURCE_DIR}/src/infrastructure/logging/LogBuffer.cpp)
+target_include_directories(insoulforge_log_buffer_tests PRIVATE ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(insoulforge_log_buffer_tests PRIVATE fmt::fmt-header-only)
+add_test(NAME log_buffer COMMAND insoulforge_log_buffer_tests)
+
 add_executable(insoulforge_message_contract_tests EXCLUDE_FROM_ALL
         MessageContractTests.cpp
         $<TARGET_OBJECTS:${PROJECT_NAME}_backend>)
