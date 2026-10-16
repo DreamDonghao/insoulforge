@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <expected>
 #include <optional>
 #include <string>
 
@@ -19,14 +20,14 @@
 namespace insoulforge::OneBotClient {
     /// @brief 发送群消息（群号即会话 ID，无需单独传 sessionId）
     /// @note OneBot 11: send_group_msg
-    /// @return message_id；失败返回 nullopt
-    [[nodiscard]] auto sendGroupMsg(u64 groupId, std::string message) -> drogon::Task<std::optional<u64>>;
+    /// @return message_id；失败返回具体错误
+    [[nodiscard]] auto sendGroupMsg(u64 groupId, std::string message) -> drogon::Task<std::expected<u64, std::string>>;
 
     /// @brief 发送私聊消息
     /// @note OneBot 11: send_private_msg
-    /// @return message_id；失败返回 nullopt
+    /// @return message_id；失败返回具体错误
     [[nodiscard]] auto sendPrivateMsg(u64 userId, std::string message, std::optional<u64> sessionId = std::nullopt)
-      -> drogon::Task<std::optional<u64>>;
+      -> drogon::Task<std::expected<u64, std::string>>;
 
     /// @brief 群组单人禁言
     /// @note OneBot 11: set_group_ban（duration=0 解除禁言）

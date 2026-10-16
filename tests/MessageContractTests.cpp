@@ -1611,6 +1611,18 @@ namespace {
           "executor projection retains internal history", kTestName);
 
         auto sent = insoulforge::MessageRecord::createAssistantRecord("机器人(我)", 123, "最终回复");
+        check(!insoulforge::MessageRecord::projectForAgent(sent, true).contains("send_error"),
+          "successful messages do not have a send error", kTestName);
+        auto failed = insoulforge::MessageRecord::createAssistantRecord("机器人(我)", std::nullopt, "最终回复");
+        failed["send_error"] = "retcode=1200, message=机器人已被禁言";
+        const auto failedProjection = insoulforge::MessageRecord::projectForAgent(failed);
+        check(failedProjection["send_error"] == failed["send_error"] && !failedProjection.contains("message_id") &&
+                insoulforge::MessageRecord::extractText(failed) == "最终回复",
+          "failed delivery preserves attempted content and error without a platform message ID", kTestName);
+        const auto failedImage =
+          insoulforge::MessageRecord::createAssistantGeneratedImageRecord("机器人(我)", std::nullopt, "生成的图片描述");
+        check(!failedImage.contains("message_id") && failedImage["segments"][0]["description"] == "生成的图片描述",
+          "generated image records support missing platform message IDs", kTestName);
         sent["tool_history"] = history;
         check(insoulforge::MessageRecord::projectForAgent(sent, true)["tool_history"] == history &&
                 insoulforge::MessageRecord::extractText(sent) == "最终回复",
@@ -1625,6 +1637,9 @@ namespace {
         const auto update = messages.append(record);
         check(update && update->back()["tool_history"] == history, "no_reply history enters the context snapshot",
           kTestName);
+        const auto failedUpdate = messages.append(failed);
+        check(failedUpdate && failedUpdate->back()["send_error"] == failed["send_error"],
+          "failed delivery enters the context snapshot", kTestName);
         messages.flushToStorage();
         insoulforge::MessageList restored(987654, database, insoulforge::Config::instance());
         check(restored.fullSnapshot() == messages.fullSnapshot(), "no_reply survives persistence and restoration",

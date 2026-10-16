@@ -314,14 +314,12 @@ namespace insoulforge {
 
                 // 走 MessageService 发送：成功后自动记入会话列表并推送 WebSocket，
                 // 后续轮次模型能从记录中看到自己发过这张表情
-                std::optional<u64> messageId;
-                if (SessionId::isPrivate(sessionId)) {
-                    messageId = co_await MessageService::sendPrivateMsg(SessionId::privateUserId(sessionId), cqCode);
-                } else {
-                    messageId = co_await MessageService::sendGroupMsg(sessionId, cqCode);
-                }
+                const auto messageId =
+                  SessionId::isPrivate(sessionId)
+                    ? co_await MessageService::sendPrivateMsg(SessionId::privateUserId(sessionId), cqCode)
+                    : co_await MessageService::sendGroupMsg(sessionId, cqCode);
                 if (!messageId) {
-                    co_return std::string("表情发送失败，请改用文字回复或稍后重试");
+                    co_return fmt::format("表情发送未确认成功：{}", messageId.error());
                 }
                 co_return fmt::format("已发送表情「{}」", name);
             },
@@ -356,14 +354,13 @@ namespace insoulforge {
 
                 // 与 send_sticker 相同：经 MessageService 发送，成功后记入会话列表并推送 WebSocket
                 const auto sessionId = ctx.sessionId;
-                std::optional<u64> messageId;
-                if (SessionId::isPrivate(sessionId)) {
-                    messageId = co_await MessageService::sendPrivateMsg(SessionId::privateUserId(sessionId), content);
-                } else {
-                    messageId = co_await MessageService::sendGroupMsg(sessionId, content);
-                }
+                const auto messageId =
+                  SessionId::isPrivate(sessionId)
+                    ? co_await MessageService::sendPrivateMsg(SessionId::privateUserId(sessionId), content)
+                    : co_await MessageService::sendGroupMsg(sessionId, content);
                 if (!messageId) {
-                    co_return std::string("过程消息发送失败，请直接继续完成最终回复");
+                    co_return fmt::format(
+                      "过程消息发送未确认成功：{}。请继续处理，不要认为该消息已送达。", messageId.error());
                 }
                 co_return std::string(
                   "过程消息已发送，请继续后续处理；最终回复仍用 reply 工具给出，操作失败也要 reply 告知用户");

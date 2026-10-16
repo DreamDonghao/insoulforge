@@ -139,8 +139,8 @@ namespace insoulforge::LuaToolExecutor {
             }
         }
 
-        [[nodiscard]] auto readJson(lua_State *state, i32 index, const i32 depth, std::unordered_set<const void *> &ancestors)
-          -> json {
+        [[nodiscard]] auto readJson(
+          lua_State *state, i32 index, const i32 depth, std::unordered_set<const void *> &ancestors) -> json {
             if (depth > kMaxJsonDepth) {
                 throw std::runtime_error("Lua 表嵌套过深");
             }
@@ -485,12 +485,12 @@ namespace insoulforge::LuaToolExecutor {
                 } else if (sessionId == 0) {
                     response = {{"ok", false}, {"error", "会话 ID 无效"}};
                 } else {
-                    const std::optional<u64> sent =
+                    const auto sent =
                       SessionId::isPrivate(sessionId)
                         ? co_await MessageService::sendPrivateMsg(SessionId::privateUserId(sessionId), text)
                         : co_await MessageService::sendGroupMsg(sessionId, text);
                     response = sent ? json{{"ok", true}, {"message_id", std::to_string(*sent)}}
-                                    : json{{"ok", false}, {"error", "消息发送失败"}};
+                                    : json{{"ok", false}, {"error", sent.error()}};
                 }
             } else if (operation == "start_task") {
                 if (const std::string description = getStr(request, "description"); description.empty()) {

@@ -22,17 +22,18 @@ namespace insoulforge::MessageRecord {
 
     [[nodiscard]] auto getSessionId(const json &record) -> u64;
 
-    /// @brief 将机器人实际发送的 CQ 内容转换为统一聊天记录
+    /// @brief 将机器人尝试发送的 CQ 内容转换为统一聊天记录
     /// @param senderName 机器人的显示名称
-    /// @param messageId OneBot 返回的消息 ID
-    /// @param content 已发送的 CQ 内容
+    /// @param messageId OneBot 返回的消息 ID；未确认发送成功时为空，不写入该字段。
+    /// @param content 尝试发送的 CQ 内容
     /// @return 不含重复 text 字段的富内容记录
     /// @details 收藏表情仅记录 `sticker.name`；普通 CQ 图片只保留图片动作，不保存外部 URL。
-    [[nodiscard]] auto createAssistantRecord(std::string senderName, u64 messageId, const std::string &content) -> json;
+    [[nodiscard]] auto createAssistantRecord(
+      std::string senderName, std::optional<u64> messageId, const std::string &content) -> json;
 
-    /// @brief 创建已发送成功的生成图片记录，只保存图片描述，不保存传输用 URL/base64
+    /// @brief 创建生成图片记录，只保存图片描述，不保存传输用 URL/base64；失败记录不带消息 ID。
     [[nodiscard]] auto createAssistantGeneratedImageRecord(
-      std::string senderName, u64 messageId, const std::string &description) -> json;
+      std::string senderName, std::optional<u64> messageId, const std::string &description) -> json;
 
     /// @brief 构造内部执行记录，不生成 QQ 消息 ID，也不表示向用户发送了消息。
     [[nodiscard]] auto createAssistantExecutionRecord(
