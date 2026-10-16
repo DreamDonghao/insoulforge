@@ -504,6 +504,17 @@ Schema 中写清楚触发条件与边界。需要调整同类别展示位置时�
 
 ## 调试
 
+- **进程内存**：首页显示 RSS、启动以来峰值和线程数，以及最近 24 小时的 RSS 曲线。
+  `ProcessMetrics` 使用 Drogon 定时器每 60 秒采样，启动时立即采样，不依赖是否打开后台；
+  Linux 读取 `/proc/self/status`，macOS 使用 Mach 与 `getrusage`，不启动外部命令或新增采样线程。
+  采样保存在最多 1440 点的固定容量环形缓冲区，重启清空，不写数据库。
+  管理接口 `GET /admin/api/process-metrics` 返回 `sampleIntervalSeconds`、`latest` 和 `history`；
+  每个点包含 Unix 毫秒 `timestamp`、字节数 `rssBytes`、`peakRssBytes` 以及 `threads`。
+  顶部当前值通过 `GET /admin/api/process-metrics/current` 每 5 秒实时读取，只返回一个采样对象，
+  不写入历史缓冲区；历史接口每分钟刷新。离开首页后停止前端轮询，后端分钟采样继续。
+  无法采集的字段为 `null`，曲线不将缺失值画为零。RSS 包含共享映射，不代表独占内存或泄漏；
+  分钟采样可能遗漏短暂峰值，峰值字段是进程启动以来的峰值，不是滚动 24 小时峰值。
+  曲线横轴按已有历史自适应，最长显示 24 小时；只有一个采样时居中显示，不补造历史点。
 - **日志**：业务代码只能调用 `Logger`，每条记录显式传入 `sessionId`、来源字符串和内容：
   `Logger::info(sessionId, "Executor", content)`。系统日志的 `sessionId` 固定为 `0`。日志系统统一生成
   `[level][session_id][source][content]`，并同时输出到控制台、`logs/bot.log`、`LogBuffer` 和后台日志 WebSocket。

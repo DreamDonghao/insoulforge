@@ -21,6 +21,7 @@
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
+#include <infrastructure/monitoring/ProcessMetrics.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <media/ImageDescriptionStore.hpp>
 #include <onebot/transport/OneBotWebSocketClient.hpp>
@@ -140,8 +141,10 @@ auto main() -> int {
             Logger::info(0, "Admin", " " + url + " ");
         }
 
-        // 进入事件循环并等待退出；返回后才执行下面的收尾操作。
+        // 资源历史在无人访问后台时也持续采样，退出事件循环后停止采样。
+        ProcessMetrics::instance().start(*drogon::app().getLoop());
         drogon::app().run();
+        ProcessMetrics::instance().stop();
 
         // stdin 读取不能依赖 SIGINT 自动返回；先结束命令线程，避免 jthread 析构时阻塞退出。
         commandThread.request_stop();
@@ -155,10 +158,12 @@ auto main() -> int {
         database.close();
         Logger::info(0, "Main", "系统正常退出");
     } catch (const std::exception &e) {
+        ProcessMetrics::instance().stop();
         Logger::critical(0, "Main", fmt::format("程序崩溃: {}", e.what()));
         Logger::shutdown();
         return EXIT_FAILURE;
     } catch (...) {
+        ProcessMetrics::instance().stop();
         Logger::critical(0, "Main", "程序崩溃: 未知错误");
         Logger::shutdown();
         return EXIT_FAILURE;

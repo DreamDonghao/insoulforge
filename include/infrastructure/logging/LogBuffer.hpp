@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <deque>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -67,7 +68,7 @@ namespace insoulforge {
         static auto matches(const LogEntry &entry, const LogQuery &query) -> bool;
 
         mutable std::mutex m_mutex;
-        std::vector<LogEntry> m_entries;
+        std::deque<LogEntry> m_entries;
         u64 m_nextId = 1;
     };
 } // namespace insoulforge

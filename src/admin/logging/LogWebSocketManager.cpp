@@ -30,6 +30,20 @@ namespace insoulforge {
     }
 
     void LogWebSocketManager::pushLog(const LogEntry &entry) {
+        std::vector<drogon::WebSocketConnectionPtr> recipients;
+        {
+            std::lock_guard lock(m_mutex);
+            for (const auto &conn: m_connections) {
+                if (const auto subscription = m_subscriptions.find(conn);
+                  subscription != m_subscriptions.end() && matches(subscription->second, entry)) {
+                    recipients.push_back(conn);
+                }
+            }
+        }
+        if (recipients.empty()) {
+            return;
+        }
+
         json data;
         data["id"] = entry.id;
         data["timestamp"] = entry.timestamp;
@@ -43,16 +57,6 @@ namespace insoulforge {
         message["data"] = data;
         const std::string payload = dumpJson(message);
 
-        std::vector<drogon::WebSocketConnectionPtr> recipients;
-        {
-            std::lock_guard lock(m_mutex);
-            for (const auto &conn: m_connections) {
-                if (const auto subscription = m_subscriptions.find(conn);
-                  subscription != m_subscriptions.end() && matches(subscription->second, entry)) {
-                    recipients.push_back(conn);
-                }
-            }
-        }
         for (const auto &conn: recipients) {
             conn->send(payload);
         }

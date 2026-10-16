@@ -164,6 +164,8 @@ a {
 }
 
 .container {
+    --app-header-height: 72px;
+    --content-padding: 40px;
     display: flex;
     min-height: 100vh;
 }
@@ -177,12 +179,16 @@ a {
     flex-direction: column;
     position: fixed;
     height: 100vh;
-    overflow-y: auto;
+    overflow: hidden;
     transition: background-color 0.25s ease, border-color 0.25s ease;
 }
 
 .sidebar-header {
-    padding: 20px;
+    flex-shrink: 0;
+    height: var(--app-header-height);
+    display: flex;
+    align-items: center;
+    padding: 10px 20px;
     border-bottom: 1px solid var(--border);
     transition: border-color 0.25s ease;
 }
@@ -238,18 +244,20 @@ a {
 }
 
 .sidebar-nav {
-    padding: 14px 12px;
+    padding: 8px 12px;
     flex: 1;
+    min-height: 0;
+    overflow-y: auto;
 }
 
 .nav-section {
-    margin-bottom: 20px;
+    margin-bottom: 0;
 }
 
 .nav-divider {
     height: 1px;
     background: var(--border);
-    margin: 8px 12px;
+    margin: 6px 12px;
     transition: background-color 0.25s ease;
 }
 
@@ -266,14 +274,16 @@ a {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 10px 12px;
+    min-height: 44px;
+    padding: 12px;
+    line-height: 20px;
     border-radius: 8px;
     cursor: pointer;
     transition: background-color 0.15s ease, color 0.15s ease;
     color: var(--text-secondary);
     font-weight: 500;
     font-size: 14px;
-    margin-bottom: 2px;
+    margin-bottom: 0;
 }
 
 .nav-item:hover {
@@ -302,7 +312,8 @@ a {
 
 /* 侧边栏底部 */
 .sidebar-footer {
-    padding: 12px;
+    flex-shrink: 0;
+    padding: 8px 12px;
     border-top: 1px solid var(--border);
     transition: border-color 0.25s ease;
 }
@@ -317,7 +328,9 @@ a {
     align-items: center;
     gap: 10px;
     width: 100%;
+    min-height: 40px;
     padding: 10px 12px;
+    line-height: 20px;
     border: none;
     border-radius: 8px;
     background: transparent;
@@ -346,36 +359,84 @@ a {
     opacity: 0.75;
 }
 
+@media (max-height: 880px) {
+    .nav-item {
+        min-height: 40px;
+        padding-block: 10px;
+    }
+}
+
+@media (max-height: 800px) {
+    .container {
+        --app-header-height: 60px;
+    }
+
+    .sidebar-header {
+        padding-block: 6px;
+    }
+
+    .sidebar-nav {
+        padding-block: 4px;
+    }
+
+    .nav-item {
+        min-height: 36px;
+        padding-block: 8px;
+    }
+
+    .nav-divider {
+        margin-block: 4px;
+    }
+
+    .sidebar-action {
+        min-height: 36px;
+        padding-block: 8px;
+    }
+
+    .sidebar-footer {
+        padding-block: 6px;
+    }
+}
+
 /* ============ 主内容区 ============ */
 .main {
     flex: 1;
+    min-width: 0;
     margin-left: 260px;
-    padding: 32px 40px;
+    padding: 0 var(--content-padding) 32px;
     min-height: 100vh;
 }
 
 .page-header {
-    margin-bottom: 28px;
+    display: grid;
+    align-content: center;
+    gap: 4px;
+    min-height: var(--app-header-height);
+    margin: 0 calc(-1 * var(--content-padding)) 24px;
+    padding: 4px var(--content-padding);
+    border-bottom: 1px solid var(--border);
 }
 
 .page-title {
-    font-size: 24px;
+    font-size: 20px;
+    line-height: 26px;
     font-weight: 700;
     color: var(--text-primary);
-    letter-spacing: -0.4px;
+    letter-spacing: 0;
 }
 
 .page-subtitle {
     color: var(--text-secondary);
-    margin-top: 6px;
-    font-size: 14px;
+    margin-top: 0;
+    font-size: 13px;
+    line-height: 18px;
 }
 
 /* ============ 日志 ============ */
 .log-viewer {
     display: flex;
     flex-direction: column;
-    height: calc(100vh - 64px);
+    height: calc(100vh - 32px);
     overflow: hidden;
 }
 

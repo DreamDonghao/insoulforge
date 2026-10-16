@@ -6,10 +6,10 @@
 #include <admin/http/AdminResponse.hpp>
 #include <agent/memory/LongTermMemoryStore.hpp>
 #include <agent/memory/MemoryStore.hpp>
+#include <agent/memory/affinity/AffinityStore.hpp>
 #include <agent/runtime/AgentSystem.hpp>
 #include <agent/tools/ToolRuntime.hpp>
 #include <conversation/history/ChatRecordStore.hpp>
-#include <agent/memory/affinity/AffinityStore.hpp>
 #include <conversation/message/MessageRecord.hpp>
 #include <conversation/message/SessionId.hpp>
 #include <conversation/session/QQNameDirectory.hpp>
@@ -20,6 +20,7 @@
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/http/HttpTrace.hpp>
 #include <infrastructure/logging/Logger.hpp>
+#include <infrastructure/monitoring/ProcessMetrics.hpp>
 #include <llm/usage/UsageStore.hpp>
 #include <onebot/transport/OneBotClient.hpp>
 #include <onebot/transport/OneBotWebSocketClient.hpp>
@@ -30,6 +31,14 @@ using namespace drogon;
 namespace {
     // 进程启动时间（文件作用域 static，程序启动时初始化）
     const auto g_processStartTime = std::chrono::system_clock::now();
+
+    auto processSampleJson(const ProcessSample &sample) -> json {
+        auto entry = json{{"timestamp", sample.timestamp}};
+        entry["rssBytes"] = sample.rssBytes ? json(*sample.rssBytes) : json(nullptr);
+        entry["peakRssBytes"] = sample.peakRssBytes ? json(*sample.peakRssBytes) : json(nullptr);
+        entry["threads"] = sample.threads ? json(*sample.threads) : json(nullptr);
+        return entry;
+    }
 
     auto parseQueryUInt64(const HttpRequestPtr &req, const std::string &name, u64 fallback = 0) -> u64 {
         const auto value = req->getParameter(name);
@@ -233,6 +242,25 @@ auto AdminController::getSystemInfo(HttpRequestPtr req, std::function<void(const
     resp["startTime"] = startEpoch;
     resp["uptimeSeconds"] = uptimeSeconds;
     callback(jsonResponse(resp));
+    co_return;
+}
+
+auto AdminController::getProcessMetrics(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
+  -> Task<> {
+    auto history = json::array();
+    for (const auto &sample: ProcessMetrics::instance().snapshot()) {
+        history.push_back(processSampleJson(sample));
+    }
+    auto response = json{{"sampleIntervalSeconds", ProcessMetrics::kSampleIntervalSeconds}};
+    response["latest"] = history.empty() ? json(nullptr) : history.back();
+    response["history"] = std::move(history);
+    callback(jsonResponse(response));
+    co_return;
+}
+
+auto AdminController::getCurrentProcessMetrics(
+  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const -> Task<> {
+    callback(jsonResponse(processSampleJson(readProcessSample())));
     co_return;
 }
 
