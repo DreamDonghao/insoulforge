@@ -6,6 +6,8 @@
 #include <agent/tools/ToolRegistry.hpp>
 #include <agent/tools/mcp/McpTools.hpp>
 #include <infrastructure/config/Config.hpp>
+#include <infrastructure/http/HttpTrace.hpp>
+#include <infrastructure/http/HttpUtil.hpp>
 #include <infrastructure/logging/Logger.hpp>
 
 namespace insoulforge {
@@ -41,6 +43,28 @@ namespace insoulforge {
             return result;
         }
 
+        auto traceBody(std::string_view body) -> std::string {
+            const auto value = json::parse(body, nullptr, false);
+            return value.is_discarded() ? std::string{body} : HttpUtil::redactImagePayloads(value).dump();
+        }
+
+        void attachTrace(
+          drogonmcp::ClientOptions &options, std::string serverName, std::optional<u64> sessionId = std::nullopt) {
+            options.onHttpTrace = [url = options.endpoint, tag = "MCP:" + serverName, sessionId](
+                                    drogon::HttpMethod method, std::string_view request, i32 status,
+                                    std::string_view response) {
+                HttpTrace::instance().append(HttpTraceEntry{
+                  .tag = tag,
+                  .method = method == drogon::Delete ? "DELETE" : "POST",
+                  .url = url,
+                  .requestBody = traceBody(request),
+                  .status = status,
+                  .responseBody = traceBody(response),
+                  .sessionId = sessionId,
+                });
+            };
+        }
+
         /// 关闭失败不能覆盖已成功执行的工具结果；异常也只记录为清理警告。
         auto closeSession(drogonmcp::Client &client, u64 sessionId) -> drogon::Task<> {
             try {
@@ -60,11 +84,12 @@ namespace insoulforge {
         }
 
         // 配置和参数由协程帧持有；每次调用独立会话，可同时服务不同群聊。
-        auto callRemote(drogonmcp::ClientOptions options, std::string remoteName, json arguments,
-          ToolCallContext context) -> drogon::Task<std::string> {
+        auto callRemote(drogonmcp::ClientOptions options, std::string serverName, std::string remoteName,
+          json arguments, ToolCallContext context) -> drogon::Task<std::string> {
             auto *loop = trantor::EventLoop::getEventLoopOfCurrentThread();
             if (!loop)
                 co_return "MCP 工具失败：当前线程没有事件循环";
+            attachTrace(options, std::move(serverName), context.sessionId);
             auto client = drogonmcp::Client{*loop, std::move(options)};
             auto output = std::string{};
             try {
@@ -125,6 +150,16 @@ namespace insoulforge {
                 return std::unexpected("MCP url 必须是 HTTP(S) 地址且不超过 4096 字节");
             if (value.contains("token") && !value["token"].is_string())
                 return std::unexpected("MCP token 必须是字符串");
+            auto headers = std::map<std::string, std::string>{};
+            if (value.contains("headers")) {
+                if (!value["headers"].is_object())
+                    return std::unexpected("MCP headers 必须是对象");
+                for (const auto &[key, header]: value["headers"].items()) {
+                    if (!header.is_string())
+                        return std::unexpected("MCP 请求头的值必须是字符串");
+                    headers.emplace(key, header.get<std::string>());
+                }
+            }
             if (value.contains("description") && (!value["description"].is_string() ||
                                                    value["description"].get_ref<const std::string &>().size() > 1024))
                 return std::unexpected("MCP description 必须是字符串且不超过 1024 UTF-8 字节");
@@ -137,6 +172,7 @@ namespace insoulforge {
               .endpoint = url,
               .name = "insoulforge",
               .bearerToken = value.value("token", std::string{}),
+              .headers = std::move(headers),
               .timeoutSeconds = timeout,
               .maxResponseBytes = 1024 * 1024,
               .maxToolCount = 256,
@@ -158,6 +194,7 @@ namespace insoulforge {
             const auto old = std::ranges::find_if(m_servers, [&](const auto &entry) {
                 return entry->name == server->name && entry->options.endpoint == server->options.endpoint &&
                        entry->options.bearerToken == server->options.bearerToken &&
+                       entry->options.headers == server->options.headers &&
                        entry->options.timeoutSeconds == server->options.timeoutSeconds;
             });
             if (old != m_servers.end()) {
@@ -199,7 +236,8 @@ namespace insoulforge {
             auto tools = json::array();
             if (server->catalog) {
                 for (const auto &tool: server->catalog->tools)
-                    tools.push_back({{"name", tool.at("name")}, {"description", tool.value("description", std::string{})}});
+                    tools.push_back(
+                      {{"name", tool.at("name")}, {"description", tool.value("description", std::string{})}});
             }
             result.push_back({{"name", server->name}, {"loaded", server->loaded}, {"loading", server->loading},
               {"toolCount", tools.size()}, {"tools", std::move(tools)}, {"error", server->error}});
@@ -226,7 +264,9 @@ namespace insoulforge {
         auto *loop = trantor::EventLoop::getEventLoopOfCurrentThread();
         if (!loop)
             co_return std::unexpected("当前线程没有事件循环");
-        auto client = drogonmcp::Client{*loop, server->options};
+        auto options = server->options;
+        attachTrace(options, server->name);
+        auto client = drogonmcp::Client{*loop, std::move(options)};
         // 查询抛出异常时也清理会话；配置与网络错误仍保留具体原因。
         auto tools = drogonmcp::Result<std::vector<drogonmcp::Json>>{};
         try {
@@ -252,9 +292,10 @@ namespace insoulforge {
               .name = localName,
               .description = "[MCP " + server->name + "] " + tool.value("description", remoteName),
               .parameters = tool["inputSchema"],
-              .handler = [options = server->options, remoteName](
+              .handler = [options = server->options, serverName = server->name, remoteName](
                            json arguments, ToolCallContext context) -> drogon::Task<std::string> {
-                  co_return co_await callRemote(options, remoteName, std::move(arguments), std::move(context));
+                  co_return co_await callRemote(
+                    options, serverName, remoteName, std::move(arguments), std::move(context));
               },
             });
         }

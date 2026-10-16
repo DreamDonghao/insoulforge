@@ -124,9 +124,16 @@ namespace drogonmcp {
             return failure(ErrorKind::Configuration, "Bearer token contains invalid characters");
         constexpr auto reserved = std::array{"accept", "content-type", "host", "content-length", "transfer-encoding",
           "mcp-session-id", "mcp-protocol-version"};
+        auto headerNames = std::set<std::string>{};
         for (const auto &[name, value]: options.headers) {
-            if (name.empty() || !isVisible(name) || name.find(':') != std::string::npos ||
-                value.find_first_of("\r\n") != std::string::npos || std::ranges::contains(reserved, lower(name)) ||
+            const auto validName = !name.empty() && std::ranges::all_of(name, [](unsigned char c) {
+                return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+                       std::string_view{"!#$%&'*+-.^_`|~"}.find(c) != std::string_view::npos;
+            });
+            const auto validValue =
+              std::ranges::all_of(value, [](unsigned char c) { return c == '\t' || (c >= 0x20 && c != 0x7f); });
+            if (!validName || !validValue || !headerNames.insert(lower(name)).second ||
+                std::ranges::contains(reserved, lower(name)) ||
                 (lower(name) == "authorization" && !options.bearerToken.empty()))
                 return failure(ErrorKind::Configuration, "Invalid or reserved custom HTTP header");
         }
@@ -162,6 +169,17 @@ namespace drogonmcp {
 
     auto Client::isInitialized() const noexcept -> bool { return m_initialized; }
 
+    void Client::traceHttp(drogon::HttpMethod method, std::string_view requestBody, i32 status,
+      std::string_view responseBody) const noexcept {
+        if (!m_options.onHttpTrace)
+            return;
+        try {
+            m_options.onHttpTrace(method, requestBody, status, responseBody);
+        } catch (...) {
+            // 调试记录失败不能改变远程调用结果，尤其不能导致有副作用的工具被重试。
+        }
+    }
+
     auto Client::send(drogon::HttpMethod method, std::string body) -> drogon::Task<Result<drogon::HttpResponsePtr>> {
         auto request = drogon::HttpRequest::newHttpRequest();
         request->setMethod(method);
@@ -179,16 +197,26 @@ namespace drogonmcp {
         request->setBody(std::move(body));
         try {
             auto response = co_await m_http->sendRequestCoro(request, m_options.timeoutSeconds);
-            if (!response)
+            if (!response) {
+                traceHttp(method, request->body(), 0, "HTTP request returned no response");
                 co_return failure(ErrorKind::Transport, "HTTP request returned no response");
+            }
             // 普通 Drogon HTTP 接口在完整接收后才返回；此限制不是接收过程的内存上限。
-            if (response->body().size() > m_options.maxResponseBytes)
+            if (response->body().size() > m_options.maxResponseBytes) {
+                traceHttp(method, request->body(), static_cast<i32>(response->statusCode()),
+                  "Response exceeds maxResponseBytes");
                 co_return failure(ErrorKind::Limit, "Response exceeds maxResponseBytes");
+            }
+            traceHttp(method, request->body(), static_cast<i32>(response->statusCode()), response->body());
             co_return response;
         } catch (const drogon::HttpException &error) {
+            traceHttp(method, request->body(), 0, error.what());
             // 超时连接可能仍占用请求队列；后续操作使用新连接，不重放当前请求。
             m_http = drogon::HttpClient::newHttpClient(m_origin, &m_loop);
             co_return failure(ErrorKind::Transport, error.what());
+        } catch (const std::exception &error) {
+            traceHttp(method, request->body(), 0, error.what());
+            throw;
         }
     }
 

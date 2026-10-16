@@ -1,7 +1,9 @@
 #pragma once
 
+#include <functional>
 #include <map>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <drogon/HttpClient.h>
@@ -20,6 +22,9 @@ namespace drogonmcp {
         size_t maxResponseBytes = 8 * 1024 * 1024;
         size_t maxToolCount = 10000;
         size_t maxPages = 100;
+        /// 同步观察 HTTP 请求结果；字符串视图仅在回调期间有效，不包含认证请求头。
+        /// status 为 0 表示未收到响应，回调异常不会改变请求结果。
+        std::function<void(drogon::HttpMethod, std::string_view, i32, std::string_view)> onHttpTrace;
     };
 
     /// @brief 在保存配置前校验地址、认证和请求限制，不连接网络。
@@ -49,6 +54,8 @@ namespace drogonmcp {
         auto exchange(Json message, bool notification = false) -> drogon::Task<Result<Json>>;
         auto send(drogon::HttpMethod method, std::string body) -> drogon::Task<Result<drogon::HttpResponsePtr>>;
         auto checkOperation() const -> Result<void>;
+        void traceHttp(drogon::HttpMethod method, std::string_view requestBody, i32 status,
+          std::string_view responseBody) const noexcept;
 
         trantor::EventLoop &m_loop;
         ClientOptions m_options;
