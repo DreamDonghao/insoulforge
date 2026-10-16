@@ -6,6 +6,7 @@
 import {computed, inject, onMounted, onUnmounted, ref, type Ref} from 'vue'
 import type {LLMConfig, QQConfig} from '../../vite-env'
 import {useToast} from '../../composables/useToast'
+import ProcessMemory from './ProcessMemory.vue'
 
 const qqConfig = inject<QQConfig>('qqConfig')
 const ws = inject<{ get: () => WebSocket | null }>('ws')
@@ -346,6 +347,8 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <ProcessMemory/>
+
     <!-- 仪表盘布局：左 3 右 2 -->
     <div class="dash-layout">
       <!-- 左列 -->
@@ -508,7 +511,7 @@ onUnmounted(() => {
   padding: 12px 18px;
   background: var(--card-bg);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
   flex-wrap: wrap;
 }
 
@@ -538,12 +541,10 @@ onUnmounted(() => {
 
 .dot-green {
   background: var(--success);
-  box-shadow: 0 0 6px var(--success);
 }
 
 .dot-red {
   background: var(--danger);
-  box-shadow: 0 0 6px var(--danger);
 }
 
 .dot-gray {
@@ -553,33 +554,27 @@ onUnmounted(() => {
 /* ====== 仪表盘布局（左 3 右 2） ====== */
 .dash-layout {
   display: grid;
-  grid-template-columns: 1fr 1.2fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
   gap: 16px;
-  align-items: stretch;
-  min-height: calc(100vh - 220px);
+  align-items: start;
 }
 
 .dash-col {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  min-width: 0;
 }
 
 .bento-card {
-  flex: 1;
-  min-height: 0;
+  min-width: 0;
+  flex: none;
   background: var(--card-bg);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 8px;
   padding: 18px 20px;
   display: flex;
   flex-direction: column;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
-}
-
-.bento-card:hover {
-  border-color: var(--neon-cyan);
-  box-shadow: 0 0 14px var(--neon-cyan-glow);
 }
 
 /* ====== 卡片头部 ====== */
@@ -619,13 +614,20 @@ onUnmounted(() => {
 .models-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 0;
 }
 
 .model-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 8px 88px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.model-row:last-child {
+  border-bottom: 0;
 }
 
 .model-dot {
@@ -633,29 +635,28 @@ onUnmounted(() => {
   height: 9px;
   border-radius: 50%;
   flex-shrink: 0;
-  box-shadow: 0 0 8px currentColor;
 }
 
 .model-name {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-secondary);
-  width: 96px;
   flex-shrink: 0;
 }
 
 .model-code {
   font-size: 12px;
-  max-width: none;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+  width: fit-content;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 /* ====== 每日用量 ====== */
 .usage-kpis {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 16px;
 }
@@ -669,10 +670,11 @@ onUnmounted(() => {
   font-size: 12px;
   color: var(--text-light);
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 0;
 }
 
 .kpi-value {
+  overflow-wrap: anywhere;
   font-size: 20px;
   font-weight: 700;
   color: var(--text-primary);
@@ -690,7 +692,7 @@ onUnmounted(() => {
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  flex: 1;
+  height: 90px;
   min-height: 90px;
 }
 
@@ -734,7 +736,7 @@ onUnmounted(() => {
   font-size: 28px;
   font-weight: 700;
   color: var(--text-primary);
-  letter-spacing: -0.5px;
+  letter-spacing: 0;
   font-variant-numeric: tabular-nums;
 }
 
@@ -756,6 +758,7 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+  min-width: 0;
 }
 
 .kv-label {
@@ -765,6 +768,8 @@ onUnmounted(() => {
 }
 
 .kv-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
   font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
@@ -792,6 +797,7 @@ onUnmounted(() => {
 }
 
 .kv-wrap {
+  min-width: 0;
   max-width: none;
   white-space: normal;
   word-break: break-all;
@@ -801,21 +807,20 @@ onUnmounted(() => {
 /* ====== 资源 ====== */
 .resource-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
-  flex: 1;
 }
 
 .resource-tile {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--primary-softer);
+  padding: 8px 0;
+  min-width: 0;
 }
 
 .resource-value {
+  overflow-wrap: anywhere;
   font-size: 20px;
   font-weight: 700;
   color: var(--text-primary);
@@ -835,18 +840,20 @@ onUnmounted(() => {
 }
 
 /* ====== 响应式 ====== */
-@media (max-width: 640px) {
+@media (max-width: 1100px) {
   .dash-layout {
     grid-template-columns: 1fr;
-    min-height: 0;
   }
+}
 
-  .usage-kpis {
-    grid-template-columns: 1fr;
-  }
-
+@media (max-width: 640px) {
   .resource-grid {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .model-row {
+    grid-template-columns: 7px 74px minmax(0, 1fr);
+    gap: 8px;
   }
 }
 </style>

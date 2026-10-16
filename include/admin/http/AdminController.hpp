@@ -58,6 +58,8 @@ namespace insoulforge {
 
         // 运行信息（启动时间/运行时长）
         ADD_METHOD_TO(AdminController::getSystemInfo, "/admin/api/system-info", drogon::Get);
+        ADD_METHOD_TO(AdminController::getProcessMetrics, "/admin/api/process-metrics", drogon::Get);
+        ADD_METHOD_TO(AdminController::getCurrentProcessMetrics, "/admin/api/process-metrics/current", drogon::Get);
 
         // 机器人运行状态
         ADD_METHOD_TO(AdminController::getBotStatus, "/admin/api/bot-status", drogon::Get);
@@ -261,6 +263,14 @@ namespace insoulforge {
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
         auto getSystemInfo(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
+
+        /// @brief 查询每分钟采样的进程资源与最近 24 小时历史；重启后清空。
+        auto getProcessMetrics(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
+
+        /// @brief 实时读取进程资源，不修改历史采样、不返回历史数据。
+        auto getCurrentProcessMetrics(drogon::HttpRequestPtr req,
           std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         /// @brief 获取机器人运行状态
