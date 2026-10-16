@@ -106,7 +106,7 @@ onMounted(loadEmojis)
             <div v-for="(emoji, i) in emojis" :key="emoji.res_id || i"
                  style="width:140px;text-align:center">
               <div style="width:100%;height:100px;display:flex;align-items:center;justify-content:center;
-                          background:var(--bg-secondary, #f5f5f5);border-radius:8px;
+                          background:var(--bg-secondary, #f5f5f5);border-radius: 0;
                           border:1px solid var(--border-color)">
                 <img v-if="emoji.url" :alt="emoji.name" :src="emoji.url"
                      loading="lazy"

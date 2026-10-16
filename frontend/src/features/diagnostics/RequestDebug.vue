@@ -297,7 +297,16 @@ onUnmounted(() => window.clearInterval(timer))
   display: grid;
   grid-template-columns: minmax(360px, 5fr) 7fr;
   gap: 16px;
-  align-items: start;
+  align-items: stretch;
+}
+
+.layout > .card {
+  display: flex;
+  flex-direction: column;
+  min-height: 160px;
+  max-height: max(240px, calc(100vh - 240px));
+  margin-bottom: 0;
+  overflow-y: auto;
 }
 
 @media (max-width: 1100px) {
@@ -307,14 +316,13 @@ onUnmounted(() => window.clearInterval(timer))
 }
 
 .trace-list-card {
-  max-height: calc(100vh - 240px);
-  overflow-y: auto;
   padding: 8px;
 }
 
 .trace-item {
+  flex-shrink: 0;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: 0;
   cursor: pointer;
   border: 1px solid transparent;
 }
@@ -354,7 +362,7 @@ onUnmounted(() => window.clearInterval(timer))
 
 .chip {
   padding: 1px 8px;
-  border-radius: 999px;
+  border-radius: 0;
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
@@ -379,7 +387,7 @@ onUnmounted(() => window.clearInterval(timer))
   background: var(--primary-soft);
   color: var(--primary-strong);
   padding: 1px 8px;
-  border-radius: 6px;
+  border-radius: 0;
   font-size: 12px;
   white-space: nowrap;
 }
@@ -440,7 +448,7 @@ onUnmounted(() => window.clearInterval(timer))
   overflow: auto;
   background: var(--code-bg);
   color: var(--code-text);
-  border-radius: 8px;
+  border-radius: 0;
   font-size: 12px;
   line-height: 1.5;
   white-space: pre-wrap;
@@ -448,6 +456,9 @@ onUnmounted(() => window.clearInterval(timer))
 }
 
 .empty {
+  flex: 1;
+  display: grid;
+  place-items: center;
   padding: 40px;
   text-align: center;
   color: var(--text-light);

@@ -121,15 +121,24 @@ const setGroupSetting = async (group: Group, event: Event, setting: GroupSetting
   }
 }
 
-const toggleGroup = async (groupId: string): Promise<void> => {
-  const resp = await fetch(`/admin/api/group/${groupId}/toggle`, {method: 'POST'})
-  const data: ApiResponse = await resp.json()
-  if (data.success) {
-    const group = groups.value.find(g => sessionKey(g) === groupId)
-    if (group) {
-      group.enabled = !group.enabled
-      showToast!(group.enabled ? '已启用' : '已禁用')
-    }
+const savingGroups = reactive(new Set<string>())
+const toggleGroup = async (group: Group, event: Event): Promise<void> => {
+  const input = event.target as HTMLInputElement
+  const groupId = sessionKey(group)
+  const enabled = input.checked
+  if (savingGroups.has(groupId)) return
+  savingGroups.add(groupId)
+  try {
+    const resp = await fetch(`/admin/api/group/${groupId}/toggle`, {method: 'POST'})
+    const data: ApiResponse = await resp.json()
+    if (!resp.ok || !data.success) throw new Error(data.error || '保存失败')
+    group.enabled = enabled
+    showToast?.(enabled ? '已启用' : '已禁用')
+  } catch (error) {
+    input.checked = group.enabled === true
+    showToast?.(error instanceof Error ? error.message : '保存失败', true)
+  } finally {
+    savingGroups.delete(groupId)
   }
 }
 
@@ -679,7 +688,7 @@ onUnmounted(() => {
     <template v-if="!selectedGroup">
       <!-- 会话列表 -->
       <div class="card">
-        <div class="card-header">
+        <div class="card-header session-list-header">
           <div style="display: flex; gap: 12px; align-items: center;">
             <h3 class="card-title">会话列表</h3>
             <div :class="{ connected: wsConnected, disconnected: !wsConnected }" class="connection-status">
@@ -718,31 +727,32 @@ onUnmounted(() => {
             </div>
           </template>
           <template v-else>
-            <table>
+            <table class="session-table">
               <thead>
               <tr>
-                <th style="width: 60px;">状态</th>
+                <th style="width: 132px;">启用会话</th>
                 <th>会话</th>
                 <th style="width: 120px;">群号/QQ号</th>
                 <th style="width: 70px;">消息</th>
                 <th style="width: 90px;">发送群名片</th>
                 <th style="width: 90px;">自动回复</th>
-                <th style="width: 360px;">操作</th>
+                <th class="session-actions-heading">操作</th>
               </tr>
               </thead>
               <tbody>
               <tr v-for="group in filteredGroups" :key="sessionKey(group)" :class="{ 'row-disabled': !group.enabled }"
                   class="group-row"
                   @click="selectGroup(sessionKey(group), sessionLabel(group))">
-                <td>
-                  <span
-                      :class="group.enabled ? 'status-enabled' : 'status-disabled'"
-                      :title="group.enabled ? '点击禁用' : '点击启用'"
-                      class="status-badge"
-                      @click.stop="toggleGroup(sessionKey(group))"
-                  >
-                    {{ group.enabled ? '启用' : '禁用' }}
-                  </span>
+                <td class="session-enabled-cell" @click.stop>
+                  <label class="group-setting-switch"
+                         :class="{'is-saving': savingGroups.has(sessionKey(group))}"
+                         :title="savingGroups.has(sessionKey(group)) ? '保存中' : (group.enabled ? '禁用会话' : '启用会话')">
+                    <input type="checkbox" role="switch" :checked="group.enabled"
+                           :disabled="savingGroups.has(sessionKey(group))" aria-label="启用会话"
+                           :aria-busy="savingGroups.has(sessionKey(group))" @change="toggleGroup(group, $event)">
+                    <span class="group-setting-track" aria-hidden="true"></span>
+                  </label>
+                  <span class="session-enabled-label" :class="{'is-enabled': group.enabled}">{{ group.enabled ? '已启用' : '已禁用' }}</span>
                 </td>
                 <td>
                   <strong v-if="isPrivateSession(group)">{{ group.groupName || '私聊' }}</strong>
@@ -775,11 +785,8 @@ onUnmounted(() => {
                   </label>
                   <span v-else>-</span>
                 </td>
-                <td style="white-space: nowrap;">
-                  <button class="btn btn-primary btn-sm"
-                          @click.stop="selectGroup(sessionKey(group), sessionLabel(group))">消息
-                  </button>
-                  <button class="btn btn-secondary btn-sm" style="margin-left: 6px;"
+                <td class="session-actions">
+                  <button class="btn btn-secondary btn-sm"
                           @click.stop="viewMemory(sessionKey(group), sessionLabel(group))">短期记忆
                   </button>
                   <button class="btn btn-secondary btn-sm" style="margin-left: 6px;"
@@ -808,12 +815,12 @@ onUnmounted(() => {
 
     <!-- 聊天记录 -->
     <div v-else class="card chat-card">
-      <div class="card-header">
-        <div>
+      <div class="card-header chat-list-header">
+        <div class="chat-heading">
           <h3 class="card-title">{{ selectedGroupName }}</h3>
           <span class="msg-count">{{ chatRecords.length }} 条消息</span>
         </div>
-        <div style="display: flex; gap: 8px;">
+        <div class="chat-header-actions">
           <button :disabled="chatRecords.length === 0" class="btn btn-danger btn-sm" @click="clearGroupRecords">
             清空消息
           </button>
@@ -835,7 +842,10 @@ onUnmounted(() => {
             <!-- 普通显示 -->
             <template v-if="editingId !== msg.id">
               <div class="msg-header">
-                <span class="msg-role">{{ messageSender(msg) }}</span>
+                <div class="msg-identity">
+                  <span class="msg-role">{{ messageSender(msg) }}</span>
+                  <span v-if="msg.role === 'assistant'" class="msg-bot-label">机器人</span>
+                </div>
                 <div v-if="canEditMessage(msg)" class="msg-actions">
                   <button class="action-btn" title="编辑" @click="startEdit(msg)">✏️</button>
                   <button class="action-btn delete" title="删除" @click="deleteRecord(msg.id!)">🗑️</button>
@@ -844,7 +854,7 @@ onUnmounted(() => {
               <div class="msg-content">{{ formatMessageContent(msg.content) }}</div>
               <details v-if="parseMessageRecord(msg.content)" class="message-debug">
                 <summary>原始 JSON</summary>
-                <pre>{{ msg.content }}</pre>
+                <pre>{{ JSON.stringify(parseMessageRecord(msg.content), null, 2) }}</pre>
               </details>
             </template>
 
@@ -1052,12 +1062,74 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.chat-list-header {
+  flex-wrap: wrap;
+  gap: 24px 40px;
+}
+
+.chat-heading {
+  min-width: 0;
+}
+
+.chat-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 40px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.chat-heading .card-title {
+  overflow-wrap: anywhere;
+}
+
+.session-list-header {
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.session-table {
+  min-width: 1060px;
+}
+
+.session-table th,
+.session-table td {
+  padding: 12px;
+}
+
+.session-actions-heading {
+  width: 1%;
+}
+
+.session-actions {
+  white-space: nowrap;
+}
+
+.session-actions .btn {
+  padding-inline: 9px;
+}
+
+.session-enabled-cell {
+  white-space: nowrap;
+}
+
+.session-enabled-label {
+  margin-left: 8px;
+  vertical-align: middle;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.session-enabled-label.is-enabled {
+  color: var(--success);
+}
+
 .group-setting-switch {
   position: relative;
   display: inline-flex;
   align-items: center;
-  width: 40px;
-  height: 32px;
+  width: 44px;
+  height: 36px;
   vertical-align: middle;
   cursor: pointer;
 }
@@ -1073,9 +1145,9 @@ onUnmounted(() => {
 }
 
 .group-setting-track {
-  width: 36px;
-  height: 20px;
-  border-radius: 10px;
+  width: 44px;
+  height: 24px;
+  border-radius: 0;
   background: var(--border-strong);
   pointer-events: none;
   transition: background-color 150ms ease;
@@ -1084,12 +1156,12 @@ onUnmounted(() => {
 .group-setting-track::before {
   content: '';
   display: block;
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
   margin: 3px;
-  border-radius: 50%;
+  border-radius: 0;
   background: #fff;
-  box-shadow: 0 1px 2px rgb(0 0 0 / 15%);
+  box-shadow: none;
   transition: transform 150ms ease;
 }
 
@@ -1098,7 +1170,7 @@ onUnmounted(() => {
 }
 
 .group-setting-switch input:checked + .group-setting-track::before {
-  transform: translateX(16px);
+  transform: translateX(20px);
 }
 
 .group-setting-switch input:focus-visible + .group-setting-track {
@@ -1115,34 +1187,6 @@ onUnmounted(() => {
   .group-setting-track, .group-setting-track::before {
     transition: none;
   }
-}
-
-.status-badge {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 10px;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.status-enabled {
-  background: var(--success-soft);
-  color: var(--success);
-}
-
-.status-enabled:hover {
-  opacity: 0.8;
-}
-
-.status-disabled {
-  background: var(--bg-secondary);
-  color: var(--text-secondary);
-}
-
-.status-disabled:hover {
-  opacity: 0.8;
 }
 
 .row-disabled {
@@ -1179,7 +1223,7 @@ onUnmounted(() => {
   display: flex;
   gap: 4px;
   background: var(--bg-secondary);
-  border-radius: 8px;
+  border-radius: 0;
   padding: 3px;
 }
 
@@ -1187,7 +1231,7 @@ onUnmounted(() => {
   border: none;
   background: none;
   padding: 4px 12px;
-  border-radius: 6px;
+  border-radius: 0;
   font-size: 13px;
   cursor: pointer;
   color: var(--text-secondary);
@@ -1211,7 +1255,9 @@ onUnmounted(() => {
 .chat-card {
   display: flex;
   flex-direction: column;
-  min-height: calc(100vh - 200px);
+  height: max(360px, calc(100dvh - var(--app-header-height) - 56px));
+  min-height: 0;
+  margin-bottom: 0;
 }
 
 .chat-card .card-header {
@@ -1228,15 +1274,16 @@ onUnmounted(() => {
   overflow-y: auto;
   padding: 16px;
   background: var(--bg-secondary);
-  min-height: 400px;
-  max-height: calc(100vh - 280px);
+  min-height: 0;
+  max-height: none;
 }
 
 .chat-message {
   padding: 12px 16px;
   margin-bottom: 12px;
-  border-radius: 12px;
+  border-radius: 0;
   max-width: 85%;
+  min-width: 0;
   position: relative;
 }
 
@@ -1247,9 +1294,25 @@ onUnmounted(() => {
 }
 
 .chat-message.assistant {
-  background: linear-gradient(135deg, var(--bubble-from), var(--bubble-to));
-  color: var(--on-primary);
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--primary);
+  color: var(--text-primary);
   margin-left: auto;
+}
+
+.msg-identity {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.msg-bot-label {
+  padding: 1px 6px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 11px;
 }
 
 .msg-header {
@@ -1260,11 +1323,10 @@ onUnmounted(() => {
 }
 
 .msg-role {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  opacity: 0.7;
+  letter-spacing: 0;
+  color: var(--text-secondary);
 }
 
 .msg-actions {
@@ -1274,7 +1336,8 @@ onUnmounted(() => {
   transition: opacity 0.2s;
 }
 
-.chat-message:hover .msg-actions {
+.chat-message:hover .msg-actions,
+.chat-message:focus-within .msg-actions {
   opacity: 1;
 }
 
@@ -1304,9 +1367,10 @@ onUnmounted(() => {
 }
 
 .message-debug {
-  margin-top: 10px;
-  color: inherit;
-  opacity: 0.75;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  color: var(--text-secondary);
 }
 
 .message-debug summary {
@@ -1315,16 +1379,23 @@ onUnmounted(() => {
 }
 
 .message-debug pre {
-  max-height: 240px;
   margin: 8px 0 0;
-  overflow: auto;
-  padding: 8px;
-  border: 1px solid currentColor;
-  border-radius: 4px;
+  padding: 12px;
+  background: var(--code-bg);
+  color: var(--code-text);
+  border: 1px solid var(--border);
+  border-radius: 0;
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 1.6;
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
+  tab-size: 2;
+}
+
+@media (hover: none) {
+  .msg-actions {
+    opacity: 1;
+  }
 }
 
 .edit-form {
@@ -1335,7 +1406,7 @@ onUnmounted(() => {
   width: 100%;
   padding: 8px 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 0;
   font-size: 14px;
   font-family: inherit;
   resize: vertical;
@@ -1382,7 +1453,7 @@ onUnmounted(() => {
 
 .modal-content {
   background: var(--card-bg);
-  border-radius: 16px;
+  border-radius: 0;
   width: 90%;
   max-width: 760px;
   max-height: 80vh;
@@ -1421,7 +1492,7 @@ onUnmounted(() => {
   height: min(400px, 55vh);
   padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 0;
   font-size: 13px;
   font-family: inherit;
   resize: vertical;
@@ -1480,7 +1551,7 @@ onUnmounted(() => {
   display: inline-block;
   min-width: 44px;
   padding: 2px 10px;
-  border-radius: 10px;
+  border-radius: 0;
   font-size: 13px;
   font-weight: 600;
   text-align: center;
@@ -1506,7 +1577,7 @@ onUnmounted(() => {
   display: inline-block;
   margin-left: 6px;
   padding: 0 6px;
-  border-radius: 8px;
+  border-radius: 0;
   font-size: 11px;
   background: var(--bg-secondary);
   color: var(--primary);
@@ -1530,7 +1601,7 @@ onUnmounted(() => {
 
 .ltm-item {
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: 0;
   padding: 10px 12px;
 }
 

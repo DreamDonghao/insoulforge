@@ -7,21 +7,24 @@ import {inject, reactive, ref, type Ref, onMounted} from 'vue'
 import type {LLMConfig} from '../../vite-env'
 
 import LLMModelForm from './LLMModelForm.vue'
+import SlidingTabs from '../../components/SlidingTabs.vue'
 
 const showToast = inject<(msg: string, isError?: boolean) => void>('showToast')
 
 const llmNames = ['router', 'jev', 'executor', 'executorThinking', 'image', 'imageGeneration', 'memory', 'embedding']
 const llmLabels: Record<string, string> = {
-  router: 'Router',
+  router: '回复决策',
   jev: 'Jev',
-  executor: 'Executor',
-  executorFallback: 'Executor 兜底',
-  executorThinking: 'Executor思考',
-  image: 'Image',
+  executor: '回复生成',
+  executorFallback: '备用模型',
+  executorThinking: '深度思考',
+  image: '图片识别',
   imageGeneration: '图片生成',
-  memory: 'Memory',
-  embedding: 'Embedding'
+  memory: '记忆维护',
+  embedding: '向量化'
 }
+const modelTabs = llmNames.map(key => ({key, label: llmLabels[key] || key}))
+
 // 各配置的实际用途（与后端代码一致）
 const llmUsages: Record<string, string> = {
   router: '用途：Jev 未配置、结果不确定或请求失败时的回复决策',
@@ -54,43 +57,48 @@ const updateConfig = (name: string, config: LLMConfig): void => {
 <template>
   <div>
     <div class="page-header">
-      <h1 class="page-title">LLM配置</h1>
-      <p class="page-subtitle">配置各Agent的模型参数</p>
+      <h1 class="page-title">模型配置</h1>
+      <p class="page-subtitle">配置各功能使用的模型与请求参数</p>
     </div>
 
-    <div class="tabs">
-      <button
-          v-for="name in llmNames"
-          :key="name"
-          :class="{ active: selectedLLM === name }"
-          class="tab"
-          @click="selectedLLM = name"
-      >{{ llmLabels[name] || name }}
-      </button>
+    <SlidingTabs v-model="selectedLLM" :items="modelTabs" label="模型功能"/>
+
+    <div :key="selectedLLM" class="model-panel">
+      <p class="form-hint">{{ llmUsages[selectedLLM] }}</p>
+
+      <template v-for="name in (selectedLLM === 'executor' ? ['executor', 'executorFallback'] : [selectedLLM])" :key="name">
+        <LLMModelForm
+            v-if="llmConfigs[name]"
+            :name="name"
+            :initial-config="llmConfigs[name]"
+            :title="selectedLLM === 'executor' ? (name === 'executor' ? '默认模型' : '备用模型（可选）') : undefined"
+            @saved="updateConfig"
+        />
+      </template>
     </div>
-
-    <p class="form-hint">{{ llmUsages[selectedLLM] }}</p>
-
-    <template v-for="name in (selectedLLM === 'executor' ? ['executor', 'executorFallback'] : [selectedLLM])" :key="name">
-      <LLMModelForm
-          v-if="llmConfigs[name]"
-          :name="name"
-          :initial-config="llmConfigs[name]"
-          :title="selectedLLM === 'executor' ? (name === 'executor' ? '默认模型' : '兜底模型（可选）') : undefined"
-          @saved="updateConfig"
-      />
-    </template>
   </div>
 </template>
 
 <style scoped>
-.tabs {
-  max-width: 100%;
-  overflow-x: auto;
+.model-panel {
+  animation: model-panel-enter 160ms ease-out;
 }
 
-.tab {
-  flex: none;
+@keyframes model-panel-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .model-panel {
+    animation: none;
+  }
 }
 
 </style>

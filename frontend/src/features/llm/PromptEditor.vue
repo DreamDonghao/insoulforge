@@ -3,7 +3,9 @@
  * @file PromptEditor.vue
  * @brief 提示词编辑组件
  */
-import {inject, onMounted, onUnmounted, reactive, ref, type Ref, watch} from 'vue'
+import {computed, inject, onMounted, onUnmounted, reactive, ref, type Ref, watch} from 'vue'
+import {Marked} from 'marked'
+import SlidingTabs from '../../components/SlidingTabs.vue'
 import type {ApiResponse} from '../../vite-env.d'
 
 const showToast = inject<(msg: string, isError?: boolean) => void>('showToast')
@@ -18,6 +20,25 @@ const promptList = [
 const selectedPrompt: Ref<string> = ref('executor_system')
 const prompts = reactive<Record<string, string>>({})
 const promptContent: Ref<string> = ref('')
+const editorModes = [
+  {key: 'edit', label: '编辑'},
+  {key: 'preview', label: '预览'},
+  {key: 'split', label: '分栏'}
+] as const
+const editorMode = ref<'edit' | 'preview' | 'split'>('edit')
+// 预览只渲染文本排版；链接、图片和 HTML 保留原文，不解释提示词内容。
+const promptMarkdown = new Marked({
+  tokenizer: {
+    def: () => undefined,
+    link: () => undefined,
+    reflink: () => undefined,
+    autolink: () => undefined,
+    url: () => undefined,
+    html: () => undefined,
+    tag: () => undefined
+  }
+})
+const previewHtml = computed(() => editorMode.value === 'edit' ? '' : promptMarkdown.parse(promptContent.value, {async: false}))
 const saving: Ref<boolean> = ref(false)
 const imageUrl = ref('')
 const imageLoading = ref(true)
@@ -147,16 +168,7 @@ const savePrompt = async (): Promise<void> => {
       <p class="page-subtitle">编辑Agent的系统提示词</p>
     </div>
 
-    <div class="tabs">
-      <button
-          v-for="p in promptList"
-          :key="p.key"
-          :class="{ active: selectedPrompt === p.key }"
-          class="tab"
-          @click="selectedPrompt = p.key"
-      >{{ p.label }}
-      </button>
-    </div>
+    <SlidingTabs v-model="selectedPrompt" :items="promptList" :item-min-width="116" label="提示词类型"/>
 
     <section v-if="selectedPrompt === 'character-image'" class="character-section">
       <div class="character-heading">
@@ -179,20 +191,108 @@ const savePrompt = async (): Promise<void> => {
       <div v-else class="character-empty">尚未上传角色形象图</div>
     </section>
 
-    <div v-else class="card prompt-card">
-      <div class="card-body">
-        <textarea v-model="promptContent" class="form-input" placeholder="输入提示词内容..."></textarea>
-        <div style="margin-top: 16px;">
+    <section v-else class="prompt-editor">
+        <div class="editor-toolbar">
+          <div class="editor-modes" role="group" aria-label="提示词显示模式">
+            <button v-for="mode in editorModes"
+                    :key="mode.key" type="button" :aria-pressed="editorMode === mode.key"
+                    :class="{active: editorMode === mode.key}" @click="editorMode = mode.key">{{ mode.label }}</button>
+          </div>
+        </div>
+        <div class="editor-panes" :class="{'is-split': editorMode === 'split'}">
+          <textarea v-show="editorMode !== 'preview'" v-model="promptContent" aria-label="提示词内容" class="form-input" placeholder="输入提示词内容..."></textarea>
+          <div v-if="editorMode !== 'edit'" class="markdown-preview" aria-label="Markdown 预览" v-html="previewHtml"></div>
+        </div>
+        <div class="prompt-actions">
           <button :disabled="saving" class="btn btn-primary" @click="savePrompt">
             {{ saving ? '保存中...' : '保存提示词' }}
           </button>
         </div>
-      </div>
-    </div>
+    </section>
   </div>
 </template>
 
 <style scoped>
+.editor-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 10px;
+}
+
+.editor-modes {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+}
+
+.editor-modes button {
+  padding: 6px 14px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.editor-modes button:last-child { border-right: 0; }
+.editor-modes button.active { background: var(--primary-soft); color: var(--primary); }
+
+.editor-panes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+.editor-panes.is-split { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+.prompt-editor textarea.form-input,
+.markdown-preview {
+  min-width: 0;
+  min-height: 300px;
+  height: calc(100dvh - var(--app-header-height) - 212px);
+  padding: 16px;
+}
+
+.prompt-editor textarea.form-input {
+  display: block;
+  resize: vertical;
+}
+
+.markdown-preview {
+  overflow: auto;
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+  color: var(--text-primary);
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.markdown-preview :deep(h1),
+.markdown-preview :deep(h2),
+.markdown-preview :deep(h3) { margin: 20px 0 10px; line-height: 1.4; }
+.markdown-preview :deep(h1) { font-size: 24px; }
+.markdown-preview :deep(h2) { font-size: 20px; }
+.markdown-preview :deep(h3) { font-size: 16px; }
+.markdown-preview :deep(> :first-child) { margin-top: 0; }
+.markdown-preview :deep(p),
+.markdown-preview :deep(ul),
+.markdown-preview :deep(ol) { margin-bottom: 12px; }
+.markdown-preview :deep(ul),
+.markdown-preview :deep(ol) { padding-left: 24px; }
+.markdown-preview :deep(pre) { padding: 12px; background: var(--code-bg); overflow: auto; margin-block: 12px; }
+.markdown-preview :deep(pre code) { padding: 0; }
+.markdown-preview :deep(blockquote) { border-left: 3px solid var(--border-strong); padding-left: 12px; margin-block: 12px; color: var(--text-secondary); }
+
+@media (max-width: 900px) {
+  .editor-panes.is-split { grid-template-columns: minmax(0, 1fr); }
+}
+
+.prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
 .character-section {
   border-top: 1px solid var(--border);
   padding-top: 24px;
@@ -228,7 +328,7 @@ const savePrompt = async (): Promise<void> => {
   object-fit: contain;
   margin-top: 24px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 0;
   background: var(--bg-secondary);
 }
 
@@ -239,7 +339,7 @@ const savePrompt = async (): Promise<void> => {
   min-height: 240px;
   margin-top: 24px;
   border: 1px dashed var(--border);
-  border-radius: 8px;
+  border-radius: 0;
   color: var(--text-secondary);
 }
 </style>

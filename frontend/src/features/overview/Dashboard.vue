@@ -86,7 +86,7 @@ const llmLabels: Record<string, string> = {
   router: 'Router',
   jev: 'Jev',
   executor: '回复生成',
-  executorFallback: '回复兜底',
+  executorFallback: '备用模型',
   executorThinking: '深度思考',
   image: '图片识别',
   imageGeneration: '图片生成',
@@ -349,7 +349,7 @@ onUnmounted(() => {
 
     <ProcessMemory/>
 
-    <!-- 仪表盘布局：左 3 右 2 -->
+    <!-- 模型配置跨两行，底部资源和用量共用同一行。 -->
     <div class="dash-layout">
       <!-- 左列 -->
       <div class="dash-col">
@@ -511,7 +511,7 @@ onUnmounted(() => {
   padding: 12px 18px;
   background: var(--card-bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 0;
   flex-wrap: wrap;
 }
 
@@ -556,14 +556,20 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
   gap: 16px;
-  align-items: start;
+  grid-template-rows: auto auto auto;
+  align-items: stretch;
 }
 
 .dash-col {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: subgrid;
+  grid-row: 1 / span 3;
   gap: 16px;
   min-width: 0;
+}
+
+.dash-col:last-child > .bento-card:first-child {
+  grid-row: span 2;
 }
 
 .bento-card {
@@ -571,7 +577,7 @@ onUnmounted(() => {
   flex: none;
   background: var(--card-bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 0;
   padding: 18px 20px;
   display: flex;
   flex-direction: column;
@@ -711,7 +717,7 @@ onUnmounted(() => {
   max-width: 28px;
   height: 70px;
   background: var(--border-soft, var(--bg-secondary));
-  border-radius: 6px;
+  border-radius: 0;
   display: flex;
   align-items: flex-end;
   overflow: hidden;
@@ -719,8 +725,8 @@ onUnmounted(() => {
 
 .usage-bar {
   width: 100%;
-  background: linear-gradient(180deg, var(--primary), var(--neon-cyan));
-  border-radius: 6px;
+  background: var(--primary-strong);
+  border-radius: 0;
   min-height: 2px;
   transition: height 0.3s ease;
 }
@@ -843,6 +849,13 @@ onUnmounted(() => {
 @media (max-width: 1100px) {
   .dash-layout {
     grid-template-columns: 1fr;
+    grid-template-rows: auto;
+  }
+
+  .dash-col {
+    display: flex;
+    flex-direction: column;
+    grid-row: auto;
   }
 }
 

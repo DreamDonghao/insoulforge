@@ -336,14 +336,14 @@ onUnmounted(() => {
 .mcp-tools li {padding: 12px 0; border-top: 1px solid var(--border); overflow-wrap: anywhere}
 .mcp-tools code {font-size: 13px}
 .mcp-tools li p {margin: 6px 0 0; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere}
-.mcp-switch {appearance: none; width: 36px; height: 20px; border-radius: 10px; background: var(--border-strong); cursor: pointer; position: relative; flex: none}
+.mcp-switch {appearance: none; width: 36px; height: 20px; border-radius: 0; background: var(--border-strong); cursor: pointer; position: relative; flex: none}
 .mcp-switch::after {content: ''; position: absolute; width: 14px; height: 14px; top: 3px; left: 3px; border-radius: 50%; background: white}
 .mcp-switch:checked {background: var(--primary-strong)}
 .mcp-switch:checked::after {transform: translateX(16px)}
 .mcp-switch:focus-visible {outline: 2px solid var(--primary-strong); outline-offset: 3px}
 .mcp-switch:disabled {opacity: .55; cursor: wait}
 .mcp-overlay {position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.5); display: grid; place-items: center; padding: 20px}
-.mcp-dialog {background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; padding: 24px; width: min(520px, 100%); max-height: calc(100dvh - 40px); overflow-y: auto; box-sizing: border-box}
+.mcp-dialog {background: var(--card-bg); border: 1px solid var(--border); border-radius: 0; padding: 24px; width: min(520px, 100%); max-height: calc(100dvh - 40px); overflow-y: auto; box-sizing: border-box}
 .mcp-enabled {display: flex; align-items: center; gap: 8px}
 .mcp-footer {justify-content: flex-end; margin-top: 24px}
 @media (max-width: 600px) {.mcp-row {align-items: flex-start}.mcp-dialog {padding: 18px}}
