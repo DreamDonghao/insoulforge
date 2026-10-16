@@ -6,7 +6,7 @@ RUN ln -fs /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential cmake ninja-build git ca-certificates \
         libsqlite3-dev libspdlog-dev libfmt-dev libjsoncpp-dev nlohmann-json3-dev \
-        zlib1g-dev libssl-dev uuid-dev libgif-dev libpng-dev liblua5.4-dev \
+        zlib1g-dev libssl-dev libc-ares-dev uuid-dev libgif-dev libpng-dev liblua5.4-dev \
         nodejs npm \
     && rm -rf /var/lib/apt/lists/*
 
@@ -17,12 +17,16 @@ RUN git clone --depth 1 --branch ${DROGON_VERSION} --recurse-submodules --shallo
     && cmake -S /tmp/drogon -B /tmp/drogon/build -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
         -DBUILD_SHARED_LIBS=OFF \
+        -DBUILD_C-ARES=ON \
         -DOPENSSL_USE_STATIC_LIBS=ON \
         -DBUILD_EXAMPLES=OFF \
         -DBUILD_CTL=OFF \
         -DBUILD_ORM=OFF \
         -DMYSQL_SUPPORT=OFF \
         -DLIBPQ_SUPPORT=OFF \
+    # 必须使用异步 DNS，避免退回按 CPU 核心数创建线程池的 NormalResolver。
+    && (grep -q 'trantor/net/inner/AresResolver.cc' /tmp/drogon/build/build.ninja \
+        || { echo '错误：Trantor 未启用 c-ares，停止构建' >&2; exit 1; }) \
     && cmake --build /tmp/drogon/build \
     && cmake --install /tmp/drogon/build \
     && rm -rf /tmp/drogon
@@ -39,7 +43,7 @@ FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive TZ=Asia/Shanghai
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates tzdata libsqlite3-0 libjsoncpp25 libssl3t64 libpng16-16 libgif7 liblua5.4-0 \
+        ca-certificates tzdata libc-ares2 libsqlite3-0 libjsoncpp25 libssl3t64 libpng16-16 libgif7 liblua5.4-0 \
     && rm -rf /var/lib/apt/lists/* \
     && ln -fs /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 
