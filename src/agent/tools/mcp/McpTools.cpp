@@ -125,6 +125,16 @@ namespace insoulforge {
                 return std::unexpected("MCP url 必须是 HTTP(S) 地址且不超过 4096 字节");
             if (value.contains("token") && !value["token"].is_string())
                 return std::unexpected("MCP token 必须是字符串");
+            auto headers = std::map<std::string, std::string>{};
+            if (value.contains("headers")) {
+                if (!value["headers"].is_object())
+                    return std::unexpected("MCP headers 必须是对象");
+                for (const auto &[key, header]: value["headers"].items()) {
+                    if (!header.is_string())
+                        return std::unexpected("MCP 请求头的值必须是字符串");
+                    headers.emplace(key, header.get<std::string>());
+                }
+            }
             if (value.contains("description") && (!value["description"].is_string() ||
                                                    value["description"].get_ref<const std::string &>().size() > 1024))
                 return std::unexpected("MCP description 必须是字符串且不超过 1024 UTF-8 字节");
@@ -137,6 +147,7 @@ namespace insoulforge {
               .endpoint = url,
               .name = "insoulforge",
               .bearerToken = value.value("token", std::string{}),
+              .headers = std::move(headers),
               .timeoutSeconds = timeout,
               .maxResponseBytes = 1024 * 1024,
               .maxToolCount = 256,
@@ -158,6 +169,7 @@ namespace insoulforge {
             const auto old = std::ranges::find_if(m_servers, [&](const auto &entry) {
                 return entry->name == server->name && entry->options.endpoint == server->options.endpoint &&
                        entry->options.bearerToken == server->options.bearerToken &&
+                       entry->options.headers == server->options.headers &&
                        entry->options.timeoutSeconds == server->options.timeoutSeconds;
             });
             if (old != m_servers.end()) {

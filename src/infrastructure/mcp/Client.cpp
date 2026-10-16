@@ -124,9 +124,17 @@ namespace drogonmcp {
             return failure(ErrorKind::Configuration, "Bearer token contains invalid characters");
         constexpr auto reserved = std::array{"accept", "content-type", "host", "content-length", "transfer-encoding",
           "mcp-session-id", "mcp-protocol-version"};
+        auto headerNames = std::set<std::string>{};
         for (const auto &[name, value]: options.headers) {
-            if (name.empty() || !isVisible(name) || name.find(':') != std::string::npos ||
-                value.find_first_of("\r\n") != std::string::npos || std::ranges::contains(reserved, lower(name)) ||
+            const auto validName = !name.empty() && std::ranges::all_of(name, [](unsigned char c) {
+                return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+                       std::string_view{"!#$%&'*+-.^_`|~"}.find(c) != std::string_view::npos;
+            });
+            const auto validValue = std::ranges::all_of(value, [](unsigned char c) {
+                return c == '\t' || (c >= 0x20 && c != 0x7f);
+            });
+            if (!validName || !validValue || !headerNames.insert(lower(name)).second ||
+                std::ranges::contains(reserved, lower(name)) ||
                 (lower(name) == "authorization" && !options.bearerToken.empty()))
                 return failure(ErrorKind::Configuration, "Invalid or reserved custom HTTP header");
         }

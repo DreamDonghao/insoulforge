@@ -7,6 +7,7 @@ interface Server {
   description: string
   url: string
   token: string
+  headers: Record<string, string>
   enabled: boolean
   timeoutSeconds: number
 }
@@ -31,9 +32,17 @@ const editing = ref<number | null>(null)
 const dialog = ref(false)
 const dialogElement = ref<HTMLFormElement | null>(null)
 const draft = reactive<Server>(emptyServer())
+const headerRows = ref<{name: string; value: string}[]>([])
+const validHeaders = computed(() => {
+  const names = headerRows.value.map(header => header.name.trim().toLowerCase())
+  return names.every(name => /^[!#$%&'*+.^_`|~0-9a-z-]+$/.test(name)) &&
+      new Set(names).size === names.length &&
+      headerRows.value.every(header => !/[\r\n\0]/.test(header.value))
+})
 const descriptionBytes = computed(() => new TextEncoder().encode(draft.description).length)
 const statusByName = computed(() => new Map(statuses.value.map(status => [status.name, status])))
 const valid = computed(() => /^[A-Za-z0-9_-]{1,20}$/.test(draft.name.trim()) &&
+    validHeaders.value &&
     descriptionBytes.value <= 1024 &&
     validUrl(draft.url.trim()) &&
     Number.isFinite(draft.timeoutSeconds) && draft.timeoutSeconds >= 1 && draft.timeoutSeconds <= 120 &&
@@ -48,7 +57,7 @@ let previousFocus: HTMLElement | null = null
 let previousOverflow = ''
 
 function emptyServer(): Server {
-  return {name: '', description: '', url: '', token: '', enabled: true, timeoutSeconds: 30}
+  return {name: '', description: '', url: '', token: '', headers: {}, enabled: true, timeoutSeconds: 30}
 }
 
 function validUrl(value: string): boolean {
@@ -106,6 +115,8 @@ async function load(background = false): Promise<void> {
         const server = value as Partial<Server>
         if (typeof server.name !== 'string' || typeof server.url !== 'string') throw new Error('MCP 服务数据无效')
         if ((server.token !== undefined && typeof server.token !== 'string') ||
+            (server.headers !== undefined && (!server.headers || typeof server.headers !== 'object' ||
+                Array.isArray(server.headers) || Object.values(server.headers).some(value => typeof value !== 'string'))) ||
             (server.description !== undefined && typeof server.description !== 'string') ||
             (server.enabled !== undefined && typeof server.enabled !== 'boolean') ||
             (server.timeoutSeconds !== undefined && typeof server.timeoutSeconds !== 'number')) {
@@ -113,6 +124,7 @@ async function load(background = false): Promise<void> {
         }
         return {
           name: server.name, url: server.url, token: server.token ?? '',
+          headers: server.headers ?? {},
           description: server.description ?? '',
           enabled: server.enabled ?? true, timeoutSeconds: server.timeoutSeconds ?? 30
         }
@@ -132,13 +144,14 @@ function open(index: number | null): void {
   previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
   editing.value = index
   Object.assign(draft, index === null ? emptyServer() : servers.value[index])
+  headerRows.value = Object.entries(draft.headers).map(([name, value]) => ({name, value}))
   dialog.value = true
 }
 
 function handleDialogKey(event: KeyboardEvent): void {
   if (event.key === 'Escape' && !busy.value) dialog.value = false
   if (event.key !== 'Tab') return
-  const controls = dialogElement.value?.querySelectorAll<HTMLElement>('input:not(:disabled), button:not(:disabled)')
+  const controls = dialogElement.value?.querySelectorAll<HTMLElement>('input:not(:disabled), textarea:not(:disabled), button:not(:disabled)')
   if (!controls?.length) {
     event.preventDefault()
     return
@@ -195,7 +208,8 @@ async function persist(next: Server[]): Promise<boolean> {
 async function save(): Promise<void> {
   if (busy.value || !valid.value) return
   const next = servers.value.map(server => ({...server}))
-  const value = {...draft, name: draft.name.trim(), url: draft.url.trim()}
+  const value = {...draft, name: draft.name.trim(), url: draft.url.trim(),
+    headers: Object.fromEntries(headerRows.value.map(header => [header.name.trim(), header.value]))}
   if (editing.value === null) next.push(value)
   else next[editing.value] = value
   if (await persist(next)) dialog.value = false
@@ -308,6 +322,17 @@ onUnmounted(() => {
         </div>
         <div class="form-group"><label class="form-label" for="mcp-token">Bearer Token</label>
           <input id="mcp-token" v-model="draft.token" class="form-input" type="password" autocomplete="new-password" :disabled="busy"></div>
+        <div class="form-group">
+          <div class="mcp-actions mcp-header-label"><span class="form-label">自定义请求头</span>
+            <button class="btn btn-secondary btn-sm" type="button" :disabled="busy" @click="headerRows.push({name: '', value: ''})">添加请求头</button>
+          </div>
+          <div v-for="(header, index) in headerRows" :key="index" class="mcp-header-row">
+            <input v-model="header.name" class="form-input" :aria-label="`请求头 ${index + 1} 名称`" placeholder="X-API-Key" :disabled="busy" required>
+            <input v-model="header.value" class="form-input" :aria-label="`请求头 ${index + 1} 值`" type="password" autocomplete="new-password" placeholder="值" :disabled="busy">
+            <button class="btn btn-danger btn-sm" type="button" :disabled="busy" :aria-label="`删除请求头 ${index + 1}`" @click="headerRows.splice(index, 1)">删除</button>
+          </div>
+          <p v-if="!validHeaders" class="form-hint mcp-error">请求头名称必须合法且不能重复，值不能包含换行或空字符。</p>
+        </div>
         <div class="form-group"><label class="form-label" for="mcp-timeout">请求超时（秒）</label>
           <input id="mcp-timeout" v-model.number="draft.timeoutSeconds" class="form-input" type="number" min="1" max="120" required :disabled="busy"></div>
         <label class="mcp-enabled"><input v-model="draft.enabled" type="checkbox" :disabled="busy">启用服务</label>
@@ -346,5 +371,7 @@ onUnmounted(() => {
 .mcp-dialog {background: var(--card-bg); border: 1px solid var(--border); border-radius: 0; padding: 24px; width: min(520px, 100%); max-height: calc(100dvh - 40px); overflow-y: auto; box-sizing: border-box}
 .mcp-enabled {display: flex; align-items: center; gap: 8px}
 .mcp-footer {justify-content: flex-end; margin-top: 24px}
+.mcp-header-label {justify-content: space-between; margin-bottom: 8px}
+.mcp-header-row {display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 8px; margin-top: 8px; align-items: center}
 @media (max-width: 600px) {.mcp-row {align-items: flex-start}.mcp-dialog {padding: 18px}}
 </style>

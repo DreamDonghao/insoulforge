@@ -22,6 +22,7 @@ namespace {
 
     struct FixtureState {
         std::atomic<size_t> listRequests{0};
+        std::atomic<size_t> authenticatedRequests{0};
         std::atomic_bool deleteDuringList{false};
         std::atomic_bool duplicateTools{false};
         std::atomic_bool failClose{false};
@@ -36,7 +37,16 @@ namespace {
     auto runTests(trantor::EventLoop &loop, std::string endpoint, int &exitCode, FixtureState &fixture)
       -> drogon::Task<> {
         try {
-            auto client = Client{loop, {.endpoint = endpoint}};
+            auto options = ClientOptions{.endpoint = endpoint, .headers = {{"X-API-Key", "fixture-key"}}};
+            require(validateOptions(options).has_value(), "Custom API key header rejected");
+            for (const auto &headers: std::vector<std::map<std::string, std::string>>{
+                   {{"X-API-Key", "one"}, {"x-api-key", "two"}}, {{"Bad Header", "value"}},
+                   {{"X-API-Key", "bad\r\nvalue"}}, {{"Content-Type", "text/plain"}}}) {
+                auto invalidOptions = options;
+                invalidOptions.headers = headers;
+                require(!validateOptions(invalidOptions), "Invalid custom header accepted");
+            }
+            auto client = Client{loop, options};
             require(!(co_await client.listTools()), "Uninitialized call must fail");
             auto initialized = co_await client.initialize();
             require(initialized.has_value(), initialized ? "" : initialized.error().message.c_str());
@@ -58,6 +68,7 @@ namespace {
                       upstream.error().message.find("fixture unavailable") != std::string::npos,
               "HTTP error detail was lost");
             require((co_await client.close()).has_value(), "Close failed");
+            require(fixture.authenticatedRequests.load() >= 4, "Custom header not sent across MCP operations");
             require(!client.isInitialized(), "Close did not reset state");
 
             auto slow = Client{loop, {.endpoint = endpoint, .timeoutSeconds = 0.05}};
@@ -77,9 +88,16 @@ namespace {
                                                                   {"name", "invalid name"}, {"url", endpoint}}})}},
                       registry),
               "Invalid MCP name accepted");
+            for (const auto &headers: drogonmcp::Json::array({"invalid", {{"X-API-Key", 123}},
+                   {{"X-API-Key", "one"}, {"x-api-key", "two"}}})) {
+                require(!mcp.initialize(drogonmcp::Json{{"servers", drogonmcp::Json::array({
+                          {{"name", "fixture"}, {"url", endpoint}, {"headers", headers}}})}}, registry),
+                  "Invalid MCP adapter headers accepted");
+            }
             auto configured = mcp.initialize(
               drogonmcp::Json{{"servers",
-                drogonmcp::Json::array({drogonmcp::Json{{"name", "fixture"}, {"url", endpoint}, {"token", ""}},
+                drogonmcp::Json::array({drogonmcp::Json{{"name", "fixture"}, {"url", endpoint}, {"token", ""},
+                                         {"headers", {{"X-API-Key", "fixture-key"}}}},
                   drogonmcp::Json{{"name", "disabled"}, {"url", endpoint}, {"enabled", false}},
                   drogonmcp::Json{{"name", "unused"}, {"url", endpoint}}})}},
               registry);
@@ -170,7 +188,8 @@ namespace {
             auto &config = insoulforge::Config::instance();
             auto serviceConfig = insoulforge::json{
               {"servers", insoulforge::json::array({insoulforge::json{{"name", "fixture"}, {"description", ""},
-                            {"url", endpoint}, {"token", ""}, {"enabled", true}}})}};
+                            {"url", endpoint}, {"token", ""}, {"headers", {{"X-API-Key", "fixture-key"}}},
+                            {"enabled", true}}})}};
             require(mcp.saveConfig(serviceConfig, config).has_value(), "Dynamic save failed");
             require(config.getMcpConfig() == serviceConfig, "MCP configuration not persisted");
             auto described = serviceConfig;
@@ -303,6 +322,8 @@ auto main() -> int {
       [&fixture](
         const drogon::HttpRequestPtr &request, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
           auto response = drogon::HttpResponse::newHttpResponse();
+          if (request->getHeader("x-api-key") == "fixture-key")
+              ++fixture.authenticatedRequests;
           if (request->method() == drogon::Delete) {
               response->setStatusCode(
                 fixture.failClose.exchange(false) ? drogon::k500InternalServerError : drogon::k405MethodNotAllowed);
