@@ -1,8 +1,10 @@
 <script lang="ts" setup>
-import {inject, reactive, ref, type Ref, watch} from 'vue'
+import {computed, inject, reactive, ref, type Ref, watch} from 'vue'
 import type {ApiResponse, LLMConfig} from '../../vite-env'
 
 const props = defineProps<{name: string, initialConfig: LLMConfig, title?: string}>()
+const hasParameters = computed(() => !['embedding', 'imageGeneration'].includes(props.name))
+const hasGenerationParameters = computed(() => hasParameters.value && props.name !== 'jev')
 const emit = defineEmits<{saved: [name: string, config: LLMConfig]}>()
 const showToast = inject<(msg: string, isError?: boolean) => void>('showToast')
 const llmConfig = reactive<LLMConfig>({...props.initialConfig})
@@ -20,7 +22,7 @@ const saveLLMConfig = async (): Promise<void> => {
     })
     const data: ApiResponse = await resp.json()
     if (resp.ok && data.success) {
-      showToast?.('LLM配置已保存')
+      showToast?.('模型配置已保存')
       emit('saved', props.name, config)
     } else {
       showToast?.(data.error || '保存失败', true)
@@ -35,45 +37,51 @@ const saveLLMConfig = async (): Promise<void> => {
 </script>
 
 <template>
-    <section class="model-config">
-      <h2 v-if="title" class="model-title">{{ title }}</h2>
+  <section class="model-config">
+    <h2 v-if="title" class="model-title">{{ title }}</h2>
+    <p v-if="name === 'executorFallback'" class="fallback-hint">仅在默认模型请求失败时用于本次重试；留空不启用，下次请求仍优先使用默认模型。</p>
+    <div class="config-section">
+      <h3 class="section-title">接口与模型</h3>
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label">API Key</label>
+          <label class="form-label">API 密钥</label>
           <div class="api-key-row">
             <input v-model="llmConfig.apiKey" :type="showApiKey ? 'text' : 'password'" class="form-input"
                    placeholder="sk-...">
             <button class="btn btn-secondary btn-sm api-key-toggle" type="button" @click="showApiKey = !showApiKey">
-              {{ showApiKey ? '● 隐藏' : '○ 显示' }}
+              {{ showApiKey ? '隐藏' : '显示' }}
             </button>
           </div>
         </div>
         <div class="form-group">
-          <label class="form-label">Base URL</label>
+          <label class="form-label">接口地址（Base URL）</label>
           <input v-model="llmConfig.baseUrl" class="form-input" placeholder="https://api.example.com" type="text">
         </div>
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label">Path</label>
+          <label class="form-label">请求路径（Path）</label>
           <input v-model="llmConfig.path" class="form-input" placeholder="/v1/chat/completions" type="text">
         </div>
         <div class="form-group">
-          <label class="form-label">Model</label>
+          <label class="form-label">模型名称</label>
           <input v-model="llmConfig.model" class="form-input" placeholder="gpt-4" type="text">
         </div>
       </div>
-      <div v-if="name !== 'embedding' && name !== 'jev' && name !== 'imageGeneration'" class="form-row">
+    </div>
+    <div v-if="hasParameters" class="config-section">
+      <h3 class="section-title">{{ name === 'jev' ? '决策参数' : '生成参数' }}</h3>
+      <div v-if="hasGenerationParameters" class="form-row sampling-row">
         <div class="form-group">
-          <label class="form-label">Max Tokens</label>
+          <label class="form-label">最大输出 Token</label>
           <input v-model.number="llmConfig.maxTokens" class="form-input" type="number">
         </div>
         <div class="form-group">
-          <label class="form-label">Temperature</label>
+          <label class="form-label">温度（Temperature）</label>
           <input v-model.number="llmConfig.temperature" class="form-input" max="2" min="0" step="0.1" type="number">
         </div>
         <div class="form-group">
-          <label class="form-label">Top P</label>
+          <label class="form-label">采样范围（Top P）</label>
           <input v-model.number="llmConfig.topP" class="form-input" max="1" min="0" step="0.1" type="number">
         </div>
       </div>
@@ -84,27 +92,29 @@ const saveLLMConfig = async (): Promise<void> => {
           <p class="form-hint">低于此值时由 Router LLM 判断，默认 0.60</p>
         </div>
       </div>
-      <div v-if="name !== 'embedding' && name !== 'jev' && name !== 'imageGeneration'" class="form-row">
+      <div v-if="hasGenerationParameters" class="form-row">
         <div class="form-group">
-          <label class="form-label">Reasoning Effort（Gemma等模型专用）</label>
+          <label class="form-label">思考强度（Reasoning Effort）</label>
           <select v-model="llmConfig.reasoningEffort" class="form-input">
             <option value="">不发送（默认）</option>
             <option value="none">关闭思考 (none)</option>
             <option value="medium">中等思考 (medium)</option>
             <option value="high">深度思考 (high)</option>
           </select>
-          <p class="form-hint">设置为"关闭思考"可大幅减少token消耗，适合简单任务（如Router）</p>
+          <p class="form-hint">仅在模型支持时设置；不发送则使用服务端默认值。</p>
         </div>
       </div>
-      <button :disabled="saving" class="btn btn-primary" @click="saveLLMConfig">
-        {{ saving ? '保存中...' : '保存配置' }}
-      </button>
-    </section>
+    </div>
+    <button :disabled="saving" class="btn btn-primary" @click="saveLLMConfig">
+      {{ saving ? '保存中...' : '保存配置' }}
+    </button>
+  </section>
 </template>
 
 <style scoped>
 .model-config {
-  padding: 24px 0;
+  padding: 20px 0;
+  max-width: 1120px;
 }
 
 .model-config + .model-config {
@@ -112,8 +122,47 @@ const saveLLMConfig = async (): Promise<void> => {
 }
 
 .model-title {
-  margin: 0 0 20px;
-  font-size: 18px;
+  margin: 0 0 16px;
+  padding-left: 10px;
+  border-left: 3px solid var(--primary);
+  font-size: 16px;
+}
+
+.config-section {
+  padding-block: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.section-title {
+  margin-bottom: 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.config-section .form-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.config-section .form-group {
+  min-width: 0;
+  margin-bottom: 12px;
+}
+
+.config-section .sampling-row {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.fallback-hint {
+  margin-bottom: 16px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+@media (max-width: 800px) {
+  .config-section .form-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 .api-key-row {
@@ -128,6 +177,7 @@ const saveLLMConfig = async (): Promise<void> => {
 }
 
 .api-key-toggle {
+  align-self: stretch;
   flex-shrink: 0;
   min-width: 64px;
 }

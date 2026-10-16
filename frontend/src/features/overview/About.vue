@@ -119,7 +119,7 @@ const copyJoinUrl = async (): Promise<void> => {
 
 <style scoped>
 .about-hero {
-  background: linear-gradient(135deg, var(--primary-soft), var(--card-bg));
+  background: var(--card-bg);
   border-color: var(--neon-cyan-glow);
 }
 
@@ -132,12 +132,12 @@ const copyJoinUrl = async (): Promise<void> => {
 .hero-title {
   font-size: 22px;
   font-weight: 700;
-  letter-spacing: -0.4px;
-  background: linear-gradient(120deg, var(--primary), var(--neon-cyan));
+  letter-spacing: 0;
+  background: none;
   -webkit-background-clip: text;
   background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
+  -webkit-text-fill-color: var(--text-primary);
+  color: var(--text-primary);
 }
 
 .version-badge {
@@ -147,7 +147,7 @@ const copyJoinUrl = async (): Promise<void> => {
   background: var(--primary-soft);
   border: 1px solid var(--focus-ring);
   padding: 2px 10px;
-  border-radius: 999px;
+  border-radius: 0;
 }
 
 .hero-desc {
@@ -189,7 +189,7 @@ const copyJoinUrl = async (): Promise<void> => {
 .qr-img {
   width: 168px;
   height: 168px;
-  border-radius: 8px;
+  border-radius: 0;
   background: #ffffff;
   padding: 8px;
   border: 1px solid var(--border);

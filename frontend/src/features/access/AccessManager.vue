@@ -246,17 +246,21 @@ onMounted(() => void Promise.all([loadAdmins(), loadBlacklist()]))
 .access-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: start;
+  grid-template-rows: auto auto;
   gap: 16px;
 }
 
 .access-grid section {
+  display: grid;
+  grid-template-rows: subgrid;
+  grid-row: 1 / span 2;
+  gap: 16px;
   min-width: 0;
-  align-self: start;
 }
 
-.access-grid .card + .card {
-  margin-top: 16px;
+.access-grid .card {
+  min-width: 0;
+  margin: 0;
 }
 
 .access-form-card {
@@ -312,6 +316,11 @@ onMounted(() => void Promise.all([loadAdmins(), loadBlacklist()]))
 @media (max-width: 900px) {
   .access-grid {
     grid-template-columns: 1fr;
+  }
+
+  .access-grid section {
+    grid-template-rows: auto auto;
+    grid-row: auto;
   }
 }
 </style>

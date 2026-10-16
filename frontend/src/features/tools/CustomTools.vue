@@ -517,7 +517,7 @@ onMounted(() => {
 .tag {
   display: inline-block;
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: 0;
   font-size: 12px;
   font-weight: 500;
 }
@@ -554,11 +554,11 @@ onMounted(() => {
 
 .dialog {
   background: var(--card-bg);
-  border-radius: 12px;
+  border-radius: 0;
   max-width: 95vw;
   max-height: 90vh;
   overflow-y: auto;
-  box-shadow: var(--shadow-md);
+  box-shadow: none;
   border: 1px solid var(--border);
 }
 
@@ -643,7 +643,7 @@ onMounted(() => {
   background: var(--code-bg);
   color: var(--code-text);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: 0;
   font-family: 'Consolas', 'Monaco', monospace;
   font-size: 13px;
 }
@@ -652,7 +652,7 @@ onMounted(() => {
   background: var(--code-bg);
   color: var(--code-text);
   padding: 12px 16px;
-  border-radius: 6px;
+  border-radius: 0;
   overflow-x: auto;
   margin: 0 0 12px 0;
 }
@@ -727,7 +727,7 @@ onMounted(() => {
   margin-top: 12px;
   padding: 12px;
   background: var(--bg-secondary);
-  border-radius: 6px;
+  border-radius: 0;
   font-size: 12px;
 }
 
@@ -735,7 +735,7 @@ onMounted(() => {
   background: var(--code-bg);
   color: var(--code-text);
   padding: 8px 12px;
-  border-radius: 4px;
+  border-radius: 0;
   font-size: 11px;
   margin: 8px 0;
   overflow-x: auto;
@@ -744,7 +744,7 @@ onMounted(() => {
 .test-section {
   margin-top: 16px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 0;
   overflow: hidden;
 }
 
@@ -783,7 +783,7 @@ onMounted(() => {
   padding: 8px 10px;
   background: var(--code-bg);
   color: var(--code-text);
-  border-radius: 4px;
+  border-radius: 0;
   font-family: 'Consolas', 'Monaco', monospace;
   font-size: 12px;
   min-height: 80px;

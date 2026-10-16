@@ -170,7 +170,7 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.process-memory { margin-bottom: 20px; padding: 20px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-bg); min-width: 0; }
+.process-memory { margin-bottom: 20px; padding: 20px; border: 1px solid var(--border); border-radius: 0; background: var(--card-bg); min-width: 0; }
 header, .chart-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
 h2, h3 { margin: 0; color: var(--text-primary); font-size: 14px; font-weight: 600; }
 .updated, .chart-heading span, .scale, .time-axis { font-size: 12px; color: var(--text-secondary); }

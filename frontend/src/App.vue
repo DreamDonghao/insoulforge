@@ -3,7 +3,7 @@
  * @file App.vue
  * @brief 主应用组件 - 管理后台入口
  */
-import {defineAsyncComponent, computed, onMounted, onUnmounted, provide, reactive, ref, type Ref} from 'vue'
+import {defineAsyncComponent, computed, onMounted, onUnmounted, provide, reactive, ref, type Ref, watch} from 'vue'
 import {useToast} from './composables/useToast'
 import type {QQConfig as QQConfigType} from './vite-env.d'
 
@@ -32,7 +32,7 @@ interface NavItem {
 
 // 导航配置
 const systemNavItems: NavItem[] = [
-  {key: 'llm', label: 'LLM配置', icon: 'llm'},
+  {key: 'llm', label: '模型配置', icon: 'llm'},
   {key: 'executionConfig', label: '执行配置', icon: 'execution'},
   {key: 'qqConfig', label: 'OneBot 配置', icon: 'qq'},
   {key: 'prompts', label: '提示词', icon: 'prompts'},
@@ -52,6 +52,28 @@ const dailyNavItems: NavItem[] = [
 ]
 
 const currentView: Ref<string> = ref('dashboard')
+const sidebarNav = ref<HTMLElement | null>(null)
+const navIndicator = reactive({top: 0, height: 0})
+
+function updateNavIndicator() {
+  const item = sidebarNav.value?.querySelector<HTMLElement>('.nav-item.active')
+  if (!item) return
+  navIndicator.top = item.offsetTop
+  navIndicator.height = item.offsetHeight
+}
+
+watch(currentView, updateNavIndicator, {flush: 'post'})
+watch(sidebarNav, (nav, _, onCleanup) => {
+  if (!nav) return
+  updateNavIndicator()
+  const observer = new ResizeObserver(updateNavIndicator)
+  observer.observe(nav)
+  onCleanup(() => observer.disconnect())
+}, {flush: 'post'})
+
+function resetPageScroll() {
+  window.scrollTo({top: 0, behavior: 'instant'})
+}
 const authenticated: Ref<boolean> = ref(false)
 const authenticationChecked: Ref<boolean> = ref(false)
 const accessToken: Ref<string> = ref('')
@@ -348,7 +370,9 @@ onUnmounted(disconnectWebSocket)
         </div>
       </div>
 
-      <nav class="sidebar-nav">
+      <nav ref="sidebarNav" class="sidebar-nav">
+        <span class="nav-indicator" aria-hidden="true"
+              :style="{height: `${navIndicator.height}px`, transform: `translateY(${navIndicator.top}px)`}"></span>
         <div class="nav-section">
           <div
               v-for="item in dailyNavItems"
@@ -362,7 +386,7 @@ onUnmounted(disconnectWebSocket)
           </div>
         </div>
 
-        <div class="nav-divider"></div>
+        <div class="nav-divider nav-divider-line"></div>
 
         <div class="nav-section">
           <div
@@ -377,7 +401,7 @@ onUnmounted(disconnectWebSocket)
           </div>
         </div>
 
-        <div class="nav-divider"></div>
+        <div class="nav-divider nav-divider-line"></div>
 
         <div class="nav-section">
           <div
@@ -424,21 +448,25 @@ onUnmounted(disconnectWebSocket)
 
     <!-- 主内容区 -->
     <div class="main">
-      <Dashboard v-if="currentView === 'dashboard'"/>
-      <LLMConfig v-else-if="currentView === 'llm'"/>
-      <ExecutionConfig v-else-if="currentView === 'executionConfig'"/>
-      <PromptEditor v-else-if="currentView === 'prompts'"/>
-      <CustomTools v-else-if="currentView === 'customTools'"/>
-      <McpServers v-else-if="currentView === 'mcpServers'"/>
-      <EmojiManager v-else-if="currentView === 'emojis'"/>
-      <AccessManager v-else-if="currentView === 'admins'"/>
-      <GroupManager v-else-if="currentView === 'groups'"/>
-      <LogViewer v-else-if="currentView === 'logs'"/>
-      <RequestDebug v-else-if="currentView === 'requestDebug'"/>
-      <MemoryConfig v-else-if="currentView === 'memoryConfig'"/>
-      <OneBotConfig v-else-if="currentView === 'qqConfig'"/>
-      <UsageStats v-else-if="currentView === 'usage'"/>
-      <About v-else-if="currentView === 'about'"/>
+      <Transition name="page-slide" :duration="240" @before-enter="resetPageScroll">
+        <div :key="currentView" class="page-content">
+          <Dashboard v-if="currentView === 'dashboard'"/>
+          <LLMConfig v-else-if="currentView === 'llm'"/>
+          <ExecutionConfig v-else-if="currentView === 'executionConfig'"/>
+          <PromptEditor v-else-if="currentView === 'prompts'"/>
+          <CustomTools v-else-if="currentView === 'customTools'"/>
+          <McpServers v-else-if="currentView === 'mcpServers'"/>
+          <EmojiManager v-else-if="currentView === 'emojis'"/>
+          <AccessManager v-else-if="currentView === 'admins'"/>
+          <GroupManager v-else-if="currentView === 'groups'"/>
+          <LogViewer v-else-if="currentView === 'logs'"/>
+          <RequestDebug v-else-if="currentView === 'requestDebug'"/>
+          <MemoryConfig v-else-if="currentView === 'memoryConfig'"/>
+          <OneBotConfig v-else-if="currentView === 'qqConfig'"/>
+          <UsageStats v-else-if="currentView === 'usage'"/>
+          <About v-else-if="currentView === 'about'"/>
+        </div>
+      </Transition>
     </div>
   </div>
 
@@ -468,14 +496,14 @@ onUnmounted(disconnectWebSocket)
   height: 36px;
   padding: 0 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 0;
   background: var(--card-bg);
   color: var(--text-secondary);
   cursor: pointer;
   font: inherit;
   font-size: 13px;
   font-weight: 600;
-  box-shadow: var(--shadow-sm);
+  box-shadow: none;
 }
 
 .login-theme-toggle:hover {
@@ -507,10 +535,10 @@ onUnmounted(disconnectWebSocket)
   width: 42px;
   height: 42px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 0;
   background: var(--card-bg);
   color: var(--primary);
-  box-shadow: var(--shadow-sm);
+  box-shadow: none;
 }
 
 .login-logo svg {
@@ -534,9 +562,9 @@ onUnmounted(disconnectWebSocket)
 .login-panel {
   padding: 28px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 0;
   background: var(--card-bg);
-  box-shadow: var(--shadow-sm);
+  box-shadow: none;
 }
 
 .login-eyebrow {
@@ -544,7 +572,7 @@ onUnmounted(disconnectWebSocket)
   color: var(--primary);
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 1px;
+  letter-spacing: 0;
   text-transform: uppercase;
 }
 
@@ -571,7 +599,7 @@ onUnmounted(disconnectWebSocket)
   height: 42px;
   padding: 0 42px 0 12px;
   border: 1px solid var(--border-strong);
-  border-radius: 6px;
+  border-radius: 0;
   outline: none;
   background: var(--input-bg);
   color: var(--text-primary);
@@ -591,7 +619,7 @@ onUnmounted(disconnectWebSocket)
   width: 32px;
   height: 32px;
   border: 0;
-  border-radius: 5px;
+  border-radius: 0;
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
@@ -609,20 +637,20 @@ onUnmounted(disconnectWebSocket)
 
 .login-input:focus {
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px var(--focus-ring);
+  box-shadow: none;
 }
 
 .login-error {
   margin-top: 12px;
   padding: 8px 10px;
-  border-radius: 5px;
+  border-radius: 0;
   background: var(--danger-soft);
   color: var(--danger);
   font-size: 13px;
 }
 
 .login-button {
-  border-radius: 6px;
+  border-radius: 0;
   border: 0;
   cursor: pointer;
   font: inherit;

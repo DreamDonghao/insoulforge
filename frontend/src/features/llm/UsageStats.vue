@@ -67,7 +67,7 @@ const roleLabels: Record<string, string> = {
   router: 'Router',
   jev: 'Jev',
   executor: 'Executor',
-  executorFallback: 'Executor 兜底',
+  executorFallback: '备用模型',
   executorThinking: 'Executor思考',
   memory: 'Memory',
   image: 'Image'
@@ -392,7 +392,7 @@ onUnmounted(() => {
 .overview-card {
   background: var(--card-bg);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 0;
   padding: 16px 20px;
 }
 
@@ -401,7 +401,7 @@ onUnmounted(() => {
   color: var(--text-light);
   margin-bottom: 6px;
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 0;
 }
 
 .ov-value {
@@ -489,7 +489,7 @@ onUnmounted(() => {
 .share-bar {
   height: 5px;
   background: var(--primary);
-  border-radius: 3px;
+  border-radius: 0;
   min-width: 2px;
   flex-shrink: 0;
 }
@@ -507,7 +507,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 10px;
   padding: 3px 0;
-  border-radius: 4px;
+  border-radius: 0;
 }
 
 .trend-row-today {
@@ -526,14 +526,14 @@ onUnmounted(() => {
   flex: 1;
   height: 18px;
   background: var(--border-soft);
-  border-radius: 4px;
+  border-radius: 0;
   overflow: hidden;
 }
 
 .trend-bar {
   height: 100%;
   background: var(--primary);
-  border-radius: 4px;
+  border-radius: 0;
   min-width: 2px;
   transition: width 0.3s ease;
   opacity: 0.7;

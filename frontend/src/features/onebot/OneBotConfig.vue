@@ -191,7 +191,7 @@ onMounted(() => {
   grid-template-columns: repeat(2, 128px);
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 0;
 }
 
 .transport-switch button {
