@@ -13,6 +13,7 @@
 #include <agent/tools/mcp/McpTools.hpp>
 #include <conversation/message/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
+#include <infrastructure/http/HttpTrace.hpp>
 #include <infrastructure/mcp/Client.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <llm/prompts/PromptService.hpp>
@@ -38,10 +39,19 @@ namespace {
       -> drogon::Task<> {
         try {
             auto options = ClientOptions{.endpoint = endpoint, .headers = {{"X-API-Key", "fixture-key"}}};
+            auto exchanges = std::vector<insoulforge::HttpTraceEntry>{};
+            options.onHttpTrace = [&](drogon::HttpMethod method, std::string_view request, i32 status,
+                                    std::string_view response) {
+                exchanges.push_back({.method = method == drogon::Delete ? "DELETE" : "POST",
+                  .requestBody = std::string{request},
+                  .status = status,
+                  .responseBody = std::string{response}});
+                throw std::runtime_error("trace observer failure");
+            };
             require(validateOptions(options).has_value(), "Custom API key header rejected");
-            for (const auto &headers: std::vector<std::map<std::string, std::string>>{
-                   {{"X-API-Key", "one"}, {"x-api-key", "two"}}, {{"Bad Header", "value"}},
-                   {{"X-API-Key", "bad\r\nvalue"}}, {{"Content-Type", "text/plain"}}}) {
+            for (const auto &headers:
+              std::vector<std::map<std::string, std::string>>{{{"X-API-Key", "one"}, {"x-api-key", "two"}},
+                {{"Bad Header", "value"}}, {{"X-API-Key", "bad\r\nvalue"}}, {{"Content-Type", "text/plain"}}}) {
                 auto invalidOptions = options;
                 invalidOptions.headers = headers;
                 require(!validateOptions(invalidOptions), "Invalid custom header accepted");
@@ -68,13 +78,27 @@ namespace {
                       upstream.error().message.find("fixture unavailable") != std::string::npos,
               "HTTP error detail was lost");
             require((co_await client.close()).has_value(), "Close failed");
+            require(exchanges.front().status == 200 &&
+                      drogonmcp::Json::parse(exchanges.front().requestBody)["method"] == "initialize" &&
+                      exchanges.back().method == "DELETE" && exchanges.back().status == 405,
+              "HTTP observer missed initialization or close");
+            require(std::ranges::any_of(exchanges,
+                      [](const auto &entry) {
+                          return entry.status == 502 &&
+                                 entry.responseBody.find("fixture unavailable") != std::string::npos;
+                      }),
+              "HTTP observer lost upstream error response");
             require(fixture.authenticatedRequests.load() >= 4, "Custom header not sent across MCP operations");
             require(!client.isInitialized(), "Close did not reset state");
 
-            auto slow = Client{loop, {.endpoint = endpoint, .timeoutSeconds = 0.05}};
+            auto slowOptions = options;
+            slowOptions.timeoutSeconds = 0.05;
+            auto slow = Client{loop, std::move(slowOptions)};
             require((co_await slow.initialize()).has_value(), "Slow client initialize failed");
             auto timeout = co_await slow.callTool("slow");
             require(!timeout && timeout.error().kind == ErrorKind::Transport, "Timeout did not fail");
+            require(
+              exchanges.back().status == 0 && !exchanges.back().responseBody.empty(), "Transport error was not traced");
             require((co_await slow.close()).has_value(), "Timeout client close failed");
             auto invalid = Client{loop, {.endpoint = "file:///tmp/test"}};
             auto bad = co_await invalid.initialize();
@@ -82,24 +106,27 @@ namespace {
 
             auto &registry = insoulforge::ToolRegistry::instance();
             auto &mcp = insoulforge::McpTools::instance();
+            auto &traces = insoulforge::HttpTrace::instance();
+            traces.clear();
             require(
               !mcp.initialize(drogonmcp::Json{{"servers", "invalid"}}, registry), "Invalid MCP configuration accepted");
             require(!mcp.initialize(drogonmcp::Json{{"servers", drogonmcp::Json::array({drogonmcp::Json{
                                                                   {"name", "invalid name"}, {"url", endpoint}}})}},
                       registry),
               "Invalid MCP name accepted");
-            for (const auto &headers: drogonmcp::Json::array({"invalid", {{"X-API-Key", 123}},
-                   {{"X-API-Key", "one"}, {"x-api-key", "two"}}})) {
-                require(!mcp.initialize(drogonmcp::Json{{"servers", drogonmcp::Json::array({
-                          {{"name", "fixture"}, {"url", endpoint}, {"headers", headers}}})}}, registry),
+            for (const auto &headers:
+              drogonmcp::Json::array({"invalid", {{"X-API-Key", 123}}, {{"X-API-Key", "one"}, {"x-api-key", "two"}}})) {
+                require(!mcp.initialize(drogonmcp::Json{{"servers", drogonmcp::Json::array({{{"name", "fixture"},
+                                                                      {"url", endpoint}, {"headers", headers}}})}},
+                          registry),
                   "Invalid MCP adapter headers accepted");
             }
             auto configured = mcp.initialize(
-              drogonmcp::Json{{"servers",
-                drogonmcp::Json::array({drogonmcp::Json{{"name", "fixture"}, {"url", endpoint}, {"token", ""},
-                                         {"headers", {{"X-API-Key", "fixture-key"}}}},
-                  drogonmcp::Json{{"name", "disabled"}, {"url", endpoint}, {"enabled", false}},
-                  drogonmcp::Json{{"name", "unused"}, {"url", endpoint}}})}},
+              drogonmcp::Json{
+                {"servers", drogonmcp::Json::array({drogonmcp::Json{{"name", "fixture"}, {"url", endpoint},
+                                                      {"token", ""}, {"headers", {{"X-API-Key", "fixture-key"}}}},
+                              drogonmcp::Json{{"name", "disabled"}, {"url", endpoint}, {"enabled", false}},
+                              drogonmcp::Json{{"name", "unused"}, {"url", endpoint}}})}},
               registry);
             require(configured.has_value(), "MCP adapter configuration failed");
             require(registry.getTools({}).empty(), "MCP tools leaked into default model request");
@@ -181,15 +208,36 @@ namespace {
             auto parsedOutput = drogonmcp::Json::parse(remoteOutput, nullptr, false);
             require(parsedOutput.is_object() && parsedOutput["content"][0]["text"] == "hello",
               "Registered MCP tool did not execute");
+            const auto recorded = traces.query(0, 50);
+            require(std::ranges::any_of(recorded,
+                      [&](const auto &entry) {
+                          const auto request = drogonmcp::Json::parse(entry.requestBody, nullptr, false);
+                          return entry.tag == "MCP:fixture" && entry.url == endpoint && entry.sessionId == 42 &&
+                                 entry.status == 200 && request.is_object() &&
+                                 request.value("method", "") == "tools/call" &&
+                                 entry.responseBody.find("hello") != std::string::npos;
+                      }),
+              "MCP tool call missing from frontend trace cache");
+            require(std::ranges::any_of(recorded,
+                      [](const auto &entry) {
+                          return entry.tag == "MCP:fixture" && !entry.sessionId &&
+                                 entry.requestBody.find("tools/list") != std::string::npos;
+                      }),
+              "MCP discovery missing from trace cache");
+            require(std::ranges::none_of(recorded,
+                      [](const auto &entry) {
+                          return entry.requestBody.find("fixture-key") != std::string::npos ||
+                                 entry.responseBody.find("fixture-key") != std::string::npos;
+                      }),
+              "Authentication header leaked into trace cache");
             auto blocked = co_await registry.executeTool(
               "mcp_fixture_echo", drogonmcp::Json::object(), {.sessionId = 42, .replyOnly = true});
             require(blocked.find("最后一轮") != std::string::npos, "MCP tool bypassed reply-only restriction");
             require(registry.getTools({.replyOnly = true}).empty(), "Remote tools included in last round");
             auto &config = insoulforge::Config::instance();
-            auto serviceConfig = insoulforge::json{
-              {"servers", insoulforge::json::array({insoulforge::json{{"name", "fixture"}, {"description", ""},
-                            {"url", endpoint}, {"token", ""}, {"headers", {{"X-API-Key", "fixture-key"}}},
-                            {"enabled", true}}})}};
+            auto serviceConfig = insoulforge::json{{"servers",
+              insoulforge::json::array({insoulforge::json{{"name", "fixture"}, {"description", ""}, {"url", endpoint},
+                {"token", ""}, {"headers", {{"X-API-Key", "fixture-key"}}}, {"enabled", true}}})}};
             require(mcp.saveConfig(serviceConfig, config).has_value(), "Dynamic save failed");
             require(config.getMcpConfig() == serviceConfig, "MCP configuration not persisted");
             auto described = serviceConfig;
