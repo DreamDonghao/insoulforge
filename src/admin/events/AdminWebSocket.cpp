@@ -1,4 +1,5 @@
 #include <admin/events/AdminWebSocket.hpp>
+#include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/logging/Logger.hpp>
 

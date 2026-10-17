@@ -3,16 +3,16 @@
 
 #include <admin/http/AdminController.hpp>
 #include <admin/http/AdminResponse.hpp>
-#include <agent/tools/ToolRuntime.hpp>
-#include <agent/tools/mcp/McpTools.hpp>
-#include <agent/tools/custom/LuaToolExecutor.hpp>
-#include <agent/tools/custom/ToolStore.hpp>
-#include <include/agent/tools/ToolRegistry.hpp>
+#include <workflow/agent/tools/ToolRuntime.hpp>
+#include <workflow/agent/tools/mcp/McpTools.hpp>
+#include <workflow/agent/tools/custom/LuaToolExecutor.hpp>
+#include <workflow/agent/tools/custom/ToolStore.hpp>
+#include <workflow/agent/tools/ToolRegistry.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
-#include <llm/prompts/PromptStore.hpp>
+#include <workflow/agent/llm/prompts/PromptStore.hpp>
 
 using namespace insoulforge;
 using namespace drogon;

@@ -2,6 +2,7 @@
 /// @brief 管理后台消息推送连接的实现
 
 #include <admin/events/WebSocketManager.hpp>
+#include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/logging/Logger.hpp>
 

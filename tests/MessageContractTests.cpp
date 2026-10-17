@@ -18,44 +18,45 @@
 #include <openssl/evp.h>
 
 #include <admin/access/AdminAccessToken.hpp>
-#include <admin/access/AdminStore.hpp>
+#include <workflow/access/AdminStore.hpp>
 #include <admin/http/AdminController.hpp>
-#include <agent/ability/AsyncTaskManager.hpp>
-#include <agent/memory/LongTermMemoryStore.hpp>
-#include <agent/memory/MemoryStore.hpp>
-#include <agent/memory/affinity/AffinityMaintenanceService.hpp>
-#include <agent/memory/affinity/AffinityStore.hpp>
-#include <agent/memory/maintenance/MemoryMaintenanceService.hpp>
-#include <agent/memory/maintenance/MemoryMaintenanceStore.hpp>
-#include <agent/runtime/AgentSystem.hpp>
-#include <agent/runtime/ExecutorAgent.hpp>
-#include <agent/tools/ToolRegistry.hpp>
-#include <agent/tools/custom/LuaToolExecutor.hpp>
-#include <agent/tools/custom/ToolStore.hpp>
-#include <agent/tools/plugins/ActionToolsPlugin.hpp>
-#include <conversation/history/ChatRecordStore.hpp>
-#include <conversation/message/MessageRecord.hpp>
-#include <conversation/message/SessionId.hpp>
-#include <conversation/session/QQNameDirectory.hpp>
-#include <conversation/session/SessionStore.hpp>
-#include <conversation/workflow/CommandProcessor.hpp>
-#include <conversation/workflow/MessageList.hpp>
-#include <conversation/workflow/MessageRouter.hpp>
-#include <conversation/workflow/OneBotEventNormalizer.hpp>
-#include <conversation/workflow/OneBotEventWorkflow.hpp>
+#include <workflow/agent/ability/AsyncTaskManager.hpp>
+#include <workflow/agent/memory/LongTermMemoryStore.hpp>
+#include <workflow/agent/memory/MemoryStore.hpp>
+#include <workflow/agent/memory/affinity/AffinityMaintenanceService.hpp>
+#include <workflow/agent/memory/affinity/AffinityStore.hpp>
+#include <workflow/agent/memory/maintenance/MemoryMaintenanceService.hpp>
+#include <workflow/agent/memory/maintenance/MemoryMaintenanceStore.hpp>
+#include <workflow/agent/runtime/AgentSystem.hpp>
+#include <workflow/agent/runtime/ExecutorAgent.hpp>
+#include <workflow/agent/tools/ToolRegistry.hpp>
+#include <workflow/agent/tools/custom/LuaToolExecutor.hpp>
+#include <workflow/agent/tools/custom/ToolStore.hpp>
+#include <workflow/agent/tools/plugins/ActionToolsPlugin.hpp>
+#include <workflow/history/ChatRecordStore.hpp>
+#include <workflow/message/MessageRecord.hpp>
+#include <workflow/message/SessionId.hpp>
+#include <workflow/session/QQNameDirectory.hpp>
+#include <workflow/session/SessionStore.hpp>
+#include <workflow/command/CommandProcessor.hpp>
+#include <workflow/MessageList.hpp>
+#include <workflow/MessageRouter.hpp>
+#include <onebot/incoming/OneBotEventNormalizer.hpp>
+#include <onebot/messaging/MessageFormatter.hpp>
+#include <workflow/OneBotEventWorkflow.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/http/HttpUtil.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/SchemaMigrator.hpp>
 #include <infrastructure/storage/Statement.hpp>
-#include <llm/JevClient.hpp>
-#include <llm/prompts/PromptService.hpp>
-#include <llm/usage/UsageStore.hpp>
-#include <media/CharacterImageStore.hpp>
-#include <media/ImageDescriptionService.hpp>
-#include <media/ImageDescriptionStore.hpp>
-#include <media/ImageGenerationService.hpp>
+#include <workflow/agent/llm/JevClient.hpp>
+#include <workflow/agent/llm/prompts/PromptService.hpp>
+#include <workflow/agent/llm/usage/UsageStore.hpp>
+#include <workflow/agent/tools/image/CharacterImageStore.hpp>
+#include <workflow/message/image/ImageDescriptionService.hpp>
+#include <workflow/message/image/ImageDescriptionStore.hpp>
+#include <workflow/agent/tools/image/ImageGenerationService.hpp>
 
 namespace {
     using insoulforge::i32;
@@ -69,6 +70,21 @@ namespace {
             std::cerr << "[FAIL] " << testName << ": " << expression << '\n';
             ++failures;
         }
+    }
+
+    void testOneBotMessageFormatter() {
+        constexpr std::string_view kTestName = "OneBot message formatter";
+        using insoulforge::MessageFormatter::convertAtToCQCode;
+        insoulforge::QQNameDirectory::setCustomName(81001, "FormatUser");
+        insoulforge::QQNameDirectory::setCustomName(81002, "FormatUserLong");
+        check(convertAtToCQCode("hello") == "hello", "plain text is unchanged", kTestName);
+        check(convertAtToCQCode("@[QQ:81003]") == "[CQ:at,qq=81003]", "numeric mention is converted", kTestName);
+        check(convertAtToCQCode("@FormatUserLong @FormatUser") == "[CQ:at,qq=81002] [CQ:at,qq=81001]",
+          "longer names are matched first", kTestName);
+        check(convertAtToCQCode("@FormatUserSuffix") == "@FormatUserSuffix",
+          "partial name is not converted", kTestName);
+        check(convertAtToCQCode("[CQ:at,qq=81001]") == "[CQ:at,qq=81001]",
+          "existing CQ mention is unchanged", kTestName);
     }
 
     void testNewWorkflowNormalizesOneBotEvent() {
@@ -2027,6 +2043,7 @@ namespace {
 auto main() -> int {
     testAdminRequestAccess();
     testConfigInitialization();
+    testOneBotMessageFormatter();
     testNewWorkflowNormalizesOneBotEvent();
     testNewWorkflowNormalizesOneBotNotices();
     testNewWorkflowDetectsCommands();

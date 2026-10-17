@@ -5,7 +5,7 @@
 
 #include <admin/http/AdminController.hpp>
 #include <admin/http/AdminResponse.hpp>
-#include <media/CharacterImageStore.hpp>
+#include <workflow/agent/tools/image/CharacterImageStore.hpp>
 
 using namespace insoulforge;
 using namespace drogon;
