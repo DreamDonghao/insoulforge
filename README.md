@@ -252,23 +252,29 @@ Git 忽略，Docker 部署时通过 `/opt/insoulforge/data:/app/data` 挂载宿�
 - **说明文档** - Markdown 格式，记录作者、用法、联系方式
 - **导入导出** - JSON 文件格式，方便分享
 
-#### 内置工具配置文件
+#### 现成工具
 
 项目提供了一些常用工具配置，位于 `agentTools/` 目录：
 
-| 文件                 | 功能                  | 额外依赖             |
-|----------------------|-----------------------|----------------------|
-| `random.json`        | 随机数生成            | 无                   |
-| `get_weather.json`   | 天气查询              | 无                   |
-| `fetch_webpage.json` | 读取动态网页          | PageWeave 服务       |
-| `search_web.json`    | 读取 Bing 搜索结果页  | PageWeave 服务       |
+| 文件                   | 功能                          | 额外依赖         |
+|------------------------|-------------------------------|------------------|
+| `random.json`          | 随机数生成                    | 无               |
+| `get_weather.json`     | 天气查询                      | 无               |
+| `fetch_webpage.json`   | 读取动态网页                  | PageWeave 服务   |
+| `search_web.json`      | 读取 Bing 搜索结果页          | PageWeave 服务   |
+| `deepseek_search.json` | DeepSeek 网页搜索，可附带正文 | DeepSeek API Key |
+| `deepseek_fetch.json`  | 读取网页并返回 Markdown 正文  | DeepSeek API Key |
 
 导入方法：
 
 1. 管理后台 → 自定义工具 → 导入
 2. 上传 JSON 文件
 
-网页读取和搜索工具使用 Lua 异步请求，默认连接 `http://172.31.100.240:7779/extract`；
+以上工具均为可导入的 Lua 自定义工具，无需修改或重新编译主程序。
+DeepSeek 工具导入后需在脚本顶部填写 `api_key`，不依赖 PageWeave；单次输出最多 20000 个字符，超出会截断并提示。
+详见 [DeepSeek 工具说明](docs/TOOLS.md#deepseek-网页工具)。
+
+PageWeave 网页读取和搜索工具使用 Lua 异步请求，默认连接 `http://172.31.100.240:7779/extract`；
 可修改脚本中的 `endpoint` 调整地址。缺少协议的网址自动补全 `https://`，其他协议会被拒绝。运行环境不需要 Python。
 已有同名工具需编辑更新或删除后重新导入，仓库文件不会自动覆盖 `data/tools/` 里的脚本。参数和运行说明见[工具文档](docs/TOOLS.md#pageweave-网页工具)。
 

@@ -246,6 +246,29 @@ HTTP 错误向模型返回状态码、PageWeave 错误码、原因和请求 ID�
 后台测试模式模拟 HTTP，不访问 PageWeave；真实网络请求需要通过实际工具调用验证。
 示例脚本校验及参数契约测试纳入 C++ 的 `message_contracts`，运行环境不需要 Python。
 
+## DeepSeek 网页工具
+
+`agentTools/deepseek_search.json` 和 `agentTools/deepseek_fetch.json` 是独立的可导入 Lua 工具，
+不替换 PageWeave 工具，也不依赖其服务。
+
+| 工具 | 参数 | 行为 |
+|------|------|------|
+| `deepseek_search` | `query`、`count?`、`need_content?`、`ori_question?`、`localization?` | 搜索网页，默认返回 5 条结果及摘要，可选择附带正文 |
+| `deepseek_fetch` | `url` | 抓取网页，返回标题及 Markdown 正文；缺少协议时补全 HTTPS |
+
+导入后在两个脚本顶部的 `api_key` 中分别填写 DeepSeek API Key，再启用工具。
+密钥不作为模型参数，不要提交真实密钥。默认请求官方 `https://api.deepseek.com/v1/tools/search`
+和 `/v1/tools/fetch`；普通聊天模型中转站不一定支持这些接口。
+请求使用异步 HTTP，超时 60 秒，不自动重试；网络错误和 HTTP/API 错误详情返回模型。
+搜索结果保留来源、摘要及评分等原始字段；抓取能力受目标站点访问策略影响，不能替代所有浏览器动态渲染场景。
+修改示例不会覆盖已导入工具，需在后台同步更新。
+接口及计费说明见 [DeepSeek 官方文档](https://api-docs.deepseek.com/zh-cn/guides/search/)。
+
+两个工具的单次输出（含来源、标题及截断提示）最多 20000 个 Unicode 字符，
+超出按 UTF-8 字符边界截断并明确标记。搜索返回的 JSON 文本截断后不保证结构完整。
+此上限用于限制单次上下文开销，并非模型的上下文极限；多轮累计结果仍可能超出模型容量。
+HTTP 响应体仍受 Lua 执行器的 1 MiB 限制，超限时返回错误，而不是下载后截断。
+
 ## 共同模式
 
 - **跨回复工具历史**：Executor 按实际处理顺序保存 `tool_history`，每项含 `name`、`arguments` 和 `status`。

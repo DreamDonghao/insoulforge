@@ -659,7 +659,7 @@ namespace {
             stream >> definition;
             return definition.at("scriptContent").get<std::string>();
         };
-        for (const auto &name: {"fetch_webpage", "search_web", "random", "get_weather"}) {
+        for (const auto &name: {"fetch_webpage", "search_web", "random", "get_weather", "deepseek_search", "deepseek_fetch"}) {
             check(!insoulforge::LuaToolExecutor::validate(load(name)), "valid Lua example", kTestName);
         }
         const auto execute = [&load](const std::string &name, insoulforge::json args) -> std::string {
@@ -676,6 +676,39 @@ namespace {
           "search example encodes query", kTestName);
         check(execute("get_weather", {{"city", "New York"}}) == "天气接口响应格式无效",
           "weather example validates mocked response", kTestName);
+        check(execute("deepseek_search", {{"query", "   "}}).starts_with("错误"),
+          "DeepSeek search rejects blank queries", kTestName);
+        check(execute("deepseek_search", {{"query", "test"}, {"count", 51}}).starts_with("错误"),
+          "DeepSeek search rejects invalid result counts", kTestName);
+        check(execute("deepseek_search", {{"query", "test"}}).find("API Key") != std::string::npos,
+          "DeepSeek search requires a configured key", kTestName);
+        check(execute("deepseek_fetch", {{"url", "ftp://example.com"}}).starts_with("错误"),
+          "DeepSeek fetch rejects unsupported schemes", kTestName);
+        check(execute("deepseek_fetch", {{"url", "https://user:pass@example.com"}}).starts_with("错误"),
+          "DeepSeek fetch rejects embedded credentials", kTestName);
+        check(execute("deepseek_fetch", {{"url", "example.com"}}).find("API Key") != std::string::npos,
+          "DeepSeek fetch accepts addresses without a scheme", kTestName);
+        for (const auto &name: {"deepseek_search", "deepseek_fetch"}) {
+            const auto script = load(name) + R"lua(
+                function run(args, ctx)
+                    local text = string.rep("中", args.count)
+                    local result = limit_output(text)
+                    return json.encode({
+                        length = utf8.len(result),
+                        unchanged = result == text,
+                        truncated = result:find("内容已截断", 1, true) ~= nil
+                    })
+                end
+            )lua";
+            for (const auto count: {19999, 20000, 20001, 50000}) {
+                const auto output = drogon::sync_wait(
+                  insoulforge::LuaToolExecutor::execute(script, {{"count", count}}, 123, false, true));
+                const auto result = insoulforge::json::parse(output);
+                check(result["length"] == std::min(count, 20000), "DeepSeek output respects character cap", kTestName);
+                check(result["unchanged"] == (count <= 20000), "DeepSeek preserves output within cap", kTestName);
+                check(result["truncated"] == (count > 20000), "DeepSeek marks truncated output", kTestName);
+            }
+        }
     }
 
     void testLuaToolExecutor() {
