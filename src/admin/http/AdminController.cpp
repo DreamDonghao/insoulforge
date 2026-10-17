@@ -1,27 +1,29 @@
-#include "onebot/messaging/MessageService.hpp"
+#include <workflow/session/SessionConfigManager.hpp>
+#include <infrastructure/CommonUtil.hpp>
+#include <charconv>
 #include <admin/access/AdminAccessToken.hpp>
-#include <admin/access/AdminStore.hpp>
-#include <admin/access/BlacklistStore.hpp>
+#include <workflow/access/AdminStore.hpp>
+#include <workflow/access/BlacklistStore.hpp>
 #include <admin/http/AdminController.hpp>
 #include <admin/http/AdminResponse.hpp>
-#include <agent/memory/LongTermMemoryStore.hpp>
-#include <agent/memory/MemoryStore.hpp>
-#include <agent/memory/affinity/AffinityStore.hpp>
-#include <agent/runtime/AgentSystem.hpp>
-#include <agent/tools/ToolRuntime.hpp>
-#include <conversation/history/ChatRecordStore.hpp>
-#include <conversation/message/MessageRecord.hpp>
-#include <conversation/message/SessionId.hpp>
-#include <conversation/session/QQNameDirectory.hpp>
-#include <conversation/session/SessionStore.hpp>
-#include <conversation/workflow/OneBotEventWorkflow.hpp>
-#include <include/agent/ability/TaskScheduler.hpp>
+#include <workflow/agent/memory/LongTermMemoryStore.hpp>
+#include <workflow/agent/memory/MemoryStore.hpp>
+#include <workflow/agent/memory/affinity/AffinityStore.hpp>
+#include <workflow/agent/runtime/AgentSystem.hpp>
+#include <workflow/agent/tools/ToolRuntime.hpp>
+#include <workflow/history/ChatRecordStore.hpp>
+#include <workflow/message/MessageRecord.hpp>
+#include <workflow/message/SessionId.hpp>
+#include <workflow/session/QQNameDirectory.hpp>
+#include <workflow/session/SessionStore.hpp>
+#include <workflow/OneBotEventWorkflow.hpp>
+#include <workflow/scheduling/TaskScheduler.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/http/HttpTrace.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/monitoring/ProcessMetrics.hpp>
-#include <llm/usage/UsageStore.hpp>
+#include <workflow/agent/llm/usage/UsageStore.hpp>
 #include <onebot/transport/OneBotClient.hpp>
 #include <onebot/transport/OneBotWebSocketClient.hpp>
 
@@ -463,7 +465,7 @@ auto AdminController::enableSession(HttpRequestPtr req, std::function<void(const
     SessionStore::enableSession(sessionId);
 
     // 自动获取会话名称（群聊为群名，私聊为 QQ 昵称）
-    std::string groupName = co_await MessageService::fetchAndUpdateSessionName(sessionId);
+    std::string groupName = co_await SessionConfigManager::fetchAndUpdateSessionName(sessionId);
 
     json resp = AdminResponse::okJson(SessionId::isPrivate(sessionId) ? "私聊已启用" : "群已启用");
     resp["groupName"] = groupName;
@@ -572,7 +574,7 @@ auto AdminController::removeSession(HttpRequestPtr req, std::function<void(const
 auto AdminController::refreshSessionName(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
   const std::string &sessionId) const -> Task<> {
     const u64 gid = std::stoull(sessionId);
-    const auto groupName = co_await MessageService::fetchAndUpdateSessionName(gid);
+    const auto groupName = co_await SessionConfigManager::fetchAndUpdateSessionName(gid);
 
     json resp = AdminResponse::okJson();
     resp["groupName"] = groupName;
@@ -585,7 +587,7 @@ auto AdminController::refreshAllSessionNames(
 
     for (auto groups = SessionStore::getAllSessionsWithStatus();
       const auto &[sessionId, groupName, enabled, messageCount]: groups) {
-        co_await MessageService::fetchAndUpdateSessionName(sessionId);
+        co_await SessionConfigManager::fetchAndUpdateSessionName(sessionId);
     }
 
     callback(jsonResponse(AdminResponse::okJson("所有会话名称已刷新")));

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <filesystem>
 
+#include <fmt/chrono.h>
 #include <fmt/format.h>
 #include <spdlog/async.h>
 #include <spdlog/sinks/rotating_file_sink.h>

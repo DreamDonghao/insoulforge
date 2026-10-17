@@ -1,7 +1,7 @@
 # 内置工具参考
 
 Executor（`ExecutorAgent`）在单个 Agent 循环中通过工具调用生成回复。所有内置工具经 `ToolRegistry`
-的进程内插件注册，按类别拆分在 `src/agent/tools/plugins/`：
+的进程内插件注册，按类别拆分在 `src/workflow/agent/tools/plugins/`：
 
 | 类别          | 插件实现文件                          | 语义                         |
 |---------------|---------------------------------------|------------------------------|
@@ -266,5 +266,5 @@ HTTP 错误向模型返回状态码、PageWeave 错误码、原因和请求 ID�
   `segments[].image_index` / `reply_to` 等字段；图片 `file/url` 仅由服务端从 `assets.images` 读取，不会提供给模型
 - **宽容取值**：参数读取统一走 `argString` / `getInt` / `getUInt` / `getBool`（见 `include/infrastructure/JsonUtil.hpp`
   ），缺参数返回引导性错误提示而非异常
-- **注册方式**：见 `include/agent/tools/plugins/*ToolsPlugin.hpp`、`include/agent/tools/ToolArgument.hpp`
+- **注册方式**：见 `include/workflow/agent/tools/plugins/*ToolsPlugin.hpp`、`include/workflow/agent/tools/ToolArgument.hpp`
   与 [DEVELOPMENT.md](./DEVELOPMENT.md) 开发指南

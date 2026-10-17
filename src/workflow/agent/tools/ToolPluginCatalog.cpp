@@ -1,0 +1,34 @@
+/// @file ToolPluginCatalog.cpp
+/// @brief 内置工具插件组合根
+
+#include <array>
+
+#include <workflow/agent/tools/ToolPluginCatalog.hpp>
+#include <workflow/agent/tools/plugins/ActionToolsPlugin.hpp>
+#include <workflow/agent/tools/plugins/InfoToolsPlugin.hpp>
+#include <workflow/agent/tools/plugins/ReplyToolsPlugin.hpp>
+#include <workflow/agent/tools/ToolRegistry.hpp>
+
+namespace insoulforge::ToolPluginCatalog {
+    /// @brief 构造并注册全部编译期内置插件
+    /// @details 插件对象仅在注册期间存活；ToolRegistry 保存工具定义和处理器副本。
+    auto registerBuiltinPlugins(const std::string_view botName) -> std::expected<void, std::string> {
+        // 新增独立工具域时，仅在此处加入插件实例；Agent 主流程无需改动。
+        const ReplyToolsPlugin replyTools;
+        const InfoToolsPlugin infoTools;
+        const ActionToolsPlugin actionTools(botName);
+        const std::array<const ToolPlugin *, 3> plugins = {
+          &replyTools,
+          &infoTools,
+          &actionTools,
+        };
+        auto &registry = ToolRegistry::instance();
+        for (const auto *plugin: plugins) {
+            if (!registry.registerPlugin(std::string(plugin->id()),
+                  [plugin](ToolRegistry &pluginRegistry) -> void { plugin->registerTools(pluginRegistry); })) {
+                return std::unexpected("内置工具插件注册失败: " + std::string(plugin->id()));
+            }
+        }
+        return {};
+    }
+} // namespace insoulforge::ToolPluginCatalog

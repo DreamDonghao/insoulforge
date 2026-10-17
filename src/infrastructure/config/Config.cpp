@@ -2,6 +2,7 @@
 /// @brief 全局配置管理 - 实现
 
 #include <array>
+#include <infrastructure/CommonUtil.hpp>
 #include <limits>
 
 #include <infrastructure/config/Config.hpp>

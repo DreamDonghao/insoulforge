@@ -127,32 +127,30 @@ ctest --test-dir cmake-build-debug --output-on-failure
 insoulforge/
 ├── CMakeLists.txt            # C++23 构建脚本（含前端自动构建）
 ├── include/                  # 头文件（按模块分目录）
-│   ├── agent/
-│   │   ├── ability/          # 定时任务、后台耗时任务及其存储
-│   │   ├── memory/           # 记忆的查询、召回与存储
-│   │   │   ├── maintenance/  # 记忆维护调度、聊天记忆总结与任务存储
-│   │   │   └── affinity/     # 好感度评估与存储
-│   │   ├── runtime/          # AgentSystem / ExecutorAgent / AgentTypes
-│   │   └── tools/            # 工具运行时、插件、自定义工具与表情缓存
-│   │       ├── custom/       # 自定义工具执行与存储
-│   │       └── plugins/      # 内置工具插件
+│   ├── workflow/             # 消息处理主干，组织预处理、路由和 Agent 执行
+│   │   ├── access/           # 机器人管理员权限与全局用户黑名单
+│   │   ├── agent/            # 工作流中的决策与执行环节
+│   │   │   ├── ability/      # Agent 工具启动的后台耗时任务
+│   │   │   ├── llm/          # 模型客户端、提示词和用量统计
+│   │   │   ├── memory/       # 记忆召回、维护、好感度及存储
+│   │   │   ├── runtime/      # AgentSystem / ExecutorAgent / AgentTypes
+│   │   │   └── tools/        # 工具运行时、插件、自定义工具与 MCP 适配
+│   │   │       └── image/    # 图片生成与角色参考图存储
+│   │   ├── command/          # 命令识别与执行
+│   │   ├── history/          # 聊天记录及其存储
+│   │   ├── message/          # 统一消息模型、会话 ID、图片与记忆补全
+│   │   │   └── image/        # 图片/GIF 识别与描述缓存，供预处理和工具复用
+│   │   ├── scheduling/       # 定时任务的存储、恢复与工作流事件投递
+│   │   └── session/          # 会话配置、存储、名称刷新与昵称目录
 │   ├── admin/                # 管理后台接口与实时推送
-│   │   ├── access/           # 管理员、黑名单、访问令牌与会话 Cookie
+│   │   ├── access/           # 后台访问令牌与会话 Cookie
 │   │   ├── events/           # 管理后台状态推送
 │   │   ├── http/             # 管理 API 控制器与响应工具
 │   │   └── logging/          # 实时日志推送
-│   ├── conversation/
-│   │   ├── history/          # 聊天记录及其存储
-│   │   ├── message/          # 统一消息模型与会话 ID
-│   │   ├── session/          # 会话配置、存储与昵称目录
-│   │   └── workflow/         # OneBot 消息处理工作流
 │   ├── infrastructure/       # NumericTypes.hpp、配置、数据库、日志、HTTP 与共享工具
-│   ├── llm/                  # LLM 客户端
-│   │   ├── prompts/         # 提示词管理与存储
-│   │   └── usage/           # 模型调用用量存储
-│   ├── media/                # 图片/GIF 识别、描述缓存与角色参考图
 │   └── onebot/               # OneBot 接入
-│       ├── messaging/       # 消息发送
+│       ├── incoming/        # OneBot 上报到内部消息记录的转换
+│       ├── messaging/       # OneBot 发送文本的 CQ 码转换
 │       └── transport/       # HTTP 事件入口与 WebSocket/API 客户端
 ├── src/                      # 源文件（按相同模块镜像组织，入口为 main.cpp）
 ├── frontend/                 # Vue 3 + Vite + TypeScript 管理后台
@@ -162,6 +160,14 @@ insoulforge/
 ├── agentTools/               # 自定义工具 JSON（时间、天气、随机数及 PageWeave 网页读取/搜索）
 └── docs/                     # 文档
 ```
+
+`src/main.cpp` 组织一级模块的启动；`workflow/` 组织消息处理及其子模块。
+`include/` 与 `src/` 保持相同层级，分别存放声明与实现。目录表示职责归属，
+不要求包含关系严格成树；跨模块仍直接包含实际使用的接口。
+
+`workflow/message/MessageService` 组织发送流程并将发送成功或失败记录写入上下文，
+通过 `onebot/messaging/MessageFormatter` 转换文本，再调用 `OneBotClient` 发送。
+会话名称查询与保存由 `workflow/session/SessionConfigManager` 负责。
 
 ## 架构
 
@@ -212,7 +218,7 @@ MessageService → OneBot API
 会话统计与异步记忆维护
 ```
 
-关键数据结构见 `include/agent/runtime/AgentTypes.hpp`（`RouterDecision`、`ReplyDecision`）。
+关键数据结构见 `include/workflow/agent/runtime/AgentTypes.hpp`（`RouterDecision`、`ReplyDecision`）。
 
 消息处理的几个约束：
 
@@ -253,7 +259,7 @@ MessageService → OneBot API
       `reply_and_continue` / `delete_sticker` / `at_user` / `ban_user` / `add_to_blacklist` / `send_poke` /
       `recall_message` / `create_scheduled_task` / `cancel_scheduled_task` / `demo_async_task`），执行操作
 - 内置工具分为 `builtin.reply`、`builtin.info`、`builtin.action` 三个 `ToolPlugin` 实现，注册代码按类别拆分在
-  `src/agent/tools/plugins/ReplyToolsPlugin.cpp` / `InfoToolsPlugin.cpp` / `ActionToolsPlugin.cpp`。`ToolPluginCatalog`
+  `src/workflow/agent/tools/plugins/ReplyToolsPlugin.cpp` / `InfoToolsPlugin.cpp` / `ActionToolsPlugin.cpp`。`ToolPluginCatalog`
   显式组合并加载
   插件，`ToolRuntime` 不感知具体插件；自定义工具归属 `custom` 插件。重载某个插件只影响该插件的工具，工具名在
   全局唯一，冲突时拒绝注册，避免自定义工具覆盖内置工具后出现定义与执行不一致。
@@ -428,8 +434,8 @@ sqlite3 data/insoulforge.db ".tables"
 新增后端代码中的数值类型使用 `infrastructure/NumericTypes.hpp` 定义的 `i*`、`u*`、`f32`、`f64`；容器大小和索引使用 `size_t`
 。完整规则见 [编码规范](./CODING_STYLE.md#数值类型)。
 
-小型工具可直接按类别编辑 `src/agent/tools/plugins/ReplyToolsPlugin.cpp` / `InfoToolsPlugin.cpp` /
-`ActionToolsPlugin.cpp` 注册（共享的参数 Schema 辅助函数在 `include/agent/tools/ToolArgument.hpp`）。内置文件由对应的
+小型工具可直接按类别编辑 `src/workflow/agent/tools/plugins/ReplyToolsPlugin.cpp` / `InfoToolsPlugin.cpp` /
+`ActionToolsPlugin.cpp` 注册（共享的参数 Schema 辅助函数在 `include/workflow/agent/tools/ToolArgument.hpp`）。内置文件由对应的
 `builtin.*` 插件加载，因此工具会自动归属到该插件：
 
 ```cpp
@@ -444,7 +450,7 @@ registry.registerTool(
     }, ToolCategory::ACTION);
 ```
 
-新增独立能力域时，实现 `ToolPlugin` 并在 `src/agent/tools/ToolPluginCatalog.cpp` 的实例列表中增加该类；不需要修改
+新增独立能力域时，实现 `ToolPlugin` 并在 `src/workflow/agent/tools/ToolPluginCatalog.cpp` 的实例列表中增加该类；不需要修改
 `ToolRuntime`、`AgentSystem` 或 `ExecutorAgent`。插件 ID 应使用稳定、全小写的命名空间形式。插件重载只会先卸载
 自己此前的工具，跨插件同名工具会被拒绝：
 

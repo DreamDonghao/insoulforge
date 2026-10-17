@@ -4,26 +4,34 @@
 ///          定时任务调度器与管理后台。控制台输入 exit 可正常关闭服务并保存消息列表。
 
 #include <cstdlib>
+#include <exception>
+#include <format>
+#include <iostream>
+#include <stop_token>
+#include <string>
+#include <thread>
+
+#include <drogon/HttpAppFramework.h>
+#include <fmt/format.h>
 
 #include <cstdio>
 #include <poll.h>
 #include <unistd.h>
 
 #include <admin/access/AdminAccessToken.hpp>
-#include <admin/access/AdminStore.hpp>
-#include <agent/ability/AsyncTaskManager.hpp>
-#include <agent/ability/TaskScheduler.hpp>
-#include <agent/runtime/AgentSystem.hpp>
-#include <agent/tools/ToolRegistry.hpp>
-#include <agent/tools/mcp/McpTools.hpp>
-#include <conversation/session/QQNameDirectory.hpp>
-#include <conversation/workflow/OneBotEventWorkflow.hpp>
+#include <workflow/access/AdminStore.hpp>
+#include <workflow/agent/ability/AsyncTaskManager.hpp>
+#include <workflow/scheduling/TaskScheduler.hpp>
+#include <workflow/agent/runtime/AgentSystem.hpp>
+#include <workflow/agent/tools/ToolRegistry.hpp>
+#include <workflow/agent/tools/mcp/McpTools.hpp>
+#include <workflow/session/QQNameDirectory.hpp>
+#include <workflow/OneBotEventWorkflow.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/monitoring/ProcessMetrics.hpp>
 #include <infrastructure/storage/Database.hpp>
-#include <media/ImageDescriptionStore.hpp>
 #include <onebot/transport/OneBotWebSocketClient.hpp>
 
 namespace {
@@ -108,10 +116,6 @@ auto main() -> int {
 
         // 将自己的 QQ 号映射为带“(我)”标记的名称，便于区分机器人与同名群友。
         QQNameDirectory::setCustomName(config.selfQQNumber, config.botName + "(我)");
-
-        // 删除超过十天未使用的图片描述缓存，并记录删除数量。
-        const auto expiredImageCount = u64{ImageDescriptionStore::purgeExpired()};
-        Logger::info(0, "Media", fmt::format("过期图片描述缓存清理完成 | deleted={}", expiredImageCount));
 
         // 配置为 WebSocket 时建立正向连接；使用 HTTP 时不建立连接。
         OneBotWebSocketClient::instance().start();

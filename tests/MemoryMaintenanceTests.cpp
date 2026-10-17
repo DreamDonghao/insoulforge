@@ -2,6 +2,7 @@
 /// @brief 使用本地模型接口验证记忆维护的成功与失败边界
 
 #include <atomic>
+#include <infrastructure/logging/Logger.hpp>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -9,12 +10,12 @@
 #include <drogon/drogon.h>
 #include <trantor/net/EventLoopThread.h>
 
-#include <agent/memory/MemoryStore.hpp>
-#include <agent/memory/affinity/AffinityMaintenanceService.hpp>
-#include <agent/memory/affinity/AffinityStore.hpp>
-#include <agent/memory/maintenance/MemoryMaintenanceCoordinator.hpp>
-#include <agent/memory/maintenance/MemoryMaintenanceStore.hpp>
-#include <conversation/workflow/MessageList.hpp>
+#include <workflow/agent/memory/MemoryStore.hpp>
+#include <workflow/agent/memory/affinity/AffinityMaintenanceService.hpp>
+#include <workflow/agent/memory/affinity/AffinityStore.hpp>
+#include <workflow/agent/memory/maintenance/MemoryMaintenanceCoordinator.hpp>
+#include <workflow/agent/memory/maintenance/MemoryMaintenanceStore.hpp>
+#include <workflow/MessageList.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/storage/Database.hpp>
 

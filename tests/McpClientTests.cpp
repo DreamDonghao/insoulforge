@@ -1,4 +1,5 @@
 #include <atomic>
+#include <infrastructure/logging/Logger.hpp>
 #include <chrono>
 #include <filesystem>
 #include <iostream>
@@ -8,15 +9,15 @@
 #include <trantor/net/EventLoopThread.h>
 
 #include <admin/http/AdminController.hpp>
-#include <agent/runtime/ExecutorAgent.hpp>
-#include <agent/tools/ToolRegistry.hpp>
-#include <agent/tools/mcp/McpTools.hpp>
-#include <conversation/message/SessionId.hpp>
+#include <workflow/agent/runtime/ExecutorAgent.hpp>
+#include <workflow/agent/tools/ToolRegistry.hpp>
+#include <workflow/agent/tools/mcp/McpTools.hpp>
+#include <workflow/message/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/http/HttpTrace.hpp>
 #include <infrastructure/mcp/Client.hpp>
 #include <infrastructure/storage/Database.hpp>
-#include <llm/prompts/PromptService.hpp>
+#include <workflow/agent/llm/prompts/PromptService.hpp>
 
 namespace {
     using namespace drogonmcp;
