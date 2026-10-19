@@ -66,6 +66,7 @@ namespace insoulforge {
 
         // 记忆配置
         i32 contextWindowLimit = 100; // Router、Executor 实际可见的最近消息上限
+        std::atomic<i32> sharedConversationMessageCount{10}; // 每个其他共享会话提供的最近消息数
         i32 memorySummaryTriggerCount = 100; // 达到该条数时创建一批记忆总结任务
         i32 memorySummaryBatchSize = 50; // 每批实际总结并在成功后删除的最旧消息数
         i32 memorySummaryContextCount = 10; // 仅供总结理解上下文、不参与提取的后续消息数

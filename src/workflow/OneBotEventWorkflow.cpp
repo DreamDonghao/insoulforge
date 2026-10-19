@@ -183,6 +183,20 @@ namespace insoulforge {
         return sessionState->messageList()->fullSnapshot();
     }
 
+    auto OneBotEventWorkflow::getSharedSessionMessages(const u64 sessionId, const size_t limit,
+      const std::string &earliest, const std::string &latest) -> json {
+        std::shared_ptr<SessionWorkflowState> state;
+        {
+            std::lock_guard lock(m_sessionsMutex);
+            const auto found = m_sessions.find(sessionId);
+            if (found == m_sessions.end()) {
+                return json::array();
+            }
+            state = found->second;
+        }
+        return state->messageList()->sharedSnapshot(limit, earliest, latest);
+    }
+
     void OneBotEventWorkflow::clearSessionMessages(const u64 sessionId) {
         std::lock_guard lock(m_sessionsMutex);
         if (const auto found = m_sessions.find(sessionId); found != m_sessions.end()) {

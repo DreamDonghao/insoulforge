@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include <infrastructure/NumericTypes.hpp>
@@ -19,6 +20,7 @@ namespace insoulforge {
         bool sendGroupCard = false; ///< 向模型发送本群群名片，默认关闭
         bool autoReply = true; ///< 允许普通群消息进入模型路由判断，默认开启
         bool commandEnabled = true; ///< 解析本群管理命令，关闭后按普通消息处理
+        bool crossSessionSharing = false; ///< 参与群聊与私聊之间的双向近期消息共享
         std::string additionalPrompt; ///< 本群附加回复提示词，默认留空
     };
 
@@ -35,6 +37,10 @@ namespace insoulforge {
         void setAutoReply(u64 sessionId, bool enabled);
         /// @brief 单独保存群命令解析开关，不影响其他设置。
         void setCommandEnabled(u64 sessionId, bool enabled);
+        /// @brief 单独保存群聊或私聊的共享开关，不改变会话启用状态。
+        void setCrossSessionSharing(u64 sessionId, bool enabled);
+        /// @brief 仅当接收会话启用且参与共享时，返回其他启用且参与共享的会话及名称。
+        [[nodiscard]] auto getSharedSessions(u64 receiverId) -> std::vector<std::pair<u64, std::string>>;
         /// @brief 获取会话的消息统计及群设置
         /// @param sessionId 统一会话 ID
         /// @return 已保存的配置；不存在时消息数为 0，群名片关闭，自动回复及命令解析开启

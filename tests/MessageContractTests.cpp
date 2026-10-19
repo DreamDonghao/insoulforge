@@ -34,6 +34,7 @@
 #include <workflow/agent/tools/custom/ToolStore.hpp>
 #include <workflow/agent/tools/plugins/ActionToolsPlugin.hpp>
 #include <workflow/history/ChatRecordStore.hpp>
+#include <workflow/history/SharedConversationContext.hpp>
 #include <workflow/message/MessageRecord.hpp>
 #include <workflow/message/SessionId.hpp>
 #include <workflow/session/QQNameDirectory.hpp>
@@ -1201,6 +1202,19 @@ namespace {
         check(memory.value("temperature", 0.0) == 0.4, "preserves extraction sampling temperature", kTestName);
         check(!insoulforge::Config::instance().getMemoryConfig().contains("memoryExtractMaxTokens"),
           "removes legacy token field", kTestName);
+        auto &config = insoulforge::Config::instance();
+        check(config.sharedConversationMessageCount == 10 && config.getMemoryConfig()["sharedConversationMessageCount"] == 10,
+          "old configuration receives ten shared messages per session", kTestName);
+        check(config.saveMemoryConfig({{"sharedConversationMessageCount", 25}}).has_value() &&
+                config.sharedConversationMessageCount == 25,
+          "sharing count updates at runtime", kTestName);
+        for (const auto &invalid: insoulforge::json::array({0, -1, 1.5, "10", true, nullptr})) {
+            check(!config.saveMemoryConfig({{"sharedConversationMessageCount", invalid}}) &&
+                    config.sharedConversationMessageCount == 25,
+              "invalid counts preserve configuration", kTestName);
+        }
+        check(config.initialize(path.string()).has_value() && config.sharedConversationMessageCount == 25,
+          "sharing count persists", kTestName);
         std::filesystem::remove(path);
     }
 
@@ -1585,6 +1599,137 @@ namespace {
         check(saved.commandEnabled && saved.sendGroupCard && !saved.autoReply && saved.allMesCount == 1 &&
                 saved.additionalPrompt == "test prompt",
           "migration defaults on and preserves existing data", kTestName);
+        db.close();
+        std::filesystem::remove(path);
+    }
+
+    void testCrossSessionSharing() {
+        constexpr std::string_view kTestName = "cross session sharing";
+        using insoulforge::json;
+        auto &db = insoulforge::Database::instance();
+        const auto path = std::filesystem::temp_directory_path() /
+                          ("insoulforge-sharing-" +
+                            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".db");
+        check(db.initialize(path.string()).has_value(), "initializes database", kTestName);
+        const auto privateId = insoulforge::SessionId::fromPrivateUser(11);
+        for (const auto id: {u64{100}, u64{200}, u64{300}, privateId}) {
+            insoulforge::SessionStore::enableSession(id);
+            check(!insoulforge::SessionStore::getSessionConfig(id).crossSessionSharing,
+              "groups and private sessions default off", kTestName);
+        }
+        insoulforge::SessionStore::setCrossSessionSharing(200, true);
+        check(insoulforge::SessionStore::getSharedSessions(100).empty(), "nonparticipant receives nothing", kTestName);
+        insoulforge::SessionStore::setCrossSessionSharing(100, true);
+        insoulforge::SessionStore::setCrossSessionSharing(privateId, true);
+        insoulforge::SessionStore::updateSessionName(200, "shared group");
+        auto sources = insoulforge::SessionStore::getSharedSessions(100);
+        check(sources.size() == 2 &&
+                std::ranges::find(sources, std::pair<u64, std::string>{200, "shared group"}) != sources.end() &&
+                std::ranges::any_of(sources, [privateId](const auto &source) { return source.first == privateId; }),
+          "excludes self and nonparticipants, includes private sources", kTestName);
+        check(insoulforge::SessionStore::getSharedSessions(privateId).size() == 2,
+          "private participants also receive group context", kTestName);
+        insoulforge::SessionStore::toggleSessionStatus(200);
+        check(insoulforge::SessionStore::getSharedSessions(100).size() == 1 &&
+                insoulforge::SessionStore::getSharedSessions(200).empty(),
+          "disabled sessions neither send nor receive", kTestName);
+        insoulforge::SessionStore::setSendGroupCard(100, true);
+        insoulforge::SessionStore::incrementMessageCount(100);
+        auto config = insoulforge::SessionStore::getSessionConfig(100);
+        insoulforge::SessionStore::saveSessionConfig(100, config);
+        check(insoulforge::SessionStore::getSessionConfig(100).crossSessionSharing && config.allMesCount == 1,
+          "full saves and statistics preserve sharing", kTestName);
+
+        const insoulforge::AdminController controller;
+        drogon::HttpResponsePtr response;
+        const auto save = [&](const std::string &id, const json &body) {
+            auto request = drogon::HttpRequest::newHttpRequest();
+            request->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            request->setBody(insoulforge::dumpJson(body));
+            drogon::sync_wait(controller.saveSessionSharing(request, [&](const auto &value) { response = value; }, id));
+        };
+        save(std::to_string(privateId), {{"crossSessionSharing", false}});
+        check(response->getStatusCode() == drogon::k200OK &&
+                !insoulforge::SessionStore::getSessionConfig(privateId).crossSessionSharing,
+          "private sharing can be disabled through API", kTestName);
+        save("100", {{"crossSessionSharing", "true"}});
+        check(response->getStatusCode() == drogon::k400BadRequest &&
+                insoulforge::SessionStore::getSessionConfig(100).crossSessionSharing,
+          "rejects non-boolean without changing state", kTestName);
+        save("0", {{"crossSessionSharing", true}});
+        check(response->getStatusCode() == drogon::k400BadRequest, "rejects invalid session", kTestName);
+
+        insoulforge::MessageList list(100, db, insoulforge::Config::instance());
+        const auto message = [](const std::string &time, const std::string &text) {
+            return json{{"time", time}, {"sender", {{"name", "test"}, {"qq", "11"}}},
+              {"message_id", "123"}, {"reply_to", {{"message_id", "122"}}},
+              {"segments", json::array({{{"type", "text"}, {"text", text}}})}};
+        };
+        const auto append = [&](json record) {
+            record.erase("message_id");
+            static_cast<void>(list.append(std::move(record)));
+        };
+        append(message("2026-10-15 12:00:00", "expired"));
+        append(message("2026-10-16 12:00:00", "boundary"));
+        append(message("2026-10-18 12:00:00", "recent"));
+        append(message("2026-10-20 12:00:00", "future"));
+        append(message("", "missing time"));
+        auto failed = message("2026-10-18 13:00:00", "not delivered");
+        failed["send_error"] = "failed";
+        append(failed);
+        auto internal = message("2026-10-18 14:00:00", "internal");
+        internal["record_type"] = "tool_execution";
+        append(internal);
+        const auto snapshot = list.sharedSnapshot(10, "2026-10-16 12:00:00", "2026-10-19 12:00:00");
+        check(snapshot.size() == 2 && snapshot[0]["segments"][0]["text"] == "boundary" &&
+                snapshot[1]["segments"][0]["text"] == "recent",
+          "time window includes boundary, excludes future and internal messages, preserves order", kTestName);
+        check(!snapshot[0].contains("message_id") && !snapshot[0].contains("reply_to"),
+          "shared messages cannot be referenced or recalled", kTestName);
+        check(list.sharedSnapshot(1, "2026-10-16 12:00:00", "2026-10-19 12:00:00").size() == 1 &&
+                list.fullSnapshot().size() == 7,
+          "sharing limit is independent and does not alter history", kTestName);
+        std::string chinese;
+        for (int index = 0; index < 120; ++index) chinese += "中";
+        auto longMessage = message("2026-10-18 12:00:00", chinese);
+        longMessage["segments"].push_back({{"type", "image"}, {"recognition_status", "succeeded"},
+          {"description", chinese}, {"image_index", 0}});
+        longMessage["memories"] = {"not shared"};
+        longMessage["tool_history"] = {"not shared"};
+        const auto projected = insoulforge::SharedConversationContext::projectMessage(longMessage);
+        check(projected && (*projected)["truncated"] == true &&
+                (*projected)["segments"][0]["text"].get<std::string>().size() == 120 * 3 &&
+                (*projected)["segments"][1]["description"].get<std::string>().size() == 80 * 3 &&
+                !(*projected)["segments"][1].contains("image_index") && !projected->contains("memories") &&
+                !projected->contains("tool_history"),
+          "text and image descriptions share a 200-codepoint budget without media indices or recalled memories", kTestName);
+        auto exact = message("2026-10-18 12:00:00", std::string(199, 'a') + "😀");
+        exact["sender"]["card"] = "not shared";
+        const auto exactProjection = insoulforge::SharedConversationContext::projectMessage(exact);
+        check(exactProjection && !exactProjection->contains("truncated") &&
+                !(*exactProjection)["sender"].contains("card"),
+          "exactly 200 codepoints are intact and group cards are not leaked", kTestName);
+        exact["segments"][0]["text"] = std::string(199, 'a') + "😀尾";
+        const auto cut = insoulforge::SharedConversationContext::projectMessage(exact);
+        check(cut && (*cut)["truncated"] == true &&
+                (*cut)["segments"][0]["text"] == std::string(199, 'a') + "😀",
+          "truncation preserves four-byte Unicode characters", kTestName);
+        exact["sender"]["qq"] = std::to_string(insoulforge::SessionId::kSystemAccountId);
+        check(!insoulforge::SharedConversationContext::projectMessage(exact),
+          "internal system messages are not shared", kTestName);
+        db.close();
+        check(db.initialize(path.string()).has_value() &&
+                insoulforge::SessionStore::getSessionConfig(100).crossSessionSharing,
+          "sharing survives restart", kTestName);
+        check(sqlite3_exec(db.handle(),
+                "ALTER TABLE group_config DROP COLUMN cross_session_sharing; PRAGMA user_version = 19",
+                nullptr, nullptr, nullptr) == SQLITE_OK,
+          "restores v19 schema", kTestName);
+        db.close();
+        check(db.initialize(path.string()).has_value(), "migrates v19", kTestName);
+        config = insoulforge::SessionStore::getSessionConfig(100);
+        check(!config.crossSessionSharing && config.sendGroupCard && config.allMesCount == 1,
+          "migration defaults sharing off and preserves other settings", kTestName);
         db.close();
         std::filesystem::remove(path);
     }
@@ -2164,6 +2309,29 @@ namespace {
           555, insoulforge::MessageRecord::createAssistantRecord("test", 778, "new message"));
         check(workflow.initialize(database, config, agent).has_value() && workflow.getSessionMessages(555)->size() == 2,
           "repeat initialization does not overwrite live messages", kTestName);
+        const auto privateId = insoulforge::SessionId::fromPrivateUser(42);
+        for (const auto id: {u64{555}, u64{556}, privateId}) {
+            insoulforge::SessionStore::enableSession(id);
+            insoulforge::SessionStore::setCrossSessionSharing(id, true);
+        }
+        workflow.appendDeliveredAssistantMessage(556,
+          insoulforge::MessageRecord::createAssistantRecord("test", 779, "other group"));
+        workflow.appendDeliveredAssistantMessage(privateId,
+          insoulforge::MessageRecord::createAssistantRecord("test", 780, "private conversation"));
+        const auto shared = insoulforge::SharedConversationContext::build(555, 1);
+        const auto sharedGroup = std::ranges::find_if(shared, [](const auto &item) {
+            return item["session"]["type"] == "group";
+        });
+        const auto sharedPrivate = std::ranges::find_if(shared, [](const auto &item) {
+            return item["session"]["type"] == "private";
+        });
+        check(shared.size() == 2 && sharedGroup != shared.end() && sharedPrivate != shared.end() &&
+                (*sharedGroup)["session"]["group_id"] == 556 && (*sharedGroup)["messages"].size() == 1 &&
+                (*sharedPrivate)["session"]["qq"] == "42",
+          "context groups live group and private messages with explicit source identity", kTestName);
+        insoulforge::SessionStore::setCrossSessionSharing(555, false);
+        check(insoulforge::SharedConversationContext::build(555, 10).empty() && shared.size() == 2,
+          "opt-out stops new requests without mutating an existing snapshot", kTestName);
         auto &tasks = insoulforge::AsyncTaskManager::instance();
         const auto delayedResult = []() -> drogon::Task<insoulforge::AsyncTaskManager::Result> {
             co_await drogon::sleepCoro(drogon::app().getLoop(), 60.0);
@@ -2237,6 +2405,7 @@ auto main() -> int {
     testGroupCardSettings();
     testGroupAutoReply();
     testGroupCommandSettings();
+    testCrossSessionSharing();
     testGroupAdditionalPrompt();
     testToolHistoryRecords();
     testImageDescriptionCacheStore();

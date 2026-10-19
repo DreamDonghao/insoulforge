@@ -236,6 +236,10 @@ MessageService → OneBot API
   `contextWindowLimit` 条近期消息。预处理结束后，若消息数达到或超过 `memorySummaryTriggerCount` 且没有执行中的维护任务，
   则选取最旧的 `memorySummaryBatchSize` 条启动内存维护任务；全部结果提交成功后才按条数删除队首消息。启动时从数据库恢复消息，正常退出时调用
   `flushToStorage()` 覆盖持久化恢复副本。
+- `SharedConversationContext` 为 Executor 构建 `other_conversations`。会话共享开关保存在 `group_config.cross_session_sharing`，
+  默认关闭，群聊、私聊双向互通；仅已启用且参与共享的会话可提供和接收。每来源默认读取 10 条（`memory.sharedConversationMessageCount`），
+  限三天内且尚未被总结移除的消息，所有内容段共用 200 字符额度，超出标记 `truncated`。只读有限条数快照，不复制整份会话历史，
+  不包含消息 ID、引用目标、媒体索引、工具执行历史或召回记忆；共享背景不能作为当前会话指令。回复期间保持快照不变，不额外限制全局预算。
 - 拍一拍、入群、退群均归一化为类型化消息段：`poke`、`member_event`。拍一拍不再按参与者区分，所有拍一拍通知均与普通消息一样交由
   Router 决策。
 - Router 的空快照、找不到触发消息、系统任务、@机器人和群聊刷屏/短文本规则先于 Jev；只有剩余群聊消息才进入 Jev。

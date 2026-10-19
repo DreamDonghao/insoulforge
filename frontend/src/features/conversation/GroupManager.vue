@@ -97,7 +97,8 @@ const loadGroups = async (): Promise<void> => {
 const groupSettings = {
   sendGroupCard: {route: 'card', message: '群名片设置已保存'},
   autoReply: {route: 'auto-reply', message: '自动回复设置已保存'},
-  commandEnabled: {route: 'command-enabled', message: '命令解析设置已保存'}
+  commandEnabled: {route: 'command-enabled', message: '命令解析设置已保存'},
+  crossSessionSharing: {route: 'sharing', message: '跨会话共享设置已保存'}
 } as const
 type GroupSetting = keyof typeof groupSettings
 const savingSettings = reactive(new Set<string>())
@@ -738,6 +739,7 @@ onUnmounted(() => {
                 <th style="width: 90px;">发送群名片</th>
                 <th style="width: 90px;">自动回复</th>
                 <th style="width: 90px;">命令解析</th>
+                <th style="width: 90px;">跨会话共享</th>
                 <th class="session-actions-heading">操作</th>
               </tr>
               </thead>
@@ -779,6 +781,13 @@ onUnmounted(() => {
                                  label="本群命令解析" :title="group.commandEnabled !== false ? '关闭命令解析，命令将按普通消息处理' : '开启命令解析'"
                                  @update:model-value="setGroupSetting(group, $event, 'commandEnabled')" />
                   <span v-else>-</span>
+                </td>
+                <td @click.stop>
+                  <EnabledSwitch :model-value="group.crossSessionSharing === true"
+                                 :disabled="isSettingSaving(group, 'crossSessionSharing')" :show-status="false"
+                                 label="跨会话共享"
+                                 title="与其他开启共享的群聊和私聊互相分享三天内的近期消息"
+                                 @update:model-value="setGroupSetting(group, $event, 'crossSessionSharing')" />
                 </td>
                 <td class="session-actions">
                   <button class="btn btn-secondary btn-sm"

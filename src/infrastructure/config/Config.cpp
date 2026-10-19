@@ -25,7 +25,7 @@ namespace insoulforge {
                   "accessToken", "oneBotTransport", "qqHttpHost", "qqWebSocketHost", "botName"};
                 constexpr std::array integerFields{"maxTokens", "contextWindowLimit", "memorySummaryTriggerCount",
                   "memorySummaryBatchSize", "memorySummaryContextCount", "routerWindowTriggerCount",
-                  "routerWindowKeepCount", "shortTermMemoryMax", "maxToolRounds"};
+                  "routerWindowKeepCount", "shortTermMemoryMax", "maxToolRounds", "sharedConversationMessageCount"};
                 if (std::ranges::find(integerFields, key) != integerFields.end()) {
                     if (!field.is_number_integer() ||
                         (field.is_number_unsigned()
@@ -127,6 +127,7 @@ namespace insoulforge {
         // 加载记忆配置
         if (const auto &memCfg = value.at("memory"); !memCfg.is_null()) {
             contextWindowLimit = getInt(memCfg, "contextWindowLimit");
+            sharedConversationMessageCount = std::max(getInt(memCfg, "sharedConversationMessageCount", 10), 1);
             memorySummaryTriggerCount = getInt(memCfg, "memorySummaryTriggerCount");
             memorySummaryBatchSize = getInt(memCfg, "memorySummaryBatchSize");
             memorySummaryContextCount = getInt(memCfg, "memorySummaryContextCount");
@@ -224,6 +225,8 @@ namespace insoulforge {
 
     void Config::applyMemoryValues(const Config &value) {
         contextWindowLimit = value.contextWindowLimit;
+        sharedConversationMessageCount.store(value.sharedConversationMessageCount.load(std::memory_order_relaxed),
+          std::memory_order_relaxed);
         memorySummaryTriggerCount = value.memorySummaryTriggerCount;
         memorySummaryBatchSize = value.memorySummaryBatchSize;
         memorySummaryContextCount = value.memorySummaryContextCount;
@@ -298,6 +301,11 @@ namespace insoulforge {
             return result;
         }
         json normalized = value;
+        if (normalized.contains("sharedConversationMessageCount") &&
+            getInt(normalized, "sharedConversationMessageCount") <= 0) {
+            return std::unexpected(ConfigError{.type = ConfigErrorType::InvalidArgument,
+              .message = "每会话共享消息数必须大于 0"});
+        }
         if (getInt(normalized, "contextWindowLimit") <= 0) {
             normalized["contextWindowLimit"] = contextWindowLimit;
         }

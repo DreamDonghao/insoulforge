@@ -3,6 +3,7 @@
 
 
 #include <workflow/history/ChatRecordStore.hpp>
+#include <workflow/history/SharedConversationContext.hpp>
 #include <workflow/MessageList.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
@@ -49,6 +50,23 @@ namespace insoulforge {
     auto MessageList::fullSnapshot() const -> json {
         std::lock_guard lock(m_mutex);
         return fullSnapshotLocked();
+    }
+
+    auto MessageList::sharedSnapshot(const size_t limit, const std::string &earliest, const std::string &latest) const -> json {
+        std::lock_guard lock(m_mutex);
+        json result = json::array();
+        for (auto it = m_messages.rbegin(); it != m_messages.rend() && result.size() < limit; ++it) {
+            const auto time = getStr(*it, "time");
+            // 消息时间统一采用固定宽度的本地时间字符串，可直接比较；无时间记录不参与共享。
+            if (time.size() != 19 || time < earliest || time > latest) {
+                continue;
+            }
+            if (auto message = SharedConversationContext::projectMessage(*it)) {
+                result.push_back(std::move(*message));
+            }
+        }
+        std::ranges::reverse(result);
+        return result;
     }
 
     void MessageList::flushToStorage() const {

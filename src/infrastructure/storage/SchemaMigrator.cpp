@@ -71,6 +71,7 @@ namespace insoulforge {
         send_group_card INTEGER NOT NULL DEFAULT 0,
         auto_reply INTEGER NOT NULL DEFAULT 1,
         command_enabled INTEGER NOT NULL DEFAULT 1,
+        cross_session_sharing INTEGER NOT NULL DEFAULT 0,
         additional_prompt TEXT NOT NULL DEFAULT ''
     ))",
           R"(CREATE TABLE IF NOT EXISTS chat_records (
@@ -490,6 +491,10 @@ namespace insoulforge {
             execSQL(db, "DROP TABLE IF EXISTS custom_tools");
         }
 
+        void migrateV19ToV20(sqlite3 *db) {
+            ensureColumn(db, "group_config", "cross_session_sharing", "cross_session_sharing INTEGER NOT NULL DEFAULT 0");
+        }
+
         void migrateV18ToV19(sqlite3 *db) {
             ensureColumn(db, "group_config", "command_enabled", "command_enabled INTEGER NOT NULL DEFAULT 1");
         }
@@ -560,6 +565,7 @@ namespace insoulforge {
               &migrateV16ToV17, // 群独立附加提示词，默认留空
               &migrateV17ToV18, // 删除记忆与好感度维护任务队列
               &migrateV18ToV19, // 群命令解析开关，默认开启
+              &migrateV19ToV20, // 跨会话近期消息共享，默认关闭
             };
 
             for (i32 v = version; v < kLatestVersion; ++v) {
