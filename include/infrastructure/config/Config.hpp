@@ -97,6 +97,8 @@ namespace insoulforge {
         [[nodiscard]] auto getExecutionConfig() const -> json;
         /// @brief 获取 MCP 服务配置快照。
         [[nodiscard]] auto getMcpConfig() const -> json;
+        [[nodiscard]] auto getBuiltinToolsConfig() const -> json;
+        [[nodiscard]] auto saveBuiltinToolsConfig(const json &value) -> std::expected<void, ConfigError>;
         /// @brief 持久化 MCP 配置；动态服务更新由 McpTools 协调。
         [[nodiscard]] auto saveMcpConfig(const json &value) -> std::expected<void, ConfigError>;
 

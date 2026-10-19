@@ -65,6 +65,7 @@ namespace insoulforge::ConfigStore {
                   {"shortTermMemoryMax", 15}, {"longTermRecallThreshold", 0.65}, {"longTermInjectThreshold", 0.45}}},
               {"execution", {{"maxToolRounds", ExecutionSettings::kDefaultMaxToolRounds}, {"mcpToolPageSize", 10},
                               {"mcpMaxToolsPerEnable", 4}, {"mcpMaxToolsPerReply", 12}}},
+              {"builtinTools", json::object()},
               {"mcp", {{"servers", json::array()}}}};
         }
 
@@ -385,6 +386,23 @@ namespace insoulforge::ConfigStore {
     auto getExecutionConfig() -> json { return getSection("execution"); }
 
     auto getMcpConfig() -> json { return getSection("mcp"); }
+    auto getBuiltinToolsConfig() -> json { return getSection("builtinTools"); }
+    auto saveBuiltinToolsConfig(const json &config, const ConfigValidator &validate)
+      -> std::expected<void, ConfigError> {
+        if (!config.is_object()) {
+            return std::unexpected(ConfigError{.type = ConfigErrorType::InvalidArgument,
+              .message = "builtinTools 必须是对象"});
+        }
+        for (const auto &entry : config) {
+            if (!entry.is_object() || !atOrNull(entry, "enabled").is_boolean() ||
+              (!atOrNull(entry, "description").is_null() &&
+                (!entry["description"].is_string() || getStr(entry, "description").size() > 16000))) {
+                return std::unexpected(ConfigError{.type = ConfigErrorType::InvalidArgument,
+                  .message = "内置工具配置需要 enabled 布尔值，description 为不超过 16000 字节的字符串或 null"});
+            }
+        }
+        return saveSection("builtinTools", config, validate);
+    }
     auto saveMcpConfig(const json &config, const ConfigValidator &validate) -> std::expected<void, ConfigError> {
         if (!config.is_object() || !config.contains("servers") || !config["servers"].is_array()) {
             return std::unexpected(

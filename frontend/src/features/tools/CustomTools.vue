@@ -3,9 +3,11 @@
  * @file CustomTools.vue
  * @brief 自定义工具管理组件
  */
-import {inject, nextTick, onMounted, reactive, ref, type Ref} from 'vue'
+import {computed, inject, nextTick, onMounted, reactive, ref, type Ref} from 'vue'
 import {marked} from 'marked'
 import type {ApiResponse} from '../../vite-env'
+import SlidingTabs from '../../components/SlidingTabs.vue'
+import EnabledSwitch from '../../components/EnabledSwitch.vue'
 
 const showToast = inject<(msg: string, isError?: boolean) => void>('showToast')
 
@@ -21,6 +23,83 @@ interface CustomTool {
 }
 
 const tools: Ref<CustomTool[]> = ref([])
+interface BuiltinTool {
+  name: string
+  category: string
+  enabled: boolean
+  description: string
+  defaultDescription: string
+  customDescription: boolean
+}
+const activeTab = ref('builtin')
+const toolTabs = [{key: 'builtin', label: '内置工具'}, {key: 'custom', label: '自定义工具'}]
+const builtinTools = ref<BuiltinTool[]>([])
+const builtinLoading = ref(true)
+const builtinError = ref('')
+const builtinFilter = ref('')
+const customFilter = ref('')
+const pendingTools = reactive(new Set<string>())
+const visibleCustomTools = computed(() => tools.value.filter(tool =>
+  `${tool.name} ${tool.description}`.toLowerCase().includes(customFilter.value.toLowerCase())))
+const builtinSaving = ref(false)
+const editingBuiltin = ref<BuiltinTool | null>(null)
+const visibleBuiltins = computed(() => builtinTools.value.filter(tool =>
+  `${tool.name} ${tool.description}`.toLowerCase().includes(builtinFilter.value.toLowerCase())))
+const loadBuiltins = async (): Promise<void> => {
+  builtinLoading.value = true
+  builtinError.value = ''
+  try {
+    const resp = await fetch('/admin/api/builtin-tools')
+    if (!resp.ok) throw new Error('内置工具加载失败')
+    builtinTools.value = await resp.json()
+  } catch (error) {
+    builtinError.value = error instanceof Error ? error.message : '内置工具加载失败'
+  } finally {
+    builtinLoading.value = false
+  }
+}
+const persistBuiltin = async (name: string, patch: {enabled?: boolean, description?: string | null}): Promise<void> => {
+  const resp = await fetch('/admin/api/builtin-tools', {
+    method: 'PUT', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name, ...patch})
+  })
+  const result: ApiResponse = await resp.json()
+  if (!resp.ok || !result.success) throw new Error(result.error || '保存失败')
+}
+const toggleBuiltin = async (tool: BuiltinTool, enabled: boolean): Promise<void> => {
+  const key = `builtin:${tool.name}`
+  if (pendingTools.has(key)) return
+  pendingTools.add(key)
+  try {
+    await persistBuiltin(tool.name, {enabled})
+    tool.enabled = enabled
+    showToast?.(enabled ? '工具已启用' : '工具已禁用')
+  } catch (error) {
+    showToast?.(error instanceof Error ? error.message : '保存失败', true)
+  } finally {
+    pendingTools.delete(key)
+  }
+}
+const saveBuiltin = async (): Promise<void> => {
+  const tool = editingBuiltin.value
+  if (!tool || builtinSaving.value) return
+  builtinSaving.value = true
+  try {
+    const description = tool.customDescription ? tool.description : null
+    await persistBuiltin(tool.name, {description})
+    const existing = builtinTools.value.find(item => item.name === tool.name)
+    if (existing) {
+      existing.description = description ?? tool.defaultDescription
+      existing.customDescription = description !== null
+    }
+    editingBuiltin.value = null
+    showToast?.('内置工具配置已保存')
+  } catch (error) {
+    showToast?.(error instanceof Error ? error.message : '保存失败', true)
+  } finally {
+    builtinSaving.value = false
+  }
+}
 const loading: Ref<boolean> = ref(false)
 const saving: Ref<boolean> = ref(false)
 const showDialog: Ref<boolean> = ref(false)
@@ -174,12 +253,20 @@ const deleteTool = async (id: number): Promise<void> => {
   }
 }
 
-const toggleTool = async (id: number): Promise<void> => {
-  const resp = await fetch(`/admin/api/custom-tool/${id}/toggle`, {method: 'POST'})
-  const data: ApiResponse = await resp.json()
-  if (data.success) {
-    showToast!('状态已切换')
-    loadTools()
+const toggleTool = async (tool: CustomTool): Promise<void> => {
+  const key = `custom:${tool.id}`
+  if (pendingTools.has(key)) return
+  pendingTools.add(key)
+  try {
+    const resp = await fetch(`/admin/api/custom-tool/${tool.id}/toggle`, {method: 'POST'})
+    const data: ApiResponse = await resp.json()
+    if (!resp.ok || !data.success) throw new Error(data.error || '状态保存失败')
+    tool.enabled = !tool.enabled
+    showToast?.(tool.enabled ? '工具已启用' : '工具已禁用')
+  } catch (error) {
+    showToast?.(error instanceof Error ? error.message : '状态保存失败', true)
+  } finally {
+    pendingTools.delete(key)
   }
 }
 
@@ -300,76 +387,102 @@ const testCurrentTool = async (): Promise<void> => {
 
 onMounted(() => {
   loadTools()
+  loadBuiltins()
 })
 </script>
 
 <template>
   <div>
     <div class="page-header">
-      <h1 class="page-title">自定义工具</h1>
-      <p class="page-subtitle">添加自定义工具，扩展Bot能力</p>
+      <h1 class="page-title">工具配置</h1>
+      <p class="page-subtitle">管理内置工具与自定义工具</p>
     </div>
 
-    <div class="card">
-      <div class="card-header">
-        <h3 class="card-title">工具管理</h3>
-        <div style="display: flex; gap: 8px;">
-          <button class="btn btn-secondary btn-sm" @click="openImportDialog">📥 导入</button>
-          <button class="btn btn-primary btn-sm" @click="reloadTools">重新加载</button>
-          <button class="btn btn-success btn-sm" @click="openAddDialog">添加工具</button>
+    <SlidingTabs v-model="activeTab" :items="toolTabs" label="工具类型" />
+    <section v-if="activeTab === 'builtin'" class="builtin-tools">
+      <div class="tools-toolbar">
+        <input v-model="builtinFilter" class="form-input tools-search" type="search" placeholder="搜索名称或描述"
+               aria-label="搜索内置工具">
+        <span class="tools-count">{{ builtinTools.filter(tool => tool.enabled).length }} / {{ builtinTools.length }} 已启用</span>
+      </div>
+      <p v-if="builtinLoading" class="empty-state">加载中...</p>
+      <div v-else-if="builtinError" class="empty-state">
+        <p>{{ builtinError }}</p><button class="btn btn-secondary" @click="loadBuiltins">重试</button>
+      </div>
+      <template v-else>
+        <section v-for="category in ['回复', '信息', '动作']" :key="category" class="builtin-group">
+          <h3>{{ category }}工具 <span>{{ visibleBuiltins.filter(tool => tool.category === category).length }}</span></h3>
+          <div v-for="tool in visibleBuiltins.filter(item => item.category === category)" :key="tool.name"
+               class="builtin-row">
+            <EnabledSwitch :model-value="tool.enabled" :disabled="pendingTools.has(`builtin:${tool.name}`)"
+                               :label="`启用工具 ${tool.name}`" @update:model-value="toggleBuiltin(tool, $event)" />
+            <div class="tool-identity"><code>{{ tool.name }}</code>
+              <span v-if="tool.customDescription" class="tool-kind">已修改描述</span>
+            </div>
+            <p class="tool-description">{{ tool.description || '—' }}</p>
+            <div class="tool-controls">
+              <button class="btn btn-secondary btn-sm" :disabled="pendingTools.has(`builtin:${tool.name}`)"
+                      @click="editingBuiltin = {...tool}">编辑描述</button>
+            </div>
+          </div>
+        </section>
+        <p v-if="!visibleBuiltins.length" class="empty-state">暂无匹配的内置工具</p>
+      </template>
+    </section>
+    <section v-if="activeTab === 'custom'" class="custom-tools">
+      <div class="tools-toolbar">
+        <input v-model="customFilter" class="form-input tools-search" type="search" placeholder="搜索名称或描述"
+               aria-label="搜索自定义工具">
+        <span class="tools-count">{{ tools.filter(tool => tool.enabled).length }} / {{ tools.length }} 已启用</span>
+        <div class="tool-actions">
+          <button class="btn btn-secondary btn-sm" @click="openImportDialog">导入</button>
+          <button class="btn btn-secondary btn-sm" @click="reloadTools">重新加载</button>
+          <button class="btn btn-primary btn-sm" @click="openAddDialog">添加工具</button>
         </div>
       </div>
-
-      <div class="table-container">
-        <table v-if="!loading">
-          <thead>
-          <tr>
-            <th style="width: 60px">状态</th>
-            <th style="width: 150px">工具名</th>
-            <th>描述</th>
-            <th style="width: 80px">类型</th>
-            <th style="width: 140px">操作</th>
-          </tr>
-          </thead>
-          <tbody>
-          <tr v-for="tool in tools" :key="tool.id" class="tool-row" @click="showReadme(tool)">
-            <td>
-                <span :class="{ 'status-enabled': tool.enabled, 'status-disabled': !tool.enabled }">
-                  {{ tool.enabled ? '启用' : '禁用' }}
-                </span>
-            </td>
-            <td><code>{{ tool.name }}</code></td>
-            <td>{{ tool.description }}</td>
-            <td>
-              <span :class="'tag-' + tool.executorType" class="tag">{{ tool.executorType }}</span>
-            </td>
-            <td style="white-space: nowrap;" @click.stop>
-              <button :class="tool.enabled ? 'btn-warning' : 'btn-success'" class="btn btn-sm"
-                      @click="toggleTool(tool.id)">
-                {{ tool.enabled ? '禁用' : '启用' }}
-              </button>
-              <button class="btn btn-secondary btn-sm" style="margin-left: 4px;"
-                      @click="exportTool(tool.id, tool.name)">导出
-              </button>
-              <button class="btn btn-primary btn-sm" style="margin-left: 4px;" @click="openEditDialog(tool)">编辑
-              </button>
-              <button class="btn btn-danger btn-sm" style="margin-left: 4px;" @click="deleteTool(tool.id)">删除</button>
-            </td>
-          </tr>
-          </tbody>
-        </table>
-
-        <div v-if="loading" class="empty-state">
-          <p>加载中...</p>
+      <p v-if="loading" class="empty-state">加载中...</p>
+      <section v-else class="builtin-group">
+        <h3>Lua 工具 <span>{{ visibleCustomTools.length }}</span></h3>
+        <div v-for="tool in visibleCustomTools" :key="tool.id" class="builtin-row">
+          <EnabledSwitch :model-value="tool.enabled" :disabled="pendingTools.has(`custom:${tool.id}`)"
+                             :label="`启用工具 ${tool.name}`" @update:model-value="toggleTool(tool)" />
+          <div class="tool-identity"><code>{{ tool.name }}</code><span class="tool-kind">Lua</span></div>
+          <p class="tool-description">{{ tool.description || '—' }}</p>
+          <div class="tool-controls">
+            <div class="tool-actions">
+              <button class="btn btn-secondary btn-sm" @click="showReadme(tool)">说明</button>
+              <button class="btn btn-secondary btn-sm" @click="exportTool(tool.id, tool.name)">导出</button>
+              <button class="btn btn-secondary btn-sm" :disabled="pendingTools.has(`custom:${tool.id}`)"
+                      @click="openEditDialog(tool)">编辑</button>
+              <button class="btn btn-danger btn-sm" :disabled="pendingTools.has(`custom:${tool.id}`)"
+                      @click="deleteTool(tool.id)">删除</button>
+            </div>
+          </div>
         </div>
-        <div v-else-if="tools.length === 0" class="empty-state">
-          <div class="empty-icon">🔧</div>
-          <p>暂无自定义工具</p>
-          <button class="btn btn-success" @click="openAddDialog">添加工具</button>
+        <p v-if="!visibleCustomTools.length" class="empty-state">{{ tools.length ? '暂无匹配的工具' : '暂无自定义工具' }}</p>
+      </section>
+    </section>
+
+    <div v-if="editingBuiltin" class="dialog-overlay">
+      <form class="dialog builtin-description-dialog" role="dialog" aria-modal="true"
+            aria-labelledby="builtin-dialog-title" @submit.prevent="saveBuiltin">
+        <div class="dialog-header">
+          <h3 id="builtin-dialog-title">{{ editingBuiltin.name }}</h3>
+          <button type="button" class="dialog-close" :disabled="builtinSaving" @click="editingBuiltin = null">×</button>
         </div>
-      </div>
+        <div class="dialog-body">
+          <label class="form-label" for="builtin-description">工具描述</label>
+          <textarea id="builtin-description" v-model="editingBuiltin.description" class="form-input"
+                    rows="7" @input="editingBuiltin.customDescription = true"></textarea>
+        </div>
+        <div class="dialog-footer">
+          <button type="button" class="btn btn-secondary" :disabled="builtinSaving"
+                  @click="editingBuiltin.description = editingBuiltin.defaultDescription; editingBuiltin.customDescription = false">恢复默认描述</button>
+          <button type="button" class="btn btn-secondary" :disabled="builtinSaving" @click="editingBuiltin = null">取消</button>
+          <button type="submit" class="btn btn-primary" :disabled="builtinSaving">{{ builtinSaving ? '保存中...' : '保存' }}</button>
+        </div>
+      </form>
     </div>
-
     <!-- 导入对话框 -->
     <div v-if="showImportDialog" class="dialog-overlay">
       <div class="dialog" style="width: 600px;">
@@ -472,9 +585,7 @@ onMounted(() => {
           </div>
 
           <div class="form-group checkbox-group">
-            <label>
-              <input v-model="editTool.enabled" type="checkbox"> 启用此工具
-            </label>
+            <EnabledSwitch v-model="editTool.enabled" :disabled="saving" label="启用此工具" />
           </div>
         </div>
 
@@ -504,27 +615,164 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.status-enabled {
-  color: var(--success);
-  font-weight: 500;
+.tools-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 20px;
 }
-
-.status-disabled {
-  color: var(--danger);
-  font-weight: 500;
+.tools-search {
+  flex: 1 1 240px;
+  width: auto;
+  max-width: 420px;
+  min-width: 0;
 }
-
-.tag {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 0;
+.tools-count {
+  color: var(--text-secondary);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.tools-toolbar > .tool-actions {
+  margin-left: auto;
+}
+.tool-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.builtin-group {
+  margin-top: 20px;
+}
+.builtin-group h3 {
+  font-size: 16px;
+  margin: 0;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+.builtin-group h3 span {
+  margin-left: 8px;
+  color: var(--text-light);
+  font-size: 13px;
+  font-weight: 400;
+}
+.builtin-row {
+  display: grid;
+  grid-template-columns: 120px 176px minmax(0, 1fr) var(--tool-actions-width, 96px);
+  gap: 20px;
+  align-items: center;
+  padding: 14px 0;
+  min-height: 76px;
+  border-bottom: 1px solid var(--border);
+}
+.custom-tools {
+  --tool-actions-width: 224px;
+}
+.builtin-row:hover {
+  background: var(--row-hover);
+}
+.tool-identity {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+.tool-identity code {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.6;
+  padding: 0;
+  background: transparent;
+}
+.tool-kind {
+  color: var(--text-light);
   font-size: 12px;
-  font-weight: 500;
 }
-
-.tag-lua {
-  background: #5a65aa;
-  color: white;
+.tool-description {
+  margin: 0;
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-secondary);
+}
+.tool-controls {
+  display: flex;
+  justify-content: flex-end;
+  justify-self: end;
+}
+.tool-controls > .tool-actions,
+.tool-controls > .btn {
+  justify-self: end;
+}
+.tool-controls > .tool-actions {
+  justify-content: flex-end;
+  gap: 6px;
+}
+.tool-controls .btn {
+  min-height: 34px;
+}
+.builtin-description-dialog {
+  width: 640px;
+  max-width: calc(100vw - 32px);
+}
+.builtin-description-dialog textarea {
+  display: block;
+  min-height: 160px;
+  height: 220px;
+  max-height: 45vh;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.7;
+}
+.builtin-description-dialog .dialog-footer {
+  flex-wrap: wrap;
+}
+.builtin-description-dialog .dialog-footer > :first-child {
+  margin-right: auto;
+}
+@media (max-width: 1100px) {
+  .builtin-row {
+    grid-template-columns: 120px minmax(0, 1fr) var(--tool-actions-width, 96px);
+    gap: 8px 16px;
+  }
+  .tool-description {
+    grid-column: 2;
+    grid-row: 2;
+  }
+  .builtin-row > .tool-switch {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+  }
+  .tool-controls {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+  }
+}
+@media (max-width: 800px) {
+  .builtin-row {
+    grid-template-columns: 120px minmax(0, 1fr);
+    gap: 10px 16px;
+  }
+  .tool-description {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .builtin-row > .tool-switch {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .tool-controls {
+    grid-column: 1 / -1;
+    grid-row: 3;
+  }
+  .tools-toolbar > .tool-actions {
+    width: 100%;
+    margin-left: 0;
+  }
 }
 
 .code-input {
@@ -595,15 +843,6 @@ onMounted(() => {
 
 .dialog-body {
   padding: 16px 20px;
-}
-
-.tool-row {
-  cursor: pointer;
-  transition: background-color 0.15s;
-}
-
-.tool-row:hover {
-  background-color: var(--row-hover);
 }
 
 .readme-content {
@@ -713,14 +952,6 @@ onMounted(() => {
 
 .checkbox-group {
   margin-top: 8px;
-}
-
-.checkbox-group label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  font-size: 13px;
 }
 
 .import-example {

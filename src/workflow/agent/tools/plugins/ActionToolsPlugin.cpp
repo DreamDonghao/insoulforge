@@ -96,6 +96,60 @@ namespace insoulforge {
 
         registry.registerTool(
           {
+            .name = "send_qzone_msg",
+            .description = "在机器人自己的 QQ 空间发布说说，在遇到高兴，离谱，无语的事的时候发送，不是发送聊天消息。"
+                           "支持文字和图片 URL，默认好友可见。"
+                           "超时或无法确认结果时不要自动重试，以免重复发布。",
+            .parameters = json{{"type", "object"},
+              {"properties",
+                {{"content", {{"type", "string"}, {"description", "说说正文，不能为空"}}},
+                  {"images", {{"type", "array"}, {"items", {{"type", "string"}}}, {"maxItems", 9},
+                               {"description", "可选，最多 9 张图片的 HTTP/HTTPS URL；不要编造地址"}}},
+                  {"ugc_right", {{"type", "integer"}, {"enum", {1, 4, 64}}, {"default", 4},
+                                  {"description", "查看权限：1 所有人可见，4 好友可见，64 仅自己可见"}}}}},
+              {"required", {"content"}}},
+            .handler = [](const json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
+                const auto content = trim(argString(args, "content"));
+                if (content.empty()) {
+                    co_return std::string("请提供非空的说说正文。");
+                }
+                const auto &right = atOrNull(args, "ugc_right");
+                if (!right.is_null() && (!right.is_number_integer() ||
+                      (right != 1 && right != 4 && right != 64))) {
+                    co_return std::string("ugc_right 必须为 1（所有人）、4（好友）或 64（仅自己）。");
+                }
+                json params = {{"content", content}, {"ugc_right", right.is_null() ? json(4) : right}};
+                const auto &images = atOrNull(args, "images");
+                if (!images.is_null()) {
+                    if (!images.is_array() || images.size() > 9) {
+                        co_return std::string("images 必须为数组，最多 9 张图片。");
+                    }
+                    for (const auto &image : images) {
+                        if (!image.is_string()) {
+                            co_return std::string("图片地址必须为 HTTP/HTTPS URL。");
+                        }
+                        const auto &url = image.get_ref<const std::string &>();
+                        const auto hostStart = url.find("://") + 3;
+                        if ((!url.starts_with("http://") && !url.starts_with("https://")) ||
+                          url.find_first_of(" \t\r\n\\") != std::string::npos ||
+                          url.find_first_of("/?#", hostStart) == hostStart || url.size() == hostStart) {
+                            co_return std::string("图片地址必须为包含主机名的 HTTP/HTTPS URL。");
+                        }
+                    }
+                    params["images"] = images;
+                }
+                const auto result = co_await OneBotClient::sendQzoneMsg(std::move(params), ctx.sessionId);
+                if (!result) {
+                    co_return "空间说说发布未成功确认：" + result.error() +
+                      "。若请求超时，请先检查空间，勿自动重试。";
+                }
+                co_return fmt::format("空间说说已发布，tid={}。", *result);
+            },
+          },
+          ToolCategory::ACTION);
+
+        registry.registerTool(
+          {
             .name = "generate_image",
             .description = "根据用户明确提出的画面要求异步生成一张图片。工具立即返回任务状态，图片生成完成后"
                            "会自动发送到当前会话，不要再调用 reply 发送图片。绘制你自己的角色形象时，"

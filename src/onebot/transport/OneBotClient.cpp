@@ -1,6 +1,7 @@
 /// @file OneBotClient.cpp
 /// @brief OneBot API 客户端实现
 
+#include <onebot/transport/OneBotClient.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/http/HttpUtil.hpp>
@@ -83,6 +84,19 @@ namespace insoulforge::OneBotClient {
             co_return messageId;
         }
     } // namespace
+
+    auto sendQzoneMsg(json params, const std::optional<u64> sessionId)
+      -> drogon::Task<std::expected<std::string, std::string>> {
+        const auto response = co_await callApi("[Qzone]", "send_qzone_msg", std::move(params), sessionId, 120.0);
+        if (!response) {
+            co_return std::unexpected(response.error());
+        }
+        const auto tid = getStr(atOrNull(*response, "data"), "tid");
+        if (tid.empty()) {
+            co_return std::unexpected("接口返回成功但缺少说说 tid，无法确认发布结果；请检查空间，不要直接重试。");
+        }
+        co_return tid;
+    }
 
     auto sendGroupMsg(const u64 groupId, std::string message) -> drogon::Task<std::expected<u64, std::string>> {
         co_return co_await sendMessage("send_group_msg", "group_id", groupId, std::move(message), groupId);

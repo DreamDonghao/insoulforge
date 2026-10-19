@@ -414,6 +414,11 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
                     toolHistory.push_back(MessageRecord::createToolHistoryEntry(name, args, status));
                 };
 
+                if (ToolRegistry::instance().isToolDisabled(name)) {
+                    recordCall("rejected");
+                    appendToolResult(messages, toolCall, "工具已关闭，未执行: " + name);
+                    continue;
+                }
                 const ReplyToolResult replyResult = applyReplyTool(name, args, accumulatedCQCodes, decision);
                 if (replyResult == ReplyToolResult::Applied) {
                     recordCall("decision");

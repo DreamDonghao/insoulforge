@@ -8,6 +8,7 @@
 #pragma once
 
 #include <functional>
+#include <expected>
 #include <map>
 #include <memory>
 #include <shared_mutex>
@@ -103,6 +104,11 @@ namespace insoulforge {
 
         /// @brief 检查工具是否存在
         [[nodiscard]] auto hasTool(const std::string &name) const -> bool;
+        [[nodiscard]] auto isToolDisabled(const std::string &name) const -> bool;
+        [[nodiscard]] auto getBuiltinTools() const -> json;
+        void loadBuiltinToolsConfig(json config);
+        [[nodiscard]] auto saveBuiltinToolConfig(const std::string &name, const json &patch)
+          -> std::expected<void, std::string>;
 
         /// @brief 注销工具
         void unregisterTool(const std::string &name);
@@ -119,6 +125,8 @@ namespace insoulforge {
 
         // 名称全局唯一，杜绝自定义工具覆盖内置工具后出现定义与执行不一致。
         std::map<std::string, RegisteredTool> m_tools;
+        json m_builtinConfig = json::object();
+        [[nodiscard]] auto isEnabled(const RegisteredTool &registered) const -> bool;
         std::map<std::string, std::vector<std::string>> m_pluginTools;
         mutable std::shared_mutex m_mutex;
         std::string m_activePluginId;

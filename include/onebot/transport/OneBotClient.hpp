@@ -18,6 +18,10 @@
 /// @brief OneBot API 客户端
 /// @details 根据 OneBot 配置，通过 HTTP 或 WebSocket 与 OneBot 实现通信。
 namespace insoulforge::OneBotClient {
+    /// @brief 发布空间说说（NapCat 扩展 send_qzone_msg）；返回 tid，失败保留错误详情。
+    [[nodiscard]] auto sendQzoneMsg(json params, std::optional<u64> sessionId = std::nullopt)
+      -> drogon::Task<std::expected<std::string, std::string>>;
+
     /// @brief 发送群消息（群号即会话 ID，无需单独传 sessionId）
     /// @note OneBot 11: send_group_msg
     /// @return message_id；失败返回具体错误

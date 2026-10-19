@@ -92,6 +92,25 @@ Router
 | `create_scheduled_task` | `time`, `content`, `daily?` | 创建定时提醒：`time` 必须是根据最新消息时间换算的绝对时间 `YYYY-MM-DD HH:MM:SS`（须晚于当前 10 秒、不超过一年）；`content` 是到点时留给模型自己的备忘说明（非最终回复文本，运行时注入 `botName`，上限 500 字符），到点后以【系统定时任务】消息回到原会话再组织回复；`daily=true` 为每日重复（如"每天 8 点叫我起床"） |
 | `cancel_scheduled_task` | `task_id`                   | 取消未触发的定时任务（含每日任务）；不知道编号时先 `list_scheduled_tasks`                                                                                                                                                                                                                                            |
 
+### 内置工具配置
+
+管理后台“工具配置 → 内置工具”可逐个开启或关闭工具、修改传给模型的 description，
+也可恢复默认描述。配置保存在 `data/config.json` 的 `builtinTools` 中，保存后立即生效，重启保留。
+关闭的工具不会出现在后续模型请求中，后续调用也会被拒绝；已经开始执行的任务不强制中断。
+回复工具也允许关闭，请保留所需的回复能力。自定义 Lua 工具仍在同页的“自定义工具”标签管理，
+MCP 远程工具仍由“MCP 服务”管理。
+
+### 空间说说
+
+`send_qzone_msg(content, images?, ugc_right?)` 在机器人账号自己的 QQ 空间发布说说，
+仅在用户明确要求发布时调用。正文不能为空；`images` 为最多 9 张图片的 HTTP/HTTPS URL 数组，
+不接受本地路径或 base64。`ugc_right` 支持 `1` 所有人可见、`4` 好友可见（默认）、`64` 仅自己可见。
+
+依赖 [NapCat 的 send_qzone_msg 扩展](https://github.com/NapNeko/NapCatQQ/pull/1965)，
+不是标准 OneBot 11 能力。复用后台配置的 HTTP/WebSocket 连接及 Access Token，无需另外配置空间 Cookie。
+成功返回说说 `tid`，失败保留接口错误详情；超时或响应缺少 `tid` 时不能确认是否已发布，
+应先检查空间，工具不会自动重试。调用结果通过现有工具历史进入上下文，不伪装成聊天消息。
+
 ### 异步耗时任务
 
 | 工具              | 参数                                           | 说明                                                                                                                                                                                                                            |
