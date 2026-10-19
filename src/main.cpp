@@ -7,32 +7,30 @@
 #include <exception>
 #include <format>
 #include <iostream>
-#include <stop_token>
 #include <string>
 #include <thread>
 
+#include <cstdio>
 #include <drogon/HttpAppFramework.h>
 #include <fmt/format.h>
-
-#include <cstdio>
 #include <poll.h>
+#include <stop_token>
 #include <unistd.h>
 
 #include <admin/access/AdminAccessToken.hpp>
-#include <workflow/access/AdminStore.hpp>
-#include <workflow/agent/ability/AsyncTaskManager.hpp>
-#include <workflow/scheduling/TaskScheduler.hpp>
-#include <workflow/agent/runtime/AgentSystem.hpp>
-#include <workflow/agent/tools/ToolRegistry.hpp>
-#include <workflow/agent/tools/mcp/McpTools.hpp>
-#include <workflow/session/QQNameDirectory.hpp>
-#include <workflow/OneBotEventWorkflow.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/monitoring/ProcessMetrics.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <onebot/transport/OneBotWebSocketClient.hpp>
+#include <workflow/OneBotEventWorkflow.hpp>
+#include <workflow/agent/ability/AsyncTaskManager.hpp>
+#include <workflow/agent/runtime/AgentSystem.hpp>
+#include <workflow/agent/tools/ToolRegistry.hpp>
+#include <workflow/agent/tools/mcp/McpTools.hpp>
+#include <workflow/scheduling/TaskScheduler.hpp>
+#include <workflow/session/QQNameDirectory.hpp>
 
 namespace {
     using namespace insoulforge;
