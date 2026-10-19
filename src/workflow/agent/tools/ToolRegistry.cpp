@@ -6,6 +6,7 @@
 #include <workflow/agent/tools/ToolRegistry.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/logging/Logger.hpp>
+#include <infrastructure/config/Config.hpp>
 
 using insoulforge::json;
 
@@ -118,6 +119,8 @@ namespace insoulforge {
         std::vector<const RegisteredTool *> visibleTools;
         visibleTools.reserve(m_tools.size());
         for (const auto &registered: m_tools | std::views::values) {
+            if (!isEnabled(registered))
+                continue;
             if (!query.includeAllMcp) {
                 if (registered.tool.mcpManagement && !query.mcpManagement)
                     continue;
@@ -138,8 +141,15 @@ namespace insoulforge {
             return std::tuple{categoryOrder(lhs->category), lhs->tool.promptOrder, lhs->tool.name} <
                    std::tuple{categoryOrder(rhs->category), rhs->tool.promptOrder, rhs->tool.name};
         });
-        for (const auto *registered: visibleTools)
-            tools.push_back(buildToolDef(registered->tool));
+        for (const auto *registered: visibleTools) {
+            auto definition = buildToolDef(registered->tool);
+            if (registered->pluginId.starts_with("builtin.")) {
+                const auto &override = atOrNull(atOrNull(m_builtinConfig, registered->tool.name.c_str()), "description");
+                if (override.is_string())
+                    definition["function"]["description"] = override;
+            }
+            tools.push_back(std::move(definition));
+        }
 
         return tools;
     }
@@ -152,6 +162,8 @@ namespace insoulforge {
         {
             std::shared_lock lock(m_mutex);
             if (const auto it = m_tools.find(name); it != m_tools.end()) {
+                if (!isEnabled(it->second))
+                    co_return "工具已关闭，未执行: " + name;
                 if (ctx.replyOnly && it->second.category != ToolCategory::REPLY) {
                     Logger::warn(ctx.sessionId, "Tool", fmt::format("最后一轮拒绝非回复工具: {}", name));
                     co_return "最后一轮只允许回复类工具，未执行: " + name;
@@ -183,6 +195,60 @@ namespace insoulforge {
     auto ToolRegistry::hasTool(const std::string &name) const -> bool {
         std::shared_lock lock(m_mutex);
         return m_tools.contains(name);
+    }
+
+    auto ToolRegistry::isEnabled(const RegisteredTool &registered) const -> bool {
+        return !registered.pluginId.starts_with("builtin.") ||
+          getBool(atOrNull(m_builtinConfig, registered.tool.name.c_str()), "enabled", true);
+    }
+
+    auto ToolRegistry::isToolDisabled(const std::string &name) const -> bool {
+        std::shared_lock lock(m_mutex);
+        const auto it = m_tools.find(name);
+        return it != m_tools.end() && !isEnabled(it->second);
+    }
+
+    void ToolRegistry::loadBuiltinToolsConfig(json config) {
+        std::unique_lock lock(m_mutex);
+        m_builtinConfig = config.is_object() ? std::move(config) : json::object();
+    }
+
+    auto ToolRegistry::getBuiltinTools() const -> json {
+        std::shared_lock lock(m_mutex);
+        json result = json::array();
+        for (const auto &[name, registered] : m_tools) {
+            if (!registered.pluginId.starts_with("builtin."))
+                continue;
+            const auto &description = atOrNull(atOrNull(m_builtinConfig, name.c_str()), "description");
+            const auto category = registered.category == ToolCategory::REPLY ? "回复" :
+              registered.category == ToolCategory::INFORMATION ? "信息" : "动作";
+            result.push_back({{"name", name}, {"category", category}, {"enabled", isEnabled(registered)},
+              {"description", description.is_string() ? description : json(registered.tool.description)},
+              {"defaultDescription", registered.tool.description}, {"customDescription", description.is_string()}});
+        }
+        return result;
+    }
+
+    auto ToolRegistry::saveBuiltinToolConfig(const std::string &name, const json &patch)
+      -> std::expected<void, std::string> {
+        if (!patch.is_object() || patch.empty())
+            return std::unexpected("请提供 enabled 或 description 配置");
+        for (const auto &[key, value] : patch.items()) {
+            if (key != "enabled" && key != "description")
+                return std::unexpected("不支持的工具配置字段: " + key);
+        }
+        std::unique_lock lock(m_mutex);
+        const auto it = m_tools.find(name);
+        if (it == m_tools.end() || !it->second.pluginId.starts_with("builtin."))
+            return std::unexpected("内置工具不存在: " + name);
+        auto next = m_builtinConfig;
+        if (!next.contains(name))
+            next[name] = {{"enabled", true}, {"description", nullptr}};
+        next[name].update(patch);
+        if (const auto saved = Config::instance().saveBuiltinToolsConfig(next); !saved)
+            return std::unexpected(saved.error().message);
+        m_builtinConfig = std::move(next);
+        return {};
     }
 
     void ToolRegistry::unregisterTool(const std::string &name) {

@@ -979,6 +979,115 @@ namespace {
         registry.unregisterPlugin("contract.character-image");
     }
 
+    void testQzoneToolValidation() {
+        constexpr std::string_view kTestName = "qzone tool validation";
+        auto &registry = insoulforge::ToolRegistry::instance();
+        check(registry.registerPlugin("contract.qzone", [](insoulforge::ToolRegistry &staged) -> void {
+            insoulforge::ActionToolsPlugin{"test-bot"}.registerTools(staged);
+        }), "action tools register", kTestName);
+        const auto reject = [&](const insoulforge::json &args, const std::string_view expected) -> void {
+            const auto result = drogon::sync_wait(registry.executeTool("send_qzone_msg", args, {.sessionId = 123}));
+            check(result.find(expected) != std::string::npos, "invalid arguments reject before publishing", kTestName);
+        };
+        reject({{"content", " \n "}}, "非空");
+        reject({{"content", "test"}, {"ugc_right", 16}}, "ugc_right");
+        reject({{"content", "test"}, {"ugc_right", "4"}}, "ugc_right");
+        reject({{"content", "test"}, {"images", "https://example.com/a.png"}}, "数组");
+        reject({{"content", "test"}, {"images", insoulforge::json::array({42})}}, "HTTP/HTTPS");
+        reject({{"content", "test"}, {"images", {"file:///tmp/a.png"}}}, "HTTP/HTTPS");
+        reject({{"content", "test"}, {"images", {"https:///a.png"}}}, "主机名");
+        reject({{"content", "test"}, {"images", {"https://"}}}, "主机名");
+        reject({{"content", "test"}, {"images", {"https://example.com/a b.png"}}}, "HTTP/HTTPS");
+        insoulforge::json tooMany = insoulforge::json::array();
+        for (int i = 0; i < 10; ++i) {
+            tooMany.push_back("https://example.com/a.png");
+        }
+        reject({{"content", "test"}, {"images", tooMany}}, "9");
+        registry.unregisterPlugin("contract.qzone");
+    }
+
+    void testBuiltinToolConfig() {
+        constexpr std::string_view kTestName = "builtin tool config";
+        auto &registry = insoulforge::ToolRegistry::instance();
+        auto &config = insoulforge::Config::instance();
+        const auto path = std::filesystem::temp_directory_path() /
+          ("insoulforge-builtin-tools-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".json");
+        check(config.initialize(path.string()).has_value(), "initializes config", kTestName);
+        int executed = 0;
+        const auto registrar = [&](insoulforge::ToolRegistry &staged) {
+            staged.registerTool({.name = "contract_builtin", .description = "default description",
+              .handler = [&](insoulforge::json, insoulforge::ToolCallContext) -> drogon::Task<std::string> {
+                  ++executed;
+                  co_return "executed";
+              }}, insoulforge::ToolCategory::REPLY);
+        };
+        check(registry.registerPlugin("builtin.contract-config", registrar), "registers builtin", kTestName);
+        const auto definition = [&]() -> insoulforge::json {
+            for (const auto &tool : registry.getTools({})) {
+                if (tool["function"]["name"] == "contract_builtin") return tool["function"];
+            }
+            return nullptr;
+        };
+        check(definition()["description"] == "default description", "default description preserved", kTestName);
+        check(!registry.isToolDisabled("missing_builtin"), "unknown tool is not explicitly disabled", kTestName);
+        check(registry.saveBuiltinToolConfig("contract_builtin", {{"enabled", false}, {"description", "custom description"}}).has_value(),
+          "saves disabled tool", kTestName);
+        check(definition().is_null() && registry.hasTool("contract_builtin") && registry.isToolDisabled("contract_builtin"),
+          "disabled tool hidden but name remains reserved", kTestName);
+        check(drogon::sync_wait(registry.executeTool("contract_builtin", {}, {})).find("已关闭") != std::string::npos && executed == 0,
+          "disabled tool cannot execute", kTestName);
+        check(config.initialize(path.string()).has_value(), "reloads file", kTestName);
+        registry.loadBuiltinToolsConfig(config.getBuiltinToolsConfig());
+        check(registry.registerPlugin("builtin.contract-config", registrar) && registry.isToolDisabled("contract_builtin"),
+          "reload preserves disabled state", kTestName);
+        check(registry.saveBuiltinToolConfig("contract_builtin", {{"enabled", true}}).has_value() &&
+          definition()["description"] == "custom description", "custom description reaches model", kTestName);
+        check(drogon::sync_wait(registry.executeTool("contract_builtin", {}, {})) == "executed" && executed == 1,
+          "enabled tool executes", kTestName);
+        check(!registry.saveBuiltinToolConfig("contract_builtin", {{"enabled", false}, {"description", 42}}) && !registry.isToolDisabled("contract_builtin"),
+          "invalid config preserves runtime state", kTestName);
+        check(!registry.saveBuiltinToolConfig("contract_builtin", {{"description", std::string(16001, 'a')}}) &&
+          !registry.isToolDisabled("contract_builtin"), "oversized description preserves state", kTestName);
+        check(!registry.saveBuiltinToolConfig("missing_builtin", {{"enabled", false}}), "unknown tool rejected", kTestName);
+        check(registry.saveBuiltinToolConfig("contract_builtin", {{"description", nullptr}}).has_value() &&
+          definition()["description"] == "default description", "null restores default description", kTestName);
+        bool listed = false;
+        for (const auto &tool : registry.getBuiltinTools()) {
+            if (tool["name"] == "contract_builtin") {
+                listed = tool["enabled"] == true && tool["customDescription"] == false && tool["category"] == "回复";
+            }
+        }
+        check(listed, "management list includes default metadata", kTestName);
+        const insoulforge::AdminController controller;
+        drogon::HttpResponsePtr response;
+        const auto save = [&](const insoulforge::json &body) {
+            const auto request = drogon::HttpRequest::newHttpRequest();
+            request->setBody(insoulforge::dumpJson(body));
+            drogon::sync_wait(controller.saveBuiltinTool(request, [&](const auto &value) { response = value; }));
+            return insoulforge::parseJson(std::string(response->body()));
+        };
+        check(save({{"name", "contract_builtin"}, {"enabled", false}, {"description", "edited via API"}})["success"] == true &&
+          registry.isToolDisabled("contract_builtin"), "endpoint applies setting", kTestName);
+        check(save({{"name", "contract_builtin"}, {"enabled", "true"}, {"description", nullptr}}).contains("error") &&
+          registry.isToolDisabled("contract_builtin"), "endpoint rejects invalid enabled type", kTestName);
+        check(save({{"name", "contract_builtin"}, {"description", "description-only edit"}})["success"] == true &&
+          registry.isToolDisabled("contract_builtin"), "description edit preserves disabled state", kTestName);
+        check(save({{"name", "contract_builtin"}, {"enabled", true}})["success"] == true &&
+          definition()["description"] == "description-only edit", "toggle preserves edited description", kTestName);
+        check(save({{"name", "contract_builtin"}, {"description", nullptr}})["success"] == true &&
+          !registry.isToolDisabled("contract_builtin") && definition()["description"] == "default description",
+          "restore preserves enabled state", kTestName);
+        check(save({{"name", "contract_builtin"}}).contains("error"), "empty patch rejected", kTestName);
+        check(save({{"name", "contract_builtin"}, {"parameters", nullptr}}).contains("error"), "unknown field rejected", kTestName);
+        std::filesystem::remove(path);
+        std::filesystem::create_directory(path);
+        check(!registry.saveBuiltinToolConfig("contract_builtin", {{"enabled", false}}) &&
+          !registry.isToolDisabled("contract_builtin"), "write failure preserves runtime state", kTestName);
+        registry.unregisterPlugin("builtin.contract-config");
+        registry.loadBuiltinToolsConfig(insoulforge::json::object());
+        std::filesystem::remove(path);
+    }
+
     void testMemoryMaintenanceStore() {
         constexpr std::string_view kTestName = "memory maintenance results";
         auto &database = insoulforge::Database::instance();
@@ -2100,6 +2209,8 @@ auto main() -> int {
     testCharacterImageStore();
     testHttpTraceImageRedaction();
     testCharacterImageToolRequiresUpload();
+    testQzoneToolValidation();
+    testBuiltinToolConfig();
     testMemoryMaintenanceStore();
     testMemoryModelConfigMigration();
     testConfigFacade();

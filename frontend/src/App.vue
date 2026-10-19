@@ -36,7 +36,7 @@ const systemNavItems: NavItem[] = [
   {key: 'executionConfig', label: '执行配置', icon: 'execution'},
   {key: 'qqConfig', label: 'OneBot 配置', icon: 'qq'},
   {key: 'prompts', label: '提示词', icon: 'prompts'},
-  {key: 'customTools', label: '自定义工具', icon: 'tool'},
+  {key: 'customTools', label: '工具配置', icon: 'tool'},
   {key: 'mcpServers', label: 'MCP 服务', icon: 'tool'},
   {key: 'memoryConfig', label: '记忆与上下文', icon: 'memory'}
 ]

@@ -152,6 +152,8 @@ namespace insoulforge {
         ADD_METHOD_TO(AdminController::saveQQConfig, "/admin/api/qq-config", drogon::Post);
 
         // 自定义工具
+        ADD_METHOD_TO(AdminController::getBuiltinTools, "/admin/api/builtin-tools", drogon::Get);
+        ADD_METHOD_TO(AdminController::saveBuiltinTool, "/admin/api/builtin-tools", drogon::Put);
         ADD_METHOD_TO(AdminController::getCustomTools, "/admin/api/custom-tools", drogon::Get);
 
         ADD_METHOD_TO(AdminController::addCustomTool, "/admin/api/custom-tool", drogon::Post);
@@ -526,6 +528,10 @@ namespace insoulforge {
           std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         // ============== 自定义工具 ==============
+        auto getBuiltinTools(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
+        auto saveBuiltinTool(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         /// @brief 获取所有自定义工具
         /// @param req HTTP 请求

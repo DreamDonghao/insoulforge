@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {computed, inject, nextTick, onMounted, onUnmounted, reactive, ref, watch} from 'vue'
 import NavIcon from '../../components/NavIcon.vue'
+import EnabledSwitch from '../../components/EnabledSwitch.vue'
 
 interface Server {
   name: string
@@ -221,13 +222,9 @@ async function remove(index: number): Promise<void> {
   await persist(servers.value.filter((_, position) => position !== index))
 }
 
-async function toggle(index: number, event: Event): Promise<void> {
+async function toggle(index: number, enabled: boolean): Promise<void> {
   const server = servers.value[index]
-  if (!server) return
-  const input = event.target as HTMLInputElement
-  const enabled = input.checked
-  input.checked = server.enabled
-  if (busy.value) return
+  if (!server || busy.value) return
   await persist(servers.value.map((value, position) => ({
     ...value, enabled: position === index ? enabled : value.enabled
   })))
@@ -283,6 +280,8 @@ onUnmounted(() => {
     <div v-else class="mcp-list">
       <p v-if="!servers.length" class="empty-state">暂无 MCP 服务</p>
       <article v-for="(server, index) in servers" :key="server.name" class="mcp-row">
+        <EnabledSwitch :model-value="server.enabled" :disabled="busy" :label="`启用服务 ${server.name}`"
+                           @update:model-value="toggle(index, $event)" />
         <div class="mcp-details">
           <h2>{{ server.name }}</h2><p class="mcp-url">{{ server.url }}</p>
           <p v-if="server.description" class="mcp-description">{{ server.description }}</p>
@@ -291,8 +290,6 @@ onUnmounted(() => {
           </p>
         </div>
         <div class="mcp-actions">
-          <input type="checkbox" role="switch" class="mcp-switch" :checked="server.enabled" :disabled="busy"
-                 :aria-label="`${server.name} 启用状态`" :title="server.enabled ? '禁用服务' : '启用服务'" @change="toggle(index, $event)">
           <button class="btn btn-secondary btn-sm" :disabled="busy" @click="open(index)">编辑</button>
           <button class="btn btn-danger btn-sm" :disabled="busy" @click="remove(index)">删除</button>
         </div>
@@ -344,34 +341,38 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.mcp-header, .mcp-actions, .mcp-row {display: flex; align-items: center; gap: 12px}
-.mcp-header, .mcp-row {justify-content: space-between; flex-wrap: wrap}
+.mcp-header, .mcp-actions {display: flex; align-items: center; gap: 12px}
+.mcp-header {justify-content: space-between; flex-wrap: wrap}
 .mcp-actions {flex-wrap: wrap}
 .mcp-actions svg {width: 16px; height: 16px}
 .mcp-list {border-top: 1px solid var(--border)}
-.mcp-row {padding: 20px 0; border-bottom: 1px solid var(--border)}
-.mcp-details {min-width: 0; flex: 1 1 240px}
-.mcp-details h2, .mcp-dialog h2 {font-size: 18px; margin: 0 0 12px}
+.mcp-row {display: grid; grid-template-columns: 120px minmax(0, 1fr) auto; align-items: start;
+  gap: 12px 20px; padding: 20px 0; border-bottom: 1px solid var(--border)}
+.mcp-row > .tool-switch {align-self: start}
+.mcp-row > .mcp-actions {justify-content: flex-end}
+.mcp-details {min-width: 0}
+.mcp-details h2, .mcp-dialog h2 {font-size: 18px; margin: 0 0 8px}
 .mcp-url, .mcp-status, .mcp-description {overflow-wrap: anywhere; margin: 6px 0; color: var(--text-secondary)}
 .mcp-error {color: var(--danger)}
-.mcp-tools {flex: 1 1 100%; min-width: 0}
+.mcp-tools {grid-column: 2 / -1; min-width: 0}
 .mcp-tools summary {cursor: pointer; color: var(--text-secondary); padding: 8px 0}
 .mcp-tools summary:focus-visible {outline: 2px solid var(--primary-strong); outline-offset: 3px}
 .mcp-tools ul {list-style: none; padding: 0; margin: 0; max-height: 360px; overflow-y: auto}
-.mcp-tools li {padding: 12px 0; border-top: 1px solid var(--border); overflow-wrap: anywhere}
-.mcp-tools code {font-size: 13px}
-.mcp-tools li p {margin: 6px 0 0; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere}
-.mcp-switch {appearance: none; width: 36px; height: 20px; border-radius: 0; background: var(--border-strong); cursor: pointer; position: relative; flex: none}
-.mcp-switch::after {content: ''; position: absolute; width: 14px; height: 14px; top: 3px; left: 3px; border-radius: 50%; background: white}
-.mcp-switch:checked {background: var(--primary-strong)}
-.mcp-switch:checked::after {transform: translateX(16px)}
-.mcp-switch:focus-visible {outline: 2px solid var(--primary-strong); outline-offset: 3px}
-.mcp-switch:disabled {opacity: .55; cursor: wait}
+.mcp-tools li {display: grid; grid-template-columns: 176px minmax(0, 1fr); gap: 20px;
+  align-items: baseline; padding: 12px 0; border-top: 1px solid var(--border); overflow-wrap: anywhere}
+.mcp-tools code {font-size: 13px; padding: 0; background: transparent}
+.mcp-tools li p {margin: 0; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65}
 .mcp-overlay {position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.5); display: grid; place-items: center; padding: 20px}
 .mcp-dialog {background: var(--card-bg); border: 1px solid var(--border); border-radius: 0; padding: 24px; width: min(520px, 100%); max-height: calc(100dvh - 40px); overflow-y: auto; box-sizing: border-box}
 .mcp-enabled {display: flex; align-items: center; gap: 8px}
 .mcp-footer {justify-content: flex-end; margin-top: 24px}
 .mcp-header-label {justify-content: space-between; margin-bottom: 8px}
 .mcp-header-row {display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 8px; margin-top: 8px; align-items: center}
-@media (max-width: 600px) {.mcp-row {align-items: flex-start}.mcp-dialog {padding: 18px}}
+@media (max-width: 800px) {
+  .mcp-row {grid-template-columns: 120px minmax(0, 1fr)}
+  .mcp-row > .mcp-actions {grid-column: 2; justify-content: flex-start}
+  .mcp-tools {grid-column: 1 / -1}
+  .mcp-tools li {grid-template-columns: minmax(0, 1fr); gap: 6px}
+}
+@media (max-width: 600px) {.mcp-dialog {padding: 18px}}
 </style>

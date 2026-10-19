@@ -4,6 +4,7 @@
  * @brief 管理群聊和私聊的启用状态、记录、记忆与定时任务
  */
 import {computed, inject, nextTick, onMounted, onUnmounted, reactive, ref, type Ref, watch} from 'vue'
+import EnabledSwitch from '../../components/EnabledSwitch.vue'
 import type {
   AffinityEntry,
   ApiResponse,
@@ -94,20 +95,18 @@ const loadGroups = async (): Promise<void> => {
 
 // 切换启用状态
 const groupSettings = {
-  sendGroupCard: {route: 'card', message: '群名片设置已保存', defaultValue: false},
-  autoReply: {route: 'auto-reply', message: '自动回复设置已保存', defaultValue: true},
-  commandEnabled: {route: 'command-enabled', message: '命令解析设置已保存', defaultValue: true}
+  sendGroupCard: {route: 'card', message: '群名片设置已保存'},
+  autoReply: {route: 'auto-reply', message: '自动回复设置已保存'},
+  commandEnabled: {route: 'command-enabled', message: '命令解析设置已保存'}
 } as const
 type GroupSetting = keyof typeof groupSettings
 const savingSettings = reactive(new Set<string>())
 const isSettingSaving = (group: Group, setting: GroupSetting): boolean =>
     savingSettings.has(`${sessionKey(group)}:${setting}`)
-const setGroupSetting = async (group: Group, event: Event, setting: GroupSetting): Promise<void> => {
-  const input = event.target as HTMLInputElement
-  const enabled = input.checked
+const setGroupSetting = async (group: Group, enabled: boolean, setting: GroupSetting): Promise<void> => {
   const id = sessionKey(group)
   const key = `${id}:${setting}`
-  const {route, message, defaultValue} = groupSettings[setting]
+  const {route, message} = groupSettings[setting]
   if (savingSettings.has(key)) return
   savingSettings.add(key)
   try {
@@ -120,7 +119,6 @@ const setGroupSetting = async (group: Group, event: Event, setting: GroupSetting
     group[setting] = enabled
     showToast?.(message)
   } catch (error) {
-    input.checked = group[setting] ?? defaultValue
     showToast?.(error instanceof Error ? error.message : '保存失败', true)
   } finally {
     savingSettings.delete(key)
@@ -128,10 +126,8 @@ const setGroupSetting = async (group: Group, event: Event, setting: GroupSetting
 }
 
 const savingGroups = reactive(new Set<string>())
-const toggleGroup = async (group: Group, event: Event): Promise<void> => {
-  const input = event.target as HTMLInputElement
+const toggleGroup = async (group: Group, enabled: boolean): Promise<void> => {
   const groupId = sessionKey(group)
-  const enabled = input.checked
   if (savingGroups.has(groupId)) return
   savingGroups.add(groupId)
   try {
@@ -141,7 +137,6 @@ const toggleGroup = async (group: Group, event: Event): Promise<void> => {
     group.enabled = enabled
     showToast?.(enabled ? '已启用' : '已禁用')
   } catch (error) {
-    input.checked = group.enabled === true
     showToast?.(error instanceof Error ? error.message : '保存失败', true)
   } finally {
     savingGroups.delete(groupId)
@@ -751,15 +746,9 @@ onUnmounted(() => {
                   class="group-row"
                   @click="selectGroup(sessionKey(group), sessionLabel(group))">
                 <td class="session-enabled-cell" @click.stop>
-                  <label class="group-setting-switch"
-                         :class="{'is-saving': savingGroups.has(sessionKey(group))}"
-                         :title="savingGroups.has(sessionKey(group)) ? '保存中' : (group.enabled ? '禁用会话' : '启用会话')">
-                    <input type="checkbox" role="switch" :checked="group.enabled"
-                           :disabled="savingGroups.has(sessionKey(group))" aria-label="启用会话"
-                           :aria-busy="savingGroups.has(sessionKey(group))" @change="toggleGroup(group, $event)">
-                    <span class="group-setting-track" aria-hidden="true"></span>
-                  </label>
-                  <span class="session-enabled-label" :class="{'is-enabled': group.enabled}">{{ group.enabled ? '已启用' : '已禁用' }}</span>
+                  <EnabledSwitch :model-value="group.enabled === true" :disabled="savingGroups.has(sessionKey(group))"
+                                 label="启用会话" :title="group.enabled ? '禁用会话' : '启用会话'"
+                                 @update:model-value="toggleGroup(group, $event)" />
                 </td>
                 <td>
                   <strong v-if="isPrivateSession(group)">{{ group.groupName || '私聊' }}</strong>
@@ -771,36 +760,24 @@ onUnmounted(() => {
                   }}</code></td>
                 <td>{{ group.messageCount || 0 }}</td>
                 <td @click.stop>
-                  <label v-if="!isPrivateSession(group)" class="group-setting-switch"
-                         :class="{'is-saving': isSettingSaving(group, 'sendGroupCard')}"
-                         :title="isSettingSaving(group, 'sendGroupCard') ? '保存中' : (group.sendGroupCard ? '关闭发送群名片' : '开启发送群名片')">
-                    <input type="checkbox" role="switch" :checked="group.sendGroupCard === true"
-                           :disabled="isSettingSaving(group, 'sendGroupCard')" aria-label="向模型发送本群群名片"
-                           :aria-busy="isSettingSaving(group, 'sendGroupCard')" @change="setGroupSetting(group, $event, 'sendGroupCard')">
-                    <span class="group-setting-track" aria-hidden="true"></span>
-                  </label>
+                  <EnabledSwitch v-if="!isPrivateSession(group)" :model-value="group.sendGroupCard === true"
+                                 :disabled="isSettingSaving(group, 'sendGroupCard')" :show-status="false"
+                                 label="向模型发送本群群名片" :title="group.sendGroupCard ? '关闭发送群名片' : '开启发送群名片'"
+                                 @update:model-value="setGroupSetting(group, $event, 'sendGroupCard')" />
                   <span v-else>-</span>
                 </td>
                 <td @click.stop>
-                  <label v-if="!isPrivateSession(group)" class="group-setting-switch"
-                         :class="{'is-saving': isSettingSaving(group, 'autoReply')}"
-                         :title="isSettingSaving(group, 'autoReply') ? '保存中' : (group.autoReply !== false ? '关闭普通消息自动回复' : '开启普通消息自动回复')">
-                    <input type="checkbox" role="switch" :checked="group.autoReply !== false"
-                           :disabled="isSettingSaving(group, 'autoReply')" aria-label="本群普通消息自动回复"
-                           :aria-busy="isSettingSaving(group, 'autoReply')" @change="setGroupSetting(group, $event, 'autoReply')">
-                    <span class="group-setting-track" aria-hidden="true"></span>
-                  </label>
+                  <EnabledSwitch v-if="!isPrivateSession(group)" :model-value="group.autoReply !== false"
+                                 :disabled="isSettingSaving(group, 'autoReply')" :show-status="false"
+                                 label="本群普通消息自动回复" :title="group.autoReply !== false ? '关闭普通消息自动回复' : '开启普通消息自动回复'"
+                                 @update:model-value="setGroupSetting(group, $event, 'autoReply')" />
                   <span v-else>-</span>
                 </td>
                 <td @click.stop>
-                  <label v-if="!isPrivateSession(group)" class="group-setting-switch"
-                         :class="{'is-saving': isSettingSaving(group, 'commandEnabled')}"
-                         :title="isSettingSaving(group, 'commandEnabled') ? '保存中' : (group.commandEnabled !== false ? '关闭命令解析，命令将按普通消息处理' : '开启命令解析')">
-                    <input type="checkbox" role="switch" :checked="group.commandEnabled !== false"
-                           :disabled="isSettingSaving(group, 'commandEnabled')" aria-label="本群命令解析"
-                           :aria-busy="isSettingSaving(group, 'commandEnabled')" @change="setGroupSetting(group, $event, 'commandEnabled')">
-                    <span class="group-setting-track" aria-hidden="true"></span>
-                  </label>
+                  <EnabledSwitch v-if="!isPrivateSession(group)" :model-value="group.commandEnabled !== false"
+                                 :disabled="isSettingSaving(group, 'commandEnabled')" :show-status="false"
+                                 label="本群命令解析" :title="group.commandEnabled !== false ? '关闭命令解析，命令将按普通消息处理' : '开启命令解析'"
+                                 @update:model-value="setGroupSetting(group, $event, 'commandEnabled')" />
                   <span v-else>-</span>
                 </td>
                 <td class="session-actions">
@@ -1129,82 +1106,6 @@ onUnmounted(() => {
 
 .session-enabled-cell {
   white-space: nowrap;
-}
-
-.session-enabled-label {
-  margin-left: 8px;
-  vertical-align: middle;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.session-enabled-label.is-enabled {
-  color: var(--success);
-}
-
-.group-setting-switch {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  width: 44px;
-  height: 36px;
-  vertical-align: middle;
-  cursor: pointer;
-}
-
-.group-setting-switch input {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  opacity: 0;
-  cursor: inherit;
-}
-
-.group-setting-track {
-  width: 44px;
-  height: 24px;
-  border-radius: 0;
-  background: var(--border-strong);
-  pointer-events: none;
-  transition: background-color 150ms ease;
-}
-
-.group-setting-track::before {
-  content: '';
-  display: block;
-  width: 18px;
-  height: 18px;
-  margin: 3px;
-  border-radius: 0;
-  background: #fff;
-  box-shadow: none;
-  transition: transform 150ms ease;
-}
-
-.group-setting-switch input:checked + .group-setting-track {
-  background: var(--primary-strong);
-}
-
-.group-setting-switch input:checked + .group-setting-track::before {
-  transform: translateX(20px);
-}
-
-.group-setting-switch input:focus-visible + .group-setting-track {
-  outline: 2px solid var(--primary);
-  outline-offset: 3px;
-}
-
-.group-setting-switch.is-saving {
-  opacity: 0.55;
-  cursor: wait;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .group-setting-track, .group-setting-track::before {
-    transition: none;
-  }
 }
 
 .row-disabled {

@@ -151,6 +151,27 @@ auto AdminController::savePrompt(HttpRequestPtr req, std::function<void(const Ht
 }
 
 // ==================== 自定义工具 ====================
+auto AdminController::getBuiltinTools(HttpRequestPtr req,
+  std::function<void(const HttpResponsePtr &)> callback) const -> Task<> {
+    callback(jsonResponse(ToolRegistry::instance().getBuiltinTools()));
+    co_return;
+}
+
+auto AdminController::saveBuiltinTool(HttpRequestPtr req,
+  std::function<void(const HttpResponsePtr &)> callback) const -> Task<> {
+    const auto body = parseJsonBody(req);
+    if (!body || !body->is_object() || getStr(*body, "name").empty()) {
+        callback(jsonResponse(AdminResponse::errorJson("需要有效的工具名称")));
+        co_return;
+    }
+    auto patch = *body;
+    patch.erase("name");
+    const auto result = ToolRegistry::instance().saveBuiltinToolConfig(getStr(*body, "name"), patch);
+    callback(jsonResponse(result ? AdminResponse::okJson("内置工具配置已保存") :
+      AdminResponse::errorJson(result.error())));
+    co_return;
+}
+
 
 auto AdminController::getCustomTools(HttpRequestPtr req, const std::function<void(const HttpResponsePtr &)> callback) const
   -> Task<> {

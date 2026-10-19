@@ -8,6 +8,7 @@
 #include <workflow/agent/tools/custom/ToolStore.hpp>
 #include <workflow/agent/tools/ToolRegistry.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
@@ -48,6 +49,7 @@ namespace insoulforge {
     } // namespace
 
     auto ToolRuntime::registerBuiltinTools(const std::string_view botName) -> std::expected<void, std::string> {
+        ToolRegistry::instance().loadBuiltinToolsConfig(Config::instance().getBuiltinToolsConfig());
         return ToolPluginCatalog::registerBuiltinPlugins(botName);
     }
 
