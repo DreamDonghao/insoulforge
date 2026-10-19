@@ -844,31 +844,50 @@ namespace {
     void testIterationRequestMessages() {
         constexpr std::string_view kTestName = "iteration request messages";
         const auto history = insoulforge::json::array(
-          {{{"role", "system"}, {"content", "original prompt"}}, {{"role", "user"}, {"content", "question"}},
+          {{{"role", "system"}, {"content", "original prompt"}},
+            {{"role", "user"}, {"content", R"({"response_requirements":{"max_length":100},"recent_conversation":[]})"}},
             {{"role", "assistant"}, {"tool_calls", {{{"id", "call-1"}, {"type", "function"}}}}},
             {{"role", "tool"}, {"tool_call_id", "call-1"}, {"content", "source data"}}});
 
         const auto first = insoulforge::ExecutorAgent::buildIterationMessages(history, 1, 8);
         const auto middle = insoulforge::ExecutorAgent::buildIterationMessages(history, 3, 8);
         const auto last = insoulforge::ExecutorAgent::buildIterationMessages(history, 8, 8);
-        check(first.size() == history.size() + 1 && middle.size() == first.size() && last.size() == first.size(),
-          "each request has exactly one transient execution status", kTestName);
+        check(first.size() == history.size() && middle.size() == first.size() && last.size() == first.size(),
+          "execution status adds no messages", kTestName);
         for (size_t index = 0; index < history.size(); ++index) {
+            if (index == 1) continue;
             check(first[index] == history[index] && middle[index] == history[index] && last[index] == history[index],
               "request status preserves the full history and tool results", kTestName);
         }
-        check(first.back()["role"] == "system" &&
-                first.back()["content"].get<std::string>().find("还可请求模型 7 次") != std::string::npos,
+        const auto context = [](const insoulforge::json &messages) {
+            return insoulforge::json::parse(messages[1]["content"].get<std::string>());
+        };
+        const auto firstContext = context(first);
+        check(firstContext["execution_state"]["remaining_rounds"] == 7 &&
+                firstContext["execution_state"]["reply_only"] == false,
           "first round counts future requests excluding the current one", kTestName);
-        check(middle.back()["content"].get<std::string>().find("3/8") != std::string::npos &&
-                middle.back()["content"].get<std::string>().find("还可请求模型 5 次") != std::string::npos,
+        check(context(middle)["execution_state"]["current_round"] == 3 &&
+                context(middle)["execution_state"]["remaining_rounds"] == 5,
           "intermediate status reflects the current round", kTestName);
-        check(last.back()["content"].get<std::string>().find("还可请求模型 0 次") != std::string::npos &&
-                last.back()["content"].get<std::string>().find("仅开放回复类工具") != std::string::npos,
+        check(context(last)["execution_state"]["remaining_rounds"] == 0 &&
+                context(last)["execution_state"]["reply_only"] == true,
           "last round explicitly requires a reply decision", kTestName);
         const auto single = insoulforge::ExecutorAgent::buildIterationMessages(history, 1, 1);
-        check(single.back()["content"].get<std::string>().find("仅开放回复类工具") != std::string::npos,
+        check(context(single)["execution_state"]["reply_only"] == true,
           "a one-round limit is immediately reply-only", kTestName);
+        auto withoutState = firstContext;
+        withoutState.erase("execution_state");
+        check(withoutState == context(history), "response requirements and chat context remain unchanged", kTestName);
+        const insoulforge::json mcp = {{"page_size", 10}, {"max_per_enable", 4},
+          {"max_per_reply", 12}, {"selected_count", 2}};
+        const auto withMcp = insoulforge::ExecutorAgent::buildIterationMessages(first, 2, 8, mcp);
+        check(context(withMcp)["execution_state"]["mcp"] == mcp &&
+                context(withMcp)["execution_state"]["current_round"] == 2,
+          "each request replaces stale execution state and includes current MCP limits", kTestName);
+        const auto finalMcp = insoulforge::ExecutorAgent::buildIterationMessages(withMcp, 8, 8, mcp);
+        check(!context(finalMcp)["execution_state"].contains("mcp") &&
+                !firstContext["execution_state"].contains("mcp"),
+          "MCP status is absent when unavailable or reply-only", kTestName);
         check(history.size() == 4 && history.front()["content"] == "original prompt",
           "transient status never modifies the original conversation", kTestName);
     }

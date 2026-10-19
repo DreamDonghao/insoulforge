@@ -88,6 +88,14 @@ execution_status=no_reply 表示当时选择不回复；failed/send_failed 表�
 
 ## 工具调用规则
 
+### 执行状态
+
+- user 上下文中的 execution_state 是当前请求的执行状态，不是聊天记录。
+- current_round、max_rounds 表示当前轮次和总轮数，remaining_rounds 不包含当前请求。
+- 请根据剩余轮数安排工具调用，信息足够时及时完成回复，不要重复执行已经完成的查询。
+- reply_only 为 true 时，仅开放回复类工具。根据已有信息调用 reply、reply_with_quote 或 no_reply 完成决策；不要再调用查询或动作工具，不要声称完成尚未执行的操作。
+- execution_state.mcp 提供 page_size（查询每页上限）、max_per_enable（单次启用上限）、max_per_reply（本次回复启用上限）及 selected_count（当前选择数量）。新启用工具下一轮才开放，不要在同一轮调用。
+
 ### 回复工具必选其一（三选一）在最后调用
 
 | 工具              | 使用场景                                          |
@@ -520,16 +528,14 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
                     Logger::error(sessionId, "Executor", "最后一轮未注册可用的回复工具");
                     co_return failedDecision("最后一轮没有可用的回复工具");
                 }
-                auto requestMessages = buildIterationMessages(messages, round + 1, maxToolRounds);
+                json mcpState = nullptr;
                 if (!mcpSelection->services.empty() && !replyOnly) {
-                    requestMessages.back()["content"] =
-                      getStr(requestMessages.back(), "content") +
-                      fmt::format(
-                        "\nMCP 查询每页最多 {} 个，单次最多启用 {} 个，本次回复最多启用 {} 个，当前已选择 {} 个。"
-                        "新启用工具下一轮才开放。",
-                        mcpSelection->limits.pageSize, mcpSelection->limits.maxPerEnable,
-                        mcpSelection->limits.maxPerReply, mcpSelection->enabled.size());
+                    mcpState = {{"page_size", mcpSelection->limits.pageSize},
+                      {"max_per_enable", mcpSelection->limits.maxPerEnable},
+                      {"max_per_reply", mcpSelection->limits.maxPerReply},
+                      {"selected_count", mcpSelection->enabled.size()}};
                 }
+                auto requestMessages = buildIterationMessages(messages, round + 1, maxToolRounds, std::move(mcpState));
                 // 兜底只重试当前请求，不改变后续轮次的默认模型，也不重新执行工具。
                 const bool fallbackConfigured = LlmClient::isConfigured(config.executorFallback);
                 auto respJson =
@@ -602,22 +608,28 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         return prompt;
     }
 
-    auto buildIterationMessages(json messages, const i32 currentRound, const i32 maxToolRounds) -> json {
+    auto buildIterationMessages(json messages, const i32 currentRound, const i32 maxToolRounds, json mcpState) -> json {
         if (!messages.is_array() || currentRound < 1 || currentRound > maxToolRounds) {
             throw std::invalid_argument("执行轮次必须在 1 到总轮数之间，消息必须是数组");
         }
-        const auto remainingRounds = maxToolRounds - currentRound;
-        auto status = fmt::format("【执行状态】\n当前执行轮次：{}/{}。\n本轮结束后还可请求模型 {} 次。\n", currentRound,
-          maxToolRounds, remainingRounds);
-        if (remainingRounds == 0) {
-            status +=
-              "这是最后一轮，仅开放回复类工具。请根据已有信息调用 reply、reply_with_quote 或 no_reply 完成决策。"
-              "不要再调用查询或动作工具，不要声称完成尚未执行的操作。";
-        } else {
-            status += "请根据剩余轮数安排工具调用，信息足够时及时完成回复，不要重复执行已经完成的查询。";
+        json state = {{"current_round", currentRound}, {"max_rounds", maxToolRounds},
+          {"remaining_rounds", maxToolRounds - currentRound}, {"reply_only", currentRound == maxToolRounds}};
+        if (!mcpState.is_null() && currentRound != maxToolRounds) {
+            state["mcp"] = std::move(mcpState);
         }
-        messages.push_back({{"role", "system"}, {"content", std::move(status)}});
-        return messages;
+        for (auto &message: messages) {
+            if (getStr(message, "role") != "user") {
+                continue;
+            }
+            auto context = json::parse(getStr(message, "content"));
+            if (!context.is_object()) {
+                throw std::invalid_argument("执行上下文必须是 JSON 对象");
+            }
+            context["execution_state"] = std::move(state);
+            message["content"] = dumpJson(context);
+            return messages;
+        }
+        throw std::invalid_argument("缺少执行上下文 user 消息");
     }
 
     /// @brief 清理模型输出的污染内容（think标签、tool_call标签、DSML标签等）

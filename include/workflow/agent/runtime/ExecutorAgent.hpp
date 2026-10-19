@@ -22,10 +22,12 @@ namespace insoulforge::ExecutorAgent {
     /// @return 清理后的内容
     [[nodiscard]] auto cleanReplyContent(const std::string &text) -> std::string;
 
-    /// @brief 构建当前轮的模型请求消息，在副本末尾追加执行状态，不改变会话上下文。
+    /// @brief 在请求副本的首条 user 上下文中更新 execution_state，不改变会话历史。
     /// @param currentRound 当前轮次，从 1 开始。
     /// @param maxToolRounds 本次回复固定的总轮数上限。
-    [[nodiscard]] auto buildIterationMessages(json messages, i32 currentRound, i32 maxToolRounds) -> json;
+    /// @param mcpState 当前 MCP 额度及选择数量；无可用 MCP 或最后一轮时省略。
+    [[nodiscard]] auto buildIterationMessages(json messages, i32 currentRound, i32 maxToolRounds,
+      json mcpState = nullptr) -> json;
 
     /// @brief 执行回复生成
     /// @param chatRecords 聊天记录
