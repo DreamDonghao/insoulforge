@@ -71,6 +71,7 @@ namespace insoulforge {
         send_group_card INTEGER NOT NULL DEFAULT 0,
         auto_reply INTEGER NOT NULL DEFAULT 1,
         command_enabled INTEGER NOT NULL DEFAULT 1,
+        cross_session_sharing INTEGER NOT NULL DEFAULT 0,
         additional_prompt TEXT NOT NULL DEFAULT ''
     ))",
           R"(CREATE TABLE IF NOT EXISTS chat_records (
@@ -243,9 +244,26 @@ namespace insoulforge {
             return stmt.step();
         }
 
+        constexpr std::array v21Tables = {
+          "CREATE TABLE IF NOT EXISTS person_affinity (qq_number INTEGER PRIMARY KEY, "
+          "affinity INTEGER NOT NULL DEFAULT 0 CHECK(affinity BETWEEN -100 AND 100))",
+          "CREATE TABLE IF NOT EXISTS person_memories (qq_number INTEGER PRIMARY KEY, "
+          "stable_memory TEXT NOT NULL DEFAULT '[]', recent_interactions TEXT NOT NULL DEFAULT '[]')",
+          "CREATE TABLE IF NOT EXISTS person_memory_entries (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+          "qq_number INTEGER NOT NULL, source_session INTEGER NOT NULL, content TEXT NOT NULL, "
+          "created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+          "CREATE INDEX IF NOT EXISTS idx_person_memory_entries_qq ON person_memory_entries(qq_number, id)"};
+
+        constexpr std::array v22Tables = {
+          "CREATE TABLE IF NOT EXISTS person_memory_daily_state (id INTEGER PRIMARY KEY CHECK(id = 1), "
+          "completed_day TEXT NOT NULL DEFAULT '', running_day TEXT NOT NULL DEFAULT '')"};
+
+        void migrateV21ToV22(sqlite3 *db) { execAll(db, v22Tables); }
+
         void createFreshSchema(sqlite3 *db) {
             execAll(db, v2Tables);
-            execAll(db, v3Tables);
+            execAll(db, v21Tables);
+            execAll(db, v22Tables);
             execAll(db, v6Tables);
             execAll(db, v7Tables);
             execAll(db, v11Tables);
@@ -356,7 +374,6 @@ namespace insoulforge {
                     memory["memoryExtractMaxTokens"] = stmt.getInt(2);
                     memory["routerWindowTriggerCount"] = stmt.getInt(3);
                     memory["routerWindowKeepCount"] = stmt.getInt(4);
-                    memory["shortTermMemoryMax"] = stmt.getInt(5);
                     memory["memoryMigrateCount"] = stmt.getInt(6);
                 } else {
                     memory["windowTriggerCount"] = 100;
@@ -364,7 +381,6 @@ namespace insoulforge {
                     memory["memoryExtractMaxTokens"] = 4000;
                     memory["routerWindowTriggerCount"] = 20;
                     memory["routerWindowKeepCount"] = 10;
-                    memory["shortTermMemoryMax"] = 15;
                     memory["memoryMigrateCount"] = 5;
                 }
             }
@@ -490,6 +506,21 @@ namespace insoulforge {
             execSQL(db, "DROP TABLE IF EXISTS custom_tools");
         }
 
+        void migrateV20ToV21(sqlite3 *db) {
+            execAll(db, v21Tables);
+            if (tableExists(db, "group_affinity")) {
+                execSQL(db, "INSERT INTO person_affinity (qq_number, affinity) "
+                            "SELECT qq_number, max(-100, min(100, CAST(round(avg(affinity)) AS INTEGER))) "
+                            "FROM group_affinity GROUP BY qq_number "
+                            "ON CONFLICT(qq_number) DO NOTHING");
+                execSQL(db, "DROP TABLE group_affinity");
+            }
+        }
+
+        void migrateV19ToV20(sqlite3 *db) {
+            ensureColumn(db, "group_config", "cross_session_sharing", "cross_session_sharing INTEGER NOT NULL DEFAULT 0");
+        }
+
         void migrateV18ToV19(sqlite3 *db) {
             ensureColumn(db, "group_config", "command_enabled", "command_enabled INTEGER NOT NULL DEFAULT 1");
         }
@@ -560,6 +591,9 @@ namespace insoulforge {
               &migrateV16ToV17, // 群独立附加提示词，默认留空
               &migrateV17ToV18, // 删除记忆与好感度维护任务队列
               &migrateV18ToV19, // 群命令解析开关，默认开启
+              &migrateV19ToV20, // 跨会话近期消息共享，默认关闭
+              &migrateV20ToV21, // 全局人物记忆与好感度；旧分数按 QQ 取平均
+              &migrateV21ToV22, // 人物记忆每日整理执行状态
             };
 
             for (i32 v = version; v < kLatestVersion; ++v) {

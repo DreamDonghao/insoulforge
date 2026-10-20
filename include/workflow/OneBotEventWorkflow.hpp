@@ -66,6 +66,10 @@ namespace insoulforge {
         /// @note 线程安全。用于管理后台展示；结果不受模型上下文窗口长度限制。
         [[nodiscard]] auto getSessionMessages(u64 sessionId) -> std::optional<json>;
 
+        /// @brief 读取指定会话有限条数的共享消息，不创建或改变会话状态。
+        [[nodiscard]] auto getSharedSessionMessages(u64 sessionId, size_t limit,
+          const std::string &earliest, const std::string &latest) -> json;
+
         /// @brief 清空会话的内存消息与持久化恢复副本，保留启用状态与已提取记忆。
         void clearSessionMessages(u64 sessionId);
 

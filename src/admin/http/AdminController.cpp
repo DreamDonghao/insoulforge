@@ -6,9 +6,11 @@
 #include <workflow/access/BlacklistStore.hpp>
 #include <admin/http/AdminController.hpp>
 #include <admin/http/AdminResponse.hpp>
+#include <admin/http/PersonNameResolver.hpp>
 #include <workflow/agent/memory/LongTermMemoryStore.hpp>
 #include <workflow/agent/memory/MemoryStore.hpp>
 #include <workflow/agent/memory/affinity/AffinityStore.hpp>
+#include <workflow/agent/memory/PersonMemoryStore.hpp>
 #include <workflow/agent/runtime/AgentSystem.hpp>
 #include <workflow/agent/tools/ToolRuntime.hpp>
 #include <workflow/history/ChatRecordStore.hpp>
@@ -33,6 +35,12 @@ using namespace drogon;
 namespace {
     // 进程启动时间（文件作用域 static，程序启动时初始化）
     const auto g_processStartTime = std::chrono::system_clock::now();
+
+    void addPersonName(json &person) {
+        const auto name = PersonNameResolver::instance().lookup(parseUInt64(getStr(person, "qq")));
+        person["name"] = name.value;
+        person["name_pending"] = name.pending;
+    }
 
     auto processSampleJson(const ProcessSample &sample) -> json {
         auto entry = json{{"timestamp", sample.timestamp}};
@@ -430,6 +438,7 @@ auto AdminController::getGroups(HttpRequestPtr req, std::function<void(const Htt
         group["messageCount"] = messageCount;
         group["autoReply"] = config.autoReply;
         group["commandEnabled"] = config.commandEnabled;
+        group["crossSessionSharing"] = config.crossSessionSharing;
         group["hasAdditionalPrompt"] = !SessionId::isPrivate(sessionId) && !config.additionalPrompt.empty();
         result.push_back(group);
     }
@@ -535,6 +544,22 @@ auto AdminController::saveGroupCommandEnabled(HttpRequestPtr req, std::function<
     }
     SessionStore::setCommandEnabled(*id, (*body)["commandEnabled"].get<bool>());
     callback(jsonResponse(AdminResponse::okJson("命令解析设置已保存")));
+    co_return;
+}
+
+auto AdminController::saveSessionSharing(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
+  const std::string &sessionId) const -> Task<> {
+    const auto id = tryParseUInt64(sessionId);
+    const auto body = parseJsonBody(req);
+    if (!id || *id == 0 || (SessionId::isPrivate(*id) && SessionId::privateUserId(*id) == 0) ||
+        !body || !atOrNull(*body, "crossSessionSharing").is_boolean()) {
+        auto response = jsonResponse(AdminResponse::errorJson("需要有效会话 ID 及布尔类型 crossSessionSharing"));
+        response->setStatusCode(drogon::k400BadRequest);
+        callback(response);
+        co_return;
+    }
+    SessionStore::setCrossSessionSharing(*id, (*body)["crossSessionSharing"].get<bool>());
+    callback(jsonResponse(AdminResponse::okJson("跨会话共享设置已保存")));
     co_return;
 }
 
@@ -735,7 +760,10 @@ auto AdminController::deleteLongTermMemory(
 auto AdminController::getSessionMemory(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
   const std::string &sessionId) const -> Task<> {
     const u64 gid = std::stoull(sessionId);
-    const std::string memory = MemoryStore::getShortTermMemory(gid);
+    std::string memory = MemoryStore::getShortTermMemory(gid);
+    if (json parsed; tryParseJson(memory, parsed)) {
+        if (auto structured = MemoryStore::normalizeSessionMemory(parsed)) memory = dumpJson(*structured, true, 2);
+    }
 
     json resp;
     resp["groupId"] = gid;
@@ -753,7 +781,18 @@ auto AdminController::updateSessionMemory(HttpRequestPtr req, std::function<void
     }
 
     const u64 gid = std::stoull(sessionId);
-    const std::string memory = getStr(*body, "memory");
+    std::string memory = getStr(*body, "memory");
+    if (trim(memory).starts_with("{")) {
+        json parsed;
+        const auto structured = tryParseJson(memory, parsed) ? MemoryStore::normalizeSessionMemory(parsed) : std::nullopt;
+        if (!structured) {
+            auto response = jsonResponse(AdminResponse::errorJson("短期记忆 JSON 需要有效的 aliases、recent_events 及可选 legacy_entries 数组"));
+            response->setStatusCode(drogon::k400BadRequest);
+            callback(response);
+            co_return;
+        }
+        memory = dumpJson(*structured);
+    }
     MemoryStore::updateShortTermMemory(gid, memory);
 
     callback(jsonResponse(AdminResponse::okJson("记忆已更新")));
@@ -762,10 +801,36 @@ auto AdminController::updateSessionMemory(HttpRequestPtr req, std::function<void
 
 // ==================== 好感度 ====================
 
+auto AdminController::getPeople(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
+  -> Task<> {
+    auto people = PersonMemoryStore::listPeople();
+    for (auto &person: people)
+        addPersonName(person);
+    callback(jsonResponse(people));
+    co_return;
+}
+
+auto AdminController::getPerson(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
+  const std::string &qq) const -> Task<> {
+    const auto id = parseUInt64(qq);
+    if (id == 0 || SessionId::isPrivate(id) || id == SessionId::kSystemAccountId) {
+        callback(jsonResponse(AdminResponse::errorJson("无效的 QQ 号")));
+        co_return;
+    }
+    auto person = PersonMemoryStore::getPerson(id);
+    if (person.is_null()) {
+        callback(jsonResponse(AdminResponse::errorJson("没有该人物的记录")));
+        co_return;
+    }
+    addPersonName(person);
+    callback(jsonResponse(person));
+    co_return;
+}
+
 auto AdminController::getSessionAffinity(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
   const std::string &sessionId) const -> Task<> {
     const u64 gid = std::stoull(sessionId);
-    auto affinityMap = AffinityStore::getAffinityMap(gid);
+    auto affinityMap = AffinityStore::getAffinityMap();
 
     std::vector<std::pair<u64, i32>> entries(affinityMap.begin(), affinityMap.end());
     std::ranges::sort(entries, [](const auto &a, const auto &b) -> auto { return a.second > b.second; });
@@ -792,6 +857,7 @@ auto AdminController::getSessionAffinity(HttpRequestPtr req, std::function<void(
 
     json resp;
     resp["groupIdStr"] = std::to_string(gid);
+    resp["scope"] = "global";
     resp["affinities"] = list;
     callback(jsonResponse(resp));
     co_return;

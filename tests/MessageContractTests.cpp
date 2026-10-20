@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -23,10 +24,11 @@
 #include <workflow/agent/ability/AsyncTaskManager.hpp>
 #include <workflow/agent/memory/LongTermMemoryStore.hpp>
 #include <workflow/agent/memory/MemoryStore.hpp>
-#include <workflow/agent/memory/affinity/AffinityMaintenanceService.hpp>
+#include <workflow/agent/memory/PersonMemoryStore.hpp>
 #include <workflow/agent/memory/affinity/AffinityStore.hpp>
 #include <workflow/agent/memory/maintenance/MemoryMaintenanceService.hpp>
 #include <workflow/agent/memory/maintenance/MemoryMaintenanceStore.hpp>
+#include <workflow/agent/memory/maintenance/PersonMemoryConsolidator.hpp>
 #include <workflow/agent/runtime/AgentSystem.hpp>
 #include <workflow/agent/runtime/ExecutorAgent.hpp>
 #include <workflow/agent/tools/ToolRegistry.hpp>
@@ -34,6 +36,7 @@
 #include <workflow/agent/tools/custom/ToolStore.hpp>
 #include <workflow/agent/tools/plugins/ActionToolsPlugin.hpp>
 #include <workflow/history/ChatRecordStore.hpp>
+#include <workflow/history/SharedConversationContext.hpp>
 #include <workflow/message/MessageRecord.hpp>
 #include <workflow/message/SessionId.hpp>
 #include <workflow/session/QQNameDirectory.hpp>
@@ -844,7 +847,8 @@ namespace {
     void testIterationRequestMessages() {
         constexpr std::string_view kTestName = "iteration request messages";
         const auto history = insoulforge::json::array(
-          {{{"role", "system"}, {"content", "original prompt"}}, {{"role", "user"}, {"content", "question"}},
+          {{{"role", "system"}, {"content", "original prompt"}},
+            {{"role", "user"}, {"content", R"({"response_requirements":{"max_length":100},"recent_conversation":[]})"}},
             {{"role", "assistant"}, {"tool_calls", {{{"id", "call-1"}, {"type", "function"}}}}},
             {{"role", "tool"}, {"tool_call_id", "call-1"}, {"content", "source data"}}});
 
@@ -852,23 +856,39 @@ namespace {
         const auto middle = insoulforge::ExecutorAgent::buildIterationMessages(history, 3, 8);
         const auto last = insoulforge::ExecutorAgent::buildIterationMessages(history, 8, 8);
         check(first.size() == history.size() + 1 && middle.size() == first.size() && last.size() == first.size(),
-          "each request has exactly one transient execution status", kTestName);
+          "each request adds one transient execution-state message", kTestName);
         for (size_t index = 0; index < history.size(); ++index) {
             check(first[index] == history[index] && middle[index] == history[index] && last[index] == history[index],
               "request status preserves the full history and tool results", kTestName);
         }
-        check(first.back()["role"] == "system" &&
-                first.back()["content"].get<std::string>().find("还可请求模型 7 次") != std::string::npos,
+        const auto context = [](const insoulforge::json &messages) {
+            return insoulforge::json::parse(messages.back()["content"].get<std::string>());
+        };
+        const auto firstContext = context(first);
+        check(firstContext["execution_state"]["remaining_rounds"] == 7 &&
+                firstContext["execution_state"]["reply_only"] == false,
           "first round counts future requests excluding the current one", kTestName);
-        check(middle.back()["content"].get<std::string>().find("3/8") != std::string::npos &&
-                middle.back()["content"].get<std::string>().find("还可请求模型 5 次") != std::string::npos,
+        check(context(middle)["execution_state"]["current_round"] == 3 &&
+                context(middle)["execution_state"]["remaining_rounds"] == 5,
           "intermediate status reflects the current round", kTestName);
-        check(last.back()["content"].get<std::string>().find("还可请求模型 0 次") != std::string::npos &&
-                last.back()["content"].get<std::string>().find("仅开放回复类工具") != std::string::npos,
+        check(context(last)["execution_state"]["remaining_rounds"] == 0 &&
+                context(last)["execution_state"]["reply_only"] == true,
           "last round explicitly requires a reply decision", kTestName);
         const auto single = insoulforge::ExecutorAgent::buildIterationMessages(history, 1, 1);
-        check(single.back()["content"].get<std::string>().find("仅开放回复类工具") != std::string::npos,
+        check(context(single)["execution_state"]["reply_only"] == true,
           "a one-round limit is immediately reply-only", kTestName);
+        check(first.back()["role"] == "system" && firstContext.size() == 1,
+          "transient system message contains structured data only", kTestName);
+        const insoulforge::json mcp = {{"page_size", 10}, {"max_per_enable", 4},
+          {"max_per_reply", 12}, {"selected_count", 2}};
+        const auto withMcp = insoulforge::ExecutorAgent::buildIterationMessages(history, 2, 8, mcp);
+        check(context(withMcp)["execution_state"]["mcp"] == mcp &&
+                context(withMcp)["execution_state"]["current_round"] == 2,
+          "each request replaces stale execution state and includes current MCP limits", kTestName);
+        const auto finalMcp = insoulforge::ExecutorAgent::buildIterationMessages(history, 8, 8, mcp);
+        check(!context(finalMcp)["execution_state"].contains("mcp") &&
+                !firstContext["execution_state"].contains("mcp"),
+          "MCP status is absent when unavailable or reply-only", kTestName);
         check(history.size() == 4 && history.front()["content"] == "original prompt",
           "transient status never modifies the original conversation", kTestName);
     }
@@ -1106,34 +1126,37 @@ namespace {
         const insoulforge::PreparedLongTermMemory longTerm{
           .content = "Alice 喜欢 C++", .embedding = {0.1F, 0.2F}, .replacedIds = {}};
         insoulforge::MemoryMaintenanceStore::apply(
-          database, 100, {.shortTerm = "近期状态", .longTerm = {longTerm}}, {{11, 3}});
+          database, 100, {.shortTerm = "近期状态", .longTerm = {longTerm},
+            .personEntries = {{11, "喜欢 C++"}}, .affinity = {{11, 3}}});
+        const auto personSenders = insoulforge::json::array({{{"sender", {{"qq", "11"}}}}});
+        const auto initialProfiles = insoulforge::PersonMemoryStore::getForSenders(personSenders);
         const auto resultsPreserved = [&]() -> bool {
             return insoulforge::MemoryStore::getShortTermMemory(100) == "近期状态" &&
                    insoulforge::LongTermMemoryStore::countMemories(100) == 1 &&
-                   insoulforge::AffinityStore::getAffinityMap(100)[11] == 3;
+                   insoulforge::AffinityStore::getAffinityMap()[11] == 3 &&
+                   insoulforge::PersonMemoryStore::getForSenders(personSenders) == initialProfiles;
         };
         check(resultsPreserved(), "commits memory and affinity together", kTestName);
         check(sqlite3_exec(database.handle(),
-                "CREATE TRIGGER reject_affinity BEFORE INSERT ON group_affinity BEGIN SELECT RAISE(ABORT, 'test'); END",
+                "CREATE TRIGGER reject_affinity BEFORE INSERT ON person_affinity BEGIN SELECT RAISE(ABORT, 'test'); END",
                 nullptr, nullptr, nullptr) == SQLITE_OK,
           "creates failure fixture", kTestName);
         bool failed = false;
         try {
             insoulforge::MemoryMaintenanceStore::apply(
-              database, 100, {.shortTerm = "不能保存", .longTerm = {longTerm}}, {{12, 5}});
+              database, 100, {.shortTerm = "不能保存", .longTerm = {longTerm},
+                .personEntries = {{11, "不能保存"}}, .affinity = {{12, 5}}});
         } catch (const insoulforge::DbError &) {
             failed = true;
         }
         check(failed && resultsPreserved(), "affinity failure rolls back all memory writes", kTestName);
         check(sqlite3_exec(database.handle(), "DROP TRIGGER reject_affinity", nullptr, nullptr, nullptr) == SQLITE_OK,
           "removes failure fixture", kTestName);
-        insoulforge::MemoryMaintenanceStore::apply(database, 100, {}, {});
+        insoulforge::MemoryMaintenanceStore::apply(database, 100, {});
         check(resultsPreserved(), "empty result preserves saved memory", kTestName);
         const auto memory = drogon::sync_wait(
           insoulforge::MemoryMaintenanceService::prepare(100, insoulforge::json::array(), insoulforge::json::array()));
-        const auto affinity =
-          drogon::sync_wait(insoulforge::AffinityMaintenanceService::prepare(100, insoulforge::json::array()));
-        check(memory.has_value() && affinity && affinity->empty(), "empty input is a successful empty calculation",
+        check(memory.has_value() && memory->affinity.empty(), "empty input is a successful empty calculation",
           kTestName);
         check(sqlite3_exec(database.handle(),
                 "CREATE TABLE memory_maintenance_jobs(id INTEGER PRIMARY KEY);"
@@ -1145,19 +1168,241 @@ namespace {
           "creates v17 queues", kTestName);
         insoulforge::SchemaMigrator::migrate(database.handle());
         check(noTaskTables() && resultsPreserved(), "upgrade removes old tasks but preserves results", kTestName);
-        insoulforge::MemoryMaintenanceStore::apply(database, 200, {.longTerm = {longTerm}}, {});
+        insoulforge::MemoryMaintenanceStore::apply(database, 200, {.longTerm = {longTerm}});
         const auto oldEntries = insoulforge::LongTermMemoryStore::listMemories(200, 1, 0);
         const i64 sourceId = oldEntries.front().id;
         const insoulforge::PreparedLongTermMemory replacementA{
           .content = "Alice 喜欢编程", .embedding = {0.1F, 0.2F}, .replacedIds = {sourceId, sourceId}};
         const insoulforge::PreparedLongTermMemory replacementB{
           .content = "Alice 使用 C++", .embedding = {0.2F, 0.3F}, .replacedIds = {sourceId}};
-        insoulforge::MemoryMaintenanceStore::apply(database, 200, {.longTerm = {replacementA, replacementB}}, {});
+        insoulforge::MemoryMaintenanceStore::apply(database, 200, {.longTerm = {replacementA, replacementB}});
         const auto replacements = insoulforge::LongTermMemoryStore::listMemories(200, 10, 0);
         check(replacements.size() == 2 &&
                 std::ranges::none_of(replacements, [sourceId](const auto &entry) { return entry.id == sourceId; }),
           "store deduplicates replacement IDs across all new memories", kTestName);
         database.close();
+    }
+
+    void testGlobalPersonMemory() {
+        constexpr std::string_view kTestName = "global person memory";
+        using namespace insoulforge;
+        auto &db = Database::instance();
+        const auto path = std::filesystem::temp_directory_path() /
+                          ("insoulforge-person-memory-" +
+                            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".db");
+        check(db.initialize(path.string()).has_value(), "initializes database", kTestName);
+        check(sqlite3_exec(db.handle(),
+                "DROP TABLE person_affinity;"
+                "CREATE TABLE group_affinity(group_id INTEGER, qq_number INTEGER, affinity INTEGER);"
+                "INSERT INTO group_affinity VALUES(100,11,10),(200,11,11),(100,22,-3),(200,22,-4),(100,33,120);"
+                "PRAGMA user_version = 20", nullptr, nullptr, nullptr) == SQLITE_OK,
+          "creates old per-session scores", kTestName);
+        SchemaMigrator::migrate(db.handle());
+        const auto scores = AffinityStore::getAffinityMap();
+        check(scores.at(11) == 11 && scores.at(22) == -4 && scores.at(33) == 100,
+          "migration averages existing rows, rounds halves away from zero and clamps", kTestName);
+        AffinityStore::adjustAffinity(11, 2);
+        SchemaMigrator::migrate(db.handle());
+        check(AffinityStore::getAffinityMap().at(11) == 13, "migration does not reapply old scores", kTestName);
+        const auto privateId = SessionId::fromPrivateUser(11);
+        MemoryMaintenanceStore::apply(db, 100, {.personEntries = {{11, "喜欢摄影"}, {22, "喜欢编程"}}});
+        MemoryMaintenanceStore::apply(db, privateId, {.personEntries = {{11, "准备比赛"}}, .affinity = {{11, -1}}});
+        const auto senders = json::array({{{"sender", {{"qq", "11"}}}}, {{"sender", {{"qq", "11"}}}},
+          {{"sender", {{"qq", "self"}}}}, {{"sender", {{"qq", std::to_string(SessionId::kSystemAccountId)}}}},
+          {{"sender", {{"qq", "33"}}}}, {{"segments", {{{"type", "at"}, {"target", {{"qq", "22"}}}}}}}});
+        const auto profiles = PersonMemoryStore::getForSenders(senders);
+        check(profiles.size() == 1 && profiles[0]["qq"] == "11" && profiles[0]["pending_entries"].size() == 2 &&
+                profiles[0]["pending_entries"][1]["source_session"] == std::to_string(privateId) &&
+                AffinityStore::getAffinityMap().at(11) == 12,
+          "deduplicates recent senders, excludes mentions and missing profiles, shares private entries globally", kTestName);
+        check(!SessionStore::getSessionConfig(100).crossSessionSharing &&
+                !SessionStore::getSessionConfig(privateId).crossSessionSharing,
+          "person memory is independent of raw-message sharing", kTestName);
+        MemoryMaintenanceStore::apply(db, 100, {.personEntries = {{44, "仅有人物记忆"}}});
+        const auto people = PersonMemoryStore::listPeople();
+        check(people.size() == 4 && people[0]["pending_count"] == 2 && !people[0].contains("pending_entries"),
+          "admin summaries include memory-only and affinity-only people without loading memory bodies", kTestName);
+        const auto person = PersonMemoryStore::getPerson(11);
+        check(person["affinity"] == 12 && person["pending_entries"].size() == 2 &&
+                person["pending_entries"][0]["source_session"] == std::to_string(privateId),
+          "person detail combines global score and newest-first entries with exact session IDs", kTestName);
+        check(PersonMemoryStore::getPerson(33)["stable_memory"].empty() &&
+                PersonMemoryStore::getPerson(44)["affinity"] == 0 && PersonMemoryStore::getPerson(999).is_null(),
+          "handles score-only, memory-only and unknown profiles", kTestName);
+        const AdminController controller;
+        auto response = drogon::HttpResponsePtr{};
+        const auto callback = [&](const drogon::HttpResponsePtr &value) { response = value; };
+        for (const u64 qq: {11, 22, 33, 44})
+            QQNameDirectory::recordName(qq, "Known " + std::to_string(qq));
+        drogon::sync_wait(controller.getPeople(drogon::HttpRequest::newHttpRequest(), callback));
+        check(json::parse(response->body()).size() == 4, "people API returns all profiles", kTestName);
+        drogon::sync_wait(controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, "11"));
+        check(json::parse(response->body())["qq"] == "11", "person API returns string identity", kTestName);
+        drogon::sync_wait(controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, "invalid"));
+        check(json::parse(response->body()).contains("error"), "person API rejects invalid identities", kTestName);
+        std::thread first([] { for (int index = 0; index < 50; ++index) AffinityStore::adjustAffinity(77, 1); });
+        std::thread second([] { for (int index = 0; index < 50; ++index) AffinityStore::adjustAffinity(77, 1); });
+        first.join();
+        second.join();
+        AffinityStore::adjustAffinity(77, 10);
+        check(AffinityStore::getAffinityMap().at(77) == 100, "concurrent global increments do not overwrite or overflow", kTestName);
+        {
+            const Statement query(db.handle(), "SELECT COUNT(*) FROM sqlite_master WHERE name = 'group_affinity'");
+            check(query.step() && query.getInt(0) == 0, "old per-session affinity table is removed", kTestName);
+        }
+        db.close();
+        check(db.initialize(path.string()).has_value() && PersonMemoryStore::getForSenders(senders) == profiles,
+          "person entries survive restart", kTestName);
+        db.close();
+        std::filesystem::remove(path);
+    }
+
+    void testPersonConsolidationStore() {
+        constexpr std::string_view kTestName = "person consolidation store and calendar";
+        using namespace insoulforge;
+        const auto localTime = [](int year, int month, int day, int hour, int minute = 0, int second = 0) {
+            std::tm value{};
+            value.tm_year = year - 1900;
+            value.tm_mon = month - 1;
+            value.tm_mday = day;
+            value.tm_hour = hour;
+            value.tm_min = minute;
+            value.tm_sec = second;
+            value.tm_isdst = -1;
+            return std::mktime(&value);
+        };
+        const auto due = PersonMemoryConsolidator::dueDay;
+        check(!due(localTime(2026, 10, 20, 2, 59, 59), {}) &&
+                due(localTime(2026, 10, 20, 3), {}) == "2026-10-20",
+          "first run waits until local 03:00 exactly", kTestName);
+        check(!due(localTime(2026, 10, 20, 23), {"2026-10-20", ""}) &&
+                !due(localTime(2026, 10, 21, 2), {"2026-10-20", ""}),
+          "completed day is not repeated across midnight", kTestName);
+        check(due(localTime(2027, 1, 1, 2), {"2026-12-29", ""}) == "2026-12-31" &&
+                due(localTime(2026, 10, 22, 8), {"2026-10-19", "2026-10-20"}) == "2026-10-22" &&
+                due(localTime(2026, 10, 21, 2), {"", "2026-10-20"}) == "2026-10-20",
+          "missed dates coalesce and unfinished run resumes even before 03:00", kTestName);
+        auto &db = Database::instance();
+        check(db.initialize(":memory:").has_value(), "initializes database", kTestName);
+        check(sqlite3_exec(db.handle(), "DROP TABLE person_memory_daily_state; PRAGMA user_version = 21",
+                nullptr, nullptr, nullptr) == SQLITE_OK, "creates v21 upgrade fixture", kTestName);
+        SchemaMigrator::migrate(db.handle());
+        PersonMemoryStore::saveDailyState({"2026-10-19", "2026-10-20"});
+        SchemaMigrator::migrate(db.handle());
+        const auto state = PersonMemoryStore::dailyState();
+        check(state.completedDay == "2026-10-19" && state.runningDay == "2026-10-20",
+          "v22 migration and repeated migration preserve daily checkpoint", kTestName);
+        MemoryMaintenanceStore::apply(db, 100, {.personEntries = {{11, "旧条目"}}, .affinity = {{11, 3}}});
+        const auto snapshot = PersonMemoryStore::pendingSnapshot(11);
+        check(snapshot.has_value(), "reads pending snapshot", kTestName);
+        if (snapshot) {
+            MemoryMaintenanceStore::apply(db, SessionId::fromPrivateUser(11), {.personEntries = {{11, "并发新增"}}});
+            const json profile = {{"stable_memory", {"喜欢摄影"}}, {"recent_interactions", {"一起讨论摄影"}}};
+            check(sqlite3_exec(db.handle(),
+                    "CREATE TRIGGER reject_person_delete BEFORE DELETE ON person_memory_entries "
+                    "BEGIN SELECT RAISE(ABORT, 'test'); END", nullptr, nullptr, nullptr) == SQLITE_OK,
+              "creates delete failure trigger", kTestName);
+            bool failed = false;
+            try { PersonMemoryStore::applyConsolidation(*snapshot, profile); }
+            catch (const DbError &) { failed = true; }
+            check(failed && PersonMemoryStore::getPerson(11)["stable_memory"].empty() &&
+                    PersonMemoryStore::getPerson(11)["pending_entries"].size() == 2,
+              "delete failure rolls back profile update and preserves entries", kTestName);
+            check(sqlite3_exec(db.handle(), "DROP TRIGGER reject_person_delete", nullptr, nullptr, nullptr) == SQLITE_OK,
+              "removes failure trigger", kTestName);
+            PersonMemoryStore::applyConsolidation(*snapshot, profile);
+            const auto person = PersonMemoryStore::getPerson(11);
+            check(person["stable_memory"] == profile["stable_memory"] && person["pending_entries"].size() == 1 &&
+                    person["pending_entries"][0]["content"] == "并发新增" && person["affinity"] == 3 &&
+                    MemoryStore::getShortTermMemory(100).empty(),
+              "snapshot commit keeps new entries and does not touch affinity or session memory", kTestName);
+        }
+        check(!PersonMemoryStore::pendingSnapshot(999), "absent person has no work", kTestName);
+        db.close();
+    }
+
+    void testSessionShortTermMemory() {
+        constexpr std::string_view kTestName = "session short-term memory";
+        using namespace insoulforge;
+        auto &db = Database::instance();
+        check(db.initialize(":memory:").has_value(), "initializes database", kTestName);
+        const json input = {{"aliases", {{{"qq", "11"}, {"names", {" 老王 ", "老王"}}},
+          {{"qq", "11"}, {"names", {"摄影佬"}}}}}, {"recent_events", {" 联机待定 ", "联机待定"}}};
+        const auto normalized = MemoryStore::normalizeSessionMemory(input);
+        check(normalized && (*normalized)["aliases"].size() == 1 &&
+                (*normalized)["aliases"][0]["names"] == json::array({"老王", "摄影佬"}) &&
+                (*normalized)["recent_events"] == json::array({"联机待定"}),
+          "deduplicates aliases by QQ, names and events", kTestName);
+        auto legacyInput = input;
+        legacyInput["legacy_entries"] = {" 喜欢摄影 ", "喜欢摄影", "以前的约定"};
+        const auto legacyNormalized = MemoryStore::normalizeSessionMemory(legacyInput);
+        check(legacyNormalized && (*legacyNormalized)["legacy_entries"] == json::array({"喜欢摄影", "以前的约定"}),
+          "legacy contents remain readable and are deduplicated", kTestName);
+        legacyInput["legacy_entries"] = "invalid";
+        check(!MemoryStore::normalizeSessionMemory(legacyInput), "rejects malformed legacy entries", kTestName);
+        for (const auto &invalid: json::array({nullptr, json::array(),
+               json{{"aliases", json::array()}, {"recent_events", "wrong"}},
+               json{{"aliases", {{{"qq", "self"}, {"names", {"bot"}}}}}, {"recent_events", json::array()}},
+               json{{"aliases", json::array()}, {"recent_events", {42}}}})) {
+            check(!MemoryStore::normalizeSessionMemory(invalid), "rejects malformed structure", kTestName);
+        }
+        MemoryStore::updateShortTermMemory(100, " 旧事件 \n\n旧称呼\n");
+        check(MemoryStore::projectShortTermMemory(MemoryStore::getShortTermMemory(100)) == json::array({"旧事件", "旧称呼"}),
+          "legacy memory remains readable without rewriting storage", kTestName);
+        const AdminController controller;
+        drogon::HttpResponsePtr response;
+        const auto save = [&](const std::string &content) {
+            auto request = drogon::HttpRequest::newHttpRequest();
+            request->setBody(dumpJson({{"memory", content}}));
+            drogon::sync_wait(controller.updateSessionMemory(request, [&](const auto &value) { response = value; }, "100"));
+        };
+        save(dumpJson(input));
+        check(response->getStatusCode() == drogon::k200OK &&
+                MemoryStore::projectShortTermMemory(MemoryStore::getShortTermMemory(100)) == *normalized,
+          "manual editing saves normalized structured memory", kTestName);
+        drogon::sync_wait(controller.getSessionMemory(drogon::HttpRequest::newHttpRequest(),
+          [&](const auto &value) { response = value; }, "100"));
+        const auto displayed = getStr(json::parse(response->body()), "memory");
+        check(displayed.find('\n') != std::string::npos && json::parse(displayed) == *normalized,
+          "existing editor receives formatted JSON", kTestName);
+        for (const auto &bad: {std::string{"{"}, std::string{R"({"aliases":[]})"}}) {
+            save(bad);
+            check(response->getStatusCode() == drogon::k400BadRequest &&
+                    MemoryStore::projectShortTermMemory(MemoryStore::getShortTermMemory(100)) == *normalized,
+              "invalid manual JSON preserves saved memory", kTestName);
+        }
+        check(MemoryStore::getShortTermMemory(200).empty() && PersonMemoryStore::getForSenders(
+                json::array({{{"sender", {{"qq", "11"}}}}})).empty() && AffinityStore::getAffinityMap().empty(),
+          "session editing does not modify other sessions or global state", kTestName);
+        db.close();
+    }
+
+    void testRemovedShortTermLimit() {
+        constexpr std::string_view kTestName = "removed short-term limit";
+        const auto path = std::filesystem::temp_directory_path() /
+                          ("insoulforge-no-memory-limit-" +
+                            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".json");
+        {
+            std::ofstream output(path);
+            output << R"({"memory":{"shortTermMemoryMax":"obsolete","contextWindowLimit":73,"futureSetting":true}})";
+        }
+        auto &config = insoulforge::Config::instance();
+        check(config.initialize(path.string()).has_value(), "loads old field without validating its obsolete type", kTestName);
+        auto memory = config.getMemoryConfig();
+        check(!memory.contains("shortTermMemoryMax") && memory["contextWindowLimit"] == 73 && memory["futureSetting"] == true,
+          "removes obsolete field and preserves other settings", kTestName);
+        {
+            std::ifstream input(path);
+            const auto stored = insoulforge::json::parse(input);
+            check(!stored["memory"].contains("shortTermMemoryMax"), "writes migration back to disk", kTestName);
+        }
+        memory["shortTermMemoryMax"] = "old frontend";
+        check(config.saveMemoryConfig(memory).has_value() && !config.getMemoryConfig().contains("shortTermMemoryMax") &&
+                config.contextWindowLimit == 73 && config.getMemoryConfig()["futureSetting"] == true,
+          "old frontend field is ignored without changing other settings", kTestName);
+        check(config.initialize(path.string()).has_value() && !config.getMemoryConfig().contains("shortTermMemoryMax"),
+          "removed field does not return after restart", kTestName);
+        std::filesystem::remove(path);
     }
 
     void testMemoryModelConfigMigration() {
@@ -1182,6 +1427,19 @@ namespace {
         check(memory.value("temperature", 0.0) == 0.4, "preserves extraction sampling temperature", kTestName);
         check(!insoulforge::Config::instance().getMemoryConfig().contains("memoryExtractMaxTokens"),
           "removes legacy token field", kTestName);
+        auto &config = insoulforge::Config::instance();
+        check(config.sharedConversationMessageCount == 10 && config.getMemoryConfig()["sharedConversationMessageCount"] == 10,
+          "old configuration receives ten shared messages per session", kTestName);
+        check(config.saveMemoryConfig({{"sharedConversationMessageCount", 25}}).has_value() &&
+                config.sharedConversationMessageCount == 25,
+          "sharing count updates at runtime", kTestName);
+        for (const auto &invalid: insoulforge::json::array({0, -1, 1.5, "10", true, nullptr})) {
+            check(!config.saveMemoryConfig({{"sharedConversationMessageCount", invalid}}) &&
+                    config.sharedConversationMessageCount == 25,
+              "invalid counts preserve configuration", kTestName);
+        }
+        check(config.initialize(path.string()).has_value() && config.sharedConversationMessageCount == 25,
+          "sharing count persists", kTestName);
         std::filesystem::remove(path);
     }
 
@@ -1566,6 +1824,137 @@ namespace {
         check(saved.commandEnabled && saved.sendGroupCard && !saved.autoReply && saved.allMesCount == 1 &&
                 saved.additionalPrompt == "test prompt",
           "migration defaults on and preserves existing data", kTestName);
+        db.close();
+        std::filesystem::remove(path);
+    }
+
+    void testCrossSessionSharing() {
+        constexpr std::string_view kTestName = "cross session sharing";
+        using insoulforge::json;
+        auto &db = insoulforge::Database::instance();
+        const auto path = std::filesystem::temp_directory_path() /
+                          ("insoulforge-sharing-" +
+                            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".db");
+        check(db.initialize(path.string()).has_value(), "initializes database", kTestName);
+        const auto privateId = insoulforge::SessionId::fromPrivateUser(11);
+        for (const auto id: {u64{100}, u64{200}, u64{300}, privateId}) {
+            insoulforge::SessionStore::enableSession(id);
+            check(!insoulforge::SessionStore::getSessionConfig(id).crossSessionSharing,
+              "groups and private sessions default off", kTestName);
+        }
+        insoulforge::SessionStore::setCrossSessionSharing(200, true);
+        check(insoulforge::SessionStore::getSharedSessions(100).empty(), "nonparticipant receives nothing", kTestName);
+        insoulforge::SessionStore::setCrossSessionSharing(100, true);
+        insoulforge::SessionStore::setCrossSessionSharing(privateId, true);
+        insoulforge::SessionStore::updateSessionName(200, "shared group");
+        auto sources = insoulforge::SessionStore::getSharedSessions(100);
+        check(sources.size() == 2 &&
+                std::ranges::find(sources, std::pair<u64, std::string>{200, "shared group"}) != sources.end() &&
+                std::ranges::any_of(sources, [privateId](const auto &source) { return source.first == privateId; }),
+          "excludes self and nonparticipants, includes private sources", kTestName);
+        check(insoulforge::SessionStore::getSharedSessions(privateId).size() == 2,
+          "private participants also receive group context", kTestName);
+        insoulforge::SessionStore::toggleSessionStatus(200);
+        check(insoulforge::SessionStore::getSharedSessions(100).size() == 1 &&
+                insoulforge::SessionStore::getSharedSessions(200).empty(),
+          "disabled sessions neither send nor receive", kTestName);
+        insoulforge::SessionStore::setSendGroupCard(100, true);
+        insoulforge::SessionStore::incrementMessageCount(100);
+        auto config = insoulforge::SessionStore::getSessionConfig(100);
+        insoulforge::SessionStore::saveSessionConfig(100, config);
+        check(insoulforge::SessionStore::getSessionConfig(100).crossSessionSharing && config.allMesCount == 1,
+          "full saves and statistics preserve sharing", kTestName);
+
+        const insoulforge::AdminController controller;
+        drogon::HttpResponsePtr response;
+        const auto save = [&](const std::string &id, const json &body) {
+            auto request = drogon::HttpRequest::newHttpRequest();
+            request->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            request->setBody(insoulforge::dumpJson(body));
+            drogon::sync_wait(controller.saveSessionSharing(request, [&](const auto &value) { response = value; }, id));
+        };
+        save(std::to_string(privateId), {{"crossSessionSharing", false}});
+        check(response->getStatusCode() == drogon::k200OK &&
+                !insoulforge::SessionStore::getSessionConfig(privateId).crossSessionSharing,
+          "private sharing can be disabled through API", kTestName);
+        save("100", {{"crossSessionSharing", "true"}});
+        check(response->getStatusCode() == drogon::k400BadRequest &&
+                insoulforge::SessionStore::getSessionConfig(100).crossSessionSharing,
+          "rejects non-boolean without changing state", kTestName);
+        save("0", {{"crossSessionSharing", true}});
+        check(response->getStatusCode() == drogon::k400BadRequest, "rejects invalid session", kTestName);
+
+        insoulforge::MessageList list(100, db, insoulforge::Config::instance());
+        const auto message = [](const std::string &time, const std::string &text) {
+            return json{{"time", time}, {"sender", {{"name", "test"}, {"qq", "11"}}},
+              {"message_id", "123"}, {"reply_to", {{"message_id", "122"}}},
+              {"segments", json::array({{{"type", "text"}, {"text", text}}})}};
+        };
+        const auto append = [&](json record) {
+            record.erase("message_id");
+            static_cast<void>(list.append(std::move(record)));
+        };
+        append(message("2026-10-15 12:00:00", "expired"));
+        append(message("2026-10-16 12:00:00", "boundary"));
+        append(message("2026-10-18 12:00:00", "recent"));
+        append(message("2026-10-20 12:00:00", "future"));
+        append(message("", "missing time"));
+        auto failed = message("2026-10-18 13:00:00", "not delivered");
+        failed["send_error"] = "failed";
+        append(failed);
+        auto internal = message("2026-10-18 14:00:00", "internal");
+        internal["record_type"] = "tool_execution";
+        append(internal);
+        const auto snapshot = list.sharedSnapshot(10, "2026-10-16 12:00:00", "2026-10-19 12:00:00");
+        check(snapshot.size() == 2 && snapshot[0]["segments"][0]["text"] == "boundary" &&
+                snapshot[1]["segments"][0]["text"] == "recent",
+          "time window includes boundary, excludes future and internal messages, preserves order", kTestName);
+        check(!snapshot[0].contains("message_id") && !snapshot[0].contains("reply_to"),
+          "shared messages cannot be referenced or recalled", kTestName);
+        check(list.sharedSnapshot(1, "2026-10-16 12:00:00", "2026-10-19 12:00:00").size() == 1 &&
+                list.fullSnapshot().size() == 7,
+          "sharing limit is independent and does not alter history", kTestName);
+        std::string chinese;
+        for (int index = 0; index < 120; ++index) chinese += "中";
+        auto longMessage = message("2026-10-18 12:00:00", chinese);
+        longMessage["segments"].push_back({{"type", "image"}, {"recognition_status", "succeeded"},
+          {"description", chinese}, {"image_index", 0}});
+        longMessage["memories"] = {"not shared"};
+        longMessage["tool_history"] = {"not shared"};
+        const auto projected = insoulforge::SharedConversationContext::projectMessage(longMessage);
+        check(projected && (*projected)["truncated"] == true &&
+                (*projected)["segments"][0]["text"].get<std::string>().size() == 120 * 3 &&
+                (*projected)["segments"][1]["description"].get<std::string>().size() == 80 * 3 &&
+                !(*projected)["segments"][1].contains("image_index") && !projected->contains("memories") &&
+                !projected->contains("tool_history"),
+          "text and image descriptions share a 200-codepoint budget without media indices or recalled memories", kTestName);
+        auto exact = message("2026-10-18 12:00:00", std::string(199, 'a') + "😀");
+        exact["sender"]["card"] = "not shared";
+        const auto exactProjection = insoulforge::SharedConversationContext::projectMessage(exact);
+        check(exactProjection && !exactProjection->contains("truncated") &&
+                !(*exactProjection)["sender"].contains("card"),
+          "exactly 200 codepoints are intact and group cards are not leaked", kTestName);
+        exact["segments"][0]["text"] = std::string(199, 'a') + "😀尾";
+        const auto cut = insoulforge::SharedConversationContext::projectMessage(exact);
+        check(cut && (*cut)["truncated"] == true &&
+                (*cut)["segments"][0]["text"] == std::string(199, 'a') + "😀",
+          "truncation preserves four-byte Unicode characters", kTestName);
+        exact["sender"]["qq"] = std::to_string(insoulforge::SessionId::kSystemAccountId);
+        check(!insoulforge::SharedConversationContext::projectMessage(exact),
+          "internal system messages are not shared", kTestName);
+        db.close();
+        check(db.initialize(path.string()).has_value() &&
+                insoulforge::SessionStore::getSessionConfig(100).crossSessionSharing,
+          "sharing survives restart", kTestName);
+        check(sqlite3_exec(db.handle(),
+                "ALTER TABLE group_config DROP COLUMN cross_session_sharing; PRAGMA user_version = 19",
+                nullptr, nullptr, nullptr) == SQLITE_OK,
+          "restores v19 schema", kTestName);
+        db.close();
+        check(db.initialize(path.string()).has_value(), "migrates v19", kTestName);
+        config = insoulforge::SessionStore::getSessionConfig(100);
+        check(!config.crossSessionSharing && config.sendGroupCard && config.allMesCount == 1,
+          "migration defaults sharing off and preserves other settings", kTestName);
         db.close();
         std::filesystem::remove(path);
     }
@@ -2145,6 +2534,29 @@ namespace {
           555, insoulforge::MessageRecord::createAssistantRecord("test", 778, "new message"));
         check(workflow.initialize(database, config, agent).has_value() && workflow.getSessionMessages(555)->size() == 2,
           "repeat initialization does not overwrite live messages", kTestName);
+        const auto privateId = insoulforge::SessionId::fromPrivateUser(42);
+        for (const auto id: {u64{555}, u64{556}, privateId}) {
+            insoulforge::SessionStore::enableSession(id);
+            insoulforge::SessionStore::setCrossSessionSharing(id, true);
+        }
+        workflow.appendDeliveredAssistantMessage(556,
+          insoulforge::MessageRecord::createAssistantRecord("test", 779, "other group"));
+        workflow.appendDeliveredAssistantMessage(privateId,
+          insoulforge::MessageRecord::createAssistantRecord("test", 780, "private conversation"));
+        const auto shared = insoulforge::SharedConversationContext::build(555, 1);
+        const auto sharedGroup = std::ranges::find_if(shared, [](const auto &item) {
+            return item["session"]["type"] == "group";
+        });
+        const auto sharedPrivate = std::ranges::find_if(shared, [](const auto &item) {
+            return item["session"]["type"] == "private";
+        });
+        check(shared.size() == 2 && sharedGroup != shared.end() && sharedPrivate != shared.end() &&
+                (*sharedGroup)["session"]["group_id"] == 556 && (*sharedGroup)["messages"].size() == 1 &&
+                (*sharedPrivate)["session"]["qq"] == "42",
+          "context groups live group and private messages with explicit source identity", kTestName);
+        insoulforge::SessionStore::setCrossSessionSharing(555, false);
+        check(insoulforge::SharedConversationContext::build(555, 10).empty() && shared.size() == 2,
+          "opt-out stops new requests without mutating an existing snapshot", kTestName);
         auto &tasks = insoulforge::AsyncTaskManager::instance();
         const auto delayedResult = []() -> drogon::Task<insoulforge::AsyncTaskManager::Result> {
             co_await drogon::sleepCoro(drogon::app().getLoop(), 60.0);
@@ -2212,12 +2624,17 @@ auto main() -> int {
     testQzoneToolValidation();
     testBuiltinToolConfig();
     testMemoryMaintenanceStore();
+    testGlobalPersonMemory();
+    testPersonConsolidationStore();
+    testSessionShortTermMemory();
+    testRemovedShortTermLimit();
     testMemoryModelConfigMigration();
     testConfigFacade();
     testExecutionConfig();
     testGroupCardSettings();
     testGroupAutoReply();
     testGroupCommandSettings();
+    testCrossSessionSharing();
     testGroupAdditionalPrompt();
     testToolHistoryRecords();
     testImageDescriptionCacheStore();

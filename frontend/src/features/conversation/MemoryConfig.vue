@@ -10,12 +10,12 @@ const showToast = inject<(msg: string, isError?: boolean) => void>('showToast')
 
 const memoryConfig = reactive<MemoryConfig>({
   contextWindowLimit: 100,
+  sharedConversationMessageCount: 10,
   memorySummaryTriggerCount: 100,
   memorySummaryBatchSize: 50,
   memorySummaryContextCount: 10,
   routerWindowTriggerCount: 20,
   routerWindowKeepCount: 10,
-  shortTermMemoryMax: 15,
   longTermRecallThreshold: 0.65,
   longTermInjectThreshold: 0.45
 })
@@ -98,23 +98,23 @@ const saveMemoryConfig = async (): Promise<void> => {
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label">短期记忆上限</label>
-          <input v-model="memoryConfig.shortTermMemoryMax" class="form-input" type="number">
-          <p class="form-hint">归类整理时短期记忆的条数上限</p>
-        </div>
-        <div class="form-group">
           <label class="form-label">长期记忆召回阈值</label>
           <input v-model="memoryConfig.longTermRecallThreshold" class="form-input" max="1" min="0" step="0.05"
                  type="number">
           <p class="form-hint">新记忆召回长期记忆做合并去重的相似度阈值（0~1，越高越严格）</p>
         </div>
-      </div>
-      <div class="form-row">
         <div class="form-group">
           <label class="form-label">长期记忆注入阈值</label>
           <input v-model="memoryConfig.longTermInjectThreshold" class="form-input" max="1" min="0" step="0.05"
                  type="number">
           <p class="form-hint">消息入库时召回长期记忆、注入提示词的相似度阈值（0~1，越高越严格）</p>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">每会话共享消息数</label>
+          <input v-model.number="memoryConfig.sharedConversationMessageCount" class="form-input" min="1" step="1"
+                 type="number">
         </div>
       </div>
       <button :disabled="saving" class="btn btn-primary" @click="saveMemoryConfig">

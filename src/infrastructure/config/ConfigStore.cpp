@@ -60,9 +60,10 @@ namespace insoulforge::ConfigStore {
                        {"qqHttpHost", "http://127.0.0.1:3000"}, {"qqWebSocketHost", "ws://127.0.0.1:3001"},
                        {"botName", "机器人"}}},
               {"memory",
-                {{"contextWindowLimit", 100}, {"memorySummaryTriggerCount", 100}, {"memorySummaryBatchSize", 50},
+                {{"contextWindowLimit", 100}, {"sharedConversationMessageCount", 10},
+                  {"memorySummaryTriggerCount", 100}, {"memorySummaryBatchSize", 50},
                   {"memorySummaryContextCount", 10}, {"routerWindowTriggerCount", 20}, {"routerWindowKeepCount", 10},
-                  {"shortTermMemoryMax", 15}, {"longTermRecallThreshold", 0.65}, {"longTermInjectThreshold", 0.45}}},
+                  {"longTermRecallThreshold", 0.65}, {"longTermInjectThreshold", 0.45}}},
               {"execution", {{"maxToolRounds", ExecutionSettings::kDefaultMaxToolRounds}, {"mcpToolPageSize", 10},
                               {"mcpMaxToolsPerEnable", 4}, {"mcpMaxToolsPerReply", 12}}},
               {"builtinTools", json::object()},
@@ -137,9 +138,12 @@ namespace insoulforge::ConfigStore {
         auto migrateLegacyFields(json &config) -> bool {
             bool changed = false;
             changed = config.erase("version") > 0;
+            if (const auto memory = config.find("memory"); memory != config.end() && memory->is_object()) {
+                changed = memory->erase("shortTermMemoryMax") > 0 || changed;
+            }
             const auto llm = config.find("llm");
             if (llm == config.end() || !llm->is_object())
-                return false;
+                return changed;
 
             if (!llm->contains("memory")) {
                 json memoryConfig = llm->value("executor", defaultChatConfig(4000, 0.4, 0.9));

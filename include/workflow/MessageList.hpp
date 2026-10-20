@@ -6,6 +6,7 @@
 #include <deque>
 #include <mutex>
 #include <optional>
+#include <string>
 
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
@@ -49,6 +50,9 @@ namespace insoulforge {
         /// @brief 获取管理后台与持久化恢复使用的完整消息值快照
         /// @note 线程安全。与模型上下文窗口无关，不会截断尚未总结删除的较早消息。
         [[nodiscard]] auto fullSnapshot() const -> json;
+
+        /// @brief 从尚未总结移除的消息中读取共享快照（旧→新），时间格式为本地 YYYY-MM-DD HH:MM:SS。
+        [[nodiscard]] auto sharedSnapshot(size_t limit, const std::string &earliest, const std::string &latest) const -> json;
 
         /// @brief 将当前完整列表持久化为会话的恢复副本
         void flushToStorage() const;

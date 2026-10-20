@@ -44,8 +44,10 @@ namespace insoulforge::OneBotClient {
 
     /// @brief 获取陌生人（QQ 用户）信息
     /// @note OneBot 11: get_stranger_info
+    /// @param timeout 请求超时秒数，默认保持普通 OneBot 请求的 30 秒。
     /// @return 响应 JSON（data 含 nickname 等）；失败返回 null
-    [[nodiscard]] auto getStrangerInfo(u64 userId, std::optional<u64> sessionId = std::nullopt) -> drogon::Task<json>;
+    [[nodiscard]] auto getStrangerInfo(u64 userId, std::optional<u64> sessionId = std::nullopt, f64 timeout = 30.0)
+      -> drogon::Task<json>;
 
     /// @brief 群聊戳一拍
     /// @note NapCat: send_poke（支持群聊/私聊）

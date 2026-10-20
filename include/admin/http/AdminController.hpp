@@ -93,6 +93,8 @@ namespace insoulforge {
         ADD_METHOD_TO(AdminController::saveGroupAutoReply, "/admin/api/group/{groupId}/auto-reply", drogon::Post);
         ADD_METHOD_TO(
           AdminController::saveGroupCommandEnabled, "/admin/api/group/{groupId}/command-enabled", drogon::Post);
+        ADD_METHOD_TO(
+          AdminController::saveSessionSharing, "/admin/api/group/{groupId}/sharing", drogon::Post);
         ADD_METHOD_TO(AdminController::getGroupPrompt, "/admin/api/group/{groupId}/prompt", drogon::Get);
         ADD_METHOD_TO(AdminController::saveGroupPrompt, "/admin/api/group/{groupId}/prompt", drogon::Post);
 
@@ -122,6 +124,8 @@ namespace insoulforge {
 
         // 好感度
         ADD_METHOD_TO(AdminController::getSessionAffinity, "/admin/api/affinity/{sessionId}", drogon::Get);
+        ADD_METHOD_TO(AdminController::getPeople, "/admin/api/people", drogon::Get);
+        ADD_METHOD_TO(AdminController::getPerson, "/admin/api/people/{qq}", drogon::Get);
 
         // 定时任务
         ADD_METHOD_TO(AdminController::getScheduledTasks, "/admin/api/scheduled-tasks/{sessionId}", drogon::Get);
@@ -366,6 +370,11 @@ namespace insoulforge {
           std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &sessionId) const
           -> drogon::Task<>;
 
+        /// @brief 保存群聊或私聊的双向共享开关。
+        auto saveSessionSharing(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &sessionId) const
+          -> drogon::Task<>;
+
         /// @brief 从启用列表移除会话
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
@@ -443,13 +452,18 @@ namespace insoulforge {
 
         // ============== 好感度 ==============
 
-        /// @brief 获取会话成员好感度列表（按分数降序）
+        /// @brief 获取全局好感度列表（按分数降序），保留会话路径以兼容现有入口。
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
         /// @param sessionId 会话 ID（私聊会话带标志位）
         auto getSessionAffinity(drogon::HttpRequestPtr req,
           std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &sessionId) const
           -> drogon::Task<>;
+
+        auto getPeople(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
+        auto getPerson(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &qq) const -> drogon::Task<>;
 
         // ============== 定时任务 ==============
 

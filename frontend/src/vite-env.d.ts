@@ -24,12 +24,12 @@ export interface LLMConfig {
 
 export interface MemoryConfig {
     contextWindowLimit: number
+    sharedConversationMessageCount: number
     memorySummaryTriggerCount: number
     memorySummaryBatchSize: number
     memorySummaryContextCount: number
     routerWindowTriggerCount: number
     routerWindowKeepCount: number
-    shortTermMemoryMax: number
     longTermRecallThreshold: number
     longTermInjectThreshold: number
 }
@@ -82,6 +82,7 @@ export interface Group {
     sendGroupCard?: boolean
     autoReply?: boolean
     commandEnabled?: boolean
+    crossSessionSharing?: boolean
     hasAdditionalPrompt?: boolean
     enabled?: boolean
     sessionType?: 'private'

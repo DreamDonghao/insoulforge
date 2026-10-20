@@ -5,6 +5,8 @@
 #pragma once
 
 #include <optional>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -20,6 +22,19 @@ namespace insoulforge {
 
 /// @brief 发起模型请求并记录用量
 namespace insoulforge::LlmClient {
+    /// @brief 取消维护请求的后续副作用；取消和用量入库互斥，不等待网络结束。
+    class MaintenanceRequestControl {
+    public:
+        void cancel();
+        [[nodiscard]] auto isCancelled() const -> bool;
+        auto recordUsage(const json &response, const std::string &model, const std::string &role,
+          std::optional<u64> sessionId) -> bool;
+
+    private:
+        mutable std::mutex m_mutex;
+        bool m_cancelled = false;
+    };
+
     /// @brief 判断 API 配置是否具备发起请求所需的地址、路径和模型名。
     [[nodiscard]] auto isConfigured(const LLMApiConfig &api) -> bool;
 
@@ -48,8 +63,10 @@ namespace insoulforge::LlmClient {
     /// @brief 使用 Memory 模型配置执行记忆或好感度维护请求。
     /// @param usageRole 用量记录中的角色（memory 或 affinity）。
     /// @param maxTokens 单次请求的输出上限；未指定时使用 Memory 模型配置。
+    /// @param control 可选取消状态，取消后丢弃迟到响应且不记录用量。
     auto requestMaintenance(json messages, u64 sessionId, std::string usageRole = "memory",
-      std::optional<i32> maxTokens = std::nullopt) -> drogon::Task<std::optional<std::string>>;
+      std::optional<i32> maxTokens = std::nullopt, std::shared_ptr<MaintenanceRequestControl> control = {})
+      -> drogon::Task<std::optional<std::string>>;
 
     /// @brief 从 API 响应中提取 usage 信息并输出缓存命中率日志
     /// @param responseJson API 返回的完整 JSON

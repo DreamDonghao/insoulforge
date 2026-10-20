@@ -17,7 +17,7 @@ namespace insoulforge {
         explicit MemoryManager(u64 sessionId);
 
         /// @brief 获取短期记忆
-        /// @return 记忆内容（每行一条）
+        /// @return 会话称呼与近期事件 JSON 字符串，或尚未转换的旧纯文本
         [[nodiscard]] auto getMemory() const -> std::string;
 
     private:

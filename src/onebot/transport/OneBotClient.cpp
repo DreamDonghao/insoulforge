@@ -128,11 +128,11 @@ namespace insoulforge::OneBotClient {
         co_return resp.value_or(json{});
     }
 
-    auto getStrangerInfo(const u64 userId, const std::optional<u64> sessionId) -> drogon::Task<json> {
+    auto getStrangerInfo(const u64 userId, const std::optional<u64> sessionId, const f64 timeout) -> drogon::Task<json> {
         json params;
         params["user_id"] = userId;
 
-        const auto resp = co_await callApi("[StrangerInfo]", "get_stranger_info", params, sessionId);
+        const auto resp = co_await callApi("[StrangerInfo]", "get_stranger_info", params, sessionId, timeout);
         co_return resp.value_or(json{});
     }
 

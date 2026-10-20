@@ -17,7 +17,7 @@ namespace insoulforge::SessionStore {
         std::shared_lock lock(db.mutex());
         SessionConfig config;
         const Statement stmt(db.handle(), "SELECT all_mes_count, send_group_card, auto_reply, additional_prompt, "
-                                          "command_enabled FROM group_config WHERE group_id = ?");
+                                          "command_enabled, cross_session_sharing FROM group_config WHERE group_id = ?");
         stmt.bind(1, sessionId);
         if (stmt.step()) {
             config.allMesCount = stmt.getInt64(0);
@@ -25,6 +25,7 @@ namespace insoulforge::SessionStore {
             config.autoReply = stmt.getInt(2) != 0;
             config.additionalPrompt = stmt.getText(3);
             config.commandEnabled = stmt.getInt(4) != 0;
+            config.crossSessionSharing = stmt.getInt(5) != 0;
         }
         return config;
     }
@@ -34,13 +35,15 @@ namespace insoulforge::SessionStore {
         std::unique_lock lock(db.mutex());
         const Statement stmt(db.handle(),
           "INSERT OR REPLACE INTO group_config (group_id, all_mes_count, "
-          "send_group_card, auto_reply, additional_prompt, command_enabled) VALUES (?, ?, ?, ?, ?, ?)");
+          "send_group_card, auto_reply, additional_prompt, command_enabled, cross_session_sharing) "
+          "VALUES (?, ?, ?, ?, ?, ?, ?)");
         stmt.bind(1, sessionId);
         stmt.bind(2, config.allMesCount);
         stmt.bind(3, config.sendGroupCard ? 1 : 0);
         stmt.bind(4, config.autoReply ? 1 : 0);
         stmt.bind(5, config.additionalPrompt);
         stmt.bind(6, config.commandEnabled ? 1 : 0);
+        stmt.bind(7, config.crossSessionSharing ? 1 : 0);
         stmt.exec();
     }
 
@@ -87,6 +90,37 @@ namespace insoulforge::SessionStore {
         stmt.bind(1, sessionId);
         stmt.bind(2, enabled ? 1 : 0);
         stmt.exec();
+    }
+
+    void setCrossSessionSharing(const u64 sessionId, const bool enabled) {
+        const auto &db = Database::instance();
+        std::unique_lock lock(db.mutex());
+        const Statement stmt(db.handle(),
+          "INSERT INTO group_config (group_id, cross_session_sharing) VALUES (?, ?) "
+          "ON CONFLICT(group_id) DO UPDATE SET cross_session_sharing = excluded.cross_session_sharing");
+        stmt.bind(1, sessionId);
+        stmt.bind(2, enabled ? 1 : 0);
+        stmt.exec();
+    }
+
+    auto getSharedSessions(const u64 receiverId) -> std::vector<std::pair<u64, std::string>> {
+        const auto &db = Database::instance();
+        std::shared_lock lock(db.mutex());
+        const Statement stmt(db.handle(),
+          "SELECT eg.group_id, eg.group_name FROM enabled_groups eg "
+          "JOIN group_config gc ON gc.group_id = eg.group_id "
+          "WHERE eg.enabled = 1 AND gc.cross_session_sharing = 1 AND eg.group_id != ? "
+          "AND EXISTS (SELECT 1 FROM enabled_groups receiver "
+          "JOIN group_config rc ON rc.group_id = receiver.group_id "
+          "WHERE receiver.group_id = ? AND receiver.enabled = 1 AND rc.cross_session_sharing = 1) "
+          "ORDER BY eg.group_id");
+        stmt.bind(1, receiverId);
+        stmt.bind(2, receiverId);
+        std::vector<std::pair<u64, std::string>> result;
+        while (stmt.step()) {
+            result.emplace_back(stmt.getInt64(0), stmt.getText(1));
+        }
+        return result;
     }
 
     void incrementMessageCount(const u64 sessionId) {
