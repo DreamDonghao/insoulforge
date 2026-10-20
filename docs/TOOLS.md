@@ -104,7 +104,7 @@ MCP 远程工具仍由“MCP 服务”管理。
 
 `send_qzone_msg(content, images?, ugc_right?)` 在机器人账号自己的 QQ 空间发布说说，
 仅在用户明确要求发布时调用。正文不能为空；`images` 为最多 9 张图片的 HTTP/HTTPS URL 数组，
-不接受本地路径或 base64。`ugc_right` 支持 `1` 所有人可见、`4` 好友可见（默认）、`64` 仅自己可见。
+不接受本地路径或 base64。`ugc_right` 支持 `1` 所有人可见（默认）、`4` 好友可见、`64` 仅自己可见。
 
 依赖 [NapCat 的 send_qzone_msg 扩展](https://github.com/NapNeko/NapCatQQ/pull/1965)，
 不是标准 OneBot 11 能力。复用后台配置的 HTTP/WebSocket 连接及 Access Token，无需另外配置空间 Cookie。

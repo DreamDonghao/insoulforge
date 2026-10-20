@@ -2,6 +2,7 @@
 /// @brief 动作工具插件实现（ACTION，执行操作、产生副作用）
 
 #include <stdexcept>
+#include <charconv>
 
 #include <regex>
 
@@ -16,6 +17,7 @@
 #include <workflow/message/MessageRecord.hpp>
 #include <workflow/message/SessionId.hpp>
 #include <workflow/session/QQNameDirectory.hpp>
+#include <workflow/session/SessionStore.hpp>
 #include <workflow/OneBotEventWorkflow.hpp>
 #include <workflow/scheduling/TaskScheduler.hpp>
 #include <workflow/agent/tools/ToolRegistry.hpp>
@@ -31,6 +33,28 @@
 
 namespace insoulforge {
     namespace {
+        auto messageTarget(const json &args, const u64 currentSession) -> std::expected<u64, std::string> {
+            if (!args.contains("group_id")) return currentSession;
+            const auto &value = args.at("group_id");
+            if (!value.is_string()) return std::unexpected("group_id 必须是数字字符串群号");
+            const auto &text = value.get_ref<const std::string &>();
+            u64 groupId = 0;
+            const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), groupId);
+            if (error != std::errc{} || end != text.data() + text.size() || groupId == 0 ||
+                SessionId::isPrivate(groupId) || groupId == SessionId::kSystemAccountId)
+                return std::unexpected("group_id 无效，必须填写有效的群号，不能指定私聊会话");
+            if (!SessionStore::isSessionEnabled(groupId))
+                return std::unexpected(fmt::format("目标群 {} 未在后台启用，未发送消息", groupId));
+            return groupId;
+        }
+
+        auto sendToSession(const u64 sessionId, std::string content)
+          -> drogon::Task<std::expected<u64, std::string>> {
+            if (SessionId::isPrivate(sessionId))
+                co_return co_await MessageService::sendPrivateMsg(SessionId::privateUserId(sessionId), std::move(content));
+            co_return co_await MessageService::sendGroupMsg(sessionId, std::move(content));
+        }
+
         auto requestedImageSize(const json &args) -> std::optional<std::string> {
             auto size = trim(argString(args, "size"));
             if (size.empty()) {
@@ -98,14 +122,14 @@ namespace insoulforge {
           {
             .name = "send_qzone_msg",
             .description = "在机器人自己的 QQ 空间发布说说，在遇到高兴，离谱，无语的事的时候发送，不是发送聊天消息。"
-                           "支持文字和图片 URL，默认好友可见。"
+                           "支持文字和图片 URL，默认所有人可见。"
                            "超时或无法确认结果时不要自动重试，以免重复发布。",
             .parameters = json{{"type", "object"},
               {"properties",
                 {{"content", {{"type", "string"}, {"description", "说说正文，不能为空"}}},
                   {"images", {{"type", "array"}, {"items", {{"type", "string"}}}, {"maxItems", 9},
                                {"description", "可选，最多 9 张图片的 HTTP/HTTPS URL；不要编造地址"}}},
-                  {"ugc_right", {{"type", "integer"}, {"enum", {1, 4, 64}}, {"default", 4},
+                  {"ugc_right", {{"type", "integer"}, {"enum", {1, 4, 64}}, {"default", 1},
                                   {"description", "查看权限：1 所有人可见，4 好友可见，64 仅自己可见"}}}}},
               {"required", {"content"}}},
             .handler = [](const json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
@@ -118,7 +142,7 @@ namespace insoulforge {
                       (right != 1 && right != 4 && right != 64))) {
                     co_return std::string("ugc_right 必须为 1（所有人）、4（好友）或 64（仅自己）。");
                 }
-                json params = {{"content", content}, {"ugc_right", right.is_null() ? json(4) : right}};
+                json params = {{"content", content}, {"ugc_right", right.is_null() ? json(1) : right}};
                 const auto &images = atOrNull(args, "images");
                 if (!images.is_null()) {
                     if (!images.is_array() || images.size() > 9) {
@@ -332,6 +356,10 @@ namespace insoulforge {
                     "name": {
                         "type": "string",
                         "description": "表情名称（先调list_stickers查看可用名称）"
+                    },
+                    "group_id": {
+                        "type": "string",
+                        "description": "可选目标群号，仅可发送到后台已启用的群；省略则发送到当前会话"
                     }
                 },
                 "required": ["name"]
@@ -340,17 +368,21 @@ namespace insoulforge {
           {
             .name = "send_sticker",
             .description = "中途发送一张QQ收藏表情包（独立消息直接发出，不经reply；发出后回合不结束，"
-                           "最终仍用reply/no_reply收尾）。先调list_stickers查看可用表情名。",
+                           "最终仍用reply/no_reply收尾）。先调list_stickers查看可用表情名。"
+                           "可选group_id指定后台已启用的目标群，不受跨会话共享开关限制；省略则发送到当前会话。"
+                           "发送失败或超时不要自动重发。",
             .parameters = stickerParams,
             .handler = [](const json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
                 std::string name = argString(args, "name");
                 if (name.empty()) {
                     co_return std::string("请提供表情名称");
                 }
-                const auto sessionId = ctx.sessionId;
-                const json emoji = co_await ToolRuntime::findFavoriteEmoji(name, sessionId);
+                const auto target = messageTarget(args, ctx.sessionId);
+                if (!target) co_return target.error();
+                const auto destination = args.contains("group_id") ? fmt::format("目标群 {}：", *target) : std::string{};
+                const json emoji = co_await ToolRuntime::findFavoriteEmoji(name, ctx.sessionId);
                 if (emoji.is_null()) {
-                    co_return fmt::format("表情'{}'不存在，先调list_stickers查看可用表情", name);
+                    co_return fmt::format("{}表情'{}'不存在，先调list_stickers查看可用表情", destination, name);
                 }
 
                 // 商城表情（字段齐全）走 mface；个人收藏表情走 image+sub_type=1（QQ 渲染为表情）
@@ -363,30 +395,30 @@ namespace insoulforge {
                 } else if (const std::string url = getStr(emoji, "url"); !url.empty()) {
                     cqCode = fmt::format("[CQ:image,file={},sub_type=1,summary={}]", url, getStr(emoji, "summary"));
                 } else {
-                    co_return fmt::format("表情'{}'缺少图片地址，无法发送", name);
+                    co_return fmt::format("{}表情'{}'缺少图片地址，无法发送", destination, name);
                 }
 
-                // 走 MessageService 发送：成功后自动记入会话列表并推送 WebSocket，
-                // 后续轮次模型能从记录中看到自己发过这张表情
-                const auto messageId =
-                  SessionId::isPrivate(sessionId)
-                    ? co_await MessageService::sendPrivateMsg(SessionId::privateUserId(sessionId), cqCode)
-                    : co_await MessageService::sendGroupMsg(sessionId, cqCode);
+                // 消息由 MessageService 记入目标会话，当前调用方通过工具结果获知发送状态。
+                const auto messageId = co_await sendToSession(*target, std::move(cqCode));
                 if (!messageId) {
-                    co_return fmt::format("表情发送未确认成功：{}", messageId.error());
+                    co_return fmt::format("{}表情发送未确认成功：{}。不要自动重发。", destination, messageId.error());
                 }
-                co_return fmt::format("已发送表情「{}」", name);
+                co_return fmt::format("{}已发送表情「{}」", destination, name);
             },
           },
           ToolCategory::ACTION);
 
-        // reply_and_continue - 发送过程消息，回合不结束，最终回复仍由 reply/no_reply 收尾
+        // reply_and_continue - 发送消息后继续处理，最终由 reply/no_reply 收尾
         const json continueParams = json::parse(R"json({
                 "type": "object",
                 "properties": {
                     "content": {
                         "type": "string",
-                        "description": "过程消息内容，简短一句话，如：稍等，我去查一下"
+                        "description": "要发送的消息内容"
+                    },
+                    "group_id": {
+                        "type": "string",
+                        "description": "可选目标群号，仅可发送到后台已启用的群；省略则发送到当前会话"
                     }
                 },
                 "required": ["content"]
@@ -394,30 +426,30 @@ namespace insoulforge {
         registry.registerTool(
           {
             .name = "reply_and_continue",
-            .description = "中途发送一条文字消息（发出后回合不结束，最终仍用reply/no_reply收尾）。两个场景："
+            .description = "发送一条消息后继续处理（发出后回合不结束，最终仍用reply/no_reply收尾）。"
+                           "可选group_id指定后台已启用的目标群，不受跨会话共享开关限制；省略则发送到当前会话。"
+                           "可用于跨群发送消息，或以下场景："
                            "1) 接下来要执行耗时操作（搜索、深度思考、查资料等用户需要等待的事），先发一句"
                            "「稍等，我去查一下」，再调用耗时工具，拿到结果后用 reply 给出最终回复"
                            "（操作失败也要 reply 说明）；2) 想在正式回复前先发其他内容（连续多条消息）。"
-                           "日常单条回复直接用 reply。",
+                           "日常单条回复直接用 reply。发送失败或超时不要自动重发。",
             .parameters = continueParams,
             .handler = [](const json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
                 const std::string content = ExecutorAgent::cleanReplyContent(argString(args, "content"));
                 if (content.empty()) {
-                    co_return std::string("请提供要发送的过程消息内容");
+                    co_return std::string("请提供要发送的消息内容");
                 }
 
                 // 与 send_sticker 相同：经 MessageService 发送，成功后记入会话列表并推送 WebSocket
-                const auto sessionId = ctx.sessionId;
-                const auto messageId =
-                  SessionId::isPrivate(sessionId)
-                    ? co_await MessageService::sendPrivateMsg(SessionId::privateUserId(sessionId), content)
-                    : co_await MessageService::sendGroupMsg(sessionId, content);
+                const auto target = messageTarget(args, ctx.sessionId);
+                if (!target) co_return target.error();
+                const auto destination = args.contains("group_id") ? fmt::format("目标群 {}：", *target) : std::string{};
+                const auto messageId = co_await sendToSession(*target, content);
                 if (!messageId) {
                     co_return fmt::format(
-                      "过程消息发送未确认成功：{}。请继续处理，不要认为该消息已送达。", messageId.error());
+                      "{}消息发送未确认成功：{}。请继续处理，不要认为该消息已送达，不要自动重发。", destination, messageId.error());
                 }
-                co_return std::string(
-                  "过程消息已发送，请继续后续处理；最终回复仍用 reply 工具给出，操作失败也要 reply 告知用户");
+                co_return destination + "消息已发送，请继续后续处理；最终仍用 reply/no_reply 收尾，操作失败也要告知用户";
             },
           },
           ToolCategory::ACTION);

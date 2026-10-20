@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {computed, onMounted, onUnmounted, ref} from 'vue'
+import {ArrowDownWideNarrow, ArrowUpNarrowWide, Pencil, Trash2} from '@lucide/vue'
 
 interface PersonIdentity {
   qq: string
@@ -14,7 +15,7 @@ interface PersonSummary extends PersonIdentity {
 interface PersonDetail extends PersonIdentity {
   stable_memory: string[]
   recent_interactions: string[]
-  pending_entries: {content: string; source_session: string; time: string}[]
+  pending_entries: {id: string; content: string; source_session: string; time: string}[]
 }
 
 const people = ref<PersonSummary[]>([])
@@ -25,6 +26,11 @@ const loading = ref(false)
 const detailLoading = ref(false)
 const error = ref('')
 const detailError = ref('')
+const ascending = ref(false)
+const editing = ref(false)
+const draftText = ref('')
+const saving = ref(false)
+const editError = ref('')
 let nameTimer: ReturnType<typeof setTimeout> | undefined
 let disposed = false
 let summaryController: AbortController | undefined
@@ -32,6 +38,8 @@ let detailController: AbortController | undefined
 const filtered = computed(() => {
   const query = search.value.trim().toLowerCase()
   return people.value.filter(person => `${person.qq} ${person.name}`.toLowerCase().includes(query))
+    .sort((a, b) => (ascending.value ? a.affinity - b.affinity : b.affinity - a.affinity) ||
+      (BigInt(a.qq) < BigInt(b.qq) ? -1 : BigInt(a.qq) > BigInt(b.qq) ? 1 : 0))
 })
 const detailName = computed(() => {
   const person = people.value.find(person => person.qq === selected.value)
@@ -49,9 +57,11 @@ const sourceLabel = (session: string) => {
 }
 const formatTime = (value: string) => value ? new Date(value.replace(' ', 'T') + 'Z').toLocaleString() : '暂无'
 
-async function fetchPeopleJson(path: string, signal: AbortSignal) {
-  const response = await fetch(path, {signal})
+async function fetchPeopleJson(path: string, signal: AbortSignal, options: RequestInit = {}) {
+  const response = await fetch(path, {...options, signal})
   if (!response.ok) {
+    if (response.status === 409) throw new Error('人物信息已变化，请重新读取后编辑；当前草稿已保留')
+    if (response.status === 400) throw new Error('输入无效，请检查好感度及记忆内容')
     if (response.status === 404) throw new Error('人物查询接口不存在，请更新并重启后端服务')
     if (response.status === 401 || response.status === 403) throw new Error('登录已失效，请重新登录')
     throw new Error(`人物查询失败：HTTP ${response.status}`)
@@ -71,6 +81,9 @@ async function fetchPeopleJson(path: string, signal: AbortSignal) {
 }
 
 async function selectPerson(qq: string) {
+  if (saving.value || (editing.value && !window.confirm('放弃未保存的修改？'))) return
+  editing.value = false
+  editError.value = ''
   detailController?.abort()
   const controller = detailController = new AbortController()
   selected.value = qq
@@ -90,7 +103,7 @@ async function selectPerson(qq: string) {
 }
 
 async function loadPeople(refreshDetail = true) {
-  if (disposed || loading.value) return
+  if (disposed || loading.value || editing.value || saving.value) return
   clearTimeout(nameTimer)
   const controller = summaryController = new AbortController()
   loading.value = true
@@ -100,7 +113,7 @@ async function loadPeople(refreshDetail = true) {
     if (disposed) return
     if (!Array.isArray(data)) throw new Error('人物列表响应格式不正确')
     people.value = data
-    const qq = data.some((person: PersonSummary) => person.qq === selected.value) ? selected.value : data[0]?.qq
+    const qq = data.some((person: PersonSummary) => person.qq === selected.value) ? selected.value : filtered.value[0]?.qq
     if (!qq) {
       selected.value = ''
       detail.value = null
@@ -112,9 +125,63 @@ async function loadPeople(refreshDetail = true) {
       error.value = cause instanceof Error ? cause.message : '读取人物列表失败'
   } finally {
     loading.value = false
-    if (!disposed && people.value.some(person => person.name_pending))
+    if (!disposed && !editing.value && people.value.some(person => person.name_pending))
       nameTimer = setTimeout(() => void loadPeople(false), 2000)
   }
+}
+function beginEdit() {
+  if (!detail.value) return
+  clearTimeout(nameTimer)
+  editing.value = true
+  const {affinity, stable_memory, recent_interactions, pending_entries} = detail.value
+  draftText.value = JSON.stringify({affinity, stable_memory, recent_interactions,
+    pending_entries: pending_entries.map(({id, content}) => ({id, content}))}, null, 2)
+  editError.value = ''
+}
+function cancelEdit() {
+  editing.value = false
+  editError.value = ''
+  void loadPeople(false)
+}
+async function savePerson() {
+  if (!editing.value || !detail.value || saving.value) return
+  let value
+  try {
+    value = JSON.parse(draftText.value)
+  } catch {
+    editError.value = 'JSON 格式不正确，请检查后保存'
+    return
+  }
+  saving.value = true
+  editError.value = ''
+  try {
+    await fetchPeopleJson(`/admin/api/people/${encodeURIComponent(selected.value)}`, new AbortController().signal, {
+      method: 'PUT', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({expected: detail.value, replacement: value})
+    })
+    editing.value = false
+  } catch (cause) {
+    editError.value = cause instanceof Error ? cause.message : '保存失败'
+  } finally { saving.value = false }
+  if (!editing.value && !disposed) await loadPeople()
+}
+async function deletePerson() {
+  if (!detail.value || saving.value || !window.confirm(`删除 ${detailName.value}（${selected.value}）的全部人物记忆和好感度？聊天记录不受影响，后续聊天可重新建立档案。`)) return
+  const index = filtered.value.findIndex(person => person.qq === selected.value)
+  const next = filtered.value[index + 1]?.qq || filtered.value[index - 1]?.qq || ''
+  saving.value = true
+  editError.value = ''
+  try {
+    await fetchPeopleJson(`/admin/api/people/${encodeURIComponent(selected.value)}`, new AbortController().signal, {
+      method: 'DELETE', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({expected: detail.value})
+    })
+    selected.value = next
+    detail.value = null
+  } catch (cause) {
+    editError.value = cause instanceof Error ? cause.message : '删除失败'
+    return
+  } finally { saving.value = false }
+  if (!disposed) await loadPeople()
 }
 onMounted(loadPeople)
 onUnmounted(() => {
@@ -126,12 +193,13 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div>
+  <div class="people-page">
     <div class="page-header"><h1 class="page-title">人物信息</h1><p class="page-subtitle">人物记忆与全局好感度</p></div>
     <div class="people-toolbar">
       <input v-model="search" class="form-input" placeholder="搜索昵称或 QQ 号" aria-label="搜索人物">
       <span>{{ filtered.length }} / {{ people.length }} 人</span>
-      <button class="btn btn-secondary" :disabled="loading" @click="loadPeople()">刷新</button>
+      <button class="btn btn-secondary icon-button" :title="ascending ? '好感度：从低到高' : '好感度：从高到低'" :aria-label="ascending ? '好感度：从低到高' : '好感度：从高到低'" @click="ascending = !ascending"><ArrowUpNarrowWide v-if="ascending" :size="18"/><ArrowDownWideNarrow v-else :size="18"/></button>
+      <button class="btn btn-secondary" :disabled="loading || editing || saving" @click="loadPeople()">刷新</button>
     </div>
     <p v-if="error" role="alert">{{ error }}</p>
     <p v-else-if="loading && !people.length" class="empty">加载中...</p>
@@ -150,6 +218,21 @@ onUnmounted(() => {
         <p v-if="detailLoading" class="empty">加载中...</p>
         <p v-else-if="detailError" role="alert">{{ detailError }}</p>
         <template v-else-if="detail">
+          <div class="person-actions" v-if="!editing">
+            <button class="btn btn-secondary" :disabled="saving" @click="beginEdit"><Pencil :size="16"/>编辑</button>
+            <button class="btn btn-danger icon-button" title="删除人物" aria-label="删除人物" :disabled="saving" @click="deletePerson"><Trash2 :size="16"/></button>
+          </div>
+          <p v-if="editError" role="alert">{{ editError }}</p>
+          <form v-if="editing" class="person-editor" @submit.prevent="savePerson">
+            <fieldset :disabled="saving">
+              <header class="person-heading editor-heading">
+                <div><h2>{{ detailName }}</h2><span>QQ {{ selected }}</span></div>
+              </header>
+              <textarea v-model="draftText" class="form-input person-json" aria-label="人物数据 JSON" spellcheck="false"/>
+              <footer class="person-actions editor-footer"><button type="button" class="btn btn-secondary" @click="cancelEdit">取消</button><button class="btn btn-primary" type="submit">{{ saving ? '保存中...' : '保存' }}</button></footer>
+            </fieldset>
+          </form>
+          <template v-else>
           <header class="person-heading">
             <div><h2>{{ detailName }}</h2><span>QQ {{ detail.qq }}</span></div>
             <div class="score"><span>全局好感度</span><strong :class="scoreClass(detail.affinity)">{{ detail.affinity > 0 ? '+' : '' }}{{ detail.affinity }}</strong></div>
@@ -166,6 +249,7 @@ onUnmounted(() => {
               <p>{{ entry.content }}</p><small>{{ formatTime(entry.time) }} · {{ sourceLabel(entry.source_session) }}</small>
             </article>
           </section>
+          </template>
         </template>
       </section>
     </div>
@@ -173,10 +257,19 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.people-page { display: flex; flex-direction: column; height: calc(100dvh - 32px); min-height: 0; }
+.people-page > .page-header, .people-toolbar { flex-shrink: 0; }
+.person-actions { display: flex; justify-content: flex-end; gap: 12px; margin-bottom: 16px; }
+.person-actions .btn { display: inline-flex; align-items: center; gap: 8px; }
+.icon-button { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; min-width: 36px; padding: 0; flex-shrink: 0; }
+.person-editor fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.person-json { display: block; width: 100%; min-height: 360px; height: 55vh; resize: vertical; font-family: monospace; font-size: 14px; line-height: 1.7; tab-size: 2; }
+.editor-footer { padding-top: 16px; margin: 0; }
 .people-toolbar { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
 .people-toolbar input { max-width: 420px; min-width: 0; flex: 1; }
 .people-toolbar span, .muted, small, .person-heading span { color: var(--text-secondary); }
-.people-layout { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); border-top: 1px solid var(--border-color); }
+.people-layout { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); flex: 1; min-height: 0; overflow: hidden; border-top: 1px solid var(--border-color); }
+.people-list, .person-detail { min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-gutter: stable; }
 .people-list { border-right: 1px solid var(--border-color); }
 .person-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; width: 100%; min-height: 76px; padding: 16px; border: 0; border-bottom: 1px solid var(--border-color); background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; }
 .person-row:hover, .person-row.selected { background: var(--bg-secondary); }
@@ -197,9 +290,10 @@ h3 small { margin-left: 8px; font-weight: normal; }
 .memory-entry p, li { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; margin-bottom: 8px; }
 .empty { padding: 32px 16px; color: var(--text-secondary); text-align: center; }
 @media (max-width: 760px) {
-  .people-layout { grid-template-columns: minmax(0, 1fr); }
-  .people-list { max-height: 260px; overflow-y: auto; border-right: 0; border-bottom: 1px solid var(--border-color); }
+  .people-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(76px, 28%) minmax(0, 1fr); }
+  .people-list { border-right: 0; border-bottom: 1px solid var(--border-color); }
   .person-detail { padding: 24px 0; }
+  .editor-heading { flex-wrap: wrap; }
   .people-toolbar { flex-wrap: wrap; gap: 12px; }
 }
 </style>
