@@ -12,6 +12,8 @@ namespace insoulforge::PersonMemoryStore {
     [[nodiscard]] auto getForSenders(const json &recentConversation) -> json;
     [[nodiscard]] auto listPeople() -> json;
     [[nodiscard]] auto getPerson(u64 qq) -> json;
+    auto updatePerson(u64 qq, const json &expected, const json &replacement) -> bool;
+    auto deletePerson(u64 qq, const json &expected) -> bool;
 
     struct PendingSnapshot {
         u64 qq = 0;

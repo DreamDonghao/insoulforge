@@ -10,7 +10,6 @@
 #include <workflow/agent/memory/maintenance/MemoryMaintenanceStore.hpp>
 #include <workflow/message/MessageRecord.hpp>
 #include <workflow/message/SessionId.hpp>
-#include <workflow/session/SessionStore.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
@@ -59,6 +58,7 @@ namespace insoulforge {
               {{"role", "system"}, {"content", R"(你是一个【人物记忆提取器】，同时评估用户给机器人留下的印象变化。群聊和私聊采用同样规则。
 
 人物记忆按真实发送者 QQ 归属；每条只包含一条完整信息，简短客观；不推测、不扩写。
+发送者昵称、群名片、@ 对象名称等身份元数据只用于识别人，不直接提取为昵称或外号记忆；只有聊天正文明确表达称呼约定时才记录别称。
 着重提取外号别称、喜好、习惯、关系和重要约定。
 不提取一次性玩笑、情绪宣泄、系统指令、控制信息、固定套话或无价值内容。
 好感度变化 delta 为 -5 到 5 的整数；友好、帮助、陪伴等正面印象给正分，辱骂、骚扰等负面印象给负分；普通聊天没有明显变化不输出。
@@ -170,6 +170,7 @@ namespace insoulforge {
 
 shortTerm 包含当前会话的 aliases、recent_events，以及仅用于旧内容过渡的 legacy_entries。新消息的个人喜好、职业、性格等人物信息不可写入这些字段。
 aliases 按有明确依据的真实 QQ 归属，保存本会话的称呼和外号，合并去重；保留已有称呼，有明确纠正时才更新，不把一次性调侃当成固定外号，也不因事件过期而删除称呼。
+发送者昵称、群名片、@ 对象名称等身份元数据只用于识别人，不直接提取为昵称或外号记忆；只有聊天正文明确表达称呼约定时才记录别称。
 recent_events 记录本会话发生的事情和最新进展，不记流水账；同一事件更新合并，没有相关新信息时保留。可根据完成状态和后续价值移除过时事件，不使用固定过期天数，不限制条数。
 直接依据“当前短期记忆”和“待总结消息”更新，即使没有“新提取的记忆”也要整理会话事件。“补充上下文”只消除歧义，不可直接提取其中的新内容。
 legacy_entries 只保留“已有过渡记忆”中的原文条目，不能新增或改写，也不能从当前消息或人物档案补入内容。后续可根据新证据、重复程度和相关性逐步删去过时或已归类的内容，不设固定天数，不因旧内容是个人属性就立即清空。没有明确理由时保留，不要一次性遗忘全部内容。
@@ -244,11 +245,14 @@ longTerm 沿用原规则，仅依据“新提取的记忆”和“召回的长�
             co_return result;
         }
 
-        [[nodiscard]] auto projectMessages(const json &messages, const bool includeGroupCard) -> json {
+        [[nodiscard]] auto projectMessages(const json &messages) -> json {
             auto records = json::array();
             for (const auto &message: messages) {
                 if (message.is_object()) {
-                    records.push_back(MessageRecord::projectForAgent(message, false, includeGroupCard));
+                    auto record = MessageRecord::projectForAgent(message, false, false);
+                    // 旧的召回结果不能作为本批新事实再次提取。
+                    record.erase("memories");
+                    records.push_back(std::move(record));
                 }
             }
             return records;
@@ -258,15 +262,13 @@ longTerm 沿用原规则，仅依据“新提取的记忆”和“召回的长�
 
     auto MemoryMaintenanceService::prepare(const u64 sessionId, json messages, json contextMessages)
       -> drogon::Task<std::optional<MemoryMaintenanceResult>> {
-        const bool includeGroupCard =
-          !SessionId::isPrivate(sessionId) && SessionStore::getSessionConfig(sessionId).sendGroupCard;
-        const auto records = projectMessages(messages, includeGroupCard);
+        const auto records = projectMessages(messages);
         if (records.empty()) {
             co_return MemoryMaintenanceResult{};
         }
 
         const auto &config = Config::instance();
-        const auto contextRecords = projectMessages(contextMessages, includeGroupCard);
+        const auto contextRecords = projectMessages(contextMessages);
         auto extracted = co_await extractMemories(records, contextRecords, sessionId);
         if (!extracted) {
             co_return std::nullopt;

@@ -1318,6 +1318,102 @@ namespace {
               "snapshot commit keeps new entries and does not touch affinity or session memory", kTestName);
         }
         check(!PersonMemoryStore::pendingSnapshot(999), "absent person has no work", kTestName);
+        auto original = PersonMemoryStore::getPerson(11);
+        auto edited = original;
+        edited["affinity"] = -100;
+        edited["stable_memory"] = json::array();
+        edited["pending_entries"][0]["content"] = "人工修正";
+        const auto stale = PersonMemoryStore::pendingSnapshot(11);
+        check(PersonMemoryStore::updatePerson(11, original, edited), "updates person atomically", kTestName);
+        check(PersonMemoryStore::getPerson(11)["affinity"] == -100 &&
+                PersonMemoryStore::getPerson(11)["pending_entries"][0]["content"] == "人工修正",
+          "edits affinity and pending content", kTestName);
+        check(!PersonMemoryStore::updatePerson(11, original, edited) &&
+                !PersonMemoryStore::deletePerson(11, original), "rejects stale admin snapshots", kTestName);
+        bool conflict = false;
+        try { PersonMemoryStore::applyConsolidation(*stale,
+            {{"stable_memory", {"过期结果"}}, {"recent_interactions", json::array()}}); }
+        catch (const DbError &) { conflict = true; }
+        check(conflict && PersonMemoryStore::getPerson(11)["stable_memory"].empty(),
+          "daily consolidation cannot overwrite manual edits", kTestName);
+        original = PersonMemoryStore::getPerson(11);
+        edited = original;
+        edited["pending_entries"] = json::array();
+        check(PersonMemoryStore::updatePerson(11, original, edited) &&
+                PersonMemoryStore::getPerson(11)["pending_entries"].empty(),
+          "editing can remove pending entries", kTestName);
+        MemoryMaintenanceStore::apply(db, 100, {.personEntries = {{11, "删除前条目"}, {22, "保留其他人"}}});
+        const auto beforeDelete = PersonMemoryStore::pendingSnapshot(11);
+        check(PersonMemoryStore::deletePerson(11, PersonMemoryStore::getPerson(11)) &&
+                PersonMemoryStore::getPerson(11).is_null() && !PersonMemoryStore::getPerson(22).is_null(),
+          "deletes all person data without touching others", kTestName);
+        conflict = false;
+        try { PersonMemoryStore::applyConsolidation(*beforeDelete,
+            {{"stable_memory", {"过期结果"}}, {"recent_interactions", json::array()}}); }
+        catch (const DbError &) { conflict = true; }
+        check(conflict && PersonMemoryStore::getPerson(11).is_null(),
+          "daily consolidation cannot recreate deleted person", kTestName);
+        MemoryMaintenanceStore::apply(db, 100, {.affinity = {{33, 1}}});
+        original = PersonMemoryStore::getPerson(33);
+        edited = original;
+        edited["stable_memory"] = {"首次手动记忆"};
+        check(PersonMemoryStore::updatePerson(33, original, edited) &&
+                PersonMemoryStore::getPerson(33)["stable_memory"] == edited["stable_memory"],
+          "affinity-only person can receive a profile", kTestName);
+        const AdminController controller;
+        drogon::HttpResponsePtr response;
+        const auto callback = [&](const drogon::HttpResponsePtr &value) { response = value; };
+        const auto unchanged = PersonMemoryStore::getPerson(22);
+        check(sqlite3_exec(db.handle(),
+                "CREATE TRIGGER reject_unchanged_entry_update BEFORE UPDATE ON person_memory_entries "
+                "BEGIN SELECT RAISE(ABORT, 'unexpected entry update'); END", nullptr, nullptr, nullptr) == SQLITE_OK,
+          "creates no-op update guard", kTestName);
+        check(PersonMemoryStore::updatePerson(22, unchanged, unchanged),
+          "unchanged pending entries do not issue updates", kTestName);
+        sqlite3_exec(db.handle(), "DROP TRIGGER reject_unchanged_entry_update", nullptr, nullptr, nullptr);
+        auto duplicateEntries = unchanged;
+        duplicateEntries["pending_entries"].push_back(duplicateEntries["pending_entries"][0]);
+        auto duplicateRequest = drogon::HttpRequest::newHttpRequest();
+        duplicateRequest->setBody(json({{"expected", unchanged}, {"replacement", duplicateEntries}}).dump());
+        drogon::sync_wait(controller.updatePerson(duplicateRequest, callback, "22"));
+        check(response->statusCode() == drogon::k400BadRequest && PersonMemoryStore::getPerson(22) == unchanged,
+          "duplicate pending IDs are rejected without modifying data", kTestName);
+        const auto update = [&](const json &body) {
+            auto request = drogon::HttpRequest::newHttpRequest();
+            request->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            request->setBody(body.dump());
+            drogon::sync_wait(controller.updatePerson(request, callback, "33"));
+            return response->statusCode();
+        };
+        original = PersonMemoryStore::getPerson(33);
+        edited = original;
+        for (const json &score : {json(-101), json(101), json(0.5), json("1")}) {
+            edited["affinity"] = score;
+            check(update({{"expected", original}, {"replacement", edited}}) == drogon::k400BadRequest,
+              "API rejects invalid affinity without writing", kTestName);
+        }
+        edited["affinity"] = 100;
+        edited["stable_memory"] = {" "};
+        check(update({{"expected", original}, {"replacement", edited}}) == drogon::k400BadRequest,
+          "API rejects blank memory items", kTestName);
+        edited["stable_memory"] = json::array();
+        edited["pending_entries"] = {{{"id", "999999"}, {"content", "伪造条目"}}};
+        check(update({{"expected", original}, {"replacement", edited}}) == drogon::k400BadRequest,
+          "API cannot add arbitrary pending IDs", kTestName);
+        edited["pending_entries"] = json::array();
+        check(update({{"expected", original}, {"replacement", edited}}) == drogon::k200OK &&
+                PersonMemoryStore::getPerson(33)["affinity"] == 100,
+          "API accepts upper affinity bound and empty categories", kTestName);
+        check(update({{"expected", original}, {"replacement", edited}}) == drogon::k409Conflict,
+          "API reports stale edits as HTTP 409", kTestName);
+        auto request = drogon::HttpRequest::newHttpRequest();
+        request->setBody(json({{"expected", original}}).dump());
+        drogon::sync_wait(controller.deletePerson(request, callback, "33"));
+        check(response->statusCode() == drogon::k409Conflict, "delete API rejects stale snapshot", kTestName);
+        request->setBody(json({{"expected", PersonMemoryStore::getPerson(33)}}).dump());
+        drogon::sync_wait(controller.deletePerson(request, callback, "33"));
+        check(response->statusCode() == drogon::k200OK && PersonMemoryStore::getPerson(33).is_null(),
+          "delete API removes person", kTestName);
         db.close();
     }
 

@@ -827,6 +827,69 @@ auto AdminController::getPerson(HttpRequestPtr req, std::function<void(const Htt
     co_return;
 }
 
+namespace {
+    auto validPersonEdit(const json &body) -> bool {
+        if (!body.is_object() || !body.contains("expected") || !body["expected"].is_object() ||
+            !atOrNull(body["expected"], "pending_entries").is_array()) return false;
+        const auto &edit = atOrNull(body, "replacement");
+        if (!edit.is_object()) return false;
+        const auto &score = atOrNull(edit, "affinity");
+        if (!score.is_number_integer() || score < -100 || score > 100) return false;
+        for (const auto key : {"stable_memory", "recent_interactions"}) {
+            const auto &items = atOrNull(edit, key);
+            if (!items.is_array()) return false;
+            for (const auto &item : items)
+                if (!item.is_string() || trim(item.get<std::string>()).empty()) return false;
+        }
+        const auto &entries = atOrNull(edit, "pending_entries");
+        if (!entries.is_array()) return false;
+        std::unordered_set<std::string> availableIds;
+        for (const auto &entry : body["expected"]["pending_entries"])
+            availableIds.insert(getStr(entry, "id"));
+        for (const auto &entry : entries) {
+            const auto id = getStr(entry, "id");
+            // 每个已有 ID 只能使用一次，同时拒绝新增和重复的待整理条目。
+            if (id.empty() || availableIds.erase(id) != 1 || !atOrNull(entry, "content").is_string() ||
+                trim(getStr(entry, "content")).empty()) return false;
+        }
+        return true;
+    }
+}
+
+auto AdminController::updatePerson(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
+  const std::string &qq) const -> Task<> {
+    const auto id = parseUInt64(qq);
+    const auto body = parseJsonBody(req);
+    auto status = drogon::k400BadRequest;
+    std::string message = "人物数据无效：好感度须为 -100～100 的整数，记忆须为非空文本";
+    if (id && !SessionId::isPrivate(id) && id != SessionId::kSystemAccountId && body && validPersonEdit(*body)) {
+        const bool saved = PersonMemoryStore::updatePerson(id, body->at("expected"), body->at("replacement"));
+        status = saved ? drogon::k200OK : drogon::k409Conflict;
+        message = saved ? "人物信息已保存" : "人物信息已变化，请重新读取后编辑；当前草稿已保留";
+    }
+    auto response = jsonResponse(status == drogon::k200OK ? AdminResponse::okJson(message) : AdminResponse::errorJson(message));
+    response->setStatusCode(status);
+    callback(response);
+    co_return;
+}
+
+auto AdminController::deletePerson(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
+  const std::string &qq) const -> Task<> {
+    const auto id = parseUInt64(qq);
+    const auto body = parseJsonBody(req);
+    auto status = drogon::k400BadRequest;
+    std::string message = "无效的人物删除请求";
+    if (id && !SessionId::isPrivate(id) && id != SessionId::kSystemAccountId && body && body->contains("expected") && body->at("expected").is_object()) {
+        const bool removed = PersonMemoryStore::deletePerson(id, body->at("expected"));
+        status = removed ? drogon::k200OK : drogon::k409Conflict;
+        message = removed ? "人物已删除" : "人物信息已变化，请刷新后重试";
+    }
+    auto response = jsonResponse(status == drogon::k200OK ? AdminResponse::okJson(message) : AdminResponse::errorJson(message));
+    response->setStatusCode(status);
+    callback(response);
+    co_return;
+}
+
 auto AdminController::getSessionAffinity(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
   const std::string &sessionId) const -> Task<> {
     const u64 gid = std::stoull(sessionId);

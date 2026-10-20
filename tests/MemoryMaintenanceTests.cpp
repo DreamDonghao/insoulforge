@@ -35,6 +35,8 @@
 #include <workflow/agent/tools/ToolRegistry.hpp>
 #include <workflow/history/ChatRecordManager.hpp>
 #include <workflow/message/SessionId.hpp>
+#include <workflow/message/MessageRecord.hpp>
+#include <workflow/session/SessionStore.hpp>
 #include <workflow/session/QQNameDirectory.hpp>
 
 namespace {
@@ -400,10 +402,20 @@ namespace {
                   {"sender", {{"qq", "11"}, {"name", "Alice"}, {"card", "群名片"}}},
                   {"segments", {{{"type", "text"}, {"text", "引号\"与换行\n"}}}},
                   {"assets", {{"images", {{{"source", {{"url", "https://example.com/private.png"}}}}}}}},
+                  {"memories", {"stale-recalled-memory"}},
                   {"tool_history", {{{"name", "hidden"}}}}});
             }
-            require((co_await MemoryMaintenanceService::prepare(100, std::move(many), json::array())).has_value(),
+            const auto normalProjection = MessageRecord::projectForAgent(many[2], false, true);
+            require(normalProjection["sender"].contains("card") && normalProjection.contains("memories"),
+              "normal reply projection unexpectedly strips memory or card");
+            const auto savedConfig = SessionStore::getSessionConfig(100);
+            auto withCard = savedConfig;
+            withCard.sendGroupCard = true;
+            SessionStore::saveSessionConfig(100, withCard);
+            auto context = json::array({many[2]});
+            require((co_await MemoryMaintenanceService::prepare(100, std::move(many), std::move(context))).has_value(),
               "joint extraction lost batch records or leaked media sources");
+            SessionStore::saveSessionConfig(100, savedConfig);
 
             PromptService::initialize(database);
             auto &registry = ToolRegistry::instance();
@@ -551,14 +563,26 @@ auto main() -> int {
           const auto prompt = body["messages"][0]["content"].get<std::string>();
           const bool extraction = prompt.find("人物记忆提取器") != std::string::npos;
           const auto current = mode.load();
-          if (current == Mode::Projection && extraction) {
+          if (current == Mode::Projection) {
               const auto input = body["messages"][1]["content"].get<std::string>();
-              const std::string prefix = "=== 待提取消息 ===\n";
-              const auto end = input.find("\n=== 补充上下文");
-              const auto records = json::parse(input.substr(prefix.size(), end - prefix.size()));
-              if (!extraction || records.size() != 305 || records[304]["message_id"] != "304" ||
-                  records[0].contains("assets") || records[0].contains("tool_history") ||
-                  records[0]["sender"].contains("card")) {
+              const std::string heading = extraction ? "=== 待提取消息 ===\n" : "=== 待总结消息 ===\n";
+              const std::string contextHeading = "\n=== 补充上下文（不得提取） ===\n";
+              const auto begin = input.find(heading) + heading.size();
+              const auto end = input.find(contextHeading, begin);
+              const auto records = json::parse(input.substr(begin, end - begin));
+              const auto contextBegin = end + contextHeading.size();
+              const auto contextEnd = input.find(extraction ? "\n\n请输出" : "\n=== 新提取的记忆", contextBegin);
+              const auto context = json::parse(input.substr(contextBegin, contextEnd - contextBegin));
+              const auto validRecord = [](const json &record) {
+                  return !record.contains("assets") && !record.contains("tool_history") &&
+                    !record.contains("memories") && !record["sender"].contains("card") &&
+                    record["sender"]["name"] == "Alice" &&
+                    record["segments"][0]["text"] == "引号\"与换行\n";
+              };
+              if (records.size() != 305 || records[304]["message_id"] != "304" ||
+                  !std::ranges::all_of(records, validRecord) || context.size() != 1 || !validRecord(context[0]) ||
+                  prompt.find("身份元数据只用于识别人") == std::string::npos ||
+                  prompt.find("只有聊天正文明确表达称呼约定时才记录别称") == std::string::npos) {
                   auto reply = drogon::HttpResponse::newHttpResponse();
                   reply->setStatusCode(drogon::k400BadRequest);
                   callback(reply);
