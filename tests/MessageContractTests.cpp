@@ -1005,6 +1005,11 @@ namespace {
         check(registry.registerPlugin("contract.qzone", [](insoulforge::ToolRegistry &staged) -> void {
             insoulforge::ActionToolsPlugin{"test-bot"}.registerTools(staged);
         }), "action tools register", kTestName);
+        for (const auto &tool : registry.getTools({})) {
+            if (tool["function"]["name"] == "send_qzone_msg")
+                check(tool["function"]["parameters"]["properties"]["ugc_right"]["default"] == 1,
+                  "qzone default visibility is public", kTestName);
+        }
         const auto reject = [&](const insoulforge::json &args, const std::string_view expected) -> void {
             const auto result = drogon::sync_wait(registry.executeTool("send_qzone_msg", args, {.sessionId = 123}));
             check(result.find(expected) != std::string::npos, "invalid arguments reject before publishing", kTestName);
