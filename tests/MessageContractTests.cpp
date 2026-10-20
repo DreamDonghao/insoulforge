@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -23,7 +24,7 @@
 #include <workflow/agent/ability/AsyncTaskManager.hpp>
 #include <workflow/agent/memory/LongTermMemoryStore.hpp>
 #include <workflow/agent/memory/MemoryStore.hpp>
-#include <workflow/agent/memory/affinity/AffinityMaintenanceService.hpp>
+#include <workflow/agent/memory/PersonMemoryStore.hpp>
 #include <workflow/agent/memory/affinity/AffinityStore.hpp>
 #include <workflow/agent/memory/maintenance/MemoryMaintenanceService.hpp>
 #include <workflow/agent/memory/maintenance/MemoryMaintenanceStore.hpp>
@@ -853,15 +854,14 @@ namespace {
         const auto first = insoulforge::ExecutorAgent::buildIterationMessages(history, 1, 8);
         const auto middle = insoulforge::ExecutorAgent::buildIterationMessages(history, 3, 8);
         const auto last = insoulforge::ExecutorAgent::buildIterationMessages(history, 8, 8);
-        check(first.size() == history.size() && middle.size() == first.size() && last.size() == first.size(),
-          "execution status adds no messages", kTestName);
+        check(first.size() == history.size() + 1 && middle.size() == first.size() && last.size() == first.size(),
+          "each request adds one transient execution-state message", kTestName);
         for (size_t index = 0; index < history.size(); ++index) {
-            if (index == 1) continue;
             check(first[index] == history[index] && middle[index] == history[index] && last[index] == history[index],
               "request status preserves the full history and tool results", kTestName);
         }
         const auto context = [](const insoulforge::json &messages) {
-            return insoulforge::json::parse(messages[1]["content"].get<std::string>());
+            return insoulforge::json::parse(messages.back()["content"].get<std::string>());
         };
         const auto firstContext = context(first);
         check(firstContext["execution_state"]["remaining_rounds"] == 7 &&
@@ -876,16 +876,15 @@ namespace {
         const auto single = insoulforge::ExecutorAgent::buildIterationMessages(history, 1, 1);
         check(context(single)["execution_state"]["reply_only"] == true,
           "a one-round limit is immediately reply-only", kTestName);
-        auto withoutState = firstContext;
-        withoutState.erase("execution_state");
-        check(withoutState == context(history), "response requirements and chat context remain unchanged", kTestName);
+        check(first.back()["role"] == "system" && firstContext.size() == 1,
+          "transient system message contains structured data only", kTestName);
         const insoulforge::json mcp = {{"page_size", 10}, {"max_per_enable", 4},
           {"max_per_reply", 12}, {"selected_count", 2}};
-        const auto withMcp = insoulforge::ExecutorAgent::buildIterationMessages(first, 2, 8, mcp);
+        const auto withMcp = insoulforge::ExecutorAgent::buildIterationMessages(history, 2, 8, mcp);
         check(context(withMcp)["execution_state"]["mcp"] == mcp &&
                 context(withMcp)["execution_state"]["current_round"] == 2,
           "each request replaces stale execution state and includes current MCP limits", kTestName);
-        const auto finalMcp = insoulforge::ExecutorAgent::buildIterationMessages(withMcp, 8, 8, mcp);
+        const auto finalMcp = insoulforge::ExecutorAgent::buildIterationMessages(history, 8, 8, mcp);
         check(!context(finalMcp)["execution_state"].contains("mcp") &&
                 !firstContext["execution_state"].contains("mcp"),
           "MCP status is absent when unavailable or reply-only", kTestName);
@@ -1126,34 +1125,37 @@ namespace {
         const insoulforge::PreparedLongTermMemory longTerm{
           .content = "Alice 喜欢 C++", .embedding = {0.1F, 0.2F}, .replacedIds = {}};
         insoulforge::MemoryMaintenanceStore::apply(
-          database, 100, {.shortTerm = "近期状态", .longTerm = {longTerm}}, {{11, 3}});
+          database, 100, {.shortTerm = "近期状态", .longTerm = {longTerm},
+            .personEntries = {{11, "喜欢 C++"}}, .affinity = {{11, 3}}});
+        const auto personSenders = insoulforge::json::array({{{"sender", {{"qq", "11"}}}}});
+        const auto initialProfiles = insoulforge::PersonMemoryStore::getForSenders(personSenders);
         const auto resultsPreserved = [&]() -> bool {
             return insoulforge::MemoryStore::getShortTermMemory(100) == "近期状态" &&
                    insoulforge::LongTermMemoryStore::countMemories(100) == 1 &&
-                   insoulforge::AffinityStore::getAffinityMap(100)[11] == 3;
+                   insoulforge::AffinityStore::getAffinityMap()[11] == 3 &&
+                   insoulforge::PersonMemoryStore::getForSenders(personSenders) == initialProfiles;
         };
         check(resultsPreserved(), "commits memory and affinity together", kTestName);
         check(sqlite3_exec(database.handle(),
-                "CREATE TRIGGER reject_affinity BEFORE INSERT ON group_affinity BEGIN SELECT RAISE(ABORT, 'test'); END",
+                "CREATE TRIGGER reject_affinity BEFORE INSERT ON person_affinity BEGIN SELECT RAISE(ABORT, 'test'); END",
                 nullptr, nullptr, nullptr) == SQLITE_OK,
           "creates failure fixture", kTestName);
         bool failed = false;
         try {
             insoulforge::MemoryMaintenanceStore::apply(
-              database, 100, {.shortTerm = "不能保存", .longTerm = {longTerm}}, {{12, 5}});
+              database, 100, {.shortTerm = "不能保存", .longTerm = {longTerm},
+                .personEntries = {{11, "不能保存"}}, .affinity = {{12, 5}}});
         } catch (const insoulforge::DbError &) {
             failed = true;
         }
         check(failed && resultsPreserved(), "affinity failure rolls back all memory writes", kTestName);
         check(sqlite3_exec(database.handle(), "DROP TRIGGER reject_affinity", nullptr, nullptr, nullptr) == SQLITE_OK,
           "removes failure fixture", kTestName);
-        insoulforge::MemoryMaintenanceStore::apply(database, 100, {}, {});
+        insoulforge::MemoryMaintenanceStore::apply(database, 100, {});
         check(resultsPreserved(), "empty result preserves saved memory", kTestName);
         const auto memory = drogon::sync_wait(
           insoulforge::MemoryMaintenanceService::prepare(100, insoulforge::json::array(), insoulforge::json::array()));
-        const auto affinity =
-          drogon::sync_wait(insoulforge::AffinityMaintenanceService::prepare(100, insoulforge::json::array()));
-        check(memory.has_value() && affinity && affinity->empty(), "empty input is a successful empty calculation",
+        check(memory.has_value() && memory->affinity.empty(), "empty input is a successful empty calculation",
           kTestName);
         check(sqlite3_exec(database.handle(),
                 "CREATE TABLE memory_maintenance_jobs(id INTEGER PRIMARY KEY);"
@@ -1165,19 +1167,177 @@ namespace {
           "creates v17 queues", kTestName);
         insoulforge::SchemaMigrator::migrate(database.handle());
         check(noTaskTables() && resultsPreserved(), "upgrade removes old tasks but preserves results", kTestName);
-        insoulforge::MemoryMaintenanceStore::apply(database, 200, {.longTerm = {longTerm}}, {});
+        insoulforge::MemoryMaintenanceStore::apply(database, 200, {.longTerm = {longTerm}});
         const auto oldEntries = insoulforge::LongTermMemoryStore::listMemories(200, 1, 0);
         const i64 sourceId = oldEntries.front().id;
         const insoulforge::PreparedLongTermMemory replacementA{
           .content = "Alice 喜欢编程", .embedding = {0.1F, 0.2F}, .replacedIds = {sourceId, sourceId}};
         const insoulforge::PreparedLongTermMemory replacementB{
           .content = "Alice 使用 C++", .embedding = {0.2F, 0.3F}, .replacedIds = {sourceId}};
-        insoulforge::MemoryMaintenanceStore::apply(database, 200, {.longTerm = {replacementA, replacementB}}, {});
+        insoulforge::MemoryMaintenanceStore::apply(database, 200, {.longTerm = {replacementA, replacementB}});
         const auto replacements = insoulforge::LongTermMemoryStore::listMemories(200, 10, 0);
         check(replacements.size() == 2 &&
                 std::ranges::none_of(replacements, [sourceId](const auto &entry) { return entry.id == sourceId; }),
           "store deduplicates replacement IDs across all new memories", kTestName);
         database.close();
+    }
+
+    void testGlobalPersonMemory() {
+        constexpr std::string_view kTestName = "global person memory";
+        using namespace insoulforge;
+        auto &db = Database::instance();
+        const auto path = std::filesystem::temp_directory_path() /
+                          ("insoulforge-person-memory-" +
+                            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".db");
+        check(db.initialize(path.string()).has_value(), "initializes database", kTestName);
+        check(sqlite3_exec(db.handle(),
+                "DROP TABLE person_affinity;"
+                "CREATE TABLE group_affinity(group_id INTEGER, qq_number INTEGER, affinity INTEGER);"
+                "INSERT INTO group_affinity VALUES(100,11,10),(200,11,11),(100,22,-3),(200,22,-4),(100,33,120);"
+                "PRAGMA user_version = 20", nullptr, nullptr, nullptr) == SQLITE_OK,
+          "creates old per-session scores", kTestName);
+        SchemaMigrator::migrate(db.handle());
+        const auto scores = AffinityStore::getAffinityMap();
+        check(scores.at(11) == 11 && scores.at(22) == -4 && scores.at(33) == 100,
+          "migration averages existing rows, rounds halves away from zero and clamps", kTestName);
+        AffinityStore::adjustAffinity(11, 2);
+        SchemaMigrator::migrate(db.handle());
+        check(AffinityStore::getAffinityMap().at(11) == 13, "migration does not reapply old scores", kTestName);
+        const auto privateId = SessionId::fromPrivateUser(11);
+        MemoryMaintenanceStore::apply(db, 100, {.personEntries = {{11, "喜欢摄影"}, {22, "喜欢编程"}}});
+        MemoryMaintenanceStore::apply(db, privateId, {.personEntries = {{11, "准备比赛"}}, .affinity = {{11, -1}}});
+        const auto senders = json::array({{{"sender", {{"qq", "11"}}}}, {{"sender", {{"qq", "11"}}}},
+          {{"sender", {{"qq", "self"}}}}, {{"sender", {{"qq", std::to_string(SessionId::kSystemAccountId)}}}},
+          {{"sender", {{"qq", "33"}}}}, {{"segments", {{{"type", "at"}, {"target", {{"qq", "22"}}}}}}}});
+        const auto profiles = PersonMemoryStore::getForSenders(senders);
+        check(profiles.size() == 1 && profiles[0]["qq"] == "11" && profiles[0]["pending_entries"].size() == 2 &&
+                profiles[0]["pending_entries"][1]["source_session"] == std::to_string(privateId) &&
+                AffinityStore::getAffinityMap().at(11) == 12,
+          "deduplicates recent senders, excludes mentions and missing profiles, shares private entries globally", kTestName);
+        check(!SessionStore::getSessionConfig(100).crossSessionSharing &&
+                !SessionStore::getSessionConfig(privateId).crossSessionSharing,
+          "person memory is independent of raw-message sharing", kTestName);
+        MemoryMaintenanceStore::apply(db, 100, {.personEntries = {{44, "仅有人物记忆"}}});
+        const auto people = PersonMemoryStore::listPeople();
+        check(people.size() == 4 && people[0]["pending_count"] == 2 && !people[0].contains("pending_entries"),
+          "admin summaries include memory-only and affinity-only people without loading memory bodies", kTestName);
+        const auto person = PersonMemoryStore::getPerson(11);
+        check(person["affinity"] == 12 && person["pending_entries"].size() == 2 &&
+                person["pending_entries"][0]["source_session"] == std::to_string(privateId),
+          "person detail combines global score and newest-first entries with exact session IDs", kTestName);
+        check(PersonMemoryStore::getPerson(33)["stable_memory"].empty() &&
+                PersonMemoryStore::getPerson(44)["affinity"] == 0 && PersonMemoryStore::getPerson(999).is_null(),
+          "handles score-only, memory-only and unknown profiles", kTestName);
+        const AdminController controller;
+        auto response = drogon::HttpResponsePtr{};
+        const auto callback = [&](const drogon::HttpResponsePtr &value) { response = value; };
+        for (const u64 qq: {11, 22, 33, 44})
+            QQNameDirectory::recordName(qq, "Known " + std::to_string(qq));
+        drogon::sync_wait(controller.getPeople(drogon::HttpRequest::newHttpRequest(), callback));
+        check(json::parse(response->body()).size() == 4, "people API returns all profiles", kTestName);
+        drogon::sync_wait(controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, "11"));
+        check(json::parse(response->body())["qq"] == "11", "person API returns string identity", kTestName);
+        drogon::sync_wait(controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, "invalid"));
+        check(json::parse(response->body()).contains("error"), "person API rejects invalid identities", kTestName);
+        std::thread first([] { for (int index = 0; index < 50; ++index) AffinityStore::adjustAffinity(77, 1); });
+        std::thread second([] { for (int index = 0; index < 50; ++index) AffinityStore::adjustAffinity(77, 1); });
+        first.join();
+        second.join();
+        AffinityStore::adjustAffinity(77, 10);
+        check(AffinityStore::getAffinityMap().at(77) == 100, "concurrent global increments do not overwrite or overflow", kTestName);
+        {
+            const Statement query(db.handle(), "SELECT COUNT(*) FROM sqlite_master WHERE name = 'group_affinity'");
+            check(query.step() && query.getInt(0) == 0, "old per-session affinity table is removed", kTestName);
+        }
+        db.close();
+        check(db.initialize(path.string()).has_value() && PersonMemoryStore::getForSenders(senders) == profiles,
+          "person entries survive restart", kTestName);
+        db.close();
+        std::filesystem::remove(path);
+    }
+
+    void testSessionShortTermMemory() {
+        constexpr std::string_view kTestName = "session short-term memory";
+        using namespace insoulforge;
+        auto &db = Database::instance();
+        check(db.initialize(":memory:").has_value(), "initializes database", kTestName);
+        const json input = {{"aliases", {{{"qq", "11"}, {"names", {" 老王 ", "老王"}}},
+          {{"qq", "11"}, {"names", {"摄影佬"}}}}}, {"recent_events", {" 联机待定 ", "联机待定"}}};
+        const auto normalized = MemoryStore::normalizeSessionMemory(input);
+        check(normalized && (*normalized)["aliases"].size() == 1 &&
+                (*normalized)["aliases"][0]["names"] == json::array({"老王", "摄影佬"}) &&
+                (*normalized)["recent_events"] == json::array({"联机待定"}),
+          "deduplicates aliases by QQ, names and events", kTestName);
+        auto legacyInput = input;
+        legacyInput["legacy_entries"] = {" 喜欢摄影 ", "喜欢摄影", "以前的约定"};
+        const auto legacyNormalized = MemoryStore::normalizeSessionMemory(legacyInput);
+        check(legacyNormalized && (*legacyNormalized)["legacy_entries"] == json::array({"喜欢摄影", "以前的约定"}),
+          "legacy contents remain readable and are deduplicated", kTestName);
+        legacyInput["legacy_entries"] = "invalid";
+        check(!MemoryStore::normalizeSessionMemory(legacyInput), "rejects malformed legacy entries", kTestName);
+        for (const auto &invalid: json::array({nullptr, json::array(),
+               json{{"aliases", json::array()}, {"recent_events", "wrong"}},
+               json{{"aliases", {{{"qq", "self"}, {"names", {"bot"}}}}}, {"recent_events", json::array()}},
+               json{{"aliases", json::array()}, {"recent_events", {42}}}})) {
+            check(!MemoryStore::normalizeSessionMemory(invalid), "rejects malformed structure", kTestName);
+        }
+        MemoryStore::updateShortTermMemory(100, " 旧事件 \n\n旧称呼\n");
+        check(MemoryStore::projectShortTermMemory(MemoryStore::getShortTermMemory(100)) == json::array({"旧事件", "旧称呼"}),
+          "legacy memory remains readable without rewriting storage", kTestName);
+        const AdminController controller;
+        drogon::HttpResponsePtr response;
+        const auto save = [&](const std::string &content) {
+            auto request = drogon::HttpRequest::newHttpRequest();
+            request->setBody(dumpJson({{"memory", content}}));
+            drogon::sync_wait(controller.updateSessionMemory(request, [&](const auto &value) { response = value; }, "100"));
+        };
+        save(dumpJson(input));
+        check(response->getStatusCode() == drogon::k200OK &&
+                MemoryStore::projectShortTermMemory(MemoryStore::getShortTermMemory(100)) == *normalized,
+          "manual editing saves normalized structured memory", kTestName);
+        drogon::sync_wait(controller.getSessionMemory(drogon::HttpRequest::newHttpRequest(),
+          [&](const auto &value) { response = value; }, "100"));
+        const auto displayed = getStr(json::parse(response->body()), "memory");
+        check(displayed.find('\n') != std::string::npos && json::parse(displayed) == *normalized,
+          "existing editor receives formatted JSON", kTestName);
+        for (const auto &bad: {std::string{"{"}, std::string{R"({"aliases":[]})"}}) {
+            save(bad);
+            check(response->getStatusCode() == drogon::k400BadRequest &&
+                    MemoryStore::projectShortTermMemory(MemoryStore::getShortTermMemory(100)) == *normalized,
+              "invalid manual JSON preserves saved memory", kTestName);
+        }
+        check(MemoryStore::getShortTermMemory(200).empty() && PersonMemoryStore::getForSenders(
+                json::array({{{"sender", {{"qq", "11"}}}}})).empty() && AffinityStore::getAffinityMap().empty(),
+          "session editing does not modify other sessions or global state", kTestName);
+        db.close();
+    }
+
+    void testRemovedShortTermLimit() {
+        constexpr std::string_view kTestName = "removed short-term limit";
+        const auto path = std::filesystem::temp_directory_path() /
+                          ("insoulforge-no-memory-limit-" +
+                            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".json");
+        {
+            std::ofstream output(path);
+            output << R"({"memory":{"shortTermMemoryMax":"obsolete","contextWindowLimit":73,"futureSetting":true}})";
+        }
+        auto &config = insoulforge::Config::instance();
+        check(config.initialize(path.string()).has_value(), "loads old field without validating its obsolete type", kTestName);
+        auto memory = config.getMemoryConfig();
+        check(!memory.contains("shortTermMemoryMax") && memory["contextWindowLimit"] == 73 && memory["futureSetting"] == true,
+          "removes obsolete field and preserves other settings", kTestName);
+        {
+            std::ifstream input(path);
+            const auto stored = insoulforge::json::parse(input);
+            check(!stored["memory"].contains("shortTermMemoryMax"), "writes migration back to disk", kTestName);
+        }
+        memory["shortTermMemoryMax"] = "old frontend";
+        check(config.saveMemoryConfig(memory).has_value() && !config.getMemoryConfig().contains("shortTermMemoryMax") &&
+                config.contextWindowLimit == 73 && config.getMemoryConfig()["futureSetting"] == true,
+          "old frontend field is ignored without changing other settings", kTestName);
+        check(config.initialize(path.string()).has_value() && !config.getMemoryConfig().contains("shortTermMemoryMax"),
+          "removed field does not return after restart", kTestName);
+        std::filesystem::remove(path);
     }
 
     void testMemoryModelConfigMigration() {
@@ -2399,6 +2559,9 @@ auto main() -> int {
     testQzoneToolValidation();
     testBuiltinToolConfig();
     testMemoryMaintenanceStore();
+    testGlobalPersonMemory();
+    testSessionShortTermMemory();
+    testRemovedShortTermLimit();
     testMemoryModelConfigMigration();
     testConfigFacade();
     testExecutionConfig();

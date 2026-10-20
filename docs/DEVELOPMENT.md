@@ -323,27 +323,43 @@ MessageService → OneBot API
 ### 记忆维护
 
 记忆模块包括聊天记忆和好感度：前者保存对话中值得记住的信息，后者保存机器人对用户的互动印象。
-统一入口负责依次计算聊天记忆和好感度，全部成功后一起保存。
+统一入口在一次调用中提取人物记忆与全局好感度，再沿用现有会话记忆整理流程，全部成功后一起保存。
 
-- **短期记忆**：`MemoryManager` 按统一会话 ID 从 SQLite 读取当前短期记忆，供 Executor 构建提示词。
+- **短期记忆**：`MemoryManager` 按统一会话 ID 从 SQLite 原文本列读取会话记忆；新内容为 `aliases` 和 `recent_events` JSON 对象，
+  Executor 通过 `MemoryStore::projectShortTermMemory` 直接注入对象，旧纯文本在成功整理前仍按行注入。后台沿用原编辑入口，返回格式化 JSON。
+  `MemoryStore::normalizeSessionMemory` 统一校验结构并合并重复 QQ、称呼和事件，不限制条数。
+  称呼只属于本会话，保留已有值，有明确纠正时才更新，不采纳一次性调侃；事件更新进展，模型可根据完成状态和后续价值移除过时内容，无固定过期天数。
+  新消息的个人属性不写入会话记忆，也不清理全局人物档案或好感度；旧文本在下一次成功整理时转换，无独立数据库迁移。
+  `legacy_entries` 是旧内容过渡区，首次转换时由程序保留全部旧文本条目并继续注入上下文。后续模型只能从已有原文条目中选留或删除，
+  依据新证据、重复程度及相关性逐步遗忘，不设固定期限；不得新增或改写，遗漏该字段时保留原值。旧两字段结构兼容为空过渡区，无法恢复此前已丢失的数据。
 - **长期记忆**：`LongTermMemory` 封装 `long_term_memory` 表的读取与向量检索；embedding 以 `f32` 数组存入 BLOB。
 - **维护批次**：工作流在每条消息预处理结束后检查消息列表；达到或超过 `memorySummaryTriggerCount` 且没有待处理总结任务时，
   选取最旧的 `memorySummaryBatchSize` 条消息作为待总结内容，并复制随后最多
   `memorySummaryContextCount` 条只读上下文。待总结消息在任务成功前继续保留在列表中。
   追加机器人回复或内部记录不会单独触发总结；任务成功收尾只清理已总结消息，下一批由后续消息预处理触发。
   启动时不恢复维护任务，也不为历史消息主动创建新批次。
-- **内存任务**：`MemoryMaintenanceCoordinator` 先计算聊天记忆，再评估同批消息的好感度；两项全部成功后，
+- **内存任务**：`MemoryMaintenanceCoordinator` 调用 `MemoryMaintenanceService` 联合提取人物条目和好感度，再整理旧会话记忆；全部成功后，
   由 `MemoryMaintenanceStore` 在同一 SQLite 事务中保存结果。任务本身不写入数据库，不保存完成状态或重试次数。
   数据库升级到 v18 时删除旧维护任务表，不迁移未完成任务；已有消息、记忆和好感度结果保留。
-- **聊天记忆总结**：`MemoryMaintenanceService` 提取并归类短期/长期记忆，按 `longTermRecallThreshold`
+- **聊天记忆总结**：`MemoryMaintenanceService` 的整理请求直接接收当前会话记忆、待总结消息和只读补充上下文，
+  没有新增人物记忆或只有好感度变化时也执行会话总结；补充上下文不得作为新记忆来源。复用原整理请求，不增加第三次模型调用。
+  长期记忆仍只依据原来的新人物记忆及召回材料处理，无新人物条目时不触发向量召回或长期写入。按 `longTermRecallThreshold`
   召回相似长期记忆，用于合并、去重和替换；计算期间不写入结果。
   未配置向量模型时只维护短期记忆；已配置但向量化失败时，本批次不提交，等待后续消息重新触发。
-- **好感度评估**：`AffinityMaintenanceService` 返回同批消息的好感度变化，计算期间不累计分数。
+- **人物记忆**：`person_memories` 按 QQ 保存 `stable_memory` 和 `recent_interactions` JSON 数组，当前只预留空数组；
+  `person_memory_entries` 保存追加的待整理条目、来源会话和 UTC 写入时间。群聊与私聊共用，不受原始消息共享开关影响，尚无每日整理任务。
+  `PersonMemoryStore` 只批量读取 `recent_conversation` 中去重后的真实发送者档案，不加载仅被提及、其他会话出现或没有档案的人。
+  上下文顺序为 `session → short_term_memory → earlier_conversation → recent_conversation → person_memories → other_conversations → response_requirements`；
+  新条目也直接提供给模型，一次回复期间固定快照。旧自由文本记忆不猜测归属、不自动迁入人物档案。
+- **好感度评估**：联合提取返回独立的 `memories` 和 `affinity_changes` 数组，允许两者为空或涉及不同用户。
+  QQ 必须属于待提取消息的真实发送者，补充上下文不可作为新增记忆或评分来源；重复人物条目去重，重复评分或无效归属使批次失败。
+  每批变化限制为 [-5, 5]，`person_affinity` 按 QQ 原子累计并限制在 [-100, 100]。v21 将旧 `group_affinity` 分数按 QQ 平均并四舍五入后迁移，
+  不把没有记录的会话当作零分；后台沿用原查询路径，但列表、弹窗和群聊/私聊上下文均使用全局分数。
 - **任务收尾**：同一会话最多执行一个维护任务。全部成功并提交后，按批次条数删除消息列表队首；失败保留消息并释放执行状态，
   等下一条消息重新触发，不自动循环重试。重启后不恢复任务，后续消息会根据恢复的消息列表重新触发。
 - **清空消息**：不会取消执行中的维护任务；旧任务成功后仍按原批次数量删除队首，可能删除清空后收到的新消息。
   前端清空确认框会提示此行为，不影响群内实际发送的消息。
-- 记忆提取、整理与好感度评分使用独立 memory 模型（`LlmClient::requestMaintenance`，好感度请求限制为 256 个输出 token）；向量化使用独立 embedding 配置（
+- 人物记忆与好感度联合提取、旧记忆整理使用独立 memory 模型（`LlmClient::requestMaintenance`，采用 memory 输出上限，不再单独发起 256 token 的评分请求）；向量化使用独立 embedding 配置（
   `LlmClient::requestEmbedding`）。`recall_memory` 工具按余弦相似度（阈值 0.3）检索长期记忆，Router 另有
   `routerWindowTriggerCount` / `routerWindowKeepCount` 子窗口参数。
 - **被动召回**：消息预处理阶段从文本段和成功图片描述构建查询，命中结果直接写入当前完整消息的 `memories` 字段；该字段随快照进入

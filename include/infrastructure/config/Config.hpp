@@ -72,7 +72,6 @@ namespace insoulforge {
         i32 memorySummaryContextCount = 10; // 仅供总结理解上下文、不参与提取的后续消息数
         i32 routerWindowTriggerCount = 20; // Router 子窗口触发条数（批量滑动）
         i32 routerWindowKeepCount = 10; // Router 子窗口保留条数
-        i32 shortTermMemoryMax = 15; // 注入上下文的短期记忆条数上限
         f64 longTermRecallThreshold = 0.65; // 长期记忆召回合并的相似度阈值（独立于 recall_memory 的 0.3）
         f64 longTermInjectThreshold = 0.45; // 长期记忆被动注入提示词的相似度阈值（消息入库时逐条召回）
 

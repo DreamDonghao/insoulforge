@@ -244,9 +244,19 @@ namespace insoulforge {
             return stmt.step();
         }
 
+        constexpr std::array v21Tables = {
+          "CREATE TABLE IF NOT EXISTS person_affinity (qq_number INTEGER PRIMARY KEY, "
+          "affinity INTEGER NOT NULL DEFAULT 0 CHECK(affinity BETWEEN -100 AND 100))",
+          "CREATE TABLE IF NOT EXISTS person_memories (qq_number INTEGER PRIMARY KEY, "
+          "stable_memory TEXT NOT NULL DEFAULT '[]', recent_interactions TEXT NOT NULL DEFAULT '[]')",
+          "CREATE TABLE IF NOT EXISTS person_memory_entries (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+          "qq_number INTEGER NOT NULL, source_session INTEGER NOT NULL, content TEXT NOT NULL, "
+          "created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+          "CREATE INDEX IF NOT EXISTS idx_person_memory_entries_qq ON person_memory_entries(qq_number, id)"};
+
         void createFreshSchema(sqlite3 *db) {
             execAll(db, v2Tables);
-            execAll(db, v3Tables);
+            execAll(db, v21Tables);
             execAll(db, v6Tables);
             execAll(db, v7Tables);
             execAll(db, v11Tables);
@@ -357,7 +367,6 @@ namespace insoulforge {
                     memory["memoryExtractMaxTokens"] = stmt.getInt(2);
                     memory["routerWindowTriggerCount"] = stmt.getInt(3);
                     memory["routerWindowKeepCount"] = stmt.getInt(4);
-                    memory["shortTermMemoryMax"] = stmt.getInt(5);
                     memory["memoryMigrateCount"] = stmt.getInt(6);
                 } else {
                     memory["windowTriggerCount"] = 100;
@@ -365,7 +374,6 @@ namespace insoulforge {
                     memory["memoryExtractMaxTokens"] = 4000;
                     memory["routerWindowTriggerCount"] = 20;
                     memory["routerWindowKeepCount"] = 10;
-                    memory["shortTermMemoryMax"] = 15;
                     memory["memoryMigrateCount"] = 5;
                 }
             }
@@ -491,6 +499,17 @@ namespace insoulforge {
             execSQL(db, "DROP TABLE IF EXISTS custom_tools");
         }
 
+        void migrateV20ToV21(sqlite3 *db) {
+            execAll(db, v21Tables);
+            if (tableExists(db, "group_affinity")) {
+                execSQL(db, "INSERT INTO person_affinity (qq_number, affinity) "
+                            "SELECT qq_number, max(-100, min(100, CAST(round(avg(affinity)) AS INTEGER))) "
+                            "FROM group_affinity GROUP BY qq_number "
+                            "ON CONFLICT(qq_number) DO NOTHING");
+                execSQL(db, "DROP TABLE group_affinity");
+            }
+        }
+
         void migrateV19ToV20(sqlite3 *db) {
             ensureColumn(db, "group_config", "cross_session_sharing", "cross_session_sharing INTEGER NOT NULL DEFAULT 0");
         }
@@ -566,6 +585,7 @@ namespace insoulforge {
               &migrateV17ToV18, // 删除记忆与好感度维护任务队列
               &migrateV18ToV19, // 群命令解析开关，默认开启
               &migrateV19ToV20, // 跨会话近期消息共享，默认关闭
+              &migrateV20ToV21, // 全局人物记忆与好感度；旧分数按 QQ 取平均
             };
 
             for (i32 v = version; v < kLatestVersion; ++v) {

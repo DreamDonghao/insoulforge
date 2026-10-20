@@ -30,7 +30,6 @@ export interface MemoryConfig {
     memorySummaryContextCount: number
     routerWindowTriggerCount: number
     routerWindowKeepCount: number
-    shortTermMemoryMax: number
     longTermRecallThreshold: number
     longTermInjectThreshold: number
 }

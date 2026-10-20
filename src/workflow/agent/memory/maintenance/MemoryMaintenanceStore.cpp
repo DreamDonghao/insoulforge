@@ -32,8 +32,7 @@ namespace insoulforge::MemoryMaintenanceStore {
         }
     } // namespace
 
-    void apply(const Database &database, const u64 sessionId, const MemoryMaintenanceResult &result,
-      const AffinityDeltas &affinity) {
+    void apply(const Database &database, const u64 sessionId, const MemoryMaintenanceResult &result) {
         std::unique_lock lock(database.mutex());
         sqlite3 *handle = database.handle();
         execOrThrow(handle, "BEGIN IMMEDIATE");
@@ -65,14 +64,25 @@ namespace insoulforge::MemoryMaintenanceStore {
                 statement.execOrThrow();
             }
 
-            for (const auto &[qqNumber, delta]: affinity) {
+            for (const auto &[qqNumber, content]: result.personEntries) {
+                const Statement profile(handle, "INSERT OR IGNORE INTO person_memories (qq_number) VALUES (?)");
+                profile.bind(1, qqNumber);
+                profile.execOrThrow();
+                const Statement entry(handle,
+                  "INSERT INTO person_memory_entries (qq_number, source_session, content) VALUES (?, ?, ?)");
+                entry.bind(1, qqNumber);
+                entry.bind(2, sessionId);
+                entry.bind(3, content);
+                entry.execOrThrow();
+            }
+
+            for (const auto &[qqNumber, delta]: result.affinity) {
                 const Statement statement(handle,
-                  "INSERT INTO group_affinity (group_id, qq_number, affinity) VALUES (?, ?, max(min(?, 100), -100)) "
-                  "ON CONFLICT(group_id, qq_number) DO UPDATE SET affinity = max(min(affinity + ?, 100), -100)");
-                statement.bind(1, sessionId);
-                statement.bind(2, qqNumber);
+                  "INSERT INTO person_affinity (qq_number, affinity) VALUES (?, max(min(?, 100), -100)) "
+                  "ON CONFLICT(qq_number) DO UPDATE SET affinity = max(min(affinity + ?, 100), -100)");
+                statement.bind(1, qqNumber);
+                statement.bind(2, delta);
                 statement.bind(3, delta);
-                statement.bind(4, delta);
                 statement.execOrThrow();
             }
             execOrThrow(handle, "COMMIT");

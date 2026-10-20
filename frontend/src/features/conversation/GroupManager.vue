@@ -6,7 +6,6 @@
 import {computed, inject, nextTick, onMounted, onUnmounted, reactive, ref, type Ref, watch} from 'vue'
 import EnabledSwitch from '../../components/EnabledSwitch.vue'
 import type {
-  AffinityEntry,
   ApiResponse,
   ChatMessage,
   Group,
@@ -320,40 +319,6 @@ const saveMemory = async (): Promise<void> => {
   }
 }
 
-// 好感度弹窗
-const affinityGroupId: Ref<string | null> = ref(null)
-const affinityGroupName: Ref<string> = ref('')
-const affinityList: Ref<AffinityEntry[]> = ref([])
-const affinityLoading: Ref<boolean> = ref(false)
-const affinityAvatarFailed: Ref<Set<string>> = ref(new Set())
-
-// 查看好感度
-const viewAffinity = async (sessionId: string, sessionName: string): Promise<void> => {
-  affinityGroupId.value = sessionId
-  affinityGroupName.value = sessionName
-  affinityLoading.value = true
-  affinityList.value = []
-  affinityAvatarFailed.value = new Set()
-
-  try {
-    const resp = await fetch(`/admin/api/affinity/${sessionId}`)
-    const data = await resp.json()
-    affinityList.value = Array.isArray(data.affinities) ? data.affinities : []
-  } finally {
-    affinityLoading.value = false
-  }
-}
-
-// 关闭好感度弹窗
-const closeAffinity = (): void => {
-  affinityGroupId.value = null
-  affinityGroupName.value = ''
-  affinityList.value = []
-}
-
-const affinityClass = (v: number): string =>
-    v > 0 ? 'affinity-positive' : v < 0 ? 'affinity-negative' : 'affinity-neutral'
-
 // 定时任务弹窗
 const tasksGroupId: Ref<string | null> = ref(null)
 const tasksGroupName: Ref<string> = ref('')
@@ -544,7 +509,7 @@ const savePrompt = async (): Promise<void> => {
 
 // 弹窗打开时锁定页面滚动，滚轮只作用于弹窗内容
 const anyModalOpen = computed(() =>
-    !!(memoryGroupId.value || ltmGroupId.value || affinityGroupId.value || tasksGroupId.value || promptGroup.value))
+    !!(memoryGroupId.value || ltmGroupId.value || tasksGroupId.value || promptGroup.value))
 watch(anyModalOpen, (open) => {
   document.body.style.overflow = open ? 'hidden' : ''
 })
@@ -797,9 +762,6 @@ onUnmounted(() => {
                           @click.stop="viewLongTermMemory(sessionKey(group), sessionLabel(group))">长期记忆
                   </button>
                   <button class="btn btn-secondary btn-sm" style="margin-left: 6px;"
-                          @click.stop="viewAffinity(sessionKey(group), sessionLabel(group))">好感度
-                  </button>
-                  <button class="btn btn-secondary btn-sm" style="margin-left: 6px;"
                           @click.stop="viewTasks(sessionKey(group), sessionLabel(group))">任务
                   </button>
                   <button v-if="!isPrivateSession(group)" class="btn btn-secondary btn-sm" style="margin-left: 6px;"
@@ -879,51 +841,6 @@ onUnmounted(() => {
             <p>暂无聊天消息</p>
           </div>
         </template>
-      </div>
-    </div>
-
-    <!-- 好感度弹窗 -->
-    <div v-if="affinityGroupId" class="modal-overlay" @click.self="closeAffinity">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h2>{{ affinityGroupName }} - 好感度</h2>
-          <button class="btn btn-secondary btn-sm" @click="closeAffinity">关闭</button>
-        </div>
-        <div class="modal-body">
-          <div v-if="affinityLoading" class="memory-loading">
-            <p>加载中...</p>
-          </div>
-          <table v-else-if="affinityList.length > 0" class="affinity-table">
-            <thead>
-            <tr>
-              <th style="width: 50px;"></th>
-              <th>昵称</th>
-              <th>QQ 号</th>
-              <th style="width: 100px; text-align: right;">好感度</th>
-            </tr>
-            </thead>
-            <tbody>
-            <tr v-for="entry in affinityList" :key="entry.qq">
-              <td>
-                <img v-if="!affinityAvatarFailed.has(entry.qq)"
-                     :alt="entry.qq"
-                     :src="`https://q1.qlogo.cn/g?b=qq&nk=${entry.qq}&s=40`"
-                     class="affinity-avatar"
-                     @error="affinityAvatarFailed.add(entry.qq)">
-                <div v-else class="affinity-avatar affinity-avatar-fallback">?</div>
-              </td>
-              <td>{{ entry.name || '未知' }}</td>
-              <td><code>{{ entry.qq }}</code></td>
-              <td style="text-align: right;">
-                <span :class="affinityClass(entry.affinity)" class="affinity-badge">{{ entry.affinity }}</span>
-              </td>
-            </tr>
-            </tbody>
-          </table>
-          <div v-else class="memory-loading">
-            <p>暂无好感度数据，会随群聊互动自动累计</p>
-          </div>
-        </div>
       </div>
     </div>
 
@@ -1457,47 +1374,6 @@ onUnmounted(() => {
 
 .affinity-table tbody tr:last-child td {
   border-bottom: none;
-}
-
-.affinity-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  display: block;
-}
-
-.affinity-avatar-fallback {
-  background: var(--bg-secondary);
-  color: var(--text-secondary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-}
-
-.affinity-badge {
-  display: inline-block;
-  min-width: 44px;
-  padding: 2px 10px;
-  border-radius: 0;
-  font-size: 13px;
-  font-weight: 600;
-  text-align: center;
-}
-
-.affinity-positive {
-  background: var(--success-soft);
-  color: var(--success);
-}
-
-.affinity-negative {
-  background: var(--danger-soft);
-  color: var(--danger);
-}
-
-.affinity-neutral {
-  background: var(--bg-secondary);
-  color: var(--text-secondary);
 }
 
 /* 定时任务 */

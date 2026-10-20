@@ -22,7 +22,7 @@ namespace insoulforge::ExecutorAgent {
     /// @return 清理后的内容
     [[nodiscard]] auto cleanReplyContent(const std::string &text) -> std::string;
 
-    /// @brief 在请求副本的首条 user 上下文中更新 execution_state，不改变会话历史。
+    /// @brief 在请求副本末尾追加仅含 execution_state 的 system 消息，不改变历史或工具结果前缀。
     /// @param currentRound 当前轮次，从 1 开始。
     /// @param maxToolRounds 本次回复固定的总轮数上限。
     /// @param mcpState 当前 MCP 额度及选择数量；无可用 MCP 或最后一轮时省略。

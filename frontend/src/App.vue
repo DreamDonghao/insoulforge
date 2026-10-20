@@ -13,6 +13,7 @@ const About = defineAsyncComponent(() => import('./features/overview/About.vue')
 const ExecutionConfig = defineAsyncComponent(() => import('./features/agent/ExecutionConfig.vue'))
 const AccessManager = defineAsyncComponent(() => import('./features/access/AccessManager.vue'))
 const GroupManager = defineAsyncComponent(() => import('./features/conversation/GroupManager.vue'))
+const PeopleManager = defineAsyncComponent(() => import('./features/conversation/PeopleManager.vue'))
 const MemoryConfig = defineAsyncComponent(() => import('./features/conversation/MemoryConfig.vue'))
 const LLMConfig = defineAsyncComponent(() => import('./features/llm/LLMConfig.vue'))
 const PromptEditor = defineAsyncComponent(() => import('./features/llm/PromptEditor.vue'))
@@ -46,6 +47,7 @@ const dailyNavItems: NavItem[] = [
   {key: 'emojis', label: '表情库', icon: 'emojis'},
   {key: 'admins', label: '访问管理', icon: 'admins'},
   {key: 'groups', label: '会话管理', icon: 'groups'},
+  {key: 'people', label: '人物信息', icon: 'admins'},
   {key: 'logs', label: '运行日志', icon: 'logs'},
   {key: 'requestDebug', label: '请求调试', icon: 'requestDebug'},
   {key: 'usage', label: '用量统计', icon: 'memory'}
@@ -459,6 +461,7 @@ onUnmounted(disconnectWebSocket)
           <EmojiManager v-else-if="currentView === 'emojis'"/>
           <AccessManager v-else-if="currentView === 'admins'"/>
           <GroupManager v-else-if="currentView === 'groups'"/>
+          <PeopleManager v-else-if="currentView === 'people'"/>
           <LogViewer v-else-if="currentView === 'logs'"/>
           <RequestDebug v-else-if="currentView === 'requestDebug'"/>
           <MemoryConfig v-else-if="currentView === 'memoryConfig'"/>

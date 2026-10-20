@@ -25,7 +25,7 @@ namespace insoulforge {
                   "accessToken", "oneBotTransport", "qqHttpHost", "qqWebSocketHost", "botName"};
                 constexpr std::array integerFields{"maxTokens", "contextWindowLimit", "memorySummaryTriggerCount",
                   "memorySummaryBatchSize", "memorySummaryContextCount", "routerWindowTriggerCount",
-                  "routerWindowKeepCount", "shortTermMemoryMax", "maxToolRounds", "sharedConversationMessageCount"};
+                  "routerWindowKeepCount", "maxToolRounds", "sharedConversationMessageCount"};
                 if (std::ranges::find(integerFields, key) != integerFields.end()) {
                     if (!field.is_number_integer() ||
                         (field.is_number_unsigned()
@@ -133,7 +133,6 @@ namespace insoulforge {
             memorySummaryContextCount = getInt(memCfg, "memorySummaryContextCount");
             routerWindowTriggerCount = getInt(memCfg, "routerWindowTriggerCount");
             routerWindowKeepCount = getInt(memCfg, "routerWindowKeepCount");
-            shortTermMemoryMax = getInt(memCfg, "shortTermMemoryMax");
             longTermRecallThreshold = getDouble(memCfg, "longTermRecallThreshold");
             longTermInjectThreshold = getDouble(memCfg, "longTermInjectThreshold");
             if (contextWindowLimit <= 0)
@@ -232,7 +231,6 @@ namespace insoulforge {
         memorySummaryContextCount = value.memorySummaryContextCount;
         routerWindowTriggerCount = value.routerWindowTriggerCount;
         routerWindowKeepCount = value.routerWindowKeepCount;
-        shortTermMemoryMax = value.shortTermMemoryMax;
         longTermRecallThreshold = value.longTermRecallThreshold;
         longTermInjectThreshold = value.longTermInjectThreshold;
     }

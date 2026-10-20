@@ -124,6 +124,8 @@ namespace insoulforge {
 
         // 好感度
         ADD_METHOD_TO(AdminController::getSessionAffinity, "/admin/api/affinity/{sessionId}", drogon::Get);
+        ADD_METHOD_TO(AdminController::getPeople, "/admin/api/people", drogon::Get);
+        ADD_METHOD_TO(AdminController::getPerson, "/admin/api/people/{qq}", drogon::Get);
 
         // 定时任务
         ADD_METHOD_TO(AdminController::getScheduledTasks, "/admin/api/scheduled-tasks/{sessionId}", drogon::Get);
@@ -450,13 +452,18 @@ namespace insoulforge {
 
         // ============== 好感度 ==============
 
-        /// @brief 获取会话成员好感度列表（按分数降序）
+        /// @brief 获取全局好感度列表（按分数降序），保留会话路径以兼容现有入口。
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
         /// @param sessionId 会话 ID（私聊会话带标志位）
         auto getSessionAffinity(drogon::HttpRequestPtr req,
           std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &sessionId) const
           -> drogon::Task<>;
+
+        auto getPeople(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
+        auto getPerson(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &qq) const -> drogon::Task<>;
 
         // ============== 定时任务 ==============
 
