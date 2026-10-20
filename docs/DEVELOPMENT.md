@@ -346,8 +346,16 @@ MessageService → OneBot API
   长期记忆仍只依据原来的新人物记忆及召回材料处理，无新人物条目时不触发向量召回或长期写入。按 `longTermRecallThreshold`
   召回相似长期记忆，用于合并、去重和替换；计算期间不写入结果。
   未配置向量模型时只维护短期记忆；已配置但向量化失败时，本批次不提交，等待后续消息重新触发。
-- **人物记忆**：`person_memories` 按 QQ 保存 `stable_memory` 和 `recent_interactions` JSON 数组，当前只预留空数组；
-  `person_memory_entries` 保存追加的待整理条目、来源会话和 UTC 写入时间。群聊与私聊共用，不受原始消息共享开关影响，尚无每日整理任务。
+- **人物记忆**：`person_memories` 按 QQ 保存 `stable_memory` 和 `recent_interactions` 字符串数组；
+  `person_memory_entries` 保存追加的待整理条目、来源会话和 UTC 写入时间。群聊与私聊共用，不受原始消息共享开关影响。
+  `PersonMemoryConsolidator` 每分钟按本地日历检查凌晨 03:00 的每日任务，使用 Memory 模型逐人处理有待整理条目的人，不重叠执行。
+  v22 新增 `person_memory_daily_state`，记录完成日期和进行中日期，启动合并补跑错过的日期；首次启用在 03:00 前不补昨天。
+  固定记忆合并重复、修正明确冲突，近期互动按相关性压缩遗忘，无固定时间淘汰；没有新条目的人不会额外调用模型。
+  请求期间不持数据库锁，校验成功后事务更新档案并按快照最大 ID 删除旧条目，不消费期间新增的内容；单人失败不影响其他人。
+  一轮结束记录当天完成，失败条目下一日重试；中断不标完成，重启仅消费剩余条目。停止与读写互斥，迟到响应不能在数据库关闭后提交。
+  每日整理向 `LlmClient::requestMaintenance` 传递共享取消状态；取消与模型用量入库使用同一互斥保护，停止后丢弃迟到响应及其用量，不等待网络超时。
+  人物昵称由 `PersonNameResolver` 后台查询，最多四路并发、同 QQ 去重，超时 5 秒、失败冷却 60 秒；接口立即返回缓存及 `name_pending`。
+  前端有待查询昵称时每 2 秒刷新概要，不重新获取记忆正文，离开页面取消轮询和请求；进程退出时昵称队列停止接单并丢弃迟到结果。
   `PersonMemoryStore` 只批量读取 `recent_conversation` 中去重后的真实发送者档案，不加载仅被提及、其他会话出现或没有档案的人。
   上下文顺序为 `session → short_term_memory → earlier_conversation → recent_conversation → person_memories → other_conversations → response_requirements`；
   新条目也直接提供给模型，一次回复期间固定快照。旧自由文本记忆不猜测归属、不自动迁入人物档案。

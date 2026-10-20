@@ -28,6 +28,7 @@
 #include <workflow/agent/memory/affinity/AffinityStore.hpp>
 #include <workflow/agent/memory/maintenance/MemoryMaintenanceService.hpp>
 #include <workflow/agent/memory/maintenance/MemoryMaintenanceStore.hpp>
+#include <workflow/agent/memory/maintenance/PersonMemoryConsolidator.hpp>
 #include <workflow/agent/runtime/AgentSystem.hpp>
 #include <workflow/agent/runtime/ExecutorAgent.hpp>
 #include <workflow/agent/tools/ToolRegistry.hpp>
@@ -1254,6 +1255,70 @@ namespace {
           "person entries survive restart", kTestName);
         db.close();
         std::filesystem::remove(path);
+    }
+
+    void testPersonConsolidationStore() {
+        constexpr std::string_view kTestName = "person consolidation store and calendar";
+        using namespace insoulforge;
+        const auto localTime = [](int year, int month, int day, int hour, int minute = 0, int second = 0) {
+            std::tm value{};
+            value.tm_year = year - 1900;
+            value.tm_mon = month - 1;
+            value.tm_mday = day;
+            value.tm_hour = hour;
+            value.tm_min = minute;
+            value.tm_sec = second;
+            value.tm_isdst = -1;
+            return std::mktime(&value);
+        };
+        const auto due = PersonMemoryConsolidator::dueDay;
+        check(!due(localTime(2026, 10, 20, 2, 59, 59), {}) &&
+                due(localTime(2026, 10, 20, 3), {}) == "2026-10-20",
+          "first run waits until local 03:00 exactly", kTestName);
+        check(!due(localTime(2026, 10, 20, 23), {"2026-10-20", ""}) &&
+                !due(localTime(2026, 10, 21, 2), {"2026-10-20", ""}),
+          "completed day is not repeated across midnight", kTestName);
+        check(due(localTime(2027, 1, 1, 2), {"2026-12-29", ""}) == "2026-12-31" &&
+                due(localTime(2026, 10, 22, 8), {"2026-10-19", "2026-10-20"}) == "2026-10-22" &&
+                due(localTime(2026, 10, 21, 2), {"", "2026-10-20"}) == "2026-10-20",
+          "missed dates coalesce and unfinished run resumes even before 03:00", kTestName);
+        auto &db = Database::instance();
+        check(db.initialize(":memory:").has_value(), "initializes database", kTestName);
+        check(sqlite3_exec(db.handle(), "DROP TABLE person_memory_daily_state; PRAGMA user_version = 21",
+                nullptr, nullptr, nullptr) == SQLITE_OK, "creates v21 upgrade fixture", kTestName);
+        SchemaMigrator::migrate(db.handle());
+        PersonMemoryStore::saveDailyState({"2026-10-19", "2026-10-20"});
+        SchemaMigrator::migrate(db.handle());
+        const auto state = PersonMemoryStore::dailyState();
+        check(state.completedDay == "2026-10-19" && state.runningDay == "2026-10-20",
+          "v22 migration and repeated migration preserve daily checkpoint", kTestName);
+        MemoryMaintenanceStore::apply(db, 100, {.personEntries = {{11, "旧条目"}}, .affinity = {{11, 3}}});
+        const auto snapshot = PersonMemoryStore::pendingSnapshot(11);
+        check(snapshot.has_value(), "reads pending snapshot", kTestName);
+        if (snapshot) {
+            MemoryMaintenanceStore::apply(db, SessionId::fromPrivateUser(11), {.personEntries = {{11, "并发新增"}}});
+            const json profile = {{"stable_memory", {"喜欢摄影"}}, {"recent_interactions", {"一起讨论摄影"}}};
+            check(sqlite3_exec(db.handle(),
+                    "CREATE TRIGGER reject_person_delete BEFORE DELETE ON person_memory_entries "
+                    "BEGIN SELECT RAISE(ABORT, 'test'); END", nullptr, nullptr, nullptr) == SQLITE_OK,
+              "creates delete failure trigger", kTestName);
+            bool failed = false;
+            try { PersonMemoryStore::applyConsolidation(*snapshot, profile); }
+            catch (const DbError &) { failed = true; }
+            check(failed && PersonMemoryStore::getPerson(11)["stable_memory"].empty() &&
+                    PersonMemoryStore::getPerson(11)["pending_entries"].size() == 2,
+              "delete failure rolls back profile update and preserves entries", kTestName);
+            check(sqlite3_exec(db.handle(), "DROP TRIGGER reject_person_delete", nullptr, nullptr, nullptr) == SQLITE_OK,
+              "removes failure trigger", kTestName);
+            PersonMemoryStore::applyConsolidation(*snapshot, profile);
+            const auto person = PersonMemoryStore::getPerson(11);
+            check(person["stable_memory"] == profile["stable_memory"] && person["pending_entries"].size() == 1 &&
+                    person["pending_entries"][0]["content"] == "并发新增" && person["affinity"] == 3 &&
+                    MemoryStore::getShortTermMemory(100).empty(),
+              "snapshot commit keeps new entries and does not touch affinity or session memory", kTestName);
+        }
+        check(!PersonMemoryStore::pendingSnapshot(999), "absent person has no work", kTestName);
+        db.close();
     }
 
     void testSessionShortTermMemory() {
@@ -2560,6 +2625,7 @@ auto main() -> int {
     testBuiltinToolConfig();
     testMemoryMaintenanceStore();
     testGlobalPersonMemory();
+    testPersonConsolidationStore();
     testSessionShortTermMemory();
     testRemovedShortTermLimit();
     testMemoryModelConfigMigration();

@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 #include <admin/access/AdminAccessToken.hpp>
+#include <admin/http/PersonNameResolver.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
@@ -26,6 +27,7 @@
 #include <onebot/transport/OneBotWebSocketClient.hpp>
 #include <workflow/OneBotEventWorkflow.hpp>
 #include <workflow/agent/ability/AsyncTaskManager.hpp>
+#include <workflow/agent/memory/maintenance/PersonMemoryConsolidator.hpp>
 #include <workflow/agent/runtime/AgentSystem.hpp>
 #include <workflow/agent/tools/ToolRegistry.hpp>
 #include <workflow/agent/tools/mcp/McpTools.hpp>
@@ -145,7 +147,10 @@ auto main() -> int {
 
         // 资源历史在无人访问后台时也持续采样，退出事件循环后停止采样。
         ProcessMetrics::instance().start(*drogon::app().getLoop());
+        PersonMemoryConsolidator::instance().start(*drogon::app().getLoop());
         drogon::app().run();
+        PersonMemoryConsolidator::instance().stop();
+        PersonNameResolver::instance().stop();
         ProcessMetrics::instance().stop();
 
         // stdin 读取不能依赖 SIGINT 自动返回；先结束命令线程，避免 jthread 析构时阻塞退出。
@@ -160,11 +165,15 @@ auto main() -> int {
         database.close();
         Logger::info(0, "Main", "系统正常退出");
     } catch (const std::exception &e) {
+        PersonMemoryConsolidator::instance().stop();
+        PersonNameResolver::instance().stop();
         ProcessMetrics::instance().stop();
         Logger::critical(0, "Main", fmt::format("程序崩溃: {}", e.what()));
         Logger::shutdown();
         return EXIT_FAILURE;
     } catch (...) {
+        PersonMemoryConsolidator::instance().stop();
+        PersonNameResolver::instance().stop();
         ProcessMetrics::instance().stop();
         Logger::critical(0, "Main", "程序崩溃: 未知错误");
         Logger::shutdown();

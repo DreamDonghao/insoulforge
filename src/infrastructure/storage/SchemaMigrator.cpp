@@ -254,9 +254,16 @@ namespace insoulforge {
           "created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
           "CREATE INDEX IF NOT EXISTS idx_person_memory_entries_qq ON person_memory_entries(qq_number, id)"};
 
+        constexpr std::array v22Tables = {
+          "CREATE TABLE IF NOT EXISTS person_memory_daily_state (id INTEGER PRIMARY KEY CHECK(id = 1), "
+          "completed_day TEXT NOT NULL DEFAULT '', running_day TEXT NOT NULL DEFAULT '')"};
+
+        void migrateV21ToV22(sqlite3 *db) { execAll(db, v22Tables); }
+
         void createFreshSchema(sqlite3 *db) {
             execAll(db, v2Tables);
             execAll(db, v21Tables);
+            execAll(db, v22Tables);
             execAll(db, v6Tables);
             execAll(db, v7Tables);
             execAll(db, v11Tables);
@@ -586,6 +593,7 @@ namespace insoulforge {
               &migrateV18ToV19, // 群命令解析开关，默认开启
               &migrateV19ToV20, // 跨会话近期消息共享，默认关闭
               &migrateV20ToV21, // 全局人物记忆与好感度；旧分数按 QQ 取平均
+              &migrateV21ToV22, // 人物记忆每日整理执行状态
             };
 
             for (i32 v = version; v < kLatestVersion; ++v) {

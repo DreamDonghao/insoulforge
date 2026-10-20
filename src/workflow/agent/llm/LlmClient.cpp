@@ -29,7 +29,10 @@ namespace insoulforge {
 
         /// @brief 通用 API 请求函数
         auto requestStr(json messages, const LLMApiConfig api, const LLMModelParams params, const std::string role,
-          const std::optional<u64> sessionId, const f64 timeoutSeconds) -> drogon::Task<std::optional<std::string>> {
+          const std::optional<u64> sessionId, const f64 timeoutSeconds,
+          const std::shared_ptr<LlmClient::MaintenanceRequestControl> control) -> drogon::Task<std::optional<std::string>> {
+            if (control && control->isCancelled())
+                co_return std::nullopt;
             if (!LlmClient::isConfigured(api)) {
                 if (sessionId) {
                     Logger::warn(*sessionId, "LLM", fmt::format("未配置服务地址、请求路径或模型名，跳过请求"));
@@ -41,7 +44,7 @@ namespace insoulforge {
             json body = LlmClient::buildChatRequestBody(api, params, std::move(messages));
             const auto resp = co_await HttpUtil::send("LLM", api.baseUrl, api.path, drogon::Post,
               std::move(body), api.apiKey, timeoutSeconds, sessionId);
-            if (!resp) {
+            if (!resp || (control && control->isCancelled())) {
                 co_return std::nullopt;
             }
 
@@ -57,7 +60,12 @@ namespace insoulforge {
                 co_return std::nullopt;
             }
 
-            LlmClient::logUsage(*respJson, api.model, role, sessionId);
+            if (control) {
+                if (!control->recordUsage(*respJson, api.model, role, sessionId))
+                    co_return std::nullopt;
+            } else {
+                LlmClient::logUsage(*respJson, api.model, role, sessionId);
+            }
 
             // validChatJson 已校验 choices 为非空数组
             const json &message = atOrNull((*respJson)["choices"][0], "message");
@@ -66,6 +74,25 @@ namespace insoulforge {
     } // namespace
 
     namespace LlmClient {
+        void MaintenanceRequestControl::cancel() {
+            std::lock_guard lock(m_mutex);
+            m_cancelled = true;
+        }
+
+        auto MaintenanceRequestControl::isCancelled() const -> bool {
+            std::lock_guard lock(m_mutex);
+            return m_cancelled;
+        }
+
+        auto MaintenanceRequestControl::recordUsage(const json &response, const std::string &model,
+          const std::string &role, const std::optional<u64> sessionId) -> bool {
+            std::lock_guard lock(m_mutex);
+            if (m_cancelled)
+                return false;
+            logUsage(response, model, role, sessionId);
+            return true;
+        }
+
         auto isConfigured(const LLMApiConfig &api) -> bool {
             return !api.baseUrl.empty() && !api.path.empty() && !api.model.empty();
         }
@@ -136,14 +163,16 @@ namespace insoulforge {
     } // namespace LlmClient
 
     auto LlmClient::requestMaintenance(
-      json messages, const u64 sessionId, std::string usageRole, const std::optional<i32> maxTokens)
+      json messages, const u64 sessionId, std::string usageRole, const std::optional<i32> maxTokens,
+      std::shared_ptr<MaintenanceRequestControl> control)
       -> drogon::Task<std::optional<std::string>> {
         const auto &config = Config::instance();
         auto params = config.memoryParams;
         if (maxTokens) {
             params.maxTokens = *maxTokens;
         }
-        co_return co_await requestStr(std::move(messages), config.memory, params, std::move(usageRole), sessionId, 180.0);
+        co_return co_await requestStr(std::move(messages), config.memory, params, std::move(usageRole), sessionId,
+          180.0, std::move(control));
     }
 
     auto LlmClient::requestEmbedding(std::string text, const std::optional<u64> sessionId)

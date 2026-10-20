@@ -1,14 +1,17 @@
 <script setup lang="ts">
-import {computed, onMounted, ref} from 'vue'
+import {computed, onMounted, onUnmounted, ref} from 'vue'
 
-interface PersonSummary {
+interface PersonIdentity {
   qq: string
   name: string
+  name_pending: boolean
   affinity: number
+}
+interface PersonSummary extends PersonIdentity {
   pending_count: number
   updated_at: string
 }
-interface PersonDetail extends PersonSummary {
+interface PersonDetail extends PersonIdentity {
   stable_memory: string[]
   recent_interactions: string[]
   pending_entries: {content: string; source_session: string; time: string}[]
@@ -22,11 +25,22 @@ const loading = ref(false)
 const detailLoading = ref(false)
 const error = ref('')
 const detailError = ref('')
-let detailRequest = 0
+let nameTimer: ReturnType<typeof setTimeout> | undefined
+let disposed = false
+let summaryController: AbortController | undefined
+let detailController: AbortController | undefined
 const filtered = computed(() => {
   const query = search.value.trim().toLowerCase()
   return people.value.filter(person => `${person.qq} ${person.name}`.toLowerCase().includes(query))
 })
+const detailName = computed(() => {
+  const person = people.value.find(person => person.qq === selected.value)
+  return person?.name && person.name !== '未知' ? person.name : detail.value?.name || '未知'
+})
+const memorySections = computed(() => detail.value ? [
+  {key: 'stable', title: '固定记忆', items: detail.value.stable_memory},
+  {key: 'recent', title: '近期互动', items: detail.value.recent_interactions}
+] : [])
 const scoreClass = (value: number) => value > 0 ? 'positive' : value < 0 ? 'negative' : ''
 const sourceLabel = (session: string) => {
   const id = BigInt(session)
@@ -35,8 +49,8 @@ const sourceLabel = (session: string) => {
 }
 const formatTime = (value: string) => value ? new Date(value.replace(' ', 'T') + 'Z').toLocaleString() : '暂无'
 
-async function fetchPeopleJson(path: string) {
-  const response = await fetch(path)
+async function fetchPeopleJson(path: string, signal: AbortSignal) {
+  const response = await fetch(path, {signal})
   if (!response.ok) {
     if (response.status === 404) throw new Error('人物查询接口不存在，请更新并重启后端服务')
     if (response.status === 401 || response.status === 403) throw new Error('登录已失效，请重新登录')
@@ -57,38 +71,58 @@ async function fetchPeopleJson(path: string) {
 }
 
 async function selectPerson(qq: string) {
-  const request = ++detailRequest
+  detailController?.abort()
+  const controller = detailController = new AbortController()
   selected.value = qq
   detail.value = null
   detailLoading.value = true
   detailError.value = ''
   try {
-    const data = await fetchPeopleJson(`/admin/api/people/${encodeURIComponent(qq)}`)
-    if (request === detailRequest) detail.value = data
+    const data = await fetchPeopleJson(`/admin/api/people/${encodeURIComponent(qq)}`, controller.signal)
+    if (!disposed && !controller.signal.aborted)
+      detail.value = data
   } catch (cause) {
-    if (request === detailRequest) detailError.value = cause instanceof Error ? cause.message : '读取人物失败'
+    if (!disposed && !controller.signal.aborted)
+      detailError.value = cause instanceof Error ? cause.message : '读取人物失败'
   } finally {
-    if (request === detailRequest) detailLoading.value = false
+    if (detailController === controller) detailLoading.value = false
   }
 }
 
-async function loadPeople() {
+async function loadPeople(refreshDetail = true) {
+  if (disposed || loading.value) return
+  clearTimeout(nameTimer)
+  const controller = summaryController = new AbortController()
   loading.value = true
   error.value = ''
   try {
-    const data = await fetchPeopleJson('/admin/api/people')
+    const data = await fetchPeopleJson('/admin/api/people', controller.signal)
+    if (disposed) return
     if (!Array.isArray(data)) throw new Error('人物列表响应格式不正确')
     people.value = data
     const qq = data.some((person: PersonSummary) => person.qq === selected.value) ? selected.value : data[0]?.qq
-    if (qq) await selectPerson(qq)
-    else { selected.value = ''; detail.value = null }
+    if (!qq) {
+      selected.value = ''
+      detail.value = null
+    } else if (refreshDetail) {
+      await selectPerson(qq)
+    }
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : '读取人物列表失败'
+    if (!disposed && !controller.signal.aborted)
+      error.value = cause instanceof Error ? cause.message : '读取人物列表失败'
   } finally {
     loading.value = false
+    if (!disposed && people.value.some(person => person.name_pending))
+      nameTimer = setTimeout(() => void loadPeople(false), 2000)
   }
 }
 onMounted(loadPeople)
+onUnmounted(() => {
+  disposed = true
+  clearTimeout(nameTimer)
+  summaryController?.abort()
+  detailController?.abort()
+})
 </script>
 
 <template>
@@ -97,7 +131,7 @@ onMounted(loadPeople)
     <div class="people-toolbar">
       <input v-model="search" class="form-input" placeholder="搜索昵称或 QQ 号" aria-label="搜索人物">
       <span>{{ filtered.length }} / {{ people.length }} 人</span>
-      <button class="btn btn-secondary" :disabled="loading" @click="loadPeople">刷新</button>
+      <button class="btn btn-secondary" :disabled="loading" @click="loadPeople()">刷新</button>
     </div>
     <p v-if="error" role="alert">{{ error }}</p>
     <p v-else-if="loading && !people.length" class="empty">加载中...</p>
@@ -117,10 +151,10 @@ onMounted(loadPeople)
         <p v-else-if="detailError" role="alert">{{ detailError }}</p>
         <template v-else-if="detail">
           <header class="person-heading">
-            <div><h2>{{ detail.name || '未知' }}</h2><span>QQ {{ detail.qq }}</span></div>
+            <div><h2>{{ detailName }}</h2><span>QQ {{ detail.qq }}</span></div>
             <div class="score"><span>全局好感度</span><strong :class="scoreClass(detail.affinity)">{{ detail.affinity > 0 ? '+' : '' }}{{ detail.affinity }}</strong></div>
           </header>
-          <section v-for="section in [{key: 'stable', title: '固定记忆', items: detail.stable_memory}, {key: 'recent', title: '近期互动', items: detail.recent_interactions}]" :key="section.key" class="memory-section">
+          <section v-for="section in memorySections" :key="section.key" class="memory-section">
             <h3>{{ section.title }} <small>{{ section.items.length }}</small></h3>
             <ul v-if="section.items.length"><li v-for="(item, index) in section.items" :key="index">{{ item }}</li></ul>
             <p v-else class="muted">暂无记录</p>

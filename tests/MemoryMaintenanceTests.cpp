@@ -6,16 +6,21 @@
 #include <chrono>
 #include <deque>
 #include <filesystem>
+#include <functional>
 #include <iostream>
+#include <mutex>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 
 #include <drogon/drogon.h>
 #include <trantor/net/EventLoopThread.h>
 
 #include <infrastructure/config/Config.hpp>
 #include <admin/http/AdminController.hpp>
+#include <admin/http/PersonNameResolver.hpp>
 #include <infrastructure/storage/Database.hpp>
+#include <infrastructure/storage/Statement.hpp>
 #include <workflow/MessageList.hpp>
 #include <workflow/agent/llm/prompts/PromptService.hpp>
 #include <workflow/agent/memory/MemoryManager.hpp>
@@ -25,6 +30,7 @@
 #include <workflow/agent/memory/maintenance/MemoryMaintenanceCoordinator.hpp>
 #include <workflow/agent/memory/maintenance/MemoryMaintenanceService.hpp>
 #include <workflow/agent/memory/maintenance/MemoryMaintenanceStore.hpp>
+#include <workflow/agent/memory/maintenance/PersonMemoryConsolidator.hpp>
 #include <workflow/agent/runtime/ExecutorAgent.hpp>
 #include <workflow/agent/tools/ToolRegistry.hpp>
 #include <workflow/history/ChatRecordManager.hpp>
@@ -33,6 +39,118 @@
 
 namespace {
     using namespace insoulforge;
+    struct PersonFixture {
+        std::atomic<i32> requests{0};
+        std::atomic_bool fail{true};
+        std::atomic_bool injectNew{true};
+        std::atomic<PersonMemoryConsolidator *> stopService{nullptr};
+        std::atomic<LlmClient::MaintenanceRequestControl *> cancelRequest{nullptr};
+    } personFixture;
+
+    auto testPersonConsolidation(const std::string &endpoint) -> drogon::Task<> {
+        auto &db = Database::instance();
+        db.close();
+        const auto path = std::filesystem::temp_directory_path() /
+          ("insoulforge-person-stop-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".db");
+        if (!db.initialize(path.string()))
+            throw std::runtime_error("person test database initialization failed");
+        auto &config = Config::instance();
+        config.memory.baseUrl = endpoint;
+        config.memory.path = "/person-consolidation-fixture";
+        MemoryMaintenanceStore::apply(db, 100, {
+          .personEntries = {{22, "已有条目"}, {88001, "喜欢摄影"}, {88002, "继续保留"}, {88003, "请求失败"}},
+          .affinity = {{22, 3}}});
+        std::tm local{};
+        local.tm_year = 126;
+        local.tm_mon = 9;
+        local.tm_mday = 20;
+        local.tm_hour = 3;
+        local.tm_isdst = -1;
+        const auto today = std::mktime(&local);
+        PersonMemoryConsolidator service;
+        co_await service.runDue(today);
+        auto person = PersonMemoryStore::getPerson(88001);
+        if (personFixture.requests != 4 || person["stable_memory"] != json::array({"整理后的固定记忆"}) ||
+            person["pending_entries"].size() != 1 || person["pending_entries"][0]["content"] != "请求期间新增" ||
+            PersonMemoryStore::getPerson(88002)["pending_entries"].size() != 1 ||
+            PersonMemoryStore::getPerson(88003)["pending_entries"].size() != 1 ||
+            PersonMemoryStore::dailyState().completedDay != "2026-10-20" ||
+            PersonMemoryStore::getPerson(22)["affinity"] != 3)
+            throw std::runtime_error("daily consolidation lost entries, failed isolation, or changed affinity");
+        co_await service.runDue(today);
+        if (personFixture.requests != 4)
+            throw std::runtime_error("completed daily run repeated");
+        personFixture.fail = false;
+        ++local.tm_mday;
+        const auto tomorrow = std::mktime(&local);
+        PersonMemoryConsolidator restarted;
+        co_await restarted.runDue(tomorrow);
+        if (personFixture.requests != 7 || !PersonMemoryStore::pendingPeople().empty())
+            throw std::runtime_error("next daily run did not consume remaining entries only");
+        ++local.tm_mday;
+        co_await restarted.runDue(std::mktime(&local));
+        if (personFixture.requests != 7)
+            throw std::runtime_error("empty daily run called model");
+        MemoryMaintenanceStore::apply(db, 100, {.personEntries = {{88004, "退出期间保留"}}});
+        ++local.tm_mday;
+        const auto interruptedDay = std::mktime(&local);
+        PersonMemoryConsolidator interrupted;
+        const auto usageCount = [&db] {
+            const Statement query(db.handle(), "SELECT COUNT(*) FROM llm_usage");
+            return query.step() ? query.getInt(0) : -1;
+        };
+        const auto beforeStop = usageCount();
+        if (beforeStop == 0)
+            throw std::runtime_error("normal consolidation did not record usage");
+        personFixture.stopService = &interrupted;
+        co_await interrupted.runDue(interruptedDay);
+        if (db.handle() || !db.initialize(path.string()) || usageCount() != beforeStop)
+            throw std::runtime_error("late response wrote usage after service stop and database closure");
+        if (PersonMemoryStore::getPerson(88004)["pending_entries"].empty() ||
+            PersonMemoryStore::dailyState().runningDay != "2026-10-23")
+            throw std::runtime_error("stopped service committed late result or completed unfinished run");
+        PersonMemoryConsolidator resumed;
+        co_await resumed.runDue(interruptedDay);
+        if (!PersonMemoryStore::pendingPeople().empty() || PersonMemoryStore::dailyState().completedDay != "2026-10-23")
+            throw std::runtime_error("unfinished daily run did not resume");
+        const auto afterResume = usageCount();
+        auto control = std::make_shared<LlmClient::MaintenanceRequestControl>();
+        personFixture.cancelRequest = control.get();
+        const auto cancelled = co_await LlmClient::requestMaintenance(
+          json::array({{{"role", "system"}, {"content", "fixture"}},
+            {{"role", "user"}, {"content", R"({"qq":"88004"})"}}}), 0, "memory", std::nullopt, control);
+        const auto requestCount = personFixture.requests.load();
+        const auto alreadyCancelled = co_await LlmClient::requestMaintenance(
+          json::array(), 0, "memory", std::nullopt, control);
+        if (cancelled || alreadyCancelled || personFixture.requests != requestCount || db.handle() ||
+            !db.initialize(path.string()) || usageCount() != afterResume)
+            throw std::runtime_error("cancelled maintenance touched closed database or returned content");
+        db.close();
+        if (!db.initialize(":memory:"))
+            throw std::runtime_error("could not restore test database");
+        MemoryMaintenanceStore::apply(db, 100, {.affinity = {{22, 3}}});
+        std::filesystem::remove(path);
+    }
+
+    struct NameFixture {
+        std::atomic<i32> active{0};
+        std::atomic<i32> peak{0};
+        std::mutex mutex;
+        std::unordered_map<u64, i32> requests;
+        auto count(const u64 qq) -> i32 {
+            std::lock_guard lock(mutex);
+            return requests[qq];
+        }
+    } nameFixture;
+
+    auto waitFor(std::function<bool()> condition) -> drogon::Task<> {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+        while (!condition()) {
+            if (std::chrono::steady_clock::now() > deadline)
+                throw std::runtime_error("timed out waiting for nickname fixture");
+            co_await drogon::sleepCoro(drogon::app().getLoop(), 0.01);
+        }
+    }
     enum class Mode {
         Success,
         ExtractFailure,
@@ -64,6 +182,81 @@ namespace {
     void require(const bool condition, const char *message) {
         if (!condition)
             throw std::runtime_error(message);
+    }
+
+    auto testPersonNames(const std::string &endpoint, std::atomic<i32> &nameRequests) -> drogon::Task<> {
+        auto &config = Config::instance();
+        auto &database = Database::instance();
+        config.oneBotTransport = "http";
+        config.qqHttpHost = endpoint;
+        for (u64 qq = 91000; qq < 91012; ++qq)
+            AffinityStore::adjustAffinity(qq, 1);
+        const AdminController controller;
+        drogon::HttpResponsePtr response;
+        const auto callback = [&](const drogon::HttpResponsePtr &value) { response = value; };
+        const auto started = std::chrono::steady_clock::now();
+        co_await controller.getPeople(drogon::HttpRequest::newHttpRequest(), callback);
+        const auto initialPeople = json::parse(response->body());
+        require(!initialPeople.empty() && initialPeople[0]["name_pending"] == true &&
+                  std::chrono::steady_clock::now() - started < std::chrono::milliseconds(100),
+          "people list waited for slow nickname queries");
+        co_await controller.getPeople(drogon::HttpRequest::newHttpRequest(), callback);
+        co_await controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, "22");
+        co_await waitFor([&initialPeople] {
+            return std::ranges::all_of(initialPeople, [](const json &person) {
+                return !PersonNameResolver::instance().lookup(std::stoull(person["qq"].get<std::string>())).pending;
+            });
+        });
+        require(nameFixture.peak == 4 && nameFixture.count(22) == 1 &&
+                  nameFixture.count(91000) == 1 && nameFixture.count(91011) == 1,
+          "nickname query concurrency limit or request deduplication failed");
+        const auto queried = nameRequests.load();
+        co_await controller.getPeople(drogon::HttpRequest::newHttpRequest(), callback);
+        require(nameRequests.load() == queried, "people list repeated cached nickname queries");
+        co_await controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, "22");
+        require(json::parse(response->body())["name"] == "Fixture 22" && nameRequests.load() == queried,
+          "person detail did not reuse resolved nickname");
+        QQNameDirectory::setCustomName(22, "自定义昵称");
+        co_await controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, "22");
+        require(json::parse(response->body())["name"] == "自定义昵称" && nameRequests.load() == queried,
+          "custom nickname was overwritten or queried unnecessarily");
+        MemoryMaintenanceStore::apply(database, 100, {.affinity = {{991, 1}, {992, 2}}});
+        for (const auto *qq: {"991", "992"}) {
+            co_await controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, qq);
+            const auto person = json::parse(response->body());
+            require(person["name"] == "未知" && person.contains("affinity") && person.contains("pending_entries"),
+              "failed or empty nickname hid person data");
+        }
+        co_await waitFor([] {
+            return !PersonNameResolver::instance().lookup(991).pending &&
+              !PersonNameResolver::instance().lookup(992).pending;
+        });
+        const auto failedQueries = nameRequests.load();
+        co_await controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, "991");
+        require(nameRequests.load() == failedQueries && json::parse(response->body())["name_pending"] == false,
+          "failed nickname query bypassed cooldown");
+        require(PersonNameResolver::instance().lookup(991,
+                  PersonNameResolver::Clock::now() + std::chrono::seconds(61)).pending,
+          "failed nickname query could not retry after cooldown");
+        co_await waitFor([] { return !PersonNameResolver::instance().lookup(991).pending; });
+        require(nameRequests.load() == failedQueries + 1, "cooldown retry did not issue one request");
+        require(PersonNameResolver::instance().lookup(995).pending, "timeout test did not start");
+        co_await waitFor([] { return !PersonNameResolver::instance().lookup(995).pending; });
+        require(QQNameDirectory::getName(995) == "未知", "timed out nickname query updated cache");
+        config.oneBotTransport = "websocket";
+        MemoryMaintenanceStore::apply(database, 100, {.affinity = {{993, 1}}});
+        co_await controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, "993");
+        require(json::parse(response->body())["name"] == "未知", "disconnected OneBot broke person detail");
+        co_await waitFor([] { return !PersonNameResolver::instance().lookup(993).pending; });
+        config.oneBotTransport = "http";
+        require(PersonNameResolver::instance().lookup(996).pending, "stop test did not queue nickname");
+        co_await waitFor([] { return nameFixture.count(996) == 1; });
+        require(PersonNameResolver::instance().lookup(997).pending, "stop test did not queue next nickname");
+        PersonNameResolver::instance().stop();
+        co_await waitFor([] { return nameFixture.active == 0; });
+        require(QQNameDirectory::getName(996) == "未知" && QQNameDirectory::getName(997) == "未知" &&
+                  !PersonNameResolver::instance().lookup(998).pending,
+          "stopped resolver updated nickname cache or accepted new work");
     }
 
     auto runTests(const std::string endpoint, std::atomic<Mode> &mode, std::atomic<i32> &requests,
@@ -269,38 +462,8 @@ namespace {
             const auto storedShortTerm = json::parse(MemoryStore::getShortTermMemory(500));
             require(storedShortTerm["recent_events"].size() == 20 && storedShortTerm["recent_events"][19] == "event 19",
               "short-term memory was truncated to the former 15-entry limit");
-            config.oneBotTransport = "http";
-            config.qqHttpHost = endpoint;
-            const AdminController controller;
-            drogon::HttpResponsePtr response;
-            const auto callback = [&](const drogon::HttpResponsePtr &value) { response = value; };
-            co_await controller.getPeople(drogon::HttpRequest::newHttpRequest(), callback);
-            require(!json::parse(response->body()).empty() && nameRequests.load() > 0,
-              "people list did not resolve missing nicknames");
-            const auto queried = nameRequests.load();
-            co_await controller.getPeople(drogon::HttpRequest::newHttpRequest(), callback);
-            require(nameRequests.load() == queried, "people list repeated cached nickname queries");
-            co_await controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, "22");
-            require(json::parse(response->body())["name"] == "Fixture 22" && nameRequests.load() == queried,
-              "person detail did not reuse resolved nickname");
-            QQNameDirectory::setCustomName(22, "自定义昵称");
-            co_await controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, "22");
-            require(json::parse(response->body())["name"] == "自定义昵称" && nameRequests.load() == queried,
-              "custom nickname was overwritten or queried unnecessarily");
-            MemoryMaintenanceStore::apply(database, 100, {.affinity = {{991, 1}, {992, 2}}});
-            for (const auto *qq: {"991", "992"}) {
-                co_await controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, qq);
-                const auto person = json::parse(response->body());
-                require(person["name"] == "未知" && person.contains("affinity") && person.contains("pending_entries"),
-                  "failed or empty nickname hid person data");
-            }
-            const auto failedQueries = nameRequests.load();
-            co_await controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, "991");
-            require(nameRequests.load() == failedQueries + 1, "failed nickname query could not retry");
-            config.oneBotTransport = "websocket";
-            MemoryMaintenanceStore::apply(database, 100, {.affinity = {{993, 1}}});
-            co_await controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, "993");
-            require(json::parse(response->body())["name"] == "未知", "disconnected OneBot broke person detail");
+            co_await testPersonConsolidation(endpoint);
+            co_await testPersonNames(endpoint, nameRequests);
             exitCode = 0;
             std::cout << "All memory maintenance tests passed\n";
         } catch (const std::exception &error) {
@@ -321,16 +484,56 @@ auto main() -> int {
     i32 executorRequests = 0;
     json frozenUser;
     drogon::app().setLogLevel(trantor::Logger::kWarn).addListener("127.0.0.1", 0);
+    drogon::app().registerHandler("/person-consolidation-fixture",
+      [](const drogon::HttpRequestPtr &request, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+          ++personFixture.requests;
+          const auto body = json::parse(request->body());
+          const auto profile = json::parse(body["messages"][1]["content"].get<std::string>());
+          const auto qq = profile["qq"].get<std::string>();
+          if (qq == "88001" && personFixture.injectNew.exchange(false)) {
+              MemoryMaintenanceStore::apply(Database::instance(), 200, {.personEntries = {{88001, "请求期间新增"}}});
+          }
+          if (auto *service = personFixture.stopService.exchange(nullptr)) {
+              service->stop();
+              Database::instance().close();
+          }
+          if (auto *control = personFixture.cancelRequest.exchange(nullptr)) {
+              control->cancel();
+              Database::instance().close();
+          }
+          auto response = drogon::HttpResponse::newHttpResponse();
+          response->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+          if (qq == "88003" && personFixture.fail) {
+              response->setStatusCode(drogon::k400BadRequest);
+              response->setBody("{}");
+          } else {
+              const auto content = qq == "88002" && personFixture.fail ? R"({"stable_memory":"invalid"})" :
+                R"({"stable_memory":["整理后的固定记忆"],"recent_interactions":["整理后的近期互动"]})";
+              response->setBody(json{{"choices", {{{"message", {{"content", content}}}}}},
+                {"usage", {{"prompt_tokens", 10}, {"completion_tokens", 5}, {"total_tokens", 15}}}}.dump());
+          }
+          callback(response);
+      }, {drogon::Post});
     drogon::app().registerHandler("/get_stranger_info",
       [&nameRequests](const drogon::HttpRequestPtr &request,
         std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
           ++nameRequests;
           const auto qq = json::parse(request->body())["user_id"].get<u64>();
+          {
+              std::lock_guard lock(nameFixture.mutex);
+              ++nameFixture.requests[qq];
+          }
+          const auto active = ++nameFixture.active;
+          nameFixture.peak.store(std::max(nameFixture.peak.load(), active));
           auto response = drogon::HttpResponse::newHttpResponse();
           response->setContentTypeCode(drogon::CT_APPLICATION_JSON);
           response->setBody(qq == 991 ? json{{"status", "failed"}, {"retcode", 1}}.dump() :
             json{{"status", "ok"}, {"data", {{"nickname", qq == 992 ? "" : "Fixture " + std::to_string(qq)}}}}.dump());
-          callback(response);
+          drogon::app().getLoop()->runAfter(qq == 995 ? 5.5 : 0.1,
+            [callback = std::move(callback), response] {
+                --nameFixture.active;
+                callback(response);
+            });
       }, {drogon::Post});
     drogon::app().registerHandler("/embedding-fixture",
       [](const drogon::HttpRequestPtr &, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {

@@ -6,6 +6,7 @@
 #include <workflow/access/BlacklistStore.hpp>
 #include <admin/http/AdminController.hpp>
 #include <admin/http/AdminResponse.hpp>
+#include <admin/http/PersonNameResolver.hpp>
 #include <workflow/agent/memory/LongTermMemoryStore.hpp>
 #include <workflow/agent/memory/MemoryStore.hpp>
 #include <workflow/agent/memory/affinity/AffinityStore.hpp>
@@ -35,19 +36,10 @@ namespace {
     // 进程启动时间（文件作用域 static，程序启动时初始化）
     const auto g_processStartTime = std::chrono::system_clock::now();
 
-    auto resolvePersonName(const u64 qq) -> Task<std::string> {
-        auto name = QQNameDirectory::getName(qq);
-        if (!name.empty() && name != "未知")
-            co_return name;
-        try {
-            const auto response = co_await OneBotClient::getStrangerInfo(qq);
-            name = getStr(atOrNull(response, "data"), "nickname");
-            if (!name.empty() && name != "未知")
-                QQNameDirectory::recordName(qq, std::move(name));
-        } catch (const std::exception &error) {
-            Logger::warn(0, "Admin", fmt::format("查询人物昵称失败: qq={}, {}", qq, error.what()));
-        }
-        co_return QQNameDirectory::getName(qq);
+    void addPersonName(json &person) {
+        const auto name = PersonNameResolver::instance().lookup(parseUInt64(getStr(person, "qq")));
+        person["name"] = name.value;
+        person["name_pending"] = name.pending;
     }
 
     auto processSampleJson(const ProcessSample &sample) -> json {
@@ -813,7 +805,7 @@ auto AdminController::getPeople(HttpRequestPtr req, std::function<void(const Htt
   -> Task<> {
     auto people = PersonMemoryStore::listPeople();
     for (auto &person: people)
-        person["name"] = co_await resolvePersonName(parseUInt64(getStr(person, "qq")));
+        addPersonName(person);
     callback(jsonResponse(people));
     co_return;
 }
@@ -830,7 +822,7 @@ auto AdminController::getPerson(HttpRequestPtr req, std::function<void(const Htt
         callback(jsonResponse(AdminResponse::errorJson("没有该人物的记录")));
         co_return;
     }
-    person["name"] = co_await resolvePersonName(id);
+    addPersonName(person);
     callback(jsonResponse(person));
     co_return;
 }
