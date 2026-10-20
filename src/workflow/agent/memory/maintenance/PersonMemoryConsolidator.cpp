@@ -98,10 +98,11 @@ recent_interactions：此人与机器人之间近期发生的事；合并进展�
             }
             if (!snapshot)
                 co_return false;
+            // GCC 13 对 co_await 参数中的嵌套初始化列表有兼容性问题，先构建命名对象。
+            const json messages = json::array({{{"role", "system"}, {"content", kPrompt}},
+              {{"role", "user"}, {"content", snapshot->profile.dump()}}});
             const auto result =
-              co_await LlmClient::requestMaintenance(json::array({{{"role", "system"}, {"content", kPrompt}},
-                                                       {{"role", "user"}, {"content", snapshot->profile.dump()}}}),
-                0, "memory", std::nullopt, control);
+              co_await LlmClient::requestMaintenance(messages, 0, "memory", std::nullopt, control);
             // 与 stop() 互斥，检查取消状态后才允许读取或提交数据库。
             std::lock_guard lock(m_mutex);
             if (control->isCancelled())
