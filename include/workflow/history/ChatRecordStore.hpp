@@ -24,6 +24,10 @@ namespace insoulforge::ChatRecordStore {
     void addChatRecord(const Database &db, u64 sessionId, const std::string &role, const std::string &content);
     void clearSessionChatRecords(const Database &db, u64 sessionId);
 
+    /// @brief 原子替换会话恢复快照；messages 为按时间从早到晚排列的完整消息数组。
+    /// @details 空数组清空该会话；失败回滚、保留旧记录并抛出异常，不影响其他会话。
+    void replaceSessionChatRecords(const Database &db, u64 sessionId, const json &messages);
+
     /// @brief 追加一条会话记录
     /// @param sessionId 统一会话 ID
     /// @param role user 或 assistant

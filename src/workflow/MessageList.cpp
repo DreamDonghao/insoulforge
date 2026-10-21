@@ -72,12 +72,7 @@ namespace insoulforge {
     void MessageList::flushToStorage() const {
         std::lock_guard lock(m_mutex);
         const json currentMessages = fullSnapshotLocked();
-        ChatRecordStore::clearSessionChatRecords(m_database, m_sessionId);
-        for (const json &message: currentMessages) {
-            const bool isAssistant = getStr(atOrNull(message, "sender"), "qq") == "self";
-            ChatRecordStore::addChatRecord(
-              m_database, m_sessionId, isAssistant ? "assistant" : "user", dumpJson(message));
-        }
+        ChatRecordStore::replaceSessionChatRecords(m_database, m_sessionId, currentMessages);
     }
 
     void MessageList::clear() {
