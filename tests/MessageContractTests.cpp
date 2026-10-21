@@ -848,7 +848,7 @@ namespace {
         constexpr std::string_view kTestName = "iteration request messages";
         const auto history = insoulforge::json::array(
           {{{"role", "system"}, {"content", "original prompt"}},
-            {{"role", "user"}, {"content", R"({"response_requirements":{"max_length":100},"recent_conversation":[]})"}},
+            {{"role", "user"}, {"content", R"({"response_requirements":{"max_length":100},"recent_messages":[]})"}},
             {{"role", "assistant"}, {"tool_calls", {{{"id", "call-1"}, {"type", "function"}}}}},
             {{"role", "tool"}, {"tool_call_id", "call-1"}, {"content", "source data"}}});
 
@@ -1231,6 +1231,12 @@ namespace {
         check(person["affinity"] == 12 && person["pending_entries"].size() == 2 &&
                 person["pending_entries"][0]["source_session"] == std::to_string(privateId),
           "person detail combines global score and newest-first entries with exact session IDs", kTestName);
+        check(profiles[0]["pending_entries"][0].contains("created_at") &&
+                !profiles[0]["pending_entries"][0].contains("time") &&
+                person["pending_entries"][1].contains("time") &&
+                !person["pending_entries"][1].contains("created_at") &&
+                profiles[0]["pending_entries"][0]["created_at"] == person["pending_entries"][1]["time"],
+          "model uses created_at while admin API retains original timestamp contract", kTestName);
         check(PersonMemoryStore::getPerson(33)["stable_memory"].empty() &&
                 PersonMemoryStore::getPerson(44)["affinity"] == 0 && PersonMemoryStore::getPerson(999).is_null(),
           "handles score-only, memory-only and unknown profiles", kTestName);

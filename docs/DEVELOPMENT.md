@@ -236,7 +236,7 @@ MessageService → OneBot API
   `contextWindowLimit` 条近期消息。预处理结束后，若消息数达到或超过 `memorySummaryTriggerCount` 且没有执行中的维护任务，
   则选取最旧的 `memorySummaryBatchSize` 条启动内存维护任务；全部结果提交成功后才按条数删除队首消息。启动时从数据库恢复消息，正常退出时调用
   `flushToStorage()` 覆盖持久化恢复副本。
-- `SharedConversationContext` 为 Executor 构建 `other_conversations`。会话共享开关保存在 `group_config.cross_session_sharing`，
+- `SharedConversationContext` 为 Executor 构建 `shared_conversations`。会话共享开关保存在 `group_config.cross_session_sharing`，
   默认关闭，群聊、私聊双向互通；仅已启用且参与共享的会话可提供和接收。每来源默认读取 10 条（`memory.sharedConversationMessageCount`），
   限三天内且尚未被总结移除的消息，所有内容段共用 200 字符额度，超出标记 `truncated`。只读有限条数快照，不复制整份会话历史，
   不包含消息 ID、引用目标、媒体索引、工具执行历史或召回记忆；共享背景不能作为当前会话指令。回复期间保持快照不变，不额外限制全局预算。
@@ -356,8 +356,9 @@ MessageService → OneBot API
   每日整理向 `LlmClient::requestMaintenance` 传递共享取消状态；取消与模型用量入库使用同一互斥保护，停止后丢弃迟到响应及其用量，不等待网络超时。
   人物昵称由 `PersonNameResolver` 后台查询，最多四路并发、同 QQ 去重，超时 5 秒、失败冷却 60 秒；接口立即返回缓存及 `name_pending`。
   前端有待查询昵称时每 2 秒刷新概要，不重新获取记忆正文，离开页面取消轮询和请求；进程退出时昵称队列停止接单并丢弃迟到结果。
-  `PersonMemoryStore` 只批量读取 `recent_conversation` 中去重后的真实发送者档案，不加载仅被提及、其他会话出现或没有档案的人。
-  上下文顺序为 `session → short_term_memory → earlier_conversation → recent_conversation → person_memories → other_conversations → response_requirements`；
+  `PersonMemoryStore` 只批量读取 `recent_messages` 中去重后的真实发送者档案，不加载仅被提及、其他会话出现或没有档案的人。
+  上下文顺序为 `current_session → session_memory → earlier_messages → person_memories → shared_conversations → recent_messages → response_requirements`；
+  Executor 消息投影将原记录的 `memories` 输出为 `recalled_memories`，人物待整理条目的写入时间输出为 `created_at`；原始记录、数据库及前端 API 的字段不变。
   新条目也直接提供给模型，一次回复期间固定快照。旧自由文本记忆不猜测归属、不自动迁入人物档案。
 - **好感度评估**：联合提取返回独立的 `memories` 和 `affinity_changes` 数组，允许两者为空或涉及不同用户。
   QQ 必须属于待提取消息的真实发送者，补充上下文不可作为新增记忆或评分来源；重复人物条目去重，重复评分或无效归属使批次失败。
