@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <deque>
 #include <filesystem>
 #include <functional>
 #include <iostream>
@@ -423,7 +422,13 @@ namespace {
                       [](ToolRegistry &staged) {
                           staged.registerTool({.name = "contract_context",
                                                 .description = "fixture",
-                                                .handler = [](json, ToolCallContext) -> drogon::Task<std::string> {
+                                                .handler = [](json, ToolCallContext ctx) -> drogon::Task<std::string> {
+                                                    const auto &snapshot = ctx.messageSnapshot;
+                                                    if (snapshot.size() != 14 || snapshot[0] != "legacy text" ||
+                                                        snapshot[1]["segments"][0]["text"] != std::string(501, 'x') ||
+                                                        !MessageRecord::findImageSource(snapshot.back(), 0)) {
+                                                        throw std::runtime_error("tool lost the complete frozen snapshot");
+                                                    }
                                                     co_return "source";
                                                 }},
                             ToolCategory::INFORMATION);
@@ -434,13 +439,16 @@ namespace {
             config.executor.model = "fixture";
             config.execution.maxToolRounds.store(3);
             MemoryMaintenanceStore::apply(database, 100, {.personEntries = {{99, "older sender must not be loaded"}}});
-            std::deque<json> chat;
+            auto chat = json::array({"legacy text"});
             for (i32 index = 0; index < 13; ++index) {
                 const json record = {{"time", "2026-10-20 12:00:00"},
                   {"sender", {{"qq", index == 0 ? "99" : (index % 2 ? "11" : "22")}}},
                   {"memories", {{{"content", "legacy recalled fact"}, {"similarity", 0.8}}}},
-                  {"segments", {{{"type", "text"}, {"text", "context"}}}}};
-                chat.push_back({{"role", "user"}, {"content", record.dump()}});
+                  {"segments", {{{"type", "text"}, {"text", std::string(501, 'x')}},
+                                 {{"type", "image"}, {"image_index", 0}}}},
+                  {"assets", {{"images", {{{"recognition_status", "succeeded"}, {"description", "fixture image"},
+                    {"source", {{"url", "https://example.com/private.png"}}}}}}}}};
+                chat.push_back(record);
             }
             const ChatRecordManager records(privateId, std::move(chat));
             const MemoryManager memory(privateId);
@@ -682,12 +690,18 @@ auto main() -> int {
                        context["shared_conversations"].empty();
           valid = valid && context["session_memory"] == sessionMemory() &&
               context["current_session"]["type"] == "private" && context["current_session"]["qq"] == 22 &&
-              context["earlier_messages"].size() == 1 && context["recent_messages"].size() == 12;
+              context["earlier_messages"].size() == 2 && context["earlier_messages"][0] == "legacy text" &&
+              context["earlier_messages"][1]["segments"][0]["text"] == std::string(500, 'x') + "…" &&
+              context["recent_messages"].size() == 12 &&
+              context["recent_messages"][0]["segments"][0]["text"] == std::string(501, 'x');
           for (const auto key : {"earlier_messages", "recent_messages"}) {
               for (const auto &record: context[key]) {
+                  if (record.is_string()) continue;
                   valid = valid && !record.contains("memories") &&
                       record["recalled_memories"] == json::array({"legacy recalled fact"}) &&
-                      record["time"] == "2026-10-20 12:00:00";
+                      record["time"] == "2026-10-20 12:00:00" && !record.contains("assets") &&
+                      !record.dump().contains("https://example.com/private.png") &&
+                      record["segments"][1]["description"] == "fixture image";
                   if (record["sender"]["qq"] == "22")
                       valid = valid && record["sender"]["affinity"] == 5;
               }
@@ -707,7 +721,8 @@ auto main() -> int {
           if (executorRequests == 1)
               frozenUser = messages[1];
           else
-              valid = valid && messages[1] == frozenUser && messages.size() == 5 && messages[3]["role"] == "tool";
+              valid = valid && messages[1] == frozenUser && messages.size() == 5 && messages[3]["role"] == "tool" &&
+                  messages[3]["content"] == "source";
           auto reply = drogon::HttpResponse::newHttpResponse();
           reply->setContentTypeCode(drogon::CT_APPLICATION_JSON);
           if (!valid) {

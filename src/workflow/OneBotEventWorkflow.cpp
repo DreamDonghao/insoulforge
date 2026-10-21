@@ -324,7 +324,7 @@ namespace insoulforge {
         bool isInitialReply = true;
         while (true) {
             // 每轮回复均读取最新快照，避免遗漏等待期间已发送的助手消息。
-            const auto messageSnapshot = sessionState->messageList()->snapshot();
+            auto messageSnapshot = sessionState->messageList()->snapshot();
 
             try {
                 if (!m_dependencies->agent.isReady()) {
@@ -338,14 +338,10 @@ namespace insoulforge {
                         routerDecision.maxLength));
 
                     if (routerDecision.shouldReply) {
-                        auto recordSnapshot = std::deque<json>{};
-                        for (const auto &message: messageSnapshot) {
-                            recordSnapshot.push_back({{"content", dumpJson(message)}});
-                        }
-                        const auto records = ChatRecordManager{sessionId, std::move(recordSnapshot)};
+                        const auto records = ChatRecordManager{sessionId, std::move(messageSnapshot)};
                         const auto memory = MemoryManager{sessionId};
                         const auto replyDecision =
-                          co_await ExecutorAgent::execute(records, memory, std::move(routerDecision), messageSnapshot);
+                          co_await ExecutorAgent::execute(records, memory, std::move(routerDecision));
                         if (replyDecision && replyDecision->shouldReply && !replyDecision->content.empty()) {
                             if (SessionId::isPrivate(sessionId)) {
                                 co_await MessageService::sendPrivateMsg(SessionId::privateUserId(sessionId),

@@ -12,6 +12,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -36,6 +37,7 @@
 #include <workflow/agent/tools/custom/ToolStore.hpp>
 #include <workflow/agent/tools/plugins/ActionToolsPlugin.hpp>
 #include <workflow/history/ChatRecordStore.hpp>
+#include <workflow/history/ChatRecordManager.hpp>
 #include <workflow/history/SharedConversationContext.hpp>
 #include <workflow/message/MessageRecord.hpp>
 #include <workflow/message/SessionId.hpp>
@@ -2509,6 +2511,28 @@ namespace {
         database.close();
     }
 
+    void testAgentMessageSnapshotOwnership() {
+        constexpr std::string_view kTestName = "agent message snapshot ownership";
+        using insoulforge::ChatRecordManager;
+        using insoulforge::json;
+        static_assert(std::is_same_v<decltype(std::declval<const ChatRecordManager &>().getRecords()), const json &>);
+        auto messages = json::array({"legacy text",
+          {{"message_id", "1"}, {"sender", {{"qq", "11"}}},
+            {"segments", {{{"type", "text"}, {"text", "original"}}}}}});
+        const auto expected = messages;
+        const ChatRecordManager copied(100, messages);
+        messages[1]["segments"][0]["text"] = "changed";
+        messages.push_back({{"message_id", "2"}});
+        check(copied.getSessionId() == 100 && copied.getRecords() == expected,
+          "snapshot owns an independent ordered copy including plain text", kTestName);
+        check(&copied.getRecords() == &copied.getRecords(), "repeated reads refer to the owned snapshot", kTestName);
+        const auto *ownedElements = &messages[0];
+        const ChatRecordManager moved(200, std::move(messages));
+        check(&moved.getRecords()[0] == ownedElements, "moving transfers the array without copying its messages",
+          kTestName);
+        check(copied.getRecords() == expected, "later snapshots do not change the frozen context", kTestName);
+    }
+
     void testMessageSnapshotAtomicReplacement() {
         constexpr std::string_view kTestName = "atomic message snapshot replacement";
         auto &database = insoulforge::Database::instance();
@@ -2804,6 +2828,7 @@ auto main() -> int {
     testImageGenerationResponse();
     testUsageSummaryUsesLatestRoleModel();
     testMessageListSnapshotsAndPersistence();
+    testAgentMessageSnapshotOwnership();
     testMessageSnapshotAtomicReplacement();
     testAsyncTaskSessionExclusivity();
     testStartupResults();
