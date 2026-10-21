@@ -360,15 +360,36 @@ test('group subscriptions resume after reconnect and stop on return or unmount',
   socket.emit(event)
   assert.equal(view.state.chatRecords.length, 2)
   view.state.backToList()
-  assert.deepEqual(socket.sent.at(-1), {action: 'unsubscribe'})
+  assert.deepEqual(socket.sent.at(-1), {action: 'unsubscribe', groupId: '123'})
   connected.value = false
   socket = new Socket()
   connected.value = true
   assert.deepEqual(socket.sent, [])
   await view.state.selectGroup('456', 'Next')
   view.unmount()
-  assert.deepEqual(socket.sent.at(-1), {action: 'unsubscribe'})
+  assert.deepEqual(socket.sent.at(-1), {action: 'unsubscribe', groupId: '456'})
   assert.equal(socket.listeners.size, 0)
+})
+
+test('group unsubscribe preserves large session IDs and skips empty or closed connections', async () => {
+  const view = mount(groupComponent())
+  await flush()
+  view.state.backToList()
+  assert.deepEqual(socket.sent, [])
+  const sessionId = '9223372037529350142'
+  await view.state.selectGroup(sessionId, 'Private')
+  view.state.backToList()
+  assert.deepEqual(socket.sent, [
+    {action: 'subscribe', groupId: sessionId},
+    {action: 'unsubscribe', groupId: sessionId}
+  ])
+  await view.state.selectGroup(sessionId, 'Private')
+  const sentCount = socket.sent.length
+  socket.readyState = Socket.CLOSED
+  connected.value = false
+  view.state.backToList()
+  view.unmount()
+  assert.equal(socket.sent.length, sentCount)
 })
 
 test('group loading completed after unmount never attaches a listener', async () => {

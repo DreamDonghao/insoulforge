@@ -186,7 +186,7 @@ const selectGroup = async (sessionId: string, sessionName: string): Promise<void
 
 // 返回列表
 const backToList = (): void => {
-  send({action: 'unsubscribe'})
+  if (selectedGroup.value) send({action: 'unsubscribe', groupId: selectedGroup.value})
   selectedGroup.value = null
   selectedGroupName.value = ''
   chatRecords.value = []
@@ -518,7 +518,7 @@ const {send} = useAdminWebSocket(event => {
   },
   onDisconnected(socket) {
     if (selectedGroup.value && socket.readyState === WebSocket.OPEN)
-      socket.send(JSON.stringify({action: 'unsubscribe'}))
+      socket.send(JSON.stringify({action: 'unsubscribe', groupId: selectedGroup.value}))
   }
 })
 
