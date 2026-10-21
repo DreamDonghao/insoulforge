@@ -436,7 +436,9 @@ namespace {
             MemoryMaintenanceStore::apply(database, 100, {.personEntries = {{99, "older sender must not be loaded"}}});
             std::deque<json> chat;
             for (i32 index = 0; index < 13; ++index) {
-                const json record = {{"sender", {{"qq", index == 0 ? "99" : (index % 2 ? "11" : "22")}}},
+                const json record = {{"time", "2026-10-20 12:00:00"},
+                  {"sender", {{"qq", index == 0 ? "99" : (index % 2 ? "11" : "22")}}},
+                  {"memories", {{{"content", "legacy recalled fact"}, {"similarity", 0.8}}}},
                   {"segments", {{{"type", "text"}, {"text", "context"}}}}};
                 chat.push_back({{"role", "user"}, {"content", record.dump()}});
             }
@@ -670,19 +672,38 @@ auto main() -> int {
           std::vector<std::string> keys;
           for (const auto &[key, value]: context.items())
               keys.push_back(key);
-          const std::vector<std::string> expected = {"session", "short_term_memory", "earlier_conversation",
-            "recent_conversation", "person_memories", "other_conversations", "response_requirements"};
+          const std::vector<std::string> expected = {"current_session", "session_memory", "earlier_messages",
+            "person_memories", "shared_conversations", "recent_messages", "response_requirements"};
           const auto state = json::parse(messages.back()["content"].get<std::string>());
           bool valid = keys == expected && messages.back()["role"] == "system" && state.size() == 1 &&
                        state["execution_state"]["current_round"] == executorRequests &&
                        context["person_memories"].size() == 1 && context["person_memories"][0]["qq"] == "11" &&
                        context["person_memories"][0]["pending_entries"].size() == 2 &&
-                       context["other_conversations"].empty();
-          valid = valid && context["short_term_memory"] == sessionMemory();
-          for (const auto &record: context["recent_conversation"]) {
-              if (record["sender"]["qq"] == "22")
-                  valid = valid && record["sender"]["affinity"] == 5;
+                       context["shared_conversations"].empty();
+          valid = valid && context["session_memory"] == sessionMemory() &&
+              context["current_session"]["type"] == "private" && context["current_session"]["qq"] == 22 &&
+              context["earlier_messages"].size() == 1 && context["recent_messages"].size() == 12;
+          for (const auto key : {"earlier_messages", "recent_messages"}) {
+              for (const auto &record: context[key]) {
+                  valid = valid && !record.contains("memories") &&
+                      record["recalled_memories"] == json::array({"legacy recalled fact"}) &&
+                      record["time"] == "2026-10-20 12:00:00";
+                  if (record["sender"]["qq"] == "22")
+                      valid = valid && record["sender"]["affinity"] == 5;
+              }
           }
+          for (const auto &entry : context["person_memories"][0]["pending_entries"]) {
+              valid = valid && entry.contains("created_at") && !entry.contains("time") &&
+                  !entry["created_at"].get<std::string>().empty();
+          }
+          const auto systemPrompt = messages[0]["content"].get<std::string>();
+          const auto formatBegin = systemPrompt.find("## 聊天记录格式说明");
+          const auto exampleBegin = systemPrompt.find("```json\n", formatBegin) + std::string("```json\n").size();
+          const auto exampleEnd = systemPrompt.find("\n```", exampleBegin);
+          const auto example = json::parse(systemPrompt.substr(exampleBegin, exampleEnd - exampleBegin));
+          std::vector<std::string> exampleKeys;
+          for (const auto &[key, value] : example.items()) exampleKeys.push_back(key);
+          valid = valid && exampleKeys == expected;
           if (executorRequests == 1)
               frozenUser = messages[1];
           else

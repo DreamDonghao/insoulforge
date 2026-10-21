@@ -270,7 +270,7 @@ namespace insoulforge::PersonMemoryStore {
             }
             if (!query.isNull(3)) {
                 it->second["pending_entries"].push_back(
-                  {{"time", query.getText(6)}, {"source_session", std::to_string(static_cast<u64>(query.getInt64(5)))},
+                  {{"created_at", query.getText(6)}, {"source_session", std::to_string(static_cast<u64>(query.getInt64(5)))},
                     {"content", query.getText(4)}});
             }
         }
