@@ -5,6 +5,7 @@
  */
 import {computed, inject, nextTick, onMounted, onUnmounted, ref} from 'vue'
 import type {Group, LogEntry, LogQueryResult} from '../../vite-env.d'
+import {privateSessionUserId, sessionKey, sessionLabel} from '../../utils/session'
 
 const showToast = inject<(msg: string, isError?: boolean) => void>('showToast')
 
@@ -42,21 +43,13 @@ const scrollToBottom = async (force = false): Promise<void> => {
   })
 }
 
-// 会话展示辅助：私聊会话 ID 带标志位（超过 JS Number 安全范围），需按字符串/BigInt 处理
-const PRIVATE_FLAG = 1n << 63n
-const sessionKey = (g: Group): string => g.groupIdStr ?? String(g.groupId)
-const sessionLabel = (g: Group): string =>
-    g.sessionType === 'private'
-        ? g.groupName ? `${g.groupName} (${g.userId ?? ''})` : `私聊 ${g.userId ?? ''}`
-        : g.groupName || `群 ${g.groupId}`
 const groupLabels = computed(() => new Map(groups.value.map(g => [sessionKey(g), sessionLabel(g)])))
 const groupTag = (sessionId: string): string => {
   const label = groupLabels.value.get(sessionId)
   if (label) return label
   try {
-    return (BigInt(sessionId) & PRIVATE_FLAG) !== 0n
-        ? `私聊 ${BigInt(sessionId) & ~PRIVATE_FLAG}`
-        : `群 ${sessionId}`
+    const userId = privateSessionUserId(sessionId)
+    return userId !== null ? `私聊 ${userId}` : `群 ${sessionId}`
   } catch {
     return `群 ${sessionId}`
   }

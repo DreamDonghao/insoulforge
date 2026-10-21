@@ -3,10 +3,11 @@
  * @file UsageStats.vue
  * @brief 展示模型用量概览、角色分布、每日趋势和调用明细
  */
-import {computed, inject, onMounted, onUnmounted, ref, type Ref} from 'vue'
+import {computed, inject, onMounted, ref, type Ref} from 'vue'
+import {useAdminWebSocket} from '../../composables/useAdminWebSocket'
+import {useCoalescedRefresh} from '../../composables/useCoalescedRefresh'
 
 const showToast = inject<(msg: string, isError?: boolean) => void>('showToast')
-const ws = inject<{ get: () => WebSocket | null }>('ws')
 
 interface RoleUsage {
   role: string
@@ -34,14 +35,10 @@ interface RecentCall {
   cached: number
 }
 
-const loading: Ref<boolean> = ref(false)
 const days: Ref<number> = ref(30)
 
 const totalCalls: Ref<number> = ref(0)
-const totalPrompt: Ref<number> = ref(0)
-const totalCompletion: Ref<number> = ref(0)
 const totalTokens: Ref<number> = ref(0)
-const totalCached: Ref<number> = ref(0)
 
 const byRole: Ref<RoleUsage[]> = ref([])
 const byDay: Ref<DayUsage[]> = ref([])
@@ -112,7 +109,6 @@ const monthCachePrompt = computed(() => cacheableRoles.value.reduce((s, m) => s 
 const monthCacheCached = computed(() => cacheableRoles.value.reduce((s, m) => s + m.cached, 0))
 const monthHitRate = computed(() => monthCachePrompt.value > 0 ? (monthCacheCached.value / monthCachePrompt.value) * 100 : 0)
 
-const dailyAvgCalls = computed(() => byDay.value.length > 0 ? Math.round(totalCalls.value / byDay.value.length) : 0)
 const dailyAvgTokens = computed(() => byDay.value.length > 0 ? Math.round(totalTokens.value / byDay.value.length) : 0)
 
 const roleTotal = computed(() => byRole.value.reduce((s, m) => s + m.total, 0))
@@ -129,8 +125,6 @@ interface MergedRole {
   share: number
   avgPerCall: number
   cacheRate: string
-  cached: number
-  prompt: number
 }
 
 const mergedRoles = computed<MergedRole[]>(() => {
@@ -152,8 +146,6 @@ const mergedRoles = computed<MergedRole[]>(() => {
       share: roleTotal.value > 0 ? (r.total / roleTotal.value) * 100 : 0,
       avgPerCall: r.calls > 0 ? Math.round(r.total / r.calls) : 0,
       cacheRate: rate,
-      cached: r.cached,
-      prompt: r.prompt,
     }
   })
 })
@@ -164,58 +156,37 @@ const maxDayTotal = computed(() => {
   return Math.max(...byDay.value.map(d => d.total), 1)
 })
 
-const loadUsage = async (): Promise<void> => {
-  loading.value = true
+const {refresh: loadUsage, loading} = useCoalescedRefresh(async signal => {
   try {
-    const resp = await fetch(`/admin/api/usage?days=${days.value}`)
+    const resp = await fetch(`/admin/api/usage?days=${days.value}`, {signal})
+    if (signal.aborted) return
     if (!resp.ok) {
       showToast!('加载失败: ' + resp.status, true)
       return
     }
     const data = await resp.json()
+    if (signal.aborted) return
     totalCalls.value = data.total_calls || 0
-    totalPrompt.value = data.total_prompt || 0
-    totalCompletion.value = data.total_completion || 0
     totalTokens.value = data.total_tokens || 0
-    totalCached.value = data.total_cached || 0
     byRole.value = data.by_role || []
     byDay.value = data.by_day || []
     recent.value = data.recent || []
     todayStats.value = data.today || {calls: 0, prompt: 0, completion: 0, total: 0, cached: 0}
     todayByRole.value = data.today_by_role || []
   } catch {
-    showToast!('网络错误，请检查后端服务', true)
-  } finally {
-    loading.value = false
-  }
-}
-
-let wsMessageHandler: ((e: MessageEvent) => void) | null = null
-
-onMounted(() => {
-  loadUsage()
-
-  const wsConn = ws?.get()
-  if (wsConn) {
-    wsMessageHandler = (e: MessageEvent) => {
-      try {
-        const msg = JSON.parse(e.data)
-        if (msg.type === 'usage_updated') {
-          loadUsage()
-        }
-      } catch { /* ignore */
-      }
-    }
-    wsConn.addEventListener('message', wsMessageHandler)
+    if (!signal.aborted) showToast!('网络错误，请检查后端服务', true)
   }
 })
 
-onUnmounted(() => {
-  if (wsMessageHandler) {
-    ws?.get()?.removeEventListener('message', wsMessageHandler)
-    wsMessageHandler = null
+useAdminWebSocket(event => {
+  try {
+    const msg = JSON.parse(event.data)
+    if (msg.type === 'usage_updated') loadUsage()
+  } catch { /* ignore */
   }
 })
+
+onMounted(loadUsage)
 </script>
 
 <template>
@@ -447,12 +418,6 @@ onUnmounted(() => {
 }
 
 /* ====== Card 通用 ====== */
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
 .card-header-right {
   display: flex;
   align-items: center;

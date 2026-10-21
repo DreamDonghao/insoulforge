@@ -261,7 +261,7 @@ onUnmounted(disconnectWebSocket)
 </script>
 
 <template>
-  <main v-if="!authenticationChecked" class="login-page">
+  <main v-if="!authenticationChecked || !authenticated" class="login-page">
     <button :aria-label="themeToggleLabel" :title="themeToggleLabel" class="login-theme-toggle" type="button"
             @click="toggleTheme">
       <svg v-if="theme === 'dark'" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -288,41 +288,11 @@ onUnmounted(disconnectWebSocket)
           <div class="login-product-type">管理后台</div>
         </div>
       </div>
-      <div aria-live="polite" class="login-panel login-status">
+      <div v-if="!authenticationChecked" aria-live="polite" class="login-panel login-status">
         <span aria-hidden="true" class="loading-indicator"></span>
         正在验证登录状态...
       </div>
-    </div>
-  </main>
-
-  <main v-else-if="!authenticated" class="login-page">
-    <button :aria-label="themeToggleLabel" :title="themeToggleLabel" class="login-theme-toggle" type="button"
-            @click="toggleTheme">
-      <svg v-if="theme === 'dark'" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-        <path
-            d="M12 3v2m0 14v2M3 12h2m14 0h2M5.64 5.64l1.42 1.42m9.88 9.88 1.42 1.42m0-12.72-1.42 1.42m-9.88 9.88-1.42 1.42"/>
-        <circle cx="12" cy="12" r="4"/>
-      </svg>
-      <svg v-else fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-      </svg>
-      <span>{{ theme === 'dark' ? '深色模式' : '浅色模式' }}</span>
-    </button>
-    <div class="login-shell">
-      <div class="login-identity">
-        <div aria-hidden="true" class="login-logo">
-          <svg fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-               viewBox="0 0 24 24">
-            <path d="M12 2 2 7l10 5 10-5-10-5Z"/>
-            <path d="m2 12 10 5 10-5M2 17l10 5 10-5"/>
-          </svg>
-        </div>
-        <div>
-          <div class="login-product-name">InSoulForge</div>
-          <div class="login-product-type">管理后台</div>
-        </div>
-      </div>
-      <form class="login-panel" @submit.prevent="login">
+      <form v-else class="login-panel" @submit.prevent="login">
         <div class="login-eyebrow">安全访问</div>
         <h1>登录管理后台</h1>
         <p>请输入服务启动日志中生成的访问令牌。</p>
@@ -657,9 +627,6 @@ onUnmounted(disconnectWebSocket)
   border: 0;
   cursor: pointer;
   font: inherit;
-}
-
-.login-button {
   width: 100%;
   height: 42px;
   margin-top: 22px;

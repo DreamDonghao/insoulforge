@@ -5,6 +5,9 @@
  */
 import {computed, inject, nextTick, onMounted, onUnmounted, reactive, ref, type Ref, watch} from 'vue'
 import EnabledSwitch from '../../components/EnabledSwitch.vue'
+import ChatMessageView from './ChatMessageView.vue'
+import {useAdminWebSocket} from '../../composables/useAdminWebSocket'
+import {isPrivateSession, sessionKey, sessionLabel} from '../../utils/session'
 import type {
   ApiResponse,
   ChatMessage,
@@ -18,7 +21,6 @@ import type {
 const showToast = inject<(msg: string, isError?: boolean) => void>('showToast')
 const qqConfig = inject<QQConfig>('qqConfig')
 const wsConnected = inject<Ref<boolean>>('wsConnected') as Ref<boolean>
-const wsObj = inject<{ get: () => WebSocket | null }>('ws')
 
 // 会话列表
 const groups: Ref<(Group & { enabled?: boolean })[]> = ref([])
@@ -36,14 +38,6 @@ const filteredGroups = computed(() => {
   })
 })
 
-// 会话 ID 的字符串形式（私聊会话 ID 带标志位，超过 JS Number 安全范围，须以字符串操作）
-const sessionKey = (g: Group): string => g.groupIdStr ?? String(g.groupId)
-const isPrivateSession = (g: Group): boolean => g.sessionType === 'private'
-const sessionLabel = (g: Group): string =>
-    isPrivateSession(g)
-        ? g.groupName ? `${g.groupName} (${g.userId ?? ''})` : `私聊 ${g.userId ?? ''}`
-        : g.groupName || `群 ${g.groupId}`
-
 // 当前查看聊天记录的会话
 const selectedGroup: Ref<string | null> = ref(null)
 const selectedGroupName: Ref<string> = ref('')
@@ -56,6 +50,7 @@ const chatRecords: Ref<DisplayChatMessage[]> = ref([])
 const chatContainer: Ref<HTMLDivElement | null> = ref(null)
 const chatLoading: Ref<boolean> = ref(false)
 let nextRealtimeMessageKey = 0
+let disposed = false
 
 // 编辑状态
 const editingId: Ref<number | null> = ref(null)
@@ -174,16 +169,14 @@ const selectGroup = async (sessionId: string, sessionName: string): Promise<void
   try {
     const resp = await fetch(`/admin/api/chat-records/${sessionId}?limit=200`)
     const records: ChatMessage[] = await resp.json()
+    if (disposed || selectedGroup.value !== sessionId) return
     chatRecords.value = records.map((record, index) =>
         record.id === undefined ? {...record, clientKey: `snapshot-${index}`} : record)
 
     // 订阅 WebSocket（字符串形式传递，后端可正确解析大数）
-    const ws = wsObj!.get()
-    if (ws && wsConnected.value) {
-      ws.send(JSON.stringify({action: 'subscribe', groupId: sessionId}))
-    }
+    send({action: 'subscribe', groupId: sessionId})
   } finally {
-    chatLoading.value = false
+    if (!disposed && selectedGroup.value === sessionId) chatLoading.value = false
   }
 
   // 等待消息列表渲染完成后滚动到底部
@@ -193,10 +186,7 @@ const selectGroup = async (sessionId: string, sessionName: string): Promise<void
 
 // 返回列表
 const backToList = (): void => {
-  const ws = wsObj!.get()
-  if (ws) {
-    ws.send(JSON.stringify({action: 'unsubscribe'}))
-  }
+  send({action: 'unsubscribe'})
   selectedGroup.value = null
   selectedGroupName.value = ''
   chatRecords.value = []
@@ -514,132 +504,28 @@ watch(anyModalOpen, (open) => {
   document.body.style.overflow = open ? 'hidden' : ''
 })
 
-/** 解析持久化的完整消息记录；旧版纯文本记录保持兼容。 */
-const parseMessageRecord = (content: string): Record<string, unknown> | null => {
-  try {
-    const value: unknown = JSON.parse(content)
-    return value !== null && typeof value === 'object' && !Array.isArray(value)
-        ? value as Record<string, unknown>
-        : null
-  } catch {
-    return null
-  }
-}
-
-const getString = (value: unknown): string => typeof value === 'string' ? value : ''
-const getRecord = (value: unknown): Record<string, unknown> | null =>
-    value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
-
-/** 从统一资产或兼容的旧版图片字段取得图片识别描述。 */
-const imageDescription = (record: Record<string, unknown>, segment: Record<string, unknown>): string => {
-  if (getString(segment.description)) return getString(segment.description)
-
-  const index = typeof segment.image_index === 'number' ? segment.image_index : -1
-  const assets = getRecord(record.assets)
-  const images = Array.isArray(assets?.images) ? assets.images : Array.isArray(record.images) ? record.images : []
-  return index >= 0 ? getString(getRecord(images[index])?.description) : ''
-}
-
-/** 将统一消息记录渲染为适合会话管理阅读的内容，保留原始 JSON 供调试展开查看。 */
-const formatMessageContent = (content: string): string => {
-  const record = parseMessageRecord(content)
-  if (!record) return content
-
-  const segments = Array.isArray(record.segments) ? record.segments : []
-  const formatted = segments.map(segment => {
-    const item = getRecord(segment)
-    if (!item) return ''
-
-    switch (getString(item.type)) {
-      case 'text':
-        return getString(item.text)
-      case 'at': {
-        const target = getRecord(item.target)
-        if (getString(target?.kind) === 'all' || getString(item.qq) === '0') return '@全体成员'
-        const name = getString(target?.name) || getString(item.name)
-        const qq = getString(target?.qq) || getString(item.qq)
-        return name ? `@${name}` : qq ? `@${qq}` : '@成员'
-      }
-      case 'image': {
-        const description = imageDescription(record, item)
-        return description ? `[图片] ${description}` : '[图片]'
-      }
-      case 'face':
-        return `[QQ 表情${getString(item.label) ? `：${getString(item.label)}` : ''}]`
-      case 'sticker':
-        return `[表情包：${getString(item.name) || '未命名'}]`
-      case 'poke': {
-        const target = getRecord(item.target)
-        const name = getString(target?.name) || getString(item.target_name)
-        return `[拍一拍${name ? `：${name}` : ''}]`
-      }
-      case 'notification':
-      case 'member_event': {
-        const action = getString(item.action) || getString(item.kind)
-        return `[成员事件${action ? `：${action}` : ''}]`
-      }
-      case 'unsupported':
-        return `[${getString(item.segment_type) || '未知消息'}]`
-      default:
-        return `[${getString(item.type) || '未知消息'}]`
-    }
-  }).join('')
-
-  return formatted || getString(record.text) || '[空消息]'
-}
-
-const messageSender = (message: DisplayChatMessage): string => {
-  const record = parseMessageRecord(message.content)
-  const sender = getRecord(record?.sender)
-  return getString(sender?.name) || (message.role === 'user' ? '用户' : qqConfig!.botName)
-}
-
 const messageKey = (message: DisplayChatMessage): string | number => message.id ?? message.clientKey ?? message.content
-const canEditMessage = (message: DisplayChatMessage): boolean => message.id !== undefined
 
-// WebSocket 消息处理
-let originalOnMessage: ((event: MessageEvent) => void) | null | undefined = null
-
-const setupWebSocket = (): void => {
-  const ws = wsObj!.get()
-  if (ws && wsConnected.value) {
-    originalOnMessage = ws.onmessage ? ws.onmessage.bind(ws) : null
-    ws.onmessage = (event: MessageEvent) => {
-      const data = JSON.parse(event.data)
-      if (data.type === 'new_message' && data.groupId === selectedGroup.value) {
-        chatRecords.value.push({...data.data, clientKey: `realtime-${++nextRealtimeMessageKey}`})
-        nextTick(scrollToBottom)
-      }
-      if (originalOnMessage) originalOnMessage(event)
-    }
+const {send} = useAdminWebSocket(event => {
+  const data = JSON.parse(event.data)
+  if (data.type === 'new_message' && data.groupId === selectedGroup.value) {
+    chatRecords.value.push({...data.data, clientKey: `realtime-${++nextRealtimeMessageKey}`})
+    nextTick(scrollToBottom)
   }
-}
-
-// WebSocket 重连时重新设置消息处理器并重新订阅
-watch(wsConnected, (connected) => {
-  if (connected && selectedGroup.value) {
-    setupWebSocket()
-    const ws = wsObj!.get()
-    if (ws) {
-      ws.send(JSON.stringify({action: 'subscribe', groupId: selectedGroup.value}))
-    }
+}, {
+  onConnected(socket) {
+    if (selectedGroup.value) socket.send(JSON.stringify({action: 'subscribe', groupId: selectedGroup.value}))
+  },
+  onDisconnected(socket) {
+    if (selectedGroup.value && socket.readyState === WebSocket.OPEN)
+      socket.send(JSON.stringify({action: 'unsubscribe'}))
   }
 })
 
-const restoreWebSocket = (): void => {
-  const ws = wsObj!.get()
-  if (ws && originalOnMessage) {
-    ws.onmessage = originalOnMessage
-  }
-}
-
-onMounted(async () => {
-  await loadGroups()
-  setupWebSocket()
-})
+onMounted(loadGroups)
 
 onUnmounted(() => {
-  restoreWebSocket()
+  disposed = true
   ++promptRequestVersion
   if (anyModalOpen.value) document.body.style.overflow = ''
 })
@@ -806,23 +692,8 @@ onUnmounted(() => {
               class="chat-message"
           >
             <!-- 普通显示 -->
-            <template v-if="editingId !== msg.id">
-              <div class="msg-header">
-                <div class="msg-identity">
-                  <span class="msg-role">{{ messageSender(msg) }}</span>
-                  <span v-if="msg.role === 'assistant'" class="msg-bot-label">机器人</span>
-                </div>
-                <div v-if="canEditMessage(msg)" class="msg-actions">
-                  <button class="action-btn" title="编辑" @click="startEdit(msg)">✏️</button>
-                  <button class="action-btn delete" title="删除" @click="deleteRecord(msg.id!)">🗑️</button>
-                </div>
-              </div>
-              <div class="msg-content">{{ formatMessageContent(msg.content) }}</div>
-              <details v-if="parseMessageRecord(msg.content)" class="message-debug">
-                <summary>原始 JSON</summary>
-                <pre>{{ JSON.stringify(parseMessageRecord(msg.content), null, 2) }}</pre>
-              </details>
-            </template>
+            <ChatMessageView v-if="editingId !== msg.id" :message="msg" :bot-name="qqConfig!.botName"
+                             @edit="startEdit(msg)" @delete="deleteRecord(msg.id!)" />
 
             <!-- 编辑模式 -->
             <template v-else>
@@ -1146,103 +1017,6 @@ onUnmounted(() => {
   margin-left: auto;
 }
 
-.msg-identity {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.msg-bot-label {
-  padding: 1px 6px;
-  background: var(--primary-soft);
-  color: var(--primary);
-  font-size: 11px;
-}
-
-.msg-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.msg-role {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0;
-  color: var(--text-secondary);
-}
-
-.msg-actions {
-  display: flex;
-  gap: 4px;
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-
-.chat-message:hover .msg-actions,
-.chat-message:focus-within .msg-actions {
-  opacity: 1;
-}
-
-.action-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 14px;
-  padding: 2px 4px;
-  opacity: 0.6;
-}
-
-.action-btn:hover {
-  opacity: 1;
-}
-
-.action-btn.delete:hover {
-  opacity: 1;
-  filter: brightness(0) saturate(100%) invert(27%) sepia(94%) saturate(6514%) hue-rotate(355deg) brightness(93%) contrast(127%);
-}
-
-.msg-content {
-  font-size: 14px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.message-debug {
-  margin-top: 14px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
-  color: var(--text-secondary);
-}
-
-.message-debug summary {
-  cursor: pointer;
-  font-size: 12px;
-}
-
-.message-debug pre {
-  margin: 8px 0 0;
-  padding: 12px;
-  background: var(--code-bg);
-  color: var(--code-text);
-  border: 1px solid var(--border);
-  border-radius: 0;
-  font-size: 12px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  tab-size: 2;
-}
-
-@media (hover: none) {
-  .msg-actions {
-    opacity: 1;
-  }
-}
-
 .edit-form {
   width: 100%;
 }
@@ -1259,27 +1033,10 @@ onUnmounted(() => {
   color: var(--text-primary);
 }
 
-.chat-message.assistant .edit-textarea {
-  background: var(--input-bg);
-  color: var(--text-primary);
-}
-
 .edit-actions {
   display: flex;
   gap: 8px;
   margin-top: 8px;
-}
-
-.chat-empty {
-  text-align: center;
-  padding: 48px;
-  color: var(--text-light);
-}
-
-.chat-empty-icon {
-  font-size: 48px;
-  margin-bottom: 16px;
-  opacity: 0.5;
 }
 
 /* 弹窗 */
