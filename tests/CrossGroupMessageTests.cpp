@@ -17,6 +17,7 @@
 #include <workflow/agent/tools/ToolRegistry.hpp>
 #include <workflow/agent/tools/ToolRuntime.hpp>
 #include <workflow/history/ChatRecordStore.hpp>
+#include <workflow/history/SharedConversationContext.hpp>
 #include <workflow/message/SessionId.hpp>
 #include <workflow/session/SessionStore.hpp>
 
@@ -38,6 +39,93 @@ namespace {
 
     void require(const bool value, const char *message) {
         if (!value) throw std::runtime_error(message);
+    }
+
+    auto testGroupMessageQuery() -> drogon::Task<> {
+        auto &workflow = OneBotEventWorkflow::instance();
+        auto &registry = ToolRegistry::instance();
+        auto &config = Config::instance();
+        const auto oldWindow = config.contextWindowLimit;
+        config.contextWindowLimit = 3;
+        SessionStore::enableSession(400);
+        SessionStore::updateSessionName(400, "查询测试群");
+        json expected = json::array();
+        std::string longText;
+        for (int index = 0; index < 250; ++index) longText += "测";
+        for (int index = 0; index < 25; ++index) {
+            json record = {{"time", "2020-01-01 00:00:00"},
+                {"sender", {{"qq", "11"}, {"name", "Alice"}, {"card", "hidden card"}}},
+                {"message_id", std::to_string(1000 + index)}, {"reply_to", "999"},
+                {"memories", {"hidden memory"}}, {"tool_history", {{{"name", "hidden"}}}},
+                {"segments", {{{"type", "text"}, {"text", index == 0 ? longText : std::to_string(index)}}}}};
+            if (index == 24) {
+                record["segments"].push_back({{"type", "image"}, {"image_index", 0}});
+                record["assets"] = {{"images", {{{"recognition_status", "succeeded"}, {"description", "a cat"},
+                    {"source", {{"url", "https://example.com/private.png"}}}}}}};
+            }
+            expected.push_back(*SharedConversationContext::projectMessage(record));
+            workflow.appendDeliveredAssistantMessage(400, record);
+        }
+        const auto rawRecords = *workflow.getSessionMessages(400);
+        auto excluded = rawRecords[1];
+        excluded["message_id"] = "2001";
+        excluded["sender"]["qq"] = std::to_string(SessionId::kSystemAccountId);
+        workflow.appendSystemStatusMessage(400, excluded);
+        excluded = rawRecords[1];
+        excluded["message_id"] = "2002";
+        excluded["send_error"] = "not delivered";
+        workflow.appendAssistantExecutionRecord(400, excluded);
+        excluded = rawRecords[1];
+        excluded["message_id"] = "2003";
+        excluded["record_type"] = "tool_execution";
+        workflow.appendAssistantExecutionRecord(400, excluded);
+
+        const auto before = workflow.getSessionMessages(400);
+        require(before->size() == 28, "query fixture did not retain excluded records");
+        const auto caller = SessionId::fromPrivateUser(999);
+        const json args = {{"group_id", "400"}};
+        const auto result = co_await registry.executeTool("get_group_messages", args, {.sessionId = caller});
+        const auto output = json::parse(result);
+        require(output["session"] == json({{"type", "group"}, {"group_id", 400}, {"group_name", "查询测试群"}}) &&
+            output["messages"] == expected && output["messages"].size() == 25,
+            "query was limited by age, sharing count, context window, or returned wrong projection order");
+        require(output["messages"][0]["truncated"] == true &&
+            output["messages"][0]["segments"][0]["text"].get<std::string>().size() == 600 &&
+            !result.contains("hidden") && !result.contains("message_id") && !result.contains("reply_to") &&
+            !result.contains("image_index") && !result.contains("private.png") &&
+            output["messages"][24]["segments"][1]["description"] == "a cat",
+            "query leaked metadata or broke UTF-8 truncation or image summaries");
+        require(workflow.getSessionMessages(400) == before && !workflow.getSessionMessages(caller),
+            "query changed target records or created calling session");
+        require(!SessionStore::getSessionConfig(400).crossSessionSharing &&
+            !SessionStore::getSessionConfig(caller).crossSessionSharing,
+            "query unexpectedly changed sharing flags");
+
+        SessionStore::enableSession(401);
+        ChatRecordStore::addChatRecord(Database::instance(), 401, "user", rawRecords[1].dump());
+        const json emptyArgs = {{"group_id", "401"}};
+        const auto empty = co_await registry.executeTool("get_group_messages", emptyArgs, {.sessionId = 100});
+        require(json::parse(empty)["messages"].empty() && !workflow.getSessionMessages(401),
+            "query read database history or created absent session");
+        SessionStore::enableSession(402);
+        auto filtered = rawRecords[1];
+        filtered["send_error"] = "failed";
+        workflow.appendAssistantExecutionRecord(402, filtered);
+        const json filteredArgs = {{"group_id", "402"}};
+        const auto onlyFiltered = co_await registry.executeTool("get_group_messages", filteredArgs, {.sessionId = 100});
+        require(json::parse(onlyFiltered)["messages"].empty(), "filtered-only session must return an empty array");
+
+        require(registry.saveBuiltinToolConfig("get_group_messages", {{"enabled", false}}).has_value(),
+            "query tool missing builtin configuration");
+        const auto disabled = co_await registry.executeTool("get_group_messages", args, {.sessionId = 100});
+        require(disabled.contains("工具已关闭"), "disabled query tool was executed");
+        require(registry.saveBuiltinToolConfig("get_group_messages", {{"enabled", true}}).has_value(),
+            "query tool could not be enabled again");
+        SessionStore::disableSession(400);
+        const auto forbidden = co_await registry.executeTool("get_group_messages", args, {.sessionId = 100});
+        require(forbidden.contains("未在后台启用") && !forbidden.contains("Alice"),
+            "disabled target leaked retained records");
+        config.contextWindowLimit = oldWindow;
     }
 
     auto runTests(const std::string endpoint, i32 &exitCode) -> drogon::Task<> {
@@ -66,11 +154,16 @@ namespace {
                     require(definition["parameters"]["properties"]["group_id"]["type"] == "string" &&
                         definition["parameters"]["required"].size() == 1, "group_id must be optional string");
                 }
+                if (definition["name"] == "get_group_messages") {
+                    require(definition["parameters"]["properties"]["group_id"]["type"] == "string" &&
+                        definition["parameters"]["required"] == json::array({"group_id"}),
+                        "query requires a string group_id");
+                }
             }
             const auto invalidIds = json::array({nullptr, false, 200, "", " ", "0", "-1", "+200", "200x", "200.0",
                 "18446744073709551616", std::to_string(SessionId::fromPrivateUser(200)),
                 std::to_string(SessionId::kSystemAccountId), "201", "999"});
-            for (const auto *tool : {"reply_and_continue", "send_sticker"}) {
+            for (const auto *tool : {"reply_and_continue", "send_sticker", "get_group_messages"}) {
                 for (const auto &id : invalidIds) {
                     const json args = {{"content", "test"}, {"name", "fixture"}, {"group_id", id}};
                     const auto result = co_await registry.executeTool(tool, args, {.sessionId = 100});
@@ -80,6 +173,11 @@ namespace {
             }
             require(fixture.messages().empty() && fixture.stickerQueries == 0,
                 "invalid target performed network requests");
+            const auto missing = co_await registry.executeTool("get_group_messages", json::object(), {.sessionId = 100});
+            require(missing.contains("group_id"), "query silently defaulted missing target");
+            co_await testGroupMessageQuery();
+            require(fixture.messages().empty() && fixture.stickerQueries == 0 && fixture.modelQueries == 0,
+                "memory query performed network or model requests");
 
             auto result = co_await registry.executeTool("reply_and_continue",
                 {{"content", "cross-group text"}, {"group_id", "200"}}, {.sessionId = 100});
