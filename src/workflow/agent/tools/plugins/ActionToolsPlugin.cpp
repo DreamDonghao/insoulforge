@@ -2,7 +2,6 @@
 /// @brief 动作工具插件实现（ACTION，执行操作、产生副作用）
 
 #include <stdexcept>
-#include <charconv>
 
 #include <regex>
 
@@ -35,16 +34,10 @@ namespace insoulforge {
     namespace {
         auto messageTarget(const json &args, const u64 currentSession) -> std::expected<u64, std::string> {
             if (!args.contains("group_id")) return currentSession;
-            const auto &value = args.at("group_id");
-            if (!value.is_string()) return std::unexpected("group_id 必须是数字字符串群号");
-            const auto &text = value.get_ref<const std::string &>();
-            u64 groupId = 0;
-            const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), groupId);
-            if (error != std::errc{} || end != text.data() + text.size() || groupId == 0 ||
-                SessionId::isPrivate(groupId) || groupId == SessionId::kSystemAccountId)
-                return std::unexpected("group_id 无效，必须填写有效的群号，不能指定私聊会话");
-            if (!SessionStore::isSessionEnabled(groupId))
-                return std::unexpected(fmt::format("目标群 {} 未在后台启用，未发送消息", groupId));
+            const auto groupId = groupIdArgument(args);
+            if (!groupId) return std::unexpected(groupId.error());
+            if (!SessionStore::isSessionEnabled(*groupId))
+                return std::unexpected(fmt::format("目标群 {} 未在后台启用，未发送消息", *groupId));
             return groupId;
         }
 

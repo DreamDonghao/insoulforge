@@ -35,14 +35,20 @@ Executor（`ExecutorAgent`）在单个 Agent 循环中通过工具调用生成�
 | `reply`            | `content`               | 普通回复，回复文本（可内嵌 CQ 码）                                  |
 | `reply_with_quote` | `content`, `message_id` | 引用特定消息回复；`message_id` 取聊天记录 JSON 的 `message_id` 字段 |
 
-## INFORMATION（查询，4 个）
+## INFORMATION（查询，5 个）
 
 | 工具                   | 参数       | 说明                                                                                                                                                                                                                                                                            |
 |------------------------|------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `list_stickers`        | 无         | 列出 QQ 收藏表情名称（`ToolRuntime::fetchFavoriteEmojis`，带缓存）                                                                                                                                                                                                              |
+| `get_group_messages`  | `group_id` | 读取已启用目标群当前内存中保留的全部可共享消息；群号为数字字符串，返回 `session` 与按旧到新排列的 `messages`，每条最多 200 个 Unicode 字符 |
 | `recall_memory`        | `query`    | 长期记忆检索：`LongTermMemory::searchMemory` 按 Brute-Force 余弦相似度（阈值 0.3）取 top-3，返回"回忆起：…"或"想不起来"                                                                                                                                                         |
 | `deep_think`           | `question` | 深度思考：调用 `executorThinking` 配置的模型求解。上下文由 Executor 经 `ToolCallContext.conversationContext` 传入（system 之后的完整消息列表，含已获取的工具结果），拼上专家求解 system prompt（只产出问题答案，不组织聊天回复）；模型 content 为空时兜底取 `reasoning_content` |
 | `list_scheduled_tasks` | 无         | 列出当前会话待触发的定时任务（编号 / 触发时间 / 备忘内容），取消前查询用                                                                                                                                                                                                        |
+
+`get_group_messages` 不受当前或目标会话的共享开关、自动共享条数、三天范围和模型上下文窗口限制，私聊也可调用。
+它不查数据库或平台历史，不能恢复已总结移除的消息；已启用群没有内存记录时返回空数组，不创建会话。
+消息字段与自动共享相同，排除系统、内部执行及发送失败记录，不含消息 ID、引用目标、图片来源或索引、工具历史及召回记忆。
+此工具的读取范围比自动共享更广；如不希望模型主动查询其他已启用群，可在后台关闭该工具。
 
 ## ACTION（动作，15 个）
 

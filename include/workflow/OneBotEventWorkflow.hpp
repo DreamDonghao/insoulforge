@@ -63,7 +63,7 @@ namespace insoulforge {
         /// @brief 获取运行中会话的完整消息列表快照
         /// @param sessionId 所属会话 ID
         /// @return 会话已在工作流中初始化时返回完整消息快照，否则返回空值
-        /// @note 线程安全。用于管理后台展示；结果不受模型上下文窗口长度限制。
+        /// @note 线程安全。供后台及工具读取；结果不受模型上下文窗口长度限制，工具须自行校验权限和投影。
         [[nodiscard]] auto getSessionMessages(u64 sessionId) -> std::optional<json>;
 
         /// @brief 读取指定会话有限条数的共享消息，不创建或改变会话状态。
