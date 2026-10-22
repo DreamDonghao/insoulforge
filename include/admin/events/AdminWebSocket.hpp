@@ -17,7 +17,6 @@ namespace insoulforge {
     public:
         WS_PATH_LIST_BEGIN
         WS_PATH_ADD("/admin/ws");
-
         WS_PATH_LIST_END
 
         /// @brief 新连接建立时的处理

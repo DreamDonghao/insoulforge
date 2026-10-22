@@ -3,11 +3,11 @@
 
 #include <fmt/format.h>
 
-#include <workflow/access/AdminStore.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
+#include <workflow/access/AdminStore.hpp>
 
 
 namespace insoulforge::AdminStore {

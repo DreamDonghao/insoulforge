@@ -2,10 +2,10 @@
 /// @brief 跨会话近期见闻的投影与组装。
 
 #include <algorithm>
+
 #include <ctime>
 
 #include <infrastructure/CommonUtil.hpp>
-
 #include <workflow/OneBotEventWorkflow.hpp>
 #include <workflow/history/SharedConversationContext.hpp>
 #include <workflow/message/MessageRecord.hpp>
@@ -45,13 +45,13 @@ namespace insoulforge::SharedConversationContext {
     } // namespace
 
     auto projectMessage(const json &record) -> std::optional<json> {
-        if (!record.is_object() || getStr(record, "record_type") == "tool_execution" ||
-            record.contains("send_error") || MessageRecord::isSystem(record)) {
+        if (!record.is_object() || getStr(record, "record_type") == "tool_execution" || record.contains("send_error") ||
+            MessageRecord::isSystem(record)) {
             return std::nullopt;
         }
         const auto projected = MessageRecord::projectForAgent(record, false, false);
-        json result = {{"time", getStr(projected, "time")}, {"sender", atOrNull(projected, "sender")},
-          {"segments", json::array()}};
+        json result = {
+          {"time", getStr(projected, "time")}, {"sender", atOrNull(projected, "sender")}, {"segments", json::array()}};
         size_t remaining = 200;
         bool truncated = false;
         for (auto segment: atOrNull(projected, "segments")) {
@@ -85,8 +85,8 @@ namespace insoulforge::SharedConversationContext {
             }
             json session;
             if (SessionId::isPrivate(sessionId)) {
-                session = {{"type", "private"}, {"qq", std::to_string(SessionId::privateUserId(sessionId))},
-                  {"name", name}};
+                session = {
+                  {"type", "private"}, {"qq", std::to_string(SessionId::privateUserId(sessionId))}, {"name", name}};
             } else {
                 session = {{"type", "group"}, {"group_id", sessionId}, {"group_name", name}};
             }

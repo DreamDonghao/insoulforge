@@ -1,11 +1,11 @@
 /// @file LongTermMemory.cpp
 /// @brief 长期记忆服务 - 实现
 
-#include <workflow/agent/memory/LongTermMemory.hpp>
-#include <workflow/agent/memory/LongTermMemoryStore.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <workflow/agent/llm/LlmClient.hpp>
+#include <workflow/agent/memory/LongTermMemory.hpp>
+#include <workflow/agent/memory/LongTermMemoryStore.hpp>
 
 namespace insoulforge {
     auto LongTermMemory::searchMemory(std::string query, const i32 topK, const u64 sessionId)

@@ -3,10 +3,10 @@
 
 #include <mutex>
 
-#include <workflow/agent/tools/ToolRegistry.hpp>
 #include <infrastructure/NumericTypes.hpp>
-#include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/config/Config.hpp>
+#include <infrastructure/logging/Logger.hpp>
+#include <workflow/agent/tools/ToolRegistry.hpp>
 
 using insoulforge::json;
 
@@ -144,7 +144,8 @@ namespace insoulforge {
         for (const auto *registered: visibleTools) {
             auto definition = buildToolDef(registered->tool);
             if (registered->pluginId.starts_with("builtin.")) {
-                const auto &override = atOrNull(atOrNull(m_builtinConfig, registered->tool.name.c_str()), "description");
+                const auto &override =
+                  atOrNull(atOrNull(m_builtinConfig, registered->tool.name.c_str()), "description");
                 if (override.is_string())
                     definition["function"]["description"] = override;
             }
@@ -199,7 +200,7 @@ namespace insoulforge {
 
     auto ToolRegistry::isEnabled(const RegisteredTool &registered) const -> bool {
         return !registered.pluginId.starts_with("builtin.") ||
-          getBool(atOrNull(m_builtinConfig, registered.tool.name.c_str()), "enabled", true);
+               getBool(atOrNull(m_builtinConfig, registered.tool.name.c_str()), "enabled", true);
     }
 
     auto ToolRegistry::isToolDisabled(const std::string &name) const -> bool {
@@ -216,12 +217,13 @@ namespace insoulforge {
     auto ToolRegistry::getBuiltinTools() const -> json {
         std::shared_lock lock(m_mutex);
         json result = json::array();
-        for (const auto &[name, registered] : m_tools) {
+        for (const auto &[name, registered]: m_tools) {
             if (!registered.pluginId.starts_with("builtin."))
                 continue;
             const auto &description = atOrNull(atOrNull(m_builtinConfig, name.c_str()), "description");
-            const auto category = registered.category == ToolCategory::REPLY ? "回复" :
-              registered.category == ToolCategory::INFORMATION ? "信息" : "动作";
+            const auto category = registered.category == ToolCategory::REPLY         ? "回复"
+                                  : registered.category == ToolCategory::INFORMATION ? "信息"
+                                                                                     : "动作";
             result.push_back({{"name", name}, {"category", category}, {"enabled", isEnabled(registered)},
               {"description", description.is_string() ? description : json(registered.tool.description)},
               {"defaultDescription", registered.tool.description}, {"customDescription", description.is_string()}});
@@ -233,7 +235,7 @@ namespace insoulforge {
       -> std::expected<void, std::string> {
         if (!patch.is_object() || patch.empty())
             return std::unexpected("请提供 enabled 或 description 配置");
-        for (const auto &[key, value] : patch.items()) {
+        for (const auto &[key, value]: patch.items()) {
             if (key != "enabled" && key != "description")
                 return std::unexpected("不支持的工具配置字段: " + key);
         }

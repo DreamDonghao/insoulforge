@@ -2,25 +2,25 @@
 /// @brief Executor Agent - 实现
 
 #include <map>
-#include <infrastructure/CommonUtil.hpp>
 #include <memory>
 #include <stdexcept>
 
-#include <workflow/agent/memory/affinity/AffinityStore.hpp>
-#include <workflow/agent/memory/PersonMemoryStore.hpp>
-#include <workflow/agent/memory/MemoryStore.hpp>
-#include <workflow/agent/runtime/ExecutorAgent.hpp>
-#include <workflow/agent/tools/mcp/McpTools.hpp>
-#include <workflow/message/MessageRecord.hpp>
-#include <workflow/message/SessionId.hpp>
-#include <workflow/history/SharedConversationContext.hpp>
-#include <workflow/session/SessionStore.hpp>
-#include <workflow/agent/tools/ToolRegistry.hpp>
+#include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <workflow/agent/llm/LlmClient.hpp>
 #include <workflow/agent/llm/prompts/PromptService.hpp>
+#include <workflow/agent/memory/MemoryStore.hpp>
+#include <workflow/agent/memory/PersonMemoryStore.hpp>
+#include <workflow/agent/memory/affinity/AffinityStore.hpp>
+#include <workflow/agent/runtime/ExecutorAgent.hpp>
+#include <workflow/agent/tools/ToolRegistry.hpp>
+#include <workflow/agent/tools/mcp/McpTools.hpp>
+#include <workflow/history/SharedConversationContext.hpp>
+#include <workflow/message/MessageRecord.hpp>
+#include <workflow/message/SessionId.hpp>
+#include <workflow/session/SessionStore.hpp>
 
 namespace insoulforge::ExecutorAgent {
     namespace {

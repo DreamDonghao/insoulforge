@@ -1,19 +1,20 @@
 /// @file MemoryMaintenanceService.cpp
 /// @brief 从消息批次提取并整理聊天记忆
 
-#include <workflow/agent/memory/LongTermMemoryStore.hpp>
 #include <set>
 #include <unordered_set>
+
 #include <infrastructure/CommonUtil.hpp>
+#include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/config/Config.hpp>
+#include <infrastructure/logging/Logger.hpp>
+#include <workflow/agent/llm/LlmClient.hpp>
+#include <workflow/agent/memory/LongTermMemoryStore.hpp>
 #include <workflow/agent/memory/MemoryStore.hpp>
 #include <workflow/agent/memory/maintenance/MemoryMaintenanceService.hpp>
 #include <workflow/agent/memory/maintenance/MemoryMaintenanceStore.hpp>
 #include <workflow/message/MessageRecord.hpp>
 #include <workflow/message/SessionId.hpp>
-#include <infrastructure/NumericTypes.hpp>
-#include <infrastructure/config/Config.hpp>
-#include <infrastructure/logging/Logger.hpp>
-#include <workflow/agent/llm/LlmClient.hpp>
 
 namespace insoulforge {
     namespace {
@@ -51,11 +52,14 @@ namespace insoulforge {
             std::unordered_set<u64> participants;
             for (const auto &record: records) {
                 const auto qq = parseUInt64(getStr(atOrNull(record, "sender"), "qq"));
-                if (qq > 0 && qq != SessionId::kSystemAccountId) participants.insert(qq);
+                if (qq > 0 && qq != SessionId::kSystemAccountId)
+                    participants.insert(qq);
             }
-            if (participants.empty()) co_return MemoryMaintenanceResult{};
+            if (participants.empty())
+                co_return MemoryMaintenanceResult{};
             const json messages = json::array({
-              {{"role", "system"}, {"content", R"(你是一个【人物记忆提取器】，同时评估用户给机器人留下的印象变化。群聊和私聊采用同样规则。
+              {{"role", "system"},
+                {"content", R"(你是一个【人物记忆提取器】，同时评估用户给机器人留下的印象变化。群聊和私聊采用同样规则。
 
 人物记忆按真实发送者 QQ 归属；每条只包含一条完整信息，简短客观；不推测、不扩写。
 发送者昵称、群名片、@ 对象名称等身份元数据只用于识别人，不直接提取为昵称或外号记忆；只有聊天正文明确表达称呼约定时才记录别称。
@@ -91,7 +95,8 @@ namespace insoulforge {
                     co_return std::nullopt;
                 }
                 for (const auto &entry: value["entries"]) {
-                    if (!entry.is_string()) co_return std::nullopt;
+                    if (!entry.is_string())
+                        co_return std::nullopt;
                     if (auto content = trim(entry.get<std::string>());
                       !content.empty() && seenEntries.emplace(qq, content).second) {
                         result.personEntries.push_back({qq, std::move(content)});
@@ -108,7 +113,8 @@ namespace insoulforge {
                     co_return std::nullopt;
                 }
                 const auto bounded = static_cast<i32>(std::clamp(jsonToDouble(delta), -5.0, 5.0));
-                if (bounded != 0) result.affinity.emplace_back(qq, bounded);
+                if (bounded != 0)
+                    result.affinity.emplace_back(qq, bounded);
             }
             co_return result;
         }
@@ -160,8 +166,7 @@ namespace insoulforge {
 
         auto reconcileMemory(const std::string &currentShortTerm, const json &records, const json &contextRecords,
           const std::vector<std::string> &newMemories, const std::vector<SimilarMemory> &recalled,
-          const bool longTermEnabled, const u64 sessionId)
-          -> drogon::Task<std::optional<ReconcileResult>> {
+          const bool longTermEnabled, const u64 sessionId) -> drogon::Task<std::optional<ReconcileResult>> {
             const auto current = MemoryStore::projectShortTermMemory(currentShortTerm);
             const bool migratingLegacy = current.is_array();
             const auto legacy = migratingLegacy ? current : current["legacy_entries"];
@@ -193,15 +198,16 @@ longTerm 沿用原规则，仅依据“新提取的记忆”和“召回的长�
             const json messages = json::array({
               {{"role", "system"}, {"content", std::move(prompt)}},
               {{"role", "user"},
-                {"content", "=== 当前短期记忆 ===\n" + currentShortTerm + "\n=== 已有过渡记忆 ===\n" + dumpJson(legacy) +
-                              "\n=== 待总结消息 ===\n" + dumpJson(records) +
-                              "\n=== 补充上下文（不得提取） ===\n" + dumpJson(contextRecords) + "\n=== 新提取的记忆 ===\n" +
-                              numberedLines(newMemories) + "\n=== 召回的长期记忆 ===\n" + recalledText +
-                              "\n请输出整理结果 JSON："}},
+                {"content", "=== 当前短期记忆 ===\n" + currentShortTerm + "\n=== 已有过渡记忆 ===\n" +
+                              dumpJson(legacy) + "\n=== 待总结消息 ===\n" + dumpJson(records) +
+                              "\n=== 补充上下文（不得提取） ===\n" + dumpJson(contextRecords) +
+                              "\n=== 新提取的记忆 ===\n" + numberedLines(newMemories) + "\n=== 召回的长期记忆 ===\n" +
+                              recalledText + "\n请输出整理结果 JSON："}},
             });
             const auto parsed =
               parseLlmJson(co_await LlmClient::requestMaintenance(messages, sessionId), "记忆整理", sessionId);
-            auto shortTerm = parsed ? MemoryStore::normalizeSessionMemory(atOrNull(*parsed, "shortTerm")) : std::nullopt;
+            auto shortTerm =
+              parsed ? MemoryStore::normalizeSessionMemory(atOrNull(*parsed, "shortTerm")) : std::nullopt;
             if (!shortTerm) {
                 Logger::warn(sessionId, "Memory", "记忆整理: shortTerm 的 aliases 或 recent_events 格式无效");
                 co_return std::nullopt;
@@ -279,7 +285,8 @@ longTerm 沿用原规则，仅依据“新提取的记忆”和“召回的长�
             newMemories.push_back(std::to_string(qq) + ": " + content);
         }
 
-        const bool longTermEnabled = !newMemories.empty() && !config.embedding.baseUrl.empty() && !config.embedding.model.empty();
+        const bool longTermEnabled =
+          !newMemories.empty() && !config.embedding.baseUrl.empty() && !config.embedding.model.empty();
         std::vector<SimilarMemory> recalled;
         if (longTermEnabled) {
             auto result = co_await recallForMerge(newMemories, sessionId);
@@ -288,8 +295,8 @@ longTerm 沿用原规则，仅依据“新提取的记忆”和“召回的长�
             }
             recalled = std::move(*result);
         }
-        const auto reconciled = co_await reconcileMemory(
-          MemoryStore::getShortTermMemory(sessionId), records, contextRecords, newMemories, recalled, longTermEnabled, sessionId);
+        const auto reconciled = co_await reconcileMemory(MemoryStore::getShortTermMemory(sessionId), records,
+          contextRecords, newMemories, recalled, longTermEnabled, sessionId);
         if (!reconciled) {
             co_return std::nullopt;
         }

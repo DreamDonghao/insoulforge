@@ -18,8 +18,8 @@
 
 #include <workflow/agent/ability/AsyncTaskManager.hpp>
 #include <workflow/agent/tools/custom/LuaToolExecutor.hpp>
-#include <workflow/message/SessionId.hpp>
 #include <workflow/message/MessageService.hpp>
+#include <workflow/message/SessionId.hpp>
 
 namespace insoulforge::LuaToolExecutor {
     namespace {

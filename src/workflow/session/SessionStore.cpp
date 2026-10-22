@@ -5,19 +5,20 @@
 
 #include <fmt/format.h>
 
-#include <workflow/session/SessionStore.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
+#include <workflow/session/SessionStore.hpp>
 
 namespace insoulforge::SessionStore {
     auto getSessionConfig(const u64 sessionId) -> SessionConfig {
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
         SessionConfig config;
-        const Statement stmt(db.handle(), "SELECT all_mes_count, send_group_card, auto_reply, additional_prompt, "
-                                          "command_enabled, cross_session_sharing FROM group_config WHERE group_id = ?");
+        const Statement stmt(db.handle(),
+          "SELECT all_mes_count, send_group_card, auto_reply, additional_prompt, "
+          "command_enabled, cross_session_sharing FROM group_config WHERE group_id = ?");
         stmt.bind(1, sessionId);
         if (stmt.step()) {
             config.allMesCount = stmt.getInt64(0);
@@ -134,7 +135,7 @@ namespace insoulforge::SessionStore {
 
         if (Statement::changes(db.handle()) == 0) {
             // 首条消息：配置行不存在，直接插入
-            Statement insert(
+            const Statement insert(
               db.handle(), "INSERT OR REPLACE INTO group_config (group_id, all_mes_count) VALUES (?, ?)");
             insert.bind(1, sessionId);
             insert.bind(2, 1);

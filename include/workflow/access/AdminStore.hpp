@@ -8,7 +8,6 @@
 
 #include <infrastructure/NumericTypes.hpp>
 
-
 /// @brief 管理员存储
 namespace insoulforge::AdminStore {
     /// @brief 判断 QQ 号是否具备机器人管理命令权限

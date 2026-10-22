@@ -1,12 +1,12 @@
 /// @file ChatRecordStore.cpp
 /// @brief 聊天记录存储 - 实现
 
-#include <workflow/history/ChatRecordStore.hpp>
 #include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
+#include <workflow/history/ChatRecordStore.hpp>
 
 namespace insoulforge::ChatRecordStore {
     void replaceSessionChatRecords(const Database &db, const u64 sessionId, const json &messages) {

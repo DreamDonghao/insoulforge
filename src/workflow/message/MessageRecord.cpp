@@ -2,14 +2,14 @@
 /// @brief 聊天记录富内容的构造、兼容与投影实现
 
 #include <algorithm>
-#include <infrastructure/CommonUtil.hpp>
 #include <cctype>
 
 #include "workflow/message/SessionId.hpp"
-#include <workflow/message/MessageRecord.hpp>
-#include <workflow/session/QQNameDirectory.hpp>
+#include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/http/HttpUtil.hpp>
+#include <workflow/message/MessageRecord.hpp>
+#include <workflow/session/QQNameDirectory.hpp>
 
 namespace insoulforge::MessageRecord {
     namespace {

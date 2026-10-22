@@ -3,16 +3,16 @@
 
 #include <admin/http/AdminController.hpp>
 #include <admin/http/AdminResponse.hpp>
-#include <workflow/agent/tools/ToolRuntime.hpp>
-#include <workflow/agent/tools/mcp/McpTools.hpp>
-#include <workflow/agent/tools/custom/LuaToolExecutor.hpp>
-#include <workflow/agent/tools/custom/ToolStore.hpp>
-#include <workflow/agent/tools/ToolRegistry.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <workflow/agent/llm/prompts/PromptStore.hpp>
+#include <workflow/agent/tools/ToolRegistry.hpp>
+#include <workflow/agent/tools/ToolRuntime.hpp>
+#include <workflow/agent/tools/custom/LuaToolExecutor.hpp>
+#include <workflow/agent/tools/custom/ToolStore.hpp>
+#include <workflow/agent/tools/mcp/McpTools.hpp>
 
 using namespace insoulforge;
 using namespace drogon;
@@ -89,7 +89,8 @@ auto AdminController::saveMcpConfig(HttpRequestPtr req, std::function<void(const
   -> Task<> {
     const auto body = parseJsonBody(req);
     if (!body || !body->is_object()) {
-        callback(AdminResponse::configErrorResponse({.type = ConfigErrorType::InvalidArgument, .message = "MCP 配置必须是 JSON 对象"}));
+        callback(AdminResponse::configErrorResponse(
+          {.type = ConfigErrorType::InvalidArgument, .message = "MCP 配置必须是 JSON 对象"}));
         co_return;
     }
     if (auto result = McpTools::instance().saveConfig(*body, Config::instance()); !result) {
@@ -151,14 +152,14 @@ auto AdminController::savePrompt(HttpRequestPtr req, std::function<void(const Ht
 }
 
 // ==================== 自定义工具 ====================
-auto AdminController::getBuiltinTools(HttpRequestPtr req,
-  std::function<void(const HttpResponsePtr &)> callback) const -> Task<> {
+auto AdminController::getBuiltinTools(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
+  -> Task<> {
     callback(jsonResponse(ToolRegistry::instance().getBuiltinTools()));
     co_return;
 }
 
-auto AdminController::saveBuiltinTool(HttpRequestPtr req,
-  std::function<void(const HttpResponsePtr &)> callback) const -> Task<> {
+auto AdminController::saveBuiltinTool(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
+  -> Task<> {
     const auto body = parseJsonBody(req);
     if (!body || !body->is_object() || getStr(*body, "name").empty()) {
         callback(jsonResponse(AdminResponse::errorJson("需要有效的工具名称")));
@@ -167,14 +168,14 @@ auto AdminController::saveBuiltinTool(HttpRequestPtr req,
     auto patch = *body;
     patch.erase("name");
     const auto result = ToolRegistry::instance().saveBuiltinToolConfig(getStr(*body, "name"), patch);
-    callback(jsonResponse(result ? AdminResponse::okJson("内置工具配置已保存") :
-      AdminResponse::errorJson(result.error())));
+    callback(
+      jsonResponse(result ? AdminResponse::okJson("内置工具配置已保存") : AdminResponse::errorJson(result.error())));
     co_return;
 }
 
 
-auto AdminController::getCustomTools(HttpRequestPtr req, const std::function<void(const HttpResponsePtr &)> callback) const
-  -> Task<> {
+auto AdminController::getCustomTools(
+  HttpRequestPtr req, const std::function<void(const HttpResponsePtr &)> callback) const -> Task<> {
     const auto tools = ToolStore::getCustomTools();
 
     json result(json::array());
@@ -253,7 +254,8 @@ auto AdminController::addCustomTool(HttpRequestPtr req, std::function<void(const
     co_return;
 }
 
-auto AdminController::updateCustomTool(const HttpRequestPtr req, const std::function<void(const HttpResponsePtr &)> callback, const std::string &id) const -> Task<> {
+auto AdminController::updateCustomTool(const HttpRequestPtr req,
+  const std::function<void(const HttpResponsePtr &)> callback, const std::string &id) const -> Task<> {
     const auto body = parseJsonBody(req);
     if (!body || !body->contains("name") || !body->contains("executorType")) {
         callback(jsonResponse(AdminResponse::errorJson("缺少必要字段 (name, executorType)")));
@@ -301,8 +303,8 @@ auto AdminController::updateCustomTool(const HttpRequestPtr req, const std::func
     co_return;
 }
 
-auto AdminController::deleteCustomTool(
-  HttpRequestPtr req, const std::function<void(const HttpResponsePtr &)> callback, const std::string &id) const -> Task<> {
+auto AdminController::deleteCustomTool(HttpRequestPtr req, const std::function<void(const HttpResponsePtr &)> callback,
+  const std::string &id) const -> Task<> {
     const i32 toolId = std::stoi(id);
     try {
         ToolStore::deleteCustomTool(toolId);
@@ -325,8 +327,8 @@ auto AdminController::deleteCustomTool(
     co_return;
 }
 
-auto AdminController::toggleCustomTool(
-  HttpRequestPtr req, const std::function<void(const HttpResponsePtr &)> callback, const std::string &id) const -> Task<> {
+auto AdminController::toggleCustomTool(HttpRequestPtr req, const std::function<void(const HttpResponsePtr &)> callback,
+  const std::string &id) const -> Task<> {
     const i32 toolId = std::stoi(id);
     try {
         ToolStore::toggleCustomTool(toolId);
@@ -349,8 +351,8 @@ auto AdminController::toggleCustomTool(
     co_return;
 }
 
-auto AdminController::reloadCustomTools(HttpRequestPtr req, const std::function<void(const HttpResponsePtr &)> callback) const
-  -> Task<> {
+auto AdminController::reloadCustomTools(
+  HttpRequestPtr req, const std::function<void(const HttpResponsePtr &)> callback) const -> Task<> {
     if (auto result = ToolRuntime::reloadCustomTools(Database::instance()); !result) {
         Logger::error(0, "Tool", result.error());
         auto response =
@@ -419,8 +421,8 @@ auto AdminController::testCustomTool(HttpRequestPtr req, std::function<void(cons
 
 // ============== 自定义工具导入导出 ==============
 
-auto AdminController::exportCustomTool(
-  HttpRequestPtr req, const std::function<void(const HttpResponsePtr &)> callback, const std::string &id) const -> Task<> {
+auto AdminController::exportCustomTool(HttpRequestPtr req, const std::function<void(const HttpResponsePtr &)> callback,
+  const std::string &id) const -> Task<> {
     i32 toolId = std::stoi(id);
     auto tools = ToolStore::getCustomTools();
 

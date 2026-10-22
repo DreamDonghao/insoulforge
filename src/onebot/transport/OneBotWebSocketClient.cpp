@@ -1,11 +1,11 @@
 /// @file OneBotWebSocketClient.cpp
 /// @brief OneBot 正向 WebSocket 连接管理器实现
 
-#include <workflow/OneBotEventWorkflow.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <onebot/transport/OneBotWebSocketClient.hpp>
+#include <workflow/OneBotEventWorkflow.hpp>
 
 namespace insoulforge {
     namespace {

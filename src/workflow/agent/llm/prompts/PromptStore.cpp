@@ -17,8 +17,8 @@ namespace insoulforge::PromptStore {
     void setPrompt(
       const Database &database, const std::string &key, const std::string &content, const std::string &description) {
         std::unique_lock lock(database.mutex());
-        const Statement stmt(
-          database.handle(), "INSERT OR REPLACE INTO prompts (prompt_key, prompt_content, description) VALUES (?, ?, ?)");
+        const Statement stmt(database.handle(),
+          "INSERT OR REPLACE INTO prompts (prompt_key, prompt_content, description) VALUES (?, ?, ?)");
         stmt.bind(1, key);
         stmt.bind(2, content);
         stmt.bind(3, description);

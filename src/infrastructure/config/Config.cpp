@@ -2,9 +2,9 @@
 /// @brief 全局配置管理 - 实现
 
 #include <array>
-#include <infrastructure/CommonUtil.hpp>
 #include <limits>
 
+#include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/config/ConfigStore.hpp>
 #include <infrastructure/logging/Logger.hpp>
@@ -224,8 +224,8 @@ namespace insoulforge {
 
     void Config::applyMemoryValues(const Config &value) {
         contextWindowLimit = value.contextWindowLimit;
-        sharedConversationMessageCount.store(value.sharedConversationMessageCount.load(std::memory_order_relaxed),
-          std::memory_order_relaxed);
+        sharedConversationMessageCount.store(
+          value.sharedConversationMessageCount.load(std::memory_order_relaxed), std::memory_order_relaxed);
         memorySummaryTriggerCount = value.memorySummaryTriggerCount;
         memorySummaryBatchSize = value.memorySummaryBatchSize;
         memorySummaryContextCount = value.memorySummaryContextCount;
@@ -256,16 +256,14 @@ namespace insoulforge {
     auto Config::saveBuiltinToolsConfig(const json &value) -> std::expected<void, ConfigError> {
         std::scoped_lock lock(m_updateMutex);
         Config next;
-        return ConfigStore::saveBuiltinToolsConfig(value, [&next](const json &stored) -> std::expected<void, ConfigError> {
-            return next.loadValues(stored);
-        });
+        return ConfigStore::saveBuiltinToolsConfig(
+          value, [&next](const json &stored) -> std::expected<void, ConfigError> { return next.loadValues(stored); });
     }
     auto Config::saveMcpConfig(const json &value) -> std::expected<void, ConfigError> {
         std::scoped_lock lock(m_updateMutex);
         Config next;
-        return ConfigStore::saveMcpConfig(value, [&next](const json &stored) -> std::expected<void, ConfigError> {
-            return next.loadValues(stored);
-        });
+        return ConfigStore::saveMcpConfig(
+          value, [&next](const json &stored) -> std::expected<void, ConfigError> { return next.loadValues(stored); });
     }
 
     auto Config::saveLLMConfig(const std::string &name, const json &value) -> std::expected<void, ConfigError> {
@@ -301,8 +299,8 @@ namespace insoulforge {
         json normalized = value;
         if (normalized.contains("sharedConversationMessageCount") &&
             getInt(normalized, "sharedConversationMessageCount") <= 0) {
-            return std::unexpected(ConfigError{.type = ConfigErrorType::InvalidArgument,
-              .message = "每会话共享消息数必须大于 0"});
+            return std::unexpected(
+              ConfigError{.type = ConfigErrorType::InvalidArgument, .message = "每会话共享消息数必须大于 0"});
         }
         if (getInt(normalized, "contextWindowLimit") <= 0) {
             normalized["contextWindowLimit"] = contextWindowLimit;

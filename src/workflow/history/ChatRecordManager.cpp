@@ -1,8 +1,8 @@
 /// @file ChatRecordManager.cpp
 /// @brief Agent 会话记录快照适配器实现
 
-#include <workflow/history/ChatRecordManager.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <workflow/history/ChatRecordManager.hpp>
 
 namespace insoulforge {
     ChatRecordManager::ChatRecordManager(const u64 sessionId, json records) :

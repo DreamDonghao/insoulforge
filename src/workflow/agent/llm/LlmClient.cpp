@@ -30,7 +30,8 @@ namespace insoulforge {
         /// @brief 通用 API 请求函数
         auto requestStr(json messages, const LLMApiConfig api, const LLMModelParams params, const std::string role,
           const std::optional<u64> sessionId, const f64 timeoutSeconds,
-          const std::shared_ptr<LlmClient::MaintenanceRequestControl> control) -> drogon::Task<std::optional<std::string>> {
+          const std::shared_ptr<LlmClient::MaintenanceRequestControl> control)
+          -> drogon::Task<std::optional<std::string>> {
             if (control && control->isCancelled())
                 co_return std::nullopt;
             if (!LlmClient::isConfigured(api)) {
@@ -42,8 +43,8 @@ namespace insoulforge {
                 co_return std::nullopt;
             }
             json body = LlmClient::buildChatRequestBody(api, params, std::move(messages));
-            const auto resp = co_await HttpUtil::send("LLM", api.baseUrl, api.path, drogon::Post,
-              std::move(body), api.apiKey, timeoutSeconds, sessionId);
+            const auto resp = co_await HttpUtil::send(
+              "LLM", api.baseUrl, api.path, drogon::Post, std::move(body), api.apiKey, timeoutSeconds, sessionId);
             if (!resp || (control && control->isCancelled())) {
                 co_return std::nullopt;
             }
@@ -162,17 +163,16 @@ namespace insoulforge {
         }
     } // namespace LlmClient
 
-    auto LlmClient::requestMaintenance(
-      json messages, const u64 sessionId, std::string usageRole, const std::optional<i32> maxTokens,
-      std::shared_ptr<MaintenanceRequestControl> control)
+    auto LlmClient::requestMaintenance(json messages, const u64 sessionId, std::string usageRole,
+      const std::optional<i32> maxTokens, std::shared_ptr<MaintenanceRequestControl> control)
       -> drogon::Task<std::optional<std::string>> {
         const auto &config = Config::instance();
         auto params = config.memoryParams;
         if (maxTokens) {
             params.maxTokens = *maxTokens;
         }
-        co_return co_await requestStr(std::move(messages), config.memory, params, std::move(usageRole), sessionId,
-          180.0, std::move(control));
+        co_return co_await requestStr(
+          std::move(messages), config.memory, params, std::move(usageRole), sessionId, 180.0, std::move(control));
     }
 
     auto LlmClient::requestEmbedding(std::string text, const std::optional<u64> sessionId)

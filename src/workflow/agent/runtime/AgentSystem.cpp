@@ -1,11 +1,11 @@
 /// @file AgentSystem.cpp
 /// @brief Agent 系统运行状态与公共依赖初始化实现
 
-#include <workflow/agent/runtime/AgentSystem.hpp>
-#include <workflow/agent/tools/ToolRuntime.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 #include <workflow/agent/llm/prompts/PromptService.hpp>
+#include <workflow/agent/runtime/AgentSystem.hpp>
+#include <workflow/agent/tools/ToolRuntime.hpp>
 
 namespace insoulforge {
     auto AgentSystem::instance() -> AgentSystem & {

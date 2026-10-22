@@ -1,11 +1,11 @@
 /// @file OneBotEventNormalizer.cpp
 /// @brief OneBot 上报事件到统一消息记录的转换实现
 
-#include <workflow/message/SessionId.hpp>
 #include <infrastructure/CommonUtil.hpp>
-#include <workflow/session/QQNameDirectory.hpp>
-#include <onebot/incoming/OneBotEventNormalizer.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <onebot/incoming/OneBotEventNormalizer.hpp>
+#include <workflow/message/SessionId.hpp>
+#include <workflow/session/QQNameDirectory.hpp>
 
 namespace insoulforge::OneBotEventNormalizer {
     namespace {
@@ -99,7 +99,7 @@ namespace insoulforge::OneBotEventNormalizer {
               {"message_id", std::to_string(messageId)}, {"segments", json::array()}};
             if (getUInt(body, "group_id") != 0) {
                 if (auto role = getStr(atOrNull(body, "sender"), "role");
-                    role == "owner" || role == "admin" || role == "member") {
+                  role == "owner" || role == "admin" || role == "member") {
                     record["sender"]["role"] = std::move(role);
                 }
                 if (auto card = getStr(atOrNull(body, "sender"), "card"); !card.empty()) {

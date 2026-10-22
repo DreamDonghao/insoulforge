@@ -4,12 +4,12 @@
 
 #include <fmt/format.h>
 
-#include <workflow/agent/memory/LongTermMemoryStore.hpp>
-#include <workflow/message/MessageRecord.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <workflow/agent/llm/LlmClient.hpp>
+#include <workflow/agent/memory/LongTermMemoryStore.hpp>
+#include <workflow/message/MessageRecord.hpp>
 #include <workflow/message/image/ImageDescriptionService.hpp>
 
 namespace insoulforge::MessageContentEnricher {

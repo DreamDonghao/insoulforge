@@ -1,18 +1,18 @@
 /// @file CommandProcessor.cpp
 /// @brief 消息工作流的管理命令处理实现
 
-#include <workflow/access/AdminStore.hpp>
 #include <infrastructure/CommonUtil.hpp>
+#include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/config/Config.hpp>
+#include <onebot/transport/OneBotClient.hpp>
+#include <workflow/access/AdminStore.hpp>
 #include <workflow/access/BlacklistStore.hpp>
 #include <workflow/agent/tools/ToolRuntime.hpp>
 #include <workflow/message/MessageRecord.hpp>
 #include <workflow/message/SessionId.hpp>
+#include <workflow/message/image/ImageDescriptionStore.hpp>
 #include <workflow/session/SessionConfigManager.hpp>
 #include <workflow/session/SessionStore.hpp>
-#include <infrastructure/NumericTypes.hpp>
-#include <infrastructure/config/Config.hpp>
-#include <workflow/message/image/ImageDescriptionStore.hpp>
-#include <onebot/transport/OneBotClient.hpp>
 
 namespace insoulforge::CommandProcessor {
     namespace {

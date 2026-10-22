@@ -244,9 +244,8 @@ namespace insoulforge {
             return stmt.step();
         }
 
-        constexpr std::array v21Tables = {
-          "CREATE TABLE IF NOT EXISTS person_affinity (qq_number INTEGER PRIMARY KEY, "
-          "affinity INTEGER NOT NULL DEFAULT 0 CHECK(affinity BETWEEN -100 AND 100))",
+        constexpr std::array v21Tables = {"CREATE TABLE IF NOT EXISTS person_affinity (qq_number INTEGER PRIMARY KEY, "
+                                          "affinity INTEGER NOT NULL DEFAULT 0 CHECK(affinity BETWEEN -100 AND 100))",
           "CREATE TABLE IF NOT EXISTS person_memories (qq_number INTEGER PRIMARY KEY, "
           "stable_memory TEXT NOT NULL DEFAULT '[]', recent_interactions TEXT NOT NULL DEFAULT '[]')",
           "CREATE TABLE IF NOT EXISTS person_memory_entries (id INTEGER PRIMARY KEY AUTOINCREMENT, "
@@ -518,7 +517,8 @@ namespace insoulforge {
         }
 
         void migrateV19ToV20(sqlite3 *db) {
-            ensureColumn(db, "group_config", "cross_session_sharing", "cross_session_sharing INTEGER NOT NULL DEFAULT 0");
+            ensureColumn(
+              db, "group_config", "cross_session_sharing", "cross_session_sharing INTEGER NOT NULL DEFAULT 0");
         }
 
         void migrateV18ToV19(sqlite3 *db) {

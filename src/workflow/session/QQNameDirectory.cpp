@@ -3,8 +3,8 @@
 
 #include <shared_mutex>
 
-#include <workflow/session/QQNameDirectory.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <workflow/session/QQNameDirectory.hpp>
 
 namespace insoulforge::QQNameDirectory {
     namespace {

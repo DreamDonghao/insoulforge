@@ -3,27 +3,27 @@
 
 #include <cassert>
 
-#include <workflow/access/BlacklistStore.hpp>
 #include <admin/events/WebSocketManager.hpp>
-#include <workflow/agent/memory/maintenance/MemoryMaintenanceCoordinator.hpp>
-#include <workflow/agent/runtime/AgentSystem.hpp>
-#include <workflow/agent/runtime/ExecutorAgent.hpp>
-#include <workflow/history/ChatRecordStore.hpp>
-#include <workflow/message/MessageRecord.hpp>
-#include <workflow/message/SessionId.hpp>
-#include <workflow/message/image/ImageDescriptionStore.hpp>
-#include <workflow/session/SessionConfigManager.hpp>
-#include <workflow/command/CommandProcessor.hpp>
-#include <workflow/message/MessageContentEnricher.hpp>
-#include <workflow/MessageRouter.hpp>
-#include <onebot/incoming/OneBotEventNormalizer.hpp>
-#include <workflow/OneBotEventWorkflow.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
+#include <onebot/incoming/OneBotEventNormalizer.hpp>
+#include <workflow/MessageRouter.hpp>
+#include <workflow/OneBotEventWorkflow.hpp>
+#include <workflow/access/BlacklistStore.hpp>
+#include <workflow/agent/memory/maintenance/MemoryMaintenanceCoordinator.hpp>
+#include <workflow/agent/runtime/AgentSystem.hpp>
+#include <workflow/agent/runtime/ExecutorAgent.hpp>
+#include <workflow/command/CommandProcessor.hpp>
+#include <workflow/history/ChatRecordStore.hpp>
+#include <workflow/message/MessageContentEnricher.hpp>
+#include <workflow/message/MessageRecord.hpp>
 #include <workflow/message/MessageService.hpp>
+#include <workflow/message/SessionId.hpp>
+#include <workflow/message/image/ImageDescriptionStore.hpp>
+#include <workflow/session/SessionConfigManager.hpp>
 
 namespace insoulforge {
     namespace {
@@ -183,8 +183,8 @@ namespace insoulforge {
         return sessionState->messageList()->fullSnapshot();
     }
 
-    auto OneBotEventWorkflow::getSharedSessionMessages(const u64 sessionId, const size_t limit,
-      const std::string &earliest, const std::string &latest) -> json {
+    auto OneBotEventWorkflow::getSharedSessionMessages(
+      const u64 sessionId, const size_t limit, const std::string &earliest, const std::string &latest) -> json {
         std::shared_ptr<SessionWorkflowState> state;
         {
             std::lock_guard lock(m_sessionsMutex);
