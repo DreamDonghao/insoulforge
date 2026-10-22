@@ -12,6 +12,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -36,6 +37,7 @@
 #include <workflow/agent/tools/custom/ToolStore.hpp>
 #include <workflow/agent/tools/plugins/ActionToolsPlugin.hpp>
 #include <workflow/history/ChatRecordStore.hpp>
+#include <workflow/history/ChatRecordManager.hpp>
 #include <workflow/history/SharedConversationContext.hpp>
 #include <workflow/message/MessageRecord.hpp>
 #include <workflow/message/SessionId.hpp>
@@ -2509,6 +2511,84 @@ namespace {
         database.close();
     }
 
+    void testAgentMessageSnapshotOwnership() {
+        constexpr std::string_view kTestName = "agent message snapshot ownership";
+        using insoulforge::ChatRecordManager;
+        using insoulforge::json;
+        static_assert(std::is_same_v<decltype(std::declval<const ChatRecordManager &>().getRecords()), const json &>);
+        auto messages = json::array({"legacy text",
+          {{"message_id", "1"}, {"sender", {{"qq", "11"}}},
+            {"segments", {{{"type", "text"}, {"text", "original"}}}}}});
+        const auto expected = messages;
+        const ChatRecordManager copied(100, messages);
+        messages[1]["segments"][0]["text"] = "changed";
+        messages.push_back({{"message_id", "2"}});
+        check(copied.getSessionId() == 100 && copied.getRecords() == expected,
+          "snapshot owns an independent ordered copy including plain text", kTestName);
+        check(&copied.getRecords() == &copied.getRecords(), "repeated reads refer to the owned snapshot", kTestName);
+        const auto *ownedElements = &messages[0];
+        const ChatRecordManager moved(200, std::move(messages));
+        check(&moved.getRecords()[0] == ownedElements, "moving transfers the array without copying its messages",
+          kTestName);
+        check(copied.getRecords() == expected, "later snapshots do not change the frozen context", kTestName);
+    }
+
+    void testMessageSnapshotAtomicReplacement() {
+        constexpr std::string_view kTestName = "atomic message snapshot replacement";
+        auto &database = insoulforge::Database::instance();
+        check(database.initialize(":memory:").has_value(), "initializes database", kTestName);
+        const auto makeMessage = [](const char *id, const char *qq) -> insoulforge::json {
+            return {{"message_id", id}, {"sender", {{"qq", qq}}},
+              {"segments", {{{"type", "text"}, {"text", id}}}}};
+        };
+        const auto oldMessages = insoulforge::json::array({makeMessage("old", "11")});
+        insoulforge::ChatRecordStore::replaceSessionChatRecords(database, 100, oldMessages);
+        insoulforge::ChatRecordStore::replaceSessionChatRecords(database, 200, oldMessages);
+        const auto oldRecords = insoulforge::ChatRecordStore::getChatRecords(database, 100);
+        const auto otherRecords = insoulforge::ChatRecordStore::getChatRecords(database, 200);
+
+        insoulforge::MessageList messages(100, database, insoulforge::Config::instance());
+        static_cast<void>(messages.append(makeMessage("new-user", "11")));
+        static_cast<void>(messages.append(makeMessage("new-assistant", "self")));
+        const auto snapshot = messages.fullSnapshot();
+        insoulforge::Statement(database.handle(),
+          "CREATE TRIGGER reject_second_chat_record BEFORE INSERT ON chat_records "
+          "WHEN NEW.group_id = 100 AND (SELECT COUNT(*) FROM chat_records WHERE group_id = 100) = 1 "
+          "BEGIN SELECT RAISE(ABORT, 'test insertion failure'); END").execOrThrow();
+        bool failed = false;
+        try {
+            messages.flushToStorage();
+        } catch (const insoulforge::DbError &) {
+            failed = true;
+        }
+        check(failed, "insertion failure propagates", kTestName);
+        check(insoulforge::ChatRecordStore::getChatRecords(database, 100) == oldRecords,
+          "failed replacement restores all old records without partial inserts", kTestName);
+        check(messages.fullSnapshot() == snapshot, "failed flush preserves runtime messages", kTestName);
+        check(sqlite3_get_autocommit(database.handle()) != 0, "failure leaves no open transaction", kTestName);
+
+        insoulforge::Statement(database.handle(), "DROP TRIGGER reject_second_chat_record").execOrThrow();
+        messages.flushToStorage();
+        const auto saved = insoulforge::ChatRecordStore::getChatRecords(database, 100);
+        check(saved.size() == snapshot.size(), "retry saves complete snapshot", kTestName);
+        for (size_t i = 0; i < saved.size(); ++i) {
+            check(saved[i]["content"] == insoulforge::dumpJson(snapshot[i]),
+              "preserves message content and chronological order", kTestName);
+            check(saved[i]["role"] == (i == 2 ? "assistant" : "user"), "preserves message roles", kTestName);
+        }
+        messages.flushToStorage();
+        check(insoulforge::ChatRecordStore::getChatRecords(database, 100) == saved,
+          "repeated flush does not duplicate messages", kTestName);
+        insoulforge::MessageList restored(100, database, insoulforge::Config::instance());
+        check(restored.fullSnapshot() == snapshot, "restores full snapshot after replacement", kTestName);
+        insoulforge::ChatRecordStore::replaceSessionChatRecords(database, 100, insoulforge::json::array());
+        check(insoulforge::ChatRecordStore::getChatRecords(database, 100).empty(), "empty snapshot clears session",
+          kTestName);
+        check(insoulforge::ChatRecordStore::getChatRecords(database, 200) == otherRecords,
+          "replacement and rollback leave other sessions unchanged", kTestName);
+        database.close();
+    }
+
     void testMessageListSnapshotsAndPersistence() {
         constexpr std::string_view kTestName = "new workflow message list";
         auto &database = insoulforge::Database::instance();
@@ -2748,6 +2828,8 @@ auto main() -> int {
     testImageGenerationResponse();
     testUsageSummaryUsesLatestRoleModel();
     testMessageListSnapshotsAndPersistence();
+    testAgentMessageSnapshotOwnership();
+    testMessageSnapshotAtomicReplacement();
     testAsyncTaskSessionExclusivity();
     testStartupResults();
     if (failures == 0) {

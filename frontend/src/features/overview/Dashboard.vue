@@ -6,10 +6,11 @@
 import {computed, inject, onMounted, onUnmounted, ref, type Ref} from 'vue'
 import type {LLMConfig, QQConfig} from '../../vite-env'
 import {useToast} from '../../composables/useToast'
+import {useAdminWebSocket} from '../../composables/useAdminWebSocket'
+import {useCoalescedRefresh} from '../../composables/useCoalescedRefresh'
 import ProcessMemory from './ProcessMemory.vue'
 
 const qqConfig = inject<QQConfig>('qqConfig')
-const ws = inject<{ get: () => WebSocket | null }>('ws')
 const {showToast} = useToast()
 
 const botRunning = ref(true)
@@ -225,16 +226,17 @@ const loadSystemInfo = async (): Promise<void> => {
   }
 }
 
-const loadUsage = async (): Promise<void> => {
+const {refresh: loadUsage} = useCoalescedRefresh(async signal => {
   try {
-    const resp = await fetch('/admin/api/usage?days=7')
+    const resp = await fetch('/admin/api/usage?days=7', {signal})
     const data = await resp.json()
+    if (signal.aborted) return
     todayStats.value = data.today || {calls: 0, prompt: 0, completion: 0, total: 0, cached: 0}
     todayByRole.value = data.today_by_role || []
     byDay.value = data.by_day || []
   } catch { /* ignore */
   }
-}
+})
 
 const loadGroups = async (): Promise<void> => {
   try {
@@ -276,7 +278,13 @@ const loadTools = async (): Promise<void> => {
   }
 }
 
-let wsMessageHandler: ((e: MessageEvent) => void) | null = null
+useAdminWebSocket(event => {
+  try {
+    const msg = JSON.parse(event.data)
+    if (msg.type === 'usage_updated') loadUsage()
+  } catch { /* ignore */
+  }
+})
 
 onMounted(() => {
   loadBotStatus()
@@ -293,27 +301,11 @@ onMounted(() => {
     nowTick.value = Date.now()
   }, 1000)
   oneBotStatusTimer = window.setInterval(loadOneBotStatus, 5000)
-
-  const wsConn = ws?.get()
-  if (wsConn) {
-    wsMessageHandler = (e: MessageEvent) => {
-      try {
-        const msg = JSON.parse(e.data)
-        if (msg.type === 'usage_updated') loadUsage()
-      } catch { /* ignore */
-      }
-    }
-    wsConn.addEventListener('message', wsMessageHandler)
-  }
 })
 
 onUnmounted(() => {
   if (uptimeTimer) clearInterval(uptimeTimer)
   if (oneBotStatusTimer) clearInterval(oneBotStatusTimer)
-  if (wsMessageHandler) {
-    ws?.get()?.removeEventListener('message', wsMessageHandler)
-    wsMessageHandler = null
-  }
 })
 </script>
 

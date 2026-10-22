@@ -2,9 +2,9 @@
 /// @brief QQ 收藏表情查询与缓存实现
 
 
-#include <workflow/agent/tools/ToolRuntime.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <onebot/transport/OneBotClient.hpp>
+#include <workflow/agent/tools/ToolRuntime.hpp>
 
 namespace insoulforge {
     namespace {
@@ -62,7 +62,8 @@ namespace insoulforge {
         co_return result;
     }
 
-    auto ToolRuntime::findFavoriteEmoji(const std::string name, const std::optional<u64> sessionId) -> drogon::Task<json> {
+    auto ToolRuntime::findFavoriteEmoji(const std::string name, const std::optional<u64> sessionId)
+      -> drogon::Task<json> {
         for (const json emojis = co_await fetchFavoriteEmojis(sessionId); const auto &emoji: emojis) {
             if (getStr(emoji, "name") == name || getStr(emoji, "summary") == name) {
                 co_return emoji;

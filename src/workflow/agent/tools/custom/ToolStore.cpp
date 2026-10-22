@@ -8,10 +8,10 @@
 #include <mutex>
 #include <stdexcept>
 
-#include <workflow/agent/tools/custom/ToolStore.hpp>
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
+#include <workflow/agent/tools/custom/ToolStore.hpp>
 
 namespace insoulforge::ToolStore {
     namespace {

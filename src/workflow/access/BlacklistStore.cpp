@@ -3,11 +3,11 @@
 
 #include <fmt/format.h>
 
-#include <workflow/access/BlacklistStore.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
+#include <workflow/access/BlacklistStore.hpp>
 
 namespace insoulforge::BlacklistStore {
     auto contains(const u64 qqNumber) -> bool {

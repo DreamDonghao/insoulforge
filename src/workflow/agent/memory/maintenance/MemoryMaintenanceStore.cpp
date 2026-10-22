@@ -5,10 +5,10 @@
 
 #include <cstring>
 
-#include <workflow/agent/memory/maintenance/MemoryMaintenanceStore.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
+#include <workflow/agent/memory/maintenance/MemoryMaintenanceStore.hpp>
 
 namespace insoulforge::MemoryMaintenanceStore {
     namespace {
@@ -68,8 +68,8 @@ namespace insoulforge::MemoryMaintenanceStore {
                 const Statement profile(handle, "INSERT OR IGNORE INTO person_memories (qq_number) VALUES (?)");
                 profile.bind(1, qqNumber);
                 profile.execOrThrow();
-                const Statement entry(handle,
-                  "INSERT INTO person_memory_entries (qq_number, source_session, content) VALUES (?, ?, ?)");
+                const Statement entry(
+                  handle, "INSERT INTO person_memory_entries (qq_number, source_session, content) VALUES (?, ?, ?)");
                 entry.bind(1, qqNumber);
                 entry.bind(2, sessionId);
                 entry.bind(3, content);

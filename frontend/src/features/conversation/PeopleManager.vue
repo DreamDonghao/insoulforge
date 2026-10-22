@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {computed, onMounted, onUnmounted, ref} from 'vue'
 import {ArrowDownWideNarrow, ArrowUpNarrowWide, Pencil, Trash2} from '@lucide/vue'
+import {privateSessionUserId} from '../../utils/session'
 
 interface PersonIdentity {
   qq: string
@@ -35,11 +36,17 @@ let nameTimer: ReturnType<typeof setTimeout> | undefined
 let disposed = false
 let summaryController: AbortController | undefined
 let detailController: AbortController | undefined
+const indexedPeople = computed(() => people.value.map(person => ({person, qq: BigInt(person.qq)})))
+const sortedPeople = computed(() => {
+  const direction = ascending.value ? 1 : -1
+  return [...indexedPeople.value]
+    .sort((a, b) => direction * (a.person.affinity - b.person.affinity) ||
+      (a.qq < b.qq ? -1 : a.qq > b.qq ? 1 : 0))
+    .map(({person}) => person)
+})
 const filtered = computed(() => {
   const query = search.value.trim().toLowerCase()
-  return people.value.filter(person => `${person.qq} ${person.name}`.toLowerCase().includes(query))
-    .sort((a, b) => (ascending.value ? a.affinity - b.affinity : b.affinity - a.affinity) ||
-      (BigInt(a.qq) < BigInt(b.qq) ? -1 : BigInt(a.qq) > BigInt(b.qq) ? 1 : 0))
+  return sortedPeople.value.filter(person => `${person.qq} ${person.name}`.toLowerCase().includes(query))
 })
 const detailName = computed(() => {
   const person = people.value.find(person => person.qq === selected.value)
@@ -51,9 +58,8 @@ const memorySections = computed(() => detail.value ? [
 ] : [])
 const scoreClass = (value: number) => value > 0 ? 'positive' : value < 0 ? 'negative' : ''
 const sourceLabel = (session: string) => {
-  const id = BigInt(session)
-  const flag = 1n << 63n
-  return id & flag ? `私聊 ${id & ~flag}` : `群聊 ${session}`
+  const userId = privateSessionUserId(session)
+  return userId !== null ? `私聊 ${userId}` : `群聊 ${session}`
 }
 const formatTime = (value: string) => value ? new Date(value.replace(' ', 'T') + 'Z').toLocaleString() : '暂无'
 

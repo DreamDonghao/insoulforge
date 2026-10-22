@@ -5,6 +5,7 @@
  */
 import {computed, inject, onMounted, onUnmounted, ref, shallowRef} from 'vue'
 import type {HttpTraceEntry, HttpTraceListResult} from '../../vite-env.d'
+import {privateSessionUserId} from '../../utils/session'
 
 const showToast = inject<(msg: string, isError?: boolean) => void>('showToast')
 
@@ -17,14 +18,11 @@ const expandNestedJson = ref(true)
 const selected = shallowRef<HttpTraceEntry | null>(null)
 let timer: number | undefined
 
-// 会话展示辅助：私聊会话 ID 带标志位（超过 JS Number 安全范围），需按 BigInt 处理
-const PRIVATE_FLAG = 1n << 63n
 const sessionLabel = (groupId: string | null | undefined): string => {
   if (!groupId) return '系统请求'
   try {
-    return (BigInt(groupId) & PRIVATE_FLAG) !== 0n
-        ? `私聊 ${BigInt(groupId) & ~PRIVATE_FLAG}`
-        : `群 ${groupId}`
+    const userId = privateSessionUserId(groupId)
+    return userId !== null ? `私聊 ${userId}` : `群 ${groupId}`
   } catch {
     return groupId
   }

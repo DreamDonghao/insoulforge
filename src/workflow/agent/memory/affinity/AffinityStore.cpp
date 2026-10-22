@@ -1,10 +1,10 @@
 /// @file AffinityStore.cpp
 /// @brief 好感度存储 - 实现
 
-#include <workflow/agent/memory/affinity/AffinityStore.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
+#include <workflow/agent/memory/affinity/AffinityStore.hpp>
 
 
 namespace insoulforge::AffinityStore {

@@ -2,11 +2,11 @@
 /// @brief 单会话完整消息列表实现
 
 
-#include <workflow/history/ChatRecordStore.hpp>
-#include <workflow/history/SharedConversationContext.hpp>
-#include <workflow/MessageList.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
+#include <workflow/MessageList.hpp>
+#include <workflow/history/ChatRecordStore.hpp>
+#include <workflow/history/SharedConversationContext.hpp>
 
 namespace insoulforge {
     MessageList::MessageList(const u64 sessionId, const Database &database, const Config &config) :
@@ -52,13 +52,13 @@ namespace insoulforge {
         return fullSnapshotLocked();
     }
 
-    auto MessageList::sharedSnapshot(const size_t limit, const std::string &earliest, const std::string &latest) const -> json {
+    auto MessageList::sharedSnapshot(const size_t limit, const std::string &earliest, const std::string &latest) const
+      -> json {
         std::lock_guard lock(m_mutex);
         json result = json::array();
         for (auto it = m_messages.rbegin(); it != m_messages.rend() && result.size() < limit; ++it) {
-            const auto time = getStr(*it, "time");
             // 消息时间统一采用固定宽度的本地时间字符串，可直接比较；无时间记录不参与共享。
-            if (time.size() != 19 || time < earliest || time > latest) {
+            if (const auto time = getStr(*it, "time"); time.size() != 19 || time < earliest || time > latest) {
                 continue;
             }
             if (auto message = SharedConversationContext::projectMessage(*it)) {
@@ -72,12 +72,7 @@ namespace insoulforge {
     void MessageList::flushToStorage() const {
         std::lock_guard lock(m_mutex);
         const json currentMessages = fullSnapshotLocked();
-        ChatRecordStore::clearSessionChatRecords(m_database, m_sessionId);
-        for (const json &message: currentMessages) {
-            const bool isAssistant = getStr(atOrNull(message, "sender"), "qq") == "self";
-            ChatRecordStore::addChatRecord(
-              m_database, m_sessionId, isAssistant ? "assistant" : "user", dumpJson(message));
-        }
+        ChatRecordStore::replaceSessionChatRecords(m_database, m_sessionId, currentMessages);
     }
 
     void MessageList::clear() {

@@ -61,13 +61,12 @@ namespace insoulforge::ConfigStore {
                        {"botName", "机器人"}}},
               {"memory",
                 {{"contextWindowLimit", 100}, {"sharedConversationMessageCount", 10},
-                  {"memorySummaryTriggerCount", 100}, {"memorySummaryBatchSize", 50},
-                  {"memorySummaryContextCount", 10}, {"routerWindowTriggerCount", 20}, {"routerWindowKeepCount", 10},
-                  {"longTermRecallThreshold", 0.65}, {"longTermInjectThreshold", 0.45}}},
+                  {"memorySummaryTriggerCount", 100}, {"memorySummaryBatchSize", 50}, {"memorySummaryContextCount", 10},
+                  {"routerWindowTriggerCount", 20}, {"routerWindowKeepCount", 10}, {"longTermRecallThreshold", 0.65},
+                  {"longTermInjectThreshold", 0.45}}},
               {"execution", {{"maxToolRounds", ExecutionSettings::kDefaultMaxToolRounds}, {"mcpToolPageSize", 10},
                               {"mcpMaxToolsPerEnable", 4}, {"mcpMaxToolsPerReply", 12}}},
-              {"builtinTools", json::object()},
-              {"mcp", {{"servers", json::array()}}}};
+              {"builtinTools", json::object()}, {"mcp", {{"servers", json::array()}}}};
         }
 
         auto validToolRounds(const json &value) -> bool {
@@ -394,13 +393,13 @@ namespace insoulforge::ConfigStore {
     auto saveBuiltinToolsConfig(const json &config, const ConfigValidator &validate)
       -> std::expected<void, ConfigError> {
         if (!config.is_object()) {
-            return std::unexpected(ConfigError{.type = ConfigErrorType::InvalidArgument,
-              .message = "builtinTools 必须是对象"});
+            return std::unexpected(
+              ConfigError{.type = ConfigErrorType::InvalidArgument, .message = "builtinTools 必须是对象"});
         }
-        for (const auto &entry : config) {
+        for (const auto &entry: config) {
             if (!entry.is_object() || !atOrNull(entry, "enabled").is_boolean() ||
-              (!atOrNull(entry, "description").is_null() &&
-                (!entry["description"].is_string() || getStr(entry, "description").size() > 16000))) {
+                (!atOrNull(entry, "description").is_null() &&
+                  (!entry["description"].is_string() || getStr(entry, "description").size() > 16000))) {
                 return std::unexpected(ConfigError{.type = ConfigErrorType::InvalidArgument,
                   .message = "内置工具配置需要 enabled 布尔值，description 为不超过 16000 字节的字符串或 null"});
             }

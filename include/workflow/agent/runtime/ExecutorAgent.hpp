@@ -30,11 +30,10 @@ namespace insoulforge::ExecutorAgent {
       json mcpState = nullptr) -> json;
 
     /// @brief 执行回复生成
-    /// @param chatRecords 聊天记录
+    /// @param chatRecords 本轮冻结的完整消息快照，同时供模型投影和工具读取；调用方须持有至协程完成。
     /// @param memory 记忆管理器
     /// @param decision Router 的决策结果（包含回复策略）
-    /// @param messageSnapshot 本轮冻结的完整消息快照，工具可读取未投影的媒体来源
     /// @return 回复或不回复决策；有工具历史的流程失败附带 failureReason，无可记录内容时返回空值。
     [[nodiscard]] auto execute(const ChatRecordManager &chatRecords, const MemoryManager &memory,
-      RouterDecision decision, json messageSnapshot = {}) -> drogon::Task<std::optional<ReplyDecision>>;
+      RouterDecision decision) -> drogon::Task<std::optional<ReplyDecision>>;
 } // namespace insoulforge::ExecutorAgent

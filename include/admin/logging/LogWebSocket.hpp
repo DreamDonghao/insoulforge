@@ -12,7 +12,6 @@ namespace insoulforge {
     public:
         WS_PATH_LIST_BEGIN
         WS_PATH_ADD("/admin/logs/ws");
-
         WS_PATH_LIST_END
 
         /// @brief 注册连接并发送已连接确认

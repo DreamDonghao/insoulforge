@@ -2,25 +2,25 @@
 /// @brief Executor Agent - 实现
 
 #include <map>
-#include <infrastructure/CommonUtil.hpp>
 #include <memory>
 #include <stdexcept>
 
-#include <workflow/agent/memory/affinity/AffinityStore.hpp>
-#include <workflow/agent/memory/PersonMemoryStore.hpp>
-#include <workflow/agent/memory/MemoryStore.hpp>
-#include <workflow/agent/runtime/ExecutorAgent.hpp>
-#include <workflow/agent/tools/mcp/McpTools.hpp>
-#include <workflow/message/MessageRecord.hpp>
-#include <workflow/message/SessionId.hpp>
-#include <workflow/history/SharedConversationContext.hpp>
-#include <workflow/session/SessionStore.hpp>
-#include <workflow/agent/tools/ToolRegistry.hpp>
+#include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <workflow/agent/llm/LlmClient.hpp>
 #include <workflow/agent/llm/prompts/PromptService.hpp>
+#include <workflow/agent/memory/MemoryStore.hpp>
+#include <workflow/agent/memory/PersonMemoryStore.hpp>
+#include <workflow/agent/memory/affinity/AffinityStore.hpp>
+#include <workflow/agent/runtime/ExecutorAgent.hpp>
+#include <workflow/agent/tools/ToolRegistry.hpp>
+#include <workflow/agent/tools/mcp/McpTools.hpp>
+#include <workflow/history/SharedConversationContext.hpp>
+#include <workflow/message/MessageRecord.hpp>
+#include <workflow/message/SessionId.hpp>
+#include <workflow/session/SessionStore.hpp>
 
 namespace insoulforge::ExecutorAgent {
     namespace {
@@ -138,7 +138,7 @@ execution_status=no_reply 表示当时选择不回复；failed/send_failed 表�
 
 ### 辅助工具
 
-at_user、等 → 返回CQ码，嵌入 reply 的 content 参数中发送
+at_user/send_face/send_image 返回CQ码，嵌入 reply 的 content 参数中才会发送。
 
 ### 调用机制
 
@@ -148,11 +148,13 @@ at_user、等 → 返回CQ码，嵌入 reply 的 content 参数中发送
 - reply 必须传入非空 content，例如 reply({"content":"你好"})；不要把最终回复只写在 assistant 的 content 字段
 - 模型只决定调用哪个工具、传什么参数
 
-表情/图片的CQ码必须通过工具获取(send_sticker/send_face/send_image)。
+QQ原生表情/网络图片的CQ码必须通过 send_face/send_image 获取。
 先调工具，拿到结果后把返回的[CQ:image...]或[CQ:face...]原样拼接到reply的content中。
 禁止自己编造假CQ标签，工具返回什么就复制什么。
 send_sticker/send_poke/reply_and_continue 都是中途动作：发出后回合不结束，最终仍要用 reply/no_reply 收尾。
-send_sticker：表情包直接作为独立消息发出，不拼进reply；若表情包就是全部回复，发完调 no_reply 收尾
+send_sticker：直接发送独立的表情包消息，不返回供reply发送的CQ码，不要通过reply重复发送。
+确认发送成功后，若表情包就是全部回复，调 no_reply 收尾；若还需文字，调用 reply 发送文字。
+发送失败不能当作已经发送成功，应根据工具结果处理。
 
 reply_and_continue：接下来要执行耗时操作（网络搜索、深度思考、查资料等用户需要等待的事）时，必须先用该工具提醒用户一下，
 再调耗时工具，拿到结果后用 reply 给出最终回复；
@@ -169,15 +171,6 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
             }
 
             return prompt;
-        }
-
-        /// @brief 解析记录的 content 字段（由本服务写入的 JSON 对象字符串）
-        [[nodiscard]] auto parseRecordContent(const json &record) -> json {
-            json parsed;
-            if (!tryParseJson(getStr(record, "content"), parsed) || !parsed.is_object()) {
-                return {};
-            }
-            return parsed;
         }
 
         /// @brief 按 UTF-8 字符边界截断，超长时末尾追加省略号
@@ -201,12 +194,11 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
             return text.substr(0, i) + "…";
         }
 
-        /// @brief 将持久化记录投影为 Agent 上下文，可选截断较早消息的文本段
+        /// @brief 将冻结的完整消息投影为 Agent 上下文，可选截断较早消息的文本段
         [[nodiscard]] auto projectRecordForAgent(
-          const json &record, const bool truncateText, const bool includeGroupCard) -> json {
-            const json raw = parseRecordContent(record);
+          const json &raw, const bool truncateText, const bool includeGroupCard) -> json {
             if (!raw.is_object()) {
-                return getStr(record, "content"); // 历史存量可能是纯文本
+                return raw.is_string() ? raw : json(""); // 兼容纯文本记录
             }
             json content = MessageRecord::projectForAgent(raw, true, includeGroupCard);
             if (content.contains("memories")) {
@@ -248,11 +240,9 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         /// 最新 kRecentRecordCount 条保留完整语义投影，更早记录的文本段截断到 500 字；
         /// 每条 sender 注入当前好感度 affinity；消息预处理阶段已将召回记忆写入完整消息。
         auto buildChatContext(const ChatRecordManager &chatRecords) -> ChatContext {
-            const auto records = chatRecords.getRecords(); // 旧 → 新
+            const auto &records = chatRecords.getRecords(); // 旧 → 新
             const size_t totalRecords = records.size();
             const size_t olderCount = totalRecords > kRecentRecordCount ? totalRecords - kRecentRecordCount : 0;
-            const auto olderRecords = records | std::views::take(olderCount);
-            const auto recentRecords = records | std::views::drop(olderCount);
 
             const auto affinityMap = AffinityStore::getAffinityMap();
 
@@ -260,16 +250,11 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
                                           SessionStore::getSessionConfig(chatRecords.getSessionId()).sendGroupCard;
             ChatContext context;
 
-            // 处理更早的对话
-            for (const auto &record: olderRecords) {
-                context.earlier.push_back(
-                  injectAffinity(projectRecordForAgent(record, true, includeGroupCard), affinityMap));
-            }
-
-            // 处理最近对话（消息预处理时已注入召回记忆）
-            for (const auto &record: recentRecords) {
-                context.recent.push_back(
-                  injectAffinity(projectRecordForAgent(record, false, includeGroupCard), affinityMap));
+            for (size_t index = 0; index < totalRecords; ++index) {
+                const bool isOlder = index < olderCount;
+                auto &target = isOlder ? context.earlier : context.recent;
+                target.push_back(
+                  injectAffinity(projectRecordForAgent(records[index], isOlder, includeGroupCard), affinityMap));
             }
             return context;
         }
@@ -679,8 +664,8 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         return result;
     }
 
-    auto execute(const ChatRecordManager &chatRecords, const MemoryManager &memory, RouterDecision decision,
-      const json messageSnapshot) -> drogon::Task<std::optional<ReplyDecision>> {
+    auto execute(const ChatRecordManager &chatRecords, const MemoryManager &memory, RouterDecision decision)
+      -> drogon::Task<std::optional<ReplyDecision>> {
         const u64 sessionId = chatRecords.getSessionId();
         Logger::info(sessionId, "Executor",
           fmt::format("开始执行 | priority={} | maxLength={}", decision.isPriority, decision.maxLength));
@@ -689,7 +674,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         auto mcpSelection = McpTools::instance().createSelection(executionConfig);
         json messages = buildPrompt(chatRecords, memory, decision, mcpSelection->directory);
 
-        co_return co_await executeWithAgent(std::move(messages), sessionId, messageSnapshot, std::move(mcpSelection),
-          getInt(executionConfig, "maxToolRounds", 8));
+        co_return co_await executeWithAgent(std::move(messages), sessionId, chatRecords.getRecords(),
+          std::move(mcpSelection), getInt(executionConfig, "maxToolRounds", 8));
     }
 } // namespace insoulforge::ExecutorAgent

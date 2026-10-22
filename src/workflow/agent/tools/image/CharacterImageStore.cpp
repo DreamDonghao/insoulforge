@@ -27,7 +27,8 @@ namespace insoulforge::CharacterImageStore {
             return std::nullopt;
         }
         const auto mimeType = ImageDescriptionService::staticImageMimeType(bytes);
-        return mimeType ? std::optional{Image{.bytes = std::move(bytes), .mimeType = std::string(*mimeType)}} : std::nullopt;
+        return mimeType ? std::optional{Image{.bytes = std::move(bytes), .mimeType = std::string(*mimeType)}}
+                        : std::nullopt;
     }
 
     auto save(const std::string_view bytes) -> std::optional<std::string> {

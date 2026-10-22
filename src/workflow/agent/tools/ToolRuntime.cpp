@@ -2,16 +2,16 @@
 /// @brief 工具运行时的插件装配与自定义工具加载
 
 
-#include <workflow/agent/tools/ToolPluginCatalog.hpp>
-#include <workflow/agent/tools/ToolRuntime.hpp>
-#include <workflow/agent/tools/custom/LuaToolExecutor.hpp>
-#include <workflow/agent/tools/custom/ToolStore.hpp>
-#include <workflow/agent/tools/ToolRegistry.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
+#include <workflow/agent/tools/ToolPluginCatalog.hpp>
+#include <workflow/agent/tools/ToolRegistry.hpp>
+#include <workflow/agent/tools/ToolRuntime.hpp>
+#include <workflow/agent/tools/custom/LuaToolExecutor.hpp>
+#include <workflow/agent/tools/custom/ToolStore.hpp>
 
 namespace insoulforge {
     namespace {

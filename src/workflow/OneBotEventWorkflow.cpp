@@ -3,27 +3,27 @@
 
 #include <cassert>
 
-#include <workflow/access/BlacklistStore.hpp>
 #include <admin/events/WebSocketManager.hpp>
-#include <workflow/agent/memory/maintenance/MemoryMaintenanceCoordinator.hpp>
-#include <workflow/agent/runtime/AgentSystem.hpp>
-#include <workflow/agent/runtime/ExecutorAgent.hpp>
-#include <workflow/history/ChatRecordStore.hpp>
-#include <workflow/message/MessageRecord.hpp>
-#include <workflow/message/SessionId.hpp>
-#include <workflow/message/image/ImageDescriptionStore.hpp>
-#include <workflow/session/SessionConfigManager.hpp>
-#include <workflow/command/CommandProcessor.hpp>
-#include <workflow/message/MessageContentEnricher.hpp>
-#include <workflow/MessageRouter.hpp>
-#include <onebot/incoming/OneBotEventNormalizer.hpp>
-#include <workflow/OneBotEventWorkflow.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
+#include <onebot/incoming/OneBotEventNormalizer.hpp>
+#include <workflow/MessageRouter.hpp>
+#include <workflow/OneBotEventWorkflow.hpp>
+#include <workflow/access/BlacklistStore.hpp>
+#include <workflow/agent/memory/maintenance/MemoryMaintenanceCoordinator.hpp>
+#include <workflow/agent/runtime/AgentSystem.hpp>
+#include <workflow/agent/runtime/ExecutorAgent.hpp>
+#include <workflow/command/CommandProcessor.hpp>
+#include <workflow/history/ChatRecordStore.hpp>
+#include <workflow/message/MessageContentEnricher.hpp>
+#include <workflow/message/MessageRecord.hpp>
 #include <workflow/message/MessageService.hpp>
+#include <workflow/message/SessionId.hpp>
+#include <workflow/message/image/ImageDescriptionStore.hpp>
+#include <workflow/session/SessionConfigManager.hpp>
 
 namespace insoulforge {
     namespace {
@@ -183,8 +183,8 @@ namespace insoulforge {
         return sessionState->messageList()->fullSnapshot();
     }
 
-    auto OneBotEventWorkflow::getSharedSessionMessages(const u64 sessionId, const size_t limit,
-      const std::string &earliest, const std::string &latest) -> json {
+    auto OneBotEventWorkflow::getSharedSessionMessages(
+      const u64 sessionId, const size_t limit, const std::string &earliest, const std::string &latest) -> json {
         std::shared_ptr<SessionWorkflowState> state;
         {
             std::lock_guard lock(m_sessionsMutex);
@@ -324,7 +324,7 @@ namespace insoulforge {
         bool isInitialReply = true;
         while (true) {
             // 每轮回复均读取最新快照，避免遗漏等待期间已发送的助手消息。
-            const auto messageSnapshot = sessionState->messageList()->snapshot();
+            auto messageSnapshot = sessionState->messageList()->snapshot();
 
             try {
                 if (!m_dependencies->agent.isReady()) {
@@ -338,14 +338,10 @@ namespace insoulforge {
                         routerDecision.maxLength));
 
                     if (routerDecision.shouldReply) {
-                        auto recordSnapshot = std::deque<json>{};
-                        for (const auto &message: messageSnapshot) {
-                            recordSnapshot.push_back({{"content", dumpJson(message)}});
-                        }
-                        const auto records = ChatRecordManager{sessionId, std::move(recordSnapshot)};
+                        const auto records = ChatRecordManager{sessionId, std::move(messageSnapshot)};
                         const auto memory = MemoryManager{sessionId};
                         const auto replyDecision =
-                          co_await ExecutorAgent::execute(records, memory, std::move(routerDecision), messageSnapshot);
+                          co_await ExecutorAgent::execute(records, memory, std::move(routerDecision));
                         if (replyDecision && replyDecision->shouldReply && !replyDecision->content.empty()) {
                             if (SessionId::isPrivate(sessionId)) {
                                 co_await MessageService::sendPrivateMsg(SessionId::privateUserId(sessionId),

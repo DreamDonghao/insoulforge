@@ -5,46 +5,48 @@
 
 #include <regex>
 
+#include <infrastructure/CommonUtil.hpp>
+#include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/config/Config.hpp>
+#include <infrastructure/logging/Logger.hpp>
+#include <onebot/transport/OneBotClient.hpp>
+#include <workflow/OneBotEventWorkflow.hpp>
 #include <workflow/access/AdminStore.hpp>
 #include <workflow/access/BlacklistStore.hpp>
 #include <workflow/agent/ability/AsyncTaskManager.hpp>
 #include <workflow/agent/runtime/ExecutorAgent.hpp>
 #include <workflow/agent/tools/ToolArgument.hpp>
+#include <workflow/agent/tools/ToolRegistry.hpp>
 #include <workflow/agent/tools/ToolRuntime.hpp>
+#include <workflow/agent/tools/image/CharacterImageStore.hpp>
+#include <workflow/agent/tools/image/ImageGenerationService.hpp>
 #include <workflow/agent/tools/plugins/ActionToolsPlugin.hpp>
 #include <workflow/history/ChatRecordStore.hpp>
 #include <workflow/message/MessageRecord.hpp>
+#include <workflow/message/MessageService.hpp>
 #include <workflow/message/SessionId.hpp>
+#include <workflow/message/image/ImageDescriptionService.hpp>
+#include <workflow/scheduling/TaskScheduler.hpp>
 #include <workflow/session/QQNameDirectory.hpp>
 #include <workflow/session/SessionStore.hpp>
-#include <workflow/OneBotEventWorkflow.hpp>
-#include <workflow/scheduling/TaskScheduler.hpp>
-#include <workflow/agent/tools/ToolRegistry.hpp>
-#include <infrastructure/CommonUtil.hpp>
-#include <infrastructure/NumericTypes.hpp>
-#include <infrastructure/config/Config.hpp>
-#include <infrastructure/logging/Logger.hpp>
-#include <workflow/agent/tools/image/CharacterImageStore.hpp>
-#include <workflow/message/image/ImageDescriptionService.hpp>
-#include <workflow/agent/tools/image/ImageGenerationService.hpp>
-#include <workflow/message/MessageService.hpp>
-#include <onebot/transport/OneBotClient.hpp>
 
 namespace insoulforge {
     namespace {
         auto messageTarget(const json &args, const u64 currentSession) -> std::expected<u64, std::string> {
-            if (!args.contains("group_id")) return currentSession;
+            if (!args.contains("group_id"))
+                return currentSession;
             const auto groupId = groupIdArgument(args);
-            if (!groupId) return std::unexpected(groupId.error());
+            if (!groupId)
+                return std::unexpected(groupId.error());
             if (!SessionStore::isSessionEnabled(*groupId))
                 return std::unexpected(fmt::format("目标群 {} 未在后台启用，未发送消息", *groupId));
             return groupId;
         }
 
-        auto sendToSession(const u64 sessionId, std::string content)
-          -> drogon::Task<std::expected<u64, std::string>> {
+        auto sendToSession(const u64 sessionId, std::string content) -> drogon::Task<std::expected<u64, std::string>> {
             if (SessionId::isPrivate(sessionId))
-                co_return co_await MessageService::sendPrivateMsg(SessionId::privateUserId(sessionId), std::move(content));
+                co_return co_await MessageService::sendPrivateMsg(
+                  SessionId::privateUserId(sessionId), std::move(content));
             co_return co_await MessageService::sendGroupMsg(sessionId, std::move(content));
         }
 
@@ -118,12 +120,11 @@ namespace insoulforge {
                            "支持文字和图片 URL，默认所有人可见。"
                            "超时或无法确认结果时不要自动重试，以免重复发布。",
             .parameters = json{{"type", "object"},
-              {"properties",
-                {{"content", {{"type", "string"}, {"description", "说说正文，不能为空"}}},
-                  {"images", {{"type", "array"}, {"items", {{"type", "string"}}}, {"maxItems", 9},
-                               {"description", "可选，最多 9 张图片的 HTTP/HTTPS URL；不要编造地址"}}},
-                  {"ugc_right", {{"type", "integer"}, {"enum", {1, 4, 64}}, {"default", 1},
-                                  {"description", "查看权限：1 所有人可见，4 好友可见，64 仅自己可见"}}}}},
+              {"properties", {{"content", {{"type", "string"}, {"description", "说说正文，不能为空"}}},
+                               {"images", {{"type", "array"}, {"items", {{"type", "string"}}}, {"maxItems", 9},
+                                            {"description", "可选，最多 9 张图片的 HTTP/HTTPS URL；不要编造地址"}}},
+                               {"ugc_right", {{"type", "integer"}, {"enum", {1, 4, 64}}, {"default", 1},
+                                               {"description", "查看权限：1 所有人可见，4 好友可见，64 仅自己可见"}}}}},
               {"required", {"content"}}},
             .handler = [](const json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
                 const auto content = trim(argString(args, "content"));
@@ -131,8 +132,7 @@ namespace insoulforge {
                     co_return std::string("请提供非空的说说正文。");
                 }
                 const auto &right = atOrNull(args, "ugc_right");
-                if (!right.is_null() && (!right.is_number_integer() ||
-                      (right != 1 && right != 4 && right != 64))) {
+                if (!right.is_null() && (!right.is_number_integer() || (right != 1 && right != 4 && right != 64))) {
                     co_return std::string("ugc_right 必须为 1（所有人）、4（好友）或 64（仅自己）。");
                 }
                 json params = {{"content", content}, {"ugc_right", right.is_null() ? json(1) : right}};
@@ -141,15 +141,15 @@ namespace insoulforge {
                     if (!images.is_array() || images.size() > 9) {
                         co_return std::string("images 必须为数组，最多 9 张图片。");
                     }
-                    for (const auto &image : images) {
+                    for (const auto &image: images) {
                         if (!image.is_string()) {
                             co_return std::string("图片地址必须为 HTTP/HTTPS URL。");
                         }
                         const auto &url = image.get_ref<const std::string &>();
                         const auto hostStart = url.find("://") + 3;
                         if ((!url.starts_with("http://") && !url.starts_with("https://")) ||
-                          url.find_first_of(" \t\r\n\\") != std::string::npos ||
-                          url.find_first_of("/?#", hostStart) == hostStart || url.size() == hostStart) {
+                            url.find_first_of(" \t\r\n\\") != std::string::npos ||
+                            url.find_first_of("/?#", hostStart) == hostStart || url.size() == hostStart) {
                             co_return std::string("图片地址必须为包含主机名的 HTTP/HTTPS URL。");
                         }
                     }
@@ -157,8 +157,7 @@ namespace insoulforge {
                 }
                 const auto result = co_await OneBotClient::sendQzoneMsg(std::move(params), ctx.sessionId);
                 if (!result) {
-                    co_return "空间说说发布未成功确认：" + result.error() +
-                      "。若请求超时，请先检查空间，勿自动重试。";
+                    co_return "空间说说发布未成功确认：" + result.error() + "。若请求超时，请先检查空间，勿自动重试。";
                 }
                 co_return fmt::format("空间说说已发布，tid={}。", *result);
             },
@@ -371,8 +370,10 @@ namespace insoulforge {
                     co_return std::string("请提供表情名称");
                 }
                 const auto target = messageTarget(args, ctx.sessionId);
-                if (!target) co_return target.error();
-                const auto destination = args.contains("group_id") ? fmt::format("目标群 {}：", *target) : std::string{};
+                if (!target)
+                    co_return target.error();
+                const auto destination =
+                  args.contains("group_id") ? fmt::format("目标群 {}：", *target) : std::string{};
                 const json emoji = co_await ToolRuntime::findFavoriteEmoji(name, ctx.sessionId);
                 if (emoji.is_null()) {
                     co_return fmt::format("{}表情'{}'不存在，先调list_stickers查看可用表情", destination, name);
@@ -435,14 +436,17 @@ namespace insoulforge {
 
                 // 与 send_sticker 相同：经 MessageService 发送，成功后记入会话列表并推送 WebSocket
                 const auto target = messageTarget(args, ctx.sessionId);
-                if (!target) co_return target.error();
-                const auto destination = args.contains("group_id") ? fmt::format("目标群 {}：", *target) : std::string{};
+                if (!target)
+                    co_return target.error();
+                const auto destination =
+                  args.contains("group_id") ? fmt::format("目标群 {}：", *target) : std::string{};
                 const auto messageId = co_await sendToSession(*target, content);
                 if (!messageId) {
-                    co_return fmt::format(
-                      "{}消息发送未确认成功：{}。请继续处理，不要认为该消息已送达，不要自动重发。", destination, messageId.error());
+                    co_return fmt::format("{}消息发送未确认成功：{}。请继续处理，不要认为该消息已送达，不要自动重发。",
+                      destination, messageId.error());
                 }
-                co_return destination + "消息已发送，请继续后续处理；最终仍用 reply/no_reply 收尾，操作失败也要告知用户";
+                co_return destination +
+                  "消息已发送，请继续后续处理；最终仍用 reply/no_reply 收尾，操作失败也要告知用户";
             },
           },
           ToolCategory::ACTION);

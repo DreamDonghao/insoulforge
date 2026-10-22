@@ -39,12 +39,23 @@ const builtinError = ref('')
 const builtinFilter = ref('')
 const customFilter = ref('')
 const pendingTools = reactive(new Set<string>())
-const visibleCustomTools = computed(() => tools.value.filter(tool =>
-  `${tool.name} ${tool.description}`.toLowerCase().includes(customFilter.value.toLowerCase())))
+const visibleCustomTools = computed(() => {
+  const query = customFilter.value.toLowerCase()
+  return tools.value.filter(tool => `${tool.name} ${tool.description}`.toLowerCase().includes(query))
+})
 const builtinSaving = ref(false)
 const editingBuiltin = ref<BuiltinTool | null>(null)
-const visibleBuiltins = computed(() => builtinTools.value.filter(tool =>
-  `${tool.name} ${tool.description}`.toLowerCase().includes(builtinFilter.value.toLowerCase())))
+const visibleBuiltins = computed(() => {
+  const query = builtinFilter.value.toLowerCase()
+  return builtinTools.value.filter(tool => `${tool.name} ${tool.description}`.toLowerCase().includes(query))
+})
+const builtinGroups = computed(() => {
+  const groups = new Map<string, BuiltinTool[]>([['回复', []], ['信息', []], ['动作', []]])
+  for (const tool of visibleBuiltins.value) groups.get(tool.category)?.push(tool)
+  return Array.from(groups, ([category, tools]) => ({category, tools}))
+})
+const enabledBuiltinCount = computed(() => builtinTools.value.filter(tool => tool.enabled).length)
+const enabledCustomCount = computed(() => tools.value.filter(tool => tool.enabled).length)
 const loadBuiltins = async (): Promise<void> => {
   builtinLoading.value = true
   builtinError.value = ''
@@ -126,7 +137,7 @@ end
 --     return "任务完成"
 -- end`
 
-const editTool = reactive<CustomTool>({
+const createDefaultTool = (): CustomTool => ({
   id: 0,
   name: '',
   description: '',
@@ -136,6 +147,7 @@ const editTool = reactive<CustomTool>({
   readme: '',
   enabled: true
 })
+const editTool = reactive<CustomTool>(createDefaultTool())
 
 const testArgs: Ref<string> = ref('{}')
 
@@ -167,16 +179,7 @@ const resizeAllTextareas = (): void => {
 
 const openAddDialog = (): void => {
   isEdit.value = false
-  Object.assign(editTool, {
-    id: 0,
-    name: '',
-    description: '',
-    parameters: '{"type":"object","properties":{},"required":[]}',
-    executorType: 'lua',
-    scriptContent: defaultLuaScript,
-    readme: '',
-    enabled: true
-  })
+  Object.assign(editTool, createDefaultTool())
   testResult.value = ''
   testArgs.value = '{}'
   showDialog.value = true
@@ -403,16 +406,16 @@ onMounted(() => {
       <div class="tools-toolbar">
         <input v-model="builtinFilter" class="form-input tools-search" type="search" placeholder="搜索名称或描述"
                aria-label="搜索内置工具">
-        <span class="tools-count">{{ builtinTools.filter(tool => tool.enabled).length }} / {{ builtinTools.length }} 已启用</span>
+        <span class="tools-count">{{ enabledBuiltinCount }} / {{ builtinTools.length }} 已启用</span>
       </div>
       <p v-if="builtinLoading" class="empty-state">加载中...</p>
       <div v-else-if="builtinError" class="empty-state">
         <p>{{ builtinError }}</p><button class="btn btn-secondary" @click="loadBuiltins">重试</button>
       </div>
       <template v-else>
-        <section v-for="category in ['回复', '信息', '动作']" :key="category" class="builtin-group">
-          <h3>{{ category }}工具 <span>{{ visibleBuiltins.filter(tool => tool.category === category).length }}</span></h3>
-          <div v-for="tool in visibleBuiltins.filter(item => item.category === category)" :key="tool.name"
+        <section v-for="group in builtinGroups" :key="group.category" class="builtin-group">
+          <h3>{{ group.category }}工具 <span>{{ group.tools.length }}</span></h3>
+          <div v-for="tool in group.tools" :key="tool.name"
                class="builtin-row">
             <EnabledSwitch :model-value="tool.enabled" :disabled="pendingTools.has(`builtin:${tool.name}`)"
                                :label="`启用工具 ${tool.name}`" @update:model-value="toggleBuiltin(tool, $event)" />
@@ -433,7 +436,7 @@ onMounted(() => {
       <div class="tools-toolbar">
         <input v-model="customFilter" class="form-input tools-search" type="search" placeholder="搜索名称或描述"
                aria-label="搜索自定义工具">
-        <span class="tools-count">{{ tools.filter(tool => tool.enabled).length }} / {{ tools.length }} 已启用</span>
+        <span class="tools-count">{{ enabledCustomCount }} / {{ tools.length }} 已启用</span>
         <div class="tool-actions">
           <button class="btn btn-secondary btn-sm" @click="openImportDialog">导入</button>
           <button class="btn btn-secondary btn-sm" @click="reloadTools">重新加载</button>

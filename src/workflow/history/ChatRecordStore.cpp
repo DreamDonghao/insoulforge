@@ -1,14 +1,38 @@
 /// @file ChatRecordStore.cpp
 /// @brief 聊天记录存储 - 实现
 
-#include <workflow/history/ChatRecordStore.hpp>
 #include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
+#include <workflow/history/ChatRecordStore.hpp>
 
 namespace insoulforge::ChatRecordStore {
+    void replaceSessionChatRecords(const Database &db, const u64 sessionId, const json &messages) {
+        std::unique_lock lock(db.mutex());
+        auto *handle = db.handle();
+        Statement(handle, "BEGIN IMMEDIATE").execOrThrow();
+        try {
+            const Statement remove(handle, "DELETE FROM chat_records WHERE group_id = ?");
+            remove.bind(1, sessionId);
+            remove.execOrThrow();
+
+            const Statement insert(handle, "INSERT INTO chat_records (group_id, role, content) VALUES (?, ?, ?)");
+            for (const auto &message: messages) {
+                insert.bind(1, sessionId);
+                insert.bind(2, getStr(atOrNull(message, "sender"), "qq") == "self" ? "assistant" : "user");
+                insert.bind(3, dumpJson(message));
+                insert.execOrThrow();
+                insert.reset();
+            }
+            Statement(handle, "COMMIT").execOrThrow();
+        } catch (...) {
+            sqlite3_exec(handle, "ROLLBACK", nullptr, nullptr, nullptr);
+            throw;
+        }
+    }
+
     void addChatRecord(const Database &db, const u64 sessionId, const std::string &role, const std::string &content) {
         std::unique_lock lock(db.mutex());
         const Statement stmt(db.handle(), "INSERT INTO chat_records (group_id, role, content) VALUES (?, ?, ?)");

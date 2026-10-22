@@ -4,10 +4,10 @@
 #include <array>
 
 #include <workflow/agent/tools/ToolPluginCatalog.hpp>
+#include <workflow/agent/tools/ToolRegistry.hpp>
 #include <workflow/agent/tools/plugins/ActionToolsPlugin.hpp>
 #include <workflow/agent/tools/plugins/InfoToolsPlugin.hpp>
 #include <workflow/agent/tools/plugins/ReplyToolsPlugin.hpp>
-#include <workflow/agent/tools/ToolRegistry.hpp>
 
 namespace insoulforge::ToolPluginCatalog {
     /// @brief 构造并注册全部编译期内置插件

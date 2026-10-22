@@ -11,13 +11,13 @@
 
 #include <fmt/format.h>
 
-#include <workflow/agent/ability/AsyncTaskManager.hpp>
-#include <workflow/message/SessionId.hpp>
-#include <workflow/OneBotEventWorkflow.hpp>
 #include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
+#include <workflow/OneBotEventWorkflow.hpp>
+#include <workflow/agent/ability/AsyncTaskManager.hpp>
 #include <workflow/message/MessageService.hpp>
+#include <workflow/message/SessionId.hpp>
 
 namespace insoulforge {
     namespace {

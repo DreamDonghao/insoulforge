@@ -5,16 +5,16 @@
 #include <ranges>
 #include <utility>
 
-#include <workflow/message/MessageRecord.hpp>
-#include <workflow/message/SessionId.hpp>
-#include <workflow/session/SessionStore.hpp>
-#include <workflow/MessageRouter.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
+#include <workflow/MessageRouter.hpp>
 #include <workflow/agent/llm/JevClient.hpp>
 #include <workflow/agent/llm/LlmClient.hpp>
 #include <workflow/agent/llm/prompts/PromptService.hpp>
+#include <workflow/message/MessageRecord.hpp>
+#include <workflow/message/SessionId.hpp>
+#include <workflow/session/SessionStore.hpp>
 
 namespace insoulforge::MessageRouter {
     [[nodiscard]] auto windowStartIndex(const size_t snapshotSize) -> size_t {

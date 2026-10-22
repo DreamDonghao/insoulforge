@@ -7,10 +7,10 @@
 
 #include <cstring>
 
-#include <workflow/agent/memory/LongTermMemoryStore.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
+#include <workflow/agent/memory/LongTermMemoryStore.hpp>
 
 namespace insoulforge::LongTermMemoryStore {
     namespace {
