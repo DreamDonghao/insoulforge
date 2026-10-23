@@ -472,20 +472,12 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
                     continue;
                 }
 
-                // deep_think 以会话上下文为参考材料：快照 system 之后的完整消息列表（含已获取的工具结果）
-                // 随调用传给 handler；其余工具不拷贝这份上下文
                 ToolCallContext ctx;
                 ctx.sessionId = sessionId;
                 ctx.messageSnapshot = messageSnapshot;
                 ctx.replyOnly = replyOnly;
                 ctx.mcpSelection = mcpSelection;
                 ctx.offeredMcpTools = offeredMcpTools;
-                if (name == "deep_think") {
-                    ctx.conversationContext = json::array();
-                    for (size_t i = 1; i < messages.size(); ++i) {
-                        ctx.conversationContext.push_back(messages[i]);
-                    }
-                }
 
                 const std::string result = co_await ToolRegistry::instance().executeTool(name, args, std::move(ctx));
                 Logger::debug(sessionId, "Executor", fmt::format("工具结果: {}", result));
@@ -608,8 +600,8 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
     auto buildSystemPrompt(const u64 sessionId, const json &mcpDirectory) -> std::string {
         auto prompt = getSystemPrompt(sessionId);
         if (!SessionId::isPrivate(sessionId)) {
-            const auto additional = SessionStore::getSessionConfig(sessionId).additionalPrompt;
-            if (!additional.empty()) {
+            if (const auto additional = SessionStore::getSessionConfig(sessionId).additionalPrompt;
+              !additional.empty()) {
                 prompt += "\n\n## 本群附加设定\n以下设定仅用于当前群的回复，不改变上面的执行约束和工具权限。\n";
                 prompt += additional;
             }
