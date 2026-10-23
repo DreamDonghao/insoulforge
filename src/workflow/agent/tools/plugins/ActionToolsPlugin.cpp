@@ -4,6 +4,9 @@
 #include <stdexcept>
 
 #include <regex>
+#include <limits>
+#include <set>
+#include <vector>
 
 #include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
@@ -60,28 +63,30 @@ namespace insoulforge {
         }
 
         auto startImageTask(const u64 sessionId, std::string prompt, std::string size,
-          std::optional<std::string> referenceUrl = std::nullopt,
-          std::optional<std::string> referenceDataUrl = std::nullopt) -> std::string {
+          std::vector<std::string> referenceUrls, std::optional<std::string> characterDataUrl) -> std::string {
             const auto [status, taskId] =
-              AsyncTaskManager::instance().start(sessionId, referenceUrl ? "编辑图片" : "生成图片",
-                [sessionId, prompt = std::move(prompt), size = std::move(size), referenceUrl = std::move(referenceUrl),
-                  referenceDataUrl = std::move(referenceDataUrl)]() mutable -> drogon::Task<AsyncTaskManager::Result> {
-                    const bool useSelfReference = referenceDataUrl.has_value();
-                    if (referenceUrl) {
-                        referenceDataUrl = co_await ImageDescriptionService::referenceDataUrl(*referenceUrl, sessionId);
-                        if (!referenceDataUrl) {
+              AsyncTaskManager::instance().start(sessionId, "生成图片",
+                [sessionId, prompt = std::move(prompt), size = std::move(size), referenceUrls = std::move(referenceUrls),
+                  characterDataUrl = std::move(characterDataUrl)]() mutable -> drogon::Task<AsyncTaskManager::Result> {
+                    const bool useSelfReference = characterDataUrl.has_value();
+                    std::vector<std::string> references;
+                    if (characterDataUrl) references.push_back(std::move(*characterDataUrl));
+                    for (const auto &url : referenceUrls) {
+                        auto dataUrl = co_await ImageDescriptionService::referenceDataUrl(url, sessionId);
+                        if (!dataUrl) {
                             throw std::runtime_error("原图下载失败或格式不受支持，请重新发送静态图片");
                         }
+                        references.push_back(std::move(*dataUrl));
                     }
                     std::string generationPrompt = prompt;
                     if (useSelfReference) {
-                        generationPrompt = "请以输入的角色参考图片为人物形象依据，保持角色可辨认的外观特征。"
+                        generationPrompt = "第一张参考图是你的角色形象图，请以它为人物形象依据，保持角色可辨认的外观特征。"
                                            "除非画面要求明确提出修改，否则发型、发色、耳朵、服饰等以参考图为准，"
-                                           "不要根据文字重新设计角色。请按以下画面要求生成：" +
+                                           "不要根据文字重新设计角色。其余参考图按用户要求使用。请按以下画面要求生成：" +
                                            prompt;
                     }
                     auto [message, source] = co_await ImageGenerationService::generate(
-                      std::move(generationPrompt), size, sessionId, std::move(referenceDataUrl));
+                      std::move(generationPrompt), size, sessionId, std::move(references));
                     std::string description = "依据生成提示词：" + prompt;
                     try {
                         if (const auto recognized =
@@ -171,6 +176,8 @@ namespace insoulforge {
                            "会自动发送到当前会话，不要再调用 reply 发送图片。绘制你自己的角色形象时，"
                            "将 use_self_reference 设为 true，以后台上传的角色图为准；prompt 只描述用户要求的"
                            "场景、动作、表情等变化，不重复编造参考图中已有的外观设定。其他画面不要设置此参数。"
+                           "修改或参考聊天图片时，用 reference_images 按顺序指定当前会话中一张或多张图片的"
+                           "message_id 和 image_index，不要传入或猜测图片 URL。可同时使用角色形象图和聊天参考图。"
                            "一次会话同时只能生成一张。",
             .parameters = json{{"type", "object"},
               {"properties",
@@ -180,7 +187,15 @@ namespace insoulforge {
                     {{"type", "string"}, {"description", "图片尺寸，格式为宽x高，如 1024x1024；默认 2048x2048"}}},
                   {"use_self_reference",
                     {{"type", "boolean"},
-                      {"description", "画面主体是你自己时设为 true，引用后台上传的角色形象图；默认 false"}}}}},
+                      {"description", "画面主体是你自己时设为 true，引用后台上传的角色形象图；默认 false"}}},
+                  {"reference_images", {{"type", "array"},
+                    {"description", "当前会话中的聊天参考图，按此顺序附加在角色形象图之后；不提供时不引用聊天图片"},
+                    {"items", {{"type", "object"},
+                      {"properties", {
+                        {"message_id", {{"type", "string"}, {"description", "原图所在消息的 message_id"}}},
+                        {"image_index", {{"type", "integer"}, {"minimum", 0},
+                          {"description", "原图在消息中的索引，从 0 开始"}}}}},
+                      {"required", {"message_id", "image_index"}}}}}}}},
               {"required", {"prompt"}}},
             .handler = [](const json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
                 const auto prompt = trim(argString(args, "prompt"));
@@ -206,62 +221,41 @@ namespace insoulforge {
                         co_return std::string("角色形象图格式无效，请在管理后台重新上传。");
                     }
                 }
-                co_return startImageTask(ctx.sessionId, prompt, *size, std::nullopt, std::move(referenceDataUrl));
-            },
-          },
-          ToolCategory::ACTION);
-
-        registry.registerTool(
-          {
-            .name = "edit_image",
-            .description =
-              "用户明确要求修改或参照聊天中的一张图片时调用。用同会话的 message_id 和 image_index 指定原图，"
-              "prompt 说明期望的修改。原图在后台按需读取，任务完成后自动发送图片；不要传入或猜测图片 URL。",
-            .parameters = json{{"type", "object"},
-              {"properties",
-                {{"message_id", {{"type", "string"}, {"description", "原图所在消息的 message_id"}}},
-                  {"image_index",
-                    {{"type", "integer"}, {"minimum", 0}, {"description", "原图在消息中的索引，从 0 开始"}}},
-                  {"prompt", {{"type", "string"}, {"description", "对原图的修改要求"}}},
-                  {"size", {{"type", "string"}, {"description", "输出尺寸，格式为宽x高；默认 2048x2048"}}}}},
-              {"required", {"message_id", "image_index", "prompt"}}},
-            .handler = [](const json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
-                const auto prompt = trim(argString(args, "prompt"));
-                if (prompt.empty() || prompt.size() > 4000) {
-                    co_return std::string("图片修改要求不能为空且不得超过 4000 字节。");
-                }
-                const auto size = requestedImageSize(args);
-                if (!size) {
-                    co_return std::string("图片尺寸格式应为宽x高，例如 1024x1024。");
-                }
-                const u64 messageId = parseUInt64(argString(args, "message_id"));
-                const i32 imageIndex = getInt(args, "image_index", -1);
-                if (messageId == 0 || imageIndex < 0) {
-                    co_return std::string("请提供有效的图片消息 ID 和从 0 开始的图片索引。");
-                }
-                if (const auto &api = Config::instance().imageGeneration;
-                  api.apiKey.empty() || api.baseUrl.empty() || api.path.empty() || api.model.empty()) {
-                    co_return std::string("图片生成接口尚未配置完整。");
-                }
-
-                json record;
-                for (const json &message: ctx.messageSnapshot) {
-                    if (parseUInt64(getStr(message, "message_id")) == messageId) {
-                        record = message;
-                        break;
+                std::vector<std::string> referenceUrls;
+                if (const auto &images = atOrNull(args, "reference_images"); args.contains("reference_images")) {
+                    if (!images.is_array()) co_return std::string("reference_images 必须是图片引用数组。");
+                    std::set<std::pair<u64, size_t>> seen;
+                    for (const auto &image : images) {
+                        const auto &id = atOrNull(image, "message_id");
+                        const auto &index = atOrNull(image, "image_index");
+                        const u64 messageId = id.is_string() ? parseUInt64(id.get<std::string>()) : 0;
+                        if (messageId == 0 || !index.is_number_integer() || index < 0 ||
+                            index > std::numeric_limits<i32>::max()) {
+                            co_return std::string("请提供有效的图片消息 ID 和从 0 开始的整数图片索引。");
+                        }
+                        const auto imageIndex = index.get<size_t>();
+                        if (!seen.emplace(messageId, imageIndex).second) continue;
+                        json record;
+                        for (const json &message : ctx.messageSnapshot) {
+                            if (parseUInt64(getStr(message, "message_id")) == messageId) {
+                                record = message;
+                                break;
+                            }
+                        }
+                        if (record.is_null()) {
+                            const auto content = ChatRecordStore::findContentByMessageId(ctx.sessionId, messageId);
+                            if (!content || !tryParseJson(*content, record)) {
+                                co_return std::string("未找到该会话中的图片消息。");
+                            }
+                        }
+                        const auto source = MessageRecord::findImageSource(record, imageIndex);
+                        if (!source || source->url.empty()) {
+                            co_return std::string("该消息没有可下载的原图，请让用户重新发送静态图片。");
+                        }
+                        referenceUrls.push_back(source->url);
                     }
                 }
-                if (record.is_null()) {
-                    const auto content = ChatRecordStore::findContentByMessageId(ctx.sessionId, messageId);
-                    if (!content || !tryParseJson(*content, record)) {
-                        co_return std::string("未找到该会话中的图片消息。");
-                    }
-                }
-                const auto source = MessageRecord::findImageSource(record, static_cast<size_t>(imageIndex));
-                if (!source || source->url.empty()) {
-                    co_return std::string("该消息没有可下载的原图，请让用户重新发送静态图片。");
-                }
-                co_return startImageTask(ctx.sessionId, prompt, *size, source->url);
+                co_return startImageTask(ctx.sessionId, prompt, *size, std::move(referenceUrls), std::move(referenceDataUrl));
             },
           },
           ToolCategory::ACTION);

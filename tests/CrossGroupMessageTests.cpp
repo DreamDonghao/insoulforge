@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <drogon/drogon.h>
+#include <openssl/evp.h>
 #include <trantor/net/EventLoopThread.h>
 
 #include <infrastructure/config/Config.hpp>
@@ -15,10 +16,12 @@
 #include <workflow/OneBotEventWorkflow.hpp>
 #include <workflow/agent/runtime/AgentSystem.hpp>
 #include <workflow/agent/tools/ToolRegistry.hpp>
-#include <workflow/agent/tools/ToolRuntime.hpp>
+#include <workflow/agent/tools/image/CharacterImageStore.hpp>
+#include <workflow/agent/tools/image/ImageGenerationService.hpp>
 #include <workflow/history/ChatRecordStore.hpp>
 #include <workflow/history/SharedConversationContext.hpp>
 #include <workflow/message/SessionId.hpp>
+#include <workflow/message/image/ImageDescriptionService.hpp>
 #include <workflow/session/SessionStore.hpp>
 
 namespace {
@@ -26,10 +29,17 @@ namespace {
     struct Fixture {
         std::mutex mutex;
         std::vector<json> sends;
+        std::vector<json> imageRequests;
         std::atomic<i32> stickerQueries{0};
         std::atomic<i32> modelQueries{0};
         std::atomic_bool fail{false};
         std::atomic<i32> qzoneRight{1};
+        std::atomic_bool failImage{false};
+
+        auto images() -> std::vector<json> {
+            std::lock_guard lock(mutex);
+            return imageRequests;
+        }
 
         auto messages() -> std::vector<json> {
             std::lock_guard lock(mutex);
@@ -39,6 +49,117 @@ namespace {
 
     void require(const bool value, const char *message) {
         if (!value) throw std::runtime_error(message);
+    }
+
+    auto imageBytes() -> std::string {
+        const std::string encoded =
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9d1QAAAABJRU5ErkJggg==";
+        std::string bytes(encoded.size() / 4 * 3, '\0');
+        const auto length = EVP_DecodeBlock(reinterpret_cast<unsigned char *>(bytes.data()),
+            reinterpret_cast<const unsigned char *>(encoded.data()), static_cast<int>(encoded.size()));
+        bytes.resize(static_cast<size_t>(length) - 2);
+        return bytes;
+    }
+
+    auto testImageGeneration(const std::string endpoint) -> drogon::Task<> {
+        auto &config = Config::instance();
+        config.imageGeneration.baseUrl = endpoint;
+        config.imageGeneration.path = "/image-generation";
+        config.imageGeneration.apiKey = "fixture";
+        config.imageGeneration.model = "fixture";
+        for (const auto &references : {std::vector<std::string>{}, std::vector<std::string>{"first"},
+                 std::vector<std::string>{"first", "second", "third"}}) {
+            const auto result = co_await ImageGenerationService::generate("test", "1024x1024", 500, references);
+            require(result.source == "https://example.com/generated.png", "image response parsing changed");
+            const auto request = fixture.images().back();
+            require(request["size"] == "1024x1024", "image size was lost");
+            if (references.empty()) {
+                require(!request.contains("input_references"), "text generation unexpectedly attached references");
+            } else {
+                require(request["input_references"].size() == references.size(), "references were dropped");
+                for (size_t index = 0; index < references.size(); ++index)
+                    require(request["input_references"][index]["image_url"]["url"] == references[index],
+                        "reference order changed");
+            }
+        }
+        fixture.failImage = true;
+        bool failed = false;
+        try {
+            co_await ImageGenerationService::generate("test", "1024x1024", 500);
+        } catch (const std::exception &) { failed = true; }
+        require(failed, "upstream rejection was silently ignored");
+        fixture.failImage = false;
+
+        auto &registry = ToolRegistry::instance();
+        const json record = {{"message_id", "5001"}, {"assets", {{"images", {
+            {{"source", {{"url", endpoint + "/reference.png"}}}},
+            {{"source", {{"url", endpoint + "/reference.png"}}}}}}}}};
+        ChatRecordStore::addChatRecord(500, "user", record.dump());
+        const json args = {{"prompt", "参考图片"}, {"reference_images", {{{"message_id", "5001"}, {"image_index", 0}}}}};
+        auto error = co_await registry.executeTool("generate_image", args, {.sessionId = 501});
+        require(error.contains("未找到该会话"), "references leaked across sessions");
+        json invalid = args;
+        invalid["reference_images"][0]["image_index"] = 2;
+        error = co_await registry.executeTool("generate_image", invalid, {.sessionId = 500});
+        require(error.contains("没有可下载"), "missing source was silently ignored");
+
+        // Isolate the relative character-image store from any developer data.
+        const auto originalPath = std::filesystem::current_path();
+        const auto temporary = std::filesystem::temp_directory_path() /
+            ("insoulforge-image-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        std::filesystem::create_directories(temporary);
+        std::filesystem::current_path(temporary);
+        require(!CharacterImageStore::save(imageBytes()), "character image fixture could not be saved");
+        auto mixed = args;
+        mixed["use_self_reference"] = true;
+        mixed["reference_images"][0]["message_id"] = "5002";
+        mixed["reference_images"].push_back({{"message_id", "5001"}, {"image_index", 1}});
+        mixed["reference_images"].push_back(mixed["reference_images"][0]);
+        auto snapshotRecord = record;
+        snapshotRecord["message_id"] = "5002";
+        const auto sentBefore = fixture.messages().size();
+        const auto started = co_await registry.executeTool("generate_image", mixed,
+            {.sessionId = 500, .messageSnapshot = json::array({snapshotRecord})});
+        require(started.contains("已启动"), "mixed reference task did not start");
+        for (int attempt = 0; attempt < 200 && fixture.messages().size() == sentBefore; ++attempt)
+            co_await drogon::sleepCoro(drogon::app().getLoop(), 0.01);
+        require(fixture.messages().size() == sentBefore + 1, "generated image was not delivered");
+        const auto request = fixture.images().back();
+        require(request["input_references"].size() == 3 &&
+            getStr(request, "prompt").starts_with("第一张参考图是你的角色形象图"),
+            "mixed references lost the character image or retained duplicate chat references");
+        for (const auto &reference : request["input_references"])
+            require(reference["image_url"]["url"] == *ImageDescriptionService::staticImageDataUrl(imageBytes()),
+                "references were not converted to image data URLs");
+        co_await drogon::sleepCoro(drogon::app().getLoop(), 0.02);
+        std::filesystem::current_path(originalPath);
+        std::filesystem::remove_all(temporary);
+
+        // A failed download must release the task slot without sending a text-only generation request.
+        auto broken = record;
+        broken["assets"]["images"][0]["source"]["url"] = endpoint + "/missing.png";
+        const auto imageRequestsBefore = fixture.images().size();
+        const auto failedStart = co_await registry.executeTool("generate_image", args,
+            {.sessionId = 502, .messageSnapshot = json::array({broken})});
+        require(failedStart.contains("已启动"), "download failure fixture did not start");
+        bool restarted = false;
+        for (int attempt = 0; attempt < 200; ++attempt) {
+            const auto next = co_await registry.executeTool("generate_image", args,
+                {.sessionId = 502, .messageSnapshot = json::array({record})});
+            if (next.contains("已启动")) {
+                restarted = true;
+                break;
+            }
+            require(next.contains("在执行"), "failed download left an unexpected task state");
+            co_await drogon::sleepCoro(drogon::app().getLoop(), 0.01);
+        }
+        require(restarted, "failed download did not release the task slot");
+        for (int attempt = 0; attempt < 200 && fixture.messages().size() == sentBefore + 1; ++attempt)
+            co_await drogon::sleepCoro(drogon::app().getLoop(), 0.01);
+        require(fixture.messages().size() == sentBefore + 2 && fixture.images().size() == imageRequestsBefore + 1 &&
+            fixture.images().back()["input_references"].size() == 1,
+            "download failure generated an image or subsequent single-reference generation failed");
+        co_await drogon::sleepCoro(drogon::app().getLoop(), 0.02);
     }
 
     auto testGroupMessageQuery() -> drogon::Task<> {
@@ -82,7 +203,7 @@ namespace {
 
         const auto before = workflow.getSessionMessages(400);
         require(before->size() == 28, "query fixture did not retain excluded records");
-        const auto caller = SessionId::fromPrivateUser(999);
+        constexpr auto caller = SessionId::fromPrivateUser(999);
         const json args = {{"group_id", "400"}};
         const auto result = co_await registry.executeTool("get_group_messages", args, {.sessionId = caller});
         const auto output = json::parse(result);
@@ -190,7 +311,7 @@ namespace {
             require(!workflow.getSessionMessages(100) && workflow.getSessionMessages(200)->size() == 2,
                 "cross-group messages were copied into the calling session");
 
-            const auto privateSession = SessionId::fromPrivateUser(300);
+            constexpr auto privateSession = SessionId::fromPrivateUser(300);
             for (const auto session : {u64{100}, privateSession}) {
                 result = co_await registry.executeTool("reply_and_continue", {{"content", "local text"}}, {.sessionId = session});
                 require(result.find("消息已发送") != std::string::npos, "default text destination changed");
@@ -236,6 +357,9 @@ namespace {
             require(ChatRecordStore::getChatRecords(db, 200).size() == 6, "target records were not persisted");
             co_await drogon::sleepCoro(drogon::app().getLoop(), 0.05);
             require(fixture.modelQueries == 0, "outgoing message triggered automatic model reply or summary");
+            fixture.fail = false;
+            config.oneBotTransport = "http";
+            co_await testImageGeneration(endpoint);
             exitCode = 0;
             std::cout << "All cross-group message tests passed\n";
         } catch (const std::exception &error) {
@@ -250,6 +374,24 @@ auto main() -> int {
         ("insoulforge-cross-group-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".json");
     require(Config::instance().initialize(configPath.string()).has_value(), "config initialization failed");
     drogon::app().setLogLevel(trantor::Logger::kWarn).addListener("127.0.0.1", 0);
+    drogon::app().registerHandler("/reference.png",
+        [](const drogon::HttpRequestPtr &, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+            auto response = drogon::HttpResponse::newHttpResponse();
+            response->setBody(imageBytes());
+            callback(response);
+        }, {drogon::Get});
+    drogon::app().registerHandler("/image-generation",
+        [](const drogon::HttpRequestPtr &request, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+            {
+                std::lock_guard lock(fixture.mutex);
+                fixture.imageRequests.push_back(json::parse(request->body()));
+            }
+            auto response = drogon::HttpResponse::newHttpResponse();
+            response->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            if (fixture.failImage) response->setStatusCode(drogon::k400BadRequest);
+            response->setBody(R"({"data":[{"url":"https://example.com/generated.png"}]})");
+            callback(response);
+        }, {drogon::Post});
     for (const auto *path : {"/send_group_msg", "/send_private_msg"}) {
         drogon::app().registerHandler(path,
             [](const drogon::HttpRequestPtr &request, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
@@ -260,7 +402,7 @@ auto main() -> int {
                     body = fixture.fail ? json{{"status", "failed"}, {"retcode", 1200}, {"message", "fixture failure"}} :
                         json{{"status", "ok"}, {"data", {{"message_id", fixture.sends.size()}}}};
                 }
-                auto response = drogon::HttpResponse::newHttpResponse();
+                const auto response = drogon::HttpResponse::newHttpResponse();
                 response->setContentTypeCode(drogon::CT_APPLICATION_JSON);
                 response->setBody(body.dump());
                 callback(response);
@@ -275,27 +417,27 @@ auto main() -> int {
             callback(response);
         }, {drogon::Post});
     drogon::app().registerHandler("/send_qzone_msg",
-        [](const drogon::HttpRequestPtr &request, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+        [](const drogon::HttpRequestPtr &request, std::function<void(const drogon::HttpResponsePtr &)> &&callback) -> void {
             const auto params = json::parse(request->body());
-            auto response = drogon::HttpResponse::newHttpResponse();
+          const auto response = drogon::HttpResponse::newHttpResponse();
             response->setContentTypeCode(drogon::CT_APPLICATION_JSON);
             response->setBody(params["ugc_right"] == fixture.qzoneRight.load() ?
                 R"({"status":"ok","data":{"tid":"fixture-tid"}})" : R"({"status":"failed","retcode":400})");
             callback(response);
         }, {drogon::Post});
     drogon::app().registerHandler("/unexpected-model",
-        [](const drogon::HttpRequestPtr &, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+        [](const drogon::HttpRequestPtr &, std::function<void(const drogon::HttpResponsePtr &)> &&callback) -> void {
             ++fixture.modelQueries;
-            auto response = drogon::HttpResponse::newHttpResponse();
+          const auto response = drogon::HttpResponse::newHttpResponse();
             response->setStatusCode(drogon::k400BadRequest);
             callback(response);
         }, {drogon::Post});
     trantor::EventLoopThread clientThread;
     clientThread.run();
     i32 exitCode = 1;
-    drogon::app().registerBeginningAdvice([&] {
+    drogon::app().registerBeginningAdvice([&] -> void {
         const auto endpoint = "http://127.0.0.1:" + std::to_string(drogon::app().getListeners().front().toPort());
-        clientThread.getLoop()->queueInLoop([&, endpoint] {
+        clientThread.getLoop()->queueInLoop([&, endpoint] -> void {
             drogon::async_run([&, endpoint]() -> drogon::Task<> {
                 co_await runTests(endpoint, exitCode);
                 clientThread.getLoop()->quit();
