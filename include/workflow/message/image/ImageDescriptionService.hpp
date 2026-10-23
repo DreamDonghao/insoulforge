@@ -4,8 +4,10 @@
 #pragma once
 
 #include <optional>
+#include <expected>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <drogon/utils/coroutine.h>
 
@@ -21,6 +23,10 @@ namespace insoulforge {
     };
 
     namespace ImageDescriptionService {
+        /// @brief 用原图回答具体问题；GIF 按时间抽帧，不读取或写入通用描述缓存。
+        [[nodiscard]] auto ask(std::string question, std::vector<std::string> sourceUrls, u64 sessionId)
+          -> drogon::Task<std::expected<std::string, std::string>>;
+
         /// @brief 判断字节是否为受支持的静态图片，返回实际 MIME 类型。
         [[nodiscard]] auto staticImageMimeType(std::string_view bytes) -> std::optional<std::string_view>;
 

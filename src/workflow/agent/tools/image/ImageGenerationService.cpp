@@ -76,16 +76,18 @@ namespace insoulforge::ImageGenerationService {
     }
 
     auto generate(std::string prompt, std::string size, const u64 sessionId,
-      std::optional<std::string> referenceDataUrl) -> drogon::Task<GeneratedImage> {
+      std::vector<std::string> referenceDataUrls) -> drogon::Task<GeneratedImage> {
         const auto config = Config::instance().imageGeneration;
         if (config.apiKey.empty() || config.baseUrl.empty() || config.path.empty() || config.model.empty()) {
             throw std::runtime_error("图片生成接口尚未配置完整");
         }
 
         json request = {{"model", config.model}, {"prompt", std::move(prompt)}, {"size", std::move(size)}};
-        if (referenceDataUrl) {
-            request["input_references"] =
-              json::array({{{"type", "image_url"}, {"image_url", {{"url", std::move(*referenceDataUrl)}}}}});
+        if (!referenceDataUrls.empty()) {
+            auto &references = request["input_references"] = json::array();
+            for (auto &url : referenceDataUrls) {
+                references.push_back({{"type", "image_url"}, {"image_url", {{"url", std::move(url)}}}});
+            }
         }
         // 响应可能包含数十 MB 的图片数据；调试记录只保留非图片字段。
         const auto response = co_await HttpUtil::send("ImageGeneration", config.baseUrl, config.path, drogon::Post,

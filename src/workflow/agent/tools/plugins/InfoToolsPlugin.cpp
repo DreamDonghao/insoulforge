@@ -11,9 +11,11 @@
 #include <workflow/agent/tools/ToolArgument.hpp>
 #include <workflow/agent/tools/ToolRegistry.hpp>
 #include <workflow/agent/tools/ToolRuntime.hpp>
+#include <workflow/agent/tools/image/ImageReferences.hpp>
 #include <workflow/agent/tools/plugins/InfoToolsPlugin.hpp>
 #include <workflow/history/SharedConversationContext.hpp>
 #include <workflow/message/SessionId.hpp>
+#include <workflow/message/image/ImageDescriptionService.hpp>
 #include <workflow/scheduling/TaskStore.hpp>
 #include <workflow/session/SessionStore.hpp>
 
@@ -23,16 +25,14 @@ namespace insoulforge {
         constexpr size_t kThinkingPreviewChars = 100;
 
         /// @brief 深度思考的系统提示词（专家求解定位：只产出问题答案，不组织聊天回复）
-        auto buildThinkingSystemPrompt(const std::string &question) -> std::string {
-            return fmt::format("你是被咨询的领域专家，负责解答问题、提供知识与分析。\n\n"
-                               "结合对话上下文理解【问题】，给出准确的答案。\n\n"
-                               "【问题】\n{}\n\n"
-                               "【输出要求】\n"
-                               "- 只输出针对问题的分析、推理与答案本身\n"
-                               "- 不组织聊天回复，不揣摩语气和长度\n"
-                               "- 结论先行，过程简明\n"
-                               "- 不使用 markdown 代码块",
-              question.empty() ? "结合上下文分析最新消息，给出准确答案" : question);
+        auto buildThinkingSystemPrompt() -> std::string {
+            return "你是被咨询的领域专家，负责解答问题、提供知识与分析。\n\n"
+                   "根据用户提供的问题、条件和资料，给出准确的答案。\n\n"
+                   "【输出要求】\n"
+                   "- 只输出针对问题的分析、推理与答案本身\n"
+                   "- 不组织聊天回复，不揣摩语气和长度\n"
+                   "- 结论先行，过程简明\n"
+                   "- 不使用 markdown 代码块";
         }
 
     } // namespace
@@ -41,6 +41,30 @@ namespace insoulforge {
 
     /// @brief 注册内容获取工具（INFORMATION，查询数据、获取答案，不产生副作用）
     void InfoToolsPlugin::registerTools(ToolRegistry &registry) const {
+
+        auto imagesSchema = ImageReferences::schema();
+        imagesSchema["minItems"] = 1;
+        registry.registerTool({
+            .name = "ask_images",
+            .description = "根据当前会话中的一张或多张原图回答具体问题，支持细节识别、文字提取、图表分析和多图比较。"
+                "现有图片描述不足时调用；GIF 按播放时间抽帧分析。question 必须包含完整问题和必要背景，不会附带聊天上下文。"
+                "用 images 中的 message_id 和 image_index 指定图片，不要传入或猜测 URL。结果返回后据此组织回复。",
+            .parameters = {{"type", "object"}, {"properties", {
+                {"question", {{"type", "string"}, {"description", "具体问题及必要条件、背景；不得只写分析刚才的图片"}}},
+                {"images", std::move(imagesSchema)}}}, {"required", {"question", "images"}}},
+            .handler = [](json args, ToolCallContext ctx) -> drogon::Task<std::string> {
+                const auto &question = atOrNull(args, "question");
+                if (!question.is_string() || trim(question.get<std::string>()).empty())
+                    co_return std::string("ask_images 需要非空字符串 question，请提供具体问题和必要背景。");
+                const auto &images = atOrNull(args, "images");
+                if (!images.is_array() || images.empty())
+                    co_return std::string("images 必须是非空图片引用数组。");
+                auto urls = ImageReferences::resolve(images, ctx);
+                if (!urls) co_return urls.error();
+                const auto result = co_await ImageDescriptionService::ask(
+                    question.get<std::string>(), std::move(*urls), ctx.sessionId);
+                co_return result ? "【原图问答结果】\n" + *result : result.error();
+            }}, ToolCategory::INFORMATION);
 
         registry.registerTool(
           {
@@ -134,14 +158,13 @@ namespace insoulforge {
           },
           ToolCategory::INFORMATION);
 
-        // deep_think - 调用深度思考模型求解。上下文由 Executor 随 ToolCallContext 传入
-        // （system 之后的完整消息列表，含已获取的工具结果）
+        // deep_think 仅求解显式传入的问题，不读取会话上下文。
         const json thinkParams = json::parse(R"json({
                 "type": "object",
                 "properties": {
                     "question": {
                         "type": "string",
-                        "description": "用一两句话描述需要深入分析的具体问题”"
+                        "description": "完整描述需要深入分析的问题，包含必要条件、相关资料和已获取的工具结果。不会自动传入聊天上下文，不要只引用刚才的问题。"
                     }
                 },
                 "required": ["question"]
@@ -150,27 +173,21 @@ namespace insoulforge {
           {
             .name = "deep_think",
             .description = "深度思考工具。遇到复杂问题（数学计算、多步推理、逻辑分析、技术难题等）时调用："
-                           "深度思考模型会结合当前对话上下文给出准确的答案或解法，"
+                           "将完整问题、必要条件和相关资料写入 question，模型不会读取当前对话上下文。"
+                           "深度思考模型会根据 question 给出答案或解法，"
                            "拿到答案后据此组织回复。简单闲聊、日常对话禁止调用。",
             .parameters = thinkParams,
             .handler = [](json args, ToolCallContext ctx) -> drogon::Task<std::string> {
                 const u64 sessionId = ctx.sessionId;
-                const std::string question = argString(args, "question");
-
-                // 上下文随调用参数传入，由协程帧持有，co_await 期间不会被其他会话覆盖
-                json context = std::move(ctx.conversationContext);
-                if (!context.is_array() || context.empty()) {
-                    co_return std::string("会话上下文缺失，无法深度思考");
+                const auto &value = atOrNull(args, "question");
+                if (!value.is_string() || trim(value.get<std::string>()).empty()) {
+                    co_return std::string("deep_think 需要非空 question，请提供完整问题、必要条件和相关资料");
                 }
+                const auto question = value.get<std::string>();
 
-                json messages = json::array();
-                json systemMsg;
-                systemMsg["role"] = "system";
-                systemMsg["content"] = buildThinkingSystemPrompt(question);
-                messages.push_back(std::move(systemMsg));
-                for (const auto &msg: context) {
-                    messages.push_back(msg);
-                }
+                json messages = json::array({
+                  {{"role", "system"}, {"content", buildThinkingSystemPrompt()}},
+                  {{"role", "user"}, {"content", question}}});
 
                 const auto &config = Config::instance();
                 const auto respJson = co_await LlmClient::requestChat("深度思考", "executorThinking",

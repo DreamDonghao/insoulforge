@@ -32,6 +32,7 @@
 #include <workflow/agent/memory/maintenance/PersonMemoryConsolidator.hpp>
 #include <workflow/agent/runtime/ExecutorAgent.hpp>
 #include <workflow/agent/tools/ToolRegistry.hpp>
+#include <workflow/agent/tools/plugins/InfoToolsPlugin.hpp>
 #include <workflow/history/ChatRecordManager.hpp>
 #include <workflow/message/SessionId.hpp>
 #include <workflow/message/MessageRecord.hpp>
@@ -47,6 +48,8 @@ namespace {
         std::atomic<PersonMemoryConsolidator *> stopService{nullptr};
         std::atomic<LlmClient::MaintenanceRequestControl *> cancelRequest{nullptr};
     } personFixture;
+    std::atomic<i32> thinkingRequests{0};
+    const std::string thinkingQuestion = "已知 x + 2 = 5，求 x。\n查询结果：x 为实数。";
 
     auto testPersonConsolidation(const std::string &endpoint) -> drogon::Task<> {
         auto &db = Database::instance();
@@ -460,6 +463,31 @@ namespace {
               RouterDecision{.reason = "group strategy", .tone = "serious", .maxLength = 123});
             require(groupReply && groupReply->content == "context verified", "group Router strategy was lost");
             registry.unregisterPlugin("contract.context");
+            require(registry.registerPlugin("contract.thinking", [](ToolRegistry &staged) {
+                InfoToolsPlugin{}.registerTools(staged);
+            }), "thinking fixture tool registration failed");
+            config.executorThinking.baseUrl = endpoint;
+            config.executorThinking.path = "/thinking-fixture";
+            config.executorThinking.model = "fixture";
+            for (const auto &args : {json::object(), json{{"question", ""}},
+                     json{{"question", " \t\n"}}, json{{"question", 42}}}) {
+                const auto error = co_await registry.executeTool("deep_think", args, {.sessionId = privateId});
+                require(error.find("非空 question") != std::string::npos && thinkingRequests == 0,
+                  "invalid thinking question reached the model");
+            }
+            const auto thought = co_await registry.executeTool("deep_think", {{"question", thinkingQuestion}},
+              {.sessionId = privateId, .messageSnapshot = records.getRecords()});
+            require(thought == "【深度思考结果】\nx = 3" && thinkingRequests == 1,
+              "thinking request leaked context or lost the question");
+            const auto reasoning = co_await registry.executeTool("deep_think", {{"question", "reasoning"}},
+              {.sessionId = privateId});
+            require(reasoning == "【深度思考结果】\nreasoning answer", "thinking reasoning fallback changed");
+            for (const auto &question : {"failure", "empty"}) {
+                const auto error = co_await registry.executeTool("deep_think", {{"question", question}},
+                  {.sessionId = privateId});
+                require(error == "深度思考暂时不可用，请直接根据已有信息回复", "thinking failure handling changed");
+            }
+            registry.unregisterPlugin("contract.thinking");
             auto transitional = sessionMemory();
             transitional["legacy_entries"] = {"旧偏好一", "旧偏好二"};
             MemoryStore::updateShortTermMemory(600, transitional.dump());
@@ -510,6 +538,30 @@ auto main() -> int {
     i32 executorRequests = 0;
     json frozenUser;
     drogon::app().setLogLevel(trantor::Logger::kWarn).addListener("127.0.0.1", 0);
+    drogon::app().registerHandler("/thinking-fixture",
+      [](const drogon::HttpRequestPtr &request, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+          ++thinkingRequests;
+          const auto body = json::parse(request->body());
+          const auto &messages = body["messages"];
+          const auto question = messages.back().value("content", "");
+          const bool valid = messages.size() == 2 && messages[0]["role"] == "system" &&
+              messages[1]["role"] == "user" &&
+              messages[0]["content"].get<std::string>().find(question) == std::string::npos &&
+              (question == thinkingQuestion || question == "reasoning" || question == "failure" || question == "empty");
+          auto response = drogon::HttpResponse::newHttpResponse();
+          response->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+          if (!valid || question == "failure") {
+              response->setStatusCode(drogon::k400BadRequest);
+          } else {
+              json message = {{"role", "assistant"}, {"content", question == "empty" ? "" : "x = 3"}};
+              if (question == "reasoning") {
+                  message["content"] = nullptr;
+                  message["reasoning_content"] = "reasoning answer";
+              }
+              response->setBody(json{{"choices", {{{"message", std::move(message)}}}}}.dump());
+          }
+          callback(response);
+      }, {drogon::Post});
     drogon::app().registerHandler("/person-consolidation-fixture",
       [](const drogon::HttpRequestPtr &request, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
           ++personFixture.requests;

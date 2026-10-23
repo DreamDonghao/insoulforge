@@ -25,7 +25,6 @@ namespace insoulforge {
     /// @brief 单次工具调用的执行环境（随调用显式传参，无共享状态）
     struct ToolCallContext {
         u64 sessionId = 0;
-        json conversationContext; ///< system 之后的完整消息列表，deep_think 等需要会话上下文的工具使用
         json messageSnapshot; ///< 本轮冻结的完整消息快照，图片保存等工具读取服务端媒体来源
         bool replyOnly = false; ///< 最后一轮只允许回复类工具，拒绝其他处理器执行
         std::shared_ptr<McpToolSelection> mcpSelection; ///< 当前回复的选择状态，启用只影响后续轮次。

@@ -5,6 +5,7 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 #include <drogon/utils/coroutine.h>
 
@@ -21,8 +22,8 @@ namespace insoulforge::ImageGenerationService {
     /// @return URL 或 base64 图片均可用；缺少图片或格式不受支持时返回空。
     [[nodiscard]] auto imageCode(const json &response) -> std::optional<GeneratedImage>;
 
-    /// @brief 按指定尺寸生成或编辑一张图片；referenceDataUrl 存在时用作原图。
+    /// @brief 按指定尺寸生成或编辑一张图片，按顺序附加所有参考图。
     /// @details 失败时抛出异常供后台任务统一处理。
     auto generate(std::string prompt, std::string size, u64 sessionId,
-      std::optional<std::string> referenceDataUrl = std::nullopt) -> drogon::Task<GeneratedImage>;
+      std::vector<std::string> referenceDataUrls = {}) -> drogon::Task<GeneratedImage>;
 } // namespace insoulforge::ImageGenerationService

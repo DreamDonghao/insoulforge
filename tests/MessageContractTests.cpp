@@ -1079,6 +1079,28 @@ namespace {
         api.baseUrl = "https://example.com";
         api.path = "/images";
         api.model = "test";
+        bool foundGeneration = false;
+        for (const auto &tool : registry.getTools({})) {
+            const auto &definition = tool["function"];
+            check(definition["name"] != "edit_image", "old edit tool is removed", kTestName);
+            if (definition["name"] == "generate_image") {
+                foundGeneration = true;
+                check(definition["parameters"]["required"] == insoulforge::json::array({"prompt"}) &&
+                    definition["parameters"]["properties"]["reference_images"]["type"] == "array",
+                  "unified tool accepts optional reference array", kTestName);
+            }
+        }
+        check(foundGeneration, "unified image tool exists", kTestName);
+        for (const auto &images : {insoulforge::json(nullptr), insoulforge::json("url"),
+                 insoulforge::json::array({42}),
+                 insoulforge::json::array({{{"message_id", "1"}, {"image_index", -1}}}),
+                 insoulforge::json::array({{{"message_id", "1"}, {"image_index", 0.5}}}),
+                 insoulforge::json::array({{{"message_id", "1"}, {"image_index", "0"}}})}) {
+            const auto error = drogon::sync_wait(registry.executeTool("generate_image",
+              {{"prompt", "参考图片"}, {"reference_images", images}}, {.sessionId = 123}));
+            check(error.find("数组") != std::string::npos || error.find("整数图片索引") != std::string::npos,
+              "invalid references reject before task starts", kTestName);
+        }
         const auto result = drogon::sync_wait(registry.executeTool(
           "generate_image", {{"prompt", "画出你自己"}, {"use_self_reference", true}}, {.sessionId = 123}));
         check(result.find("尚未在管理后台上传") != std::string::npos, "missing image rejects before task starts",
