@@ -166,6 +166,7 @@ namespace {
 
     auto testImageGeneration(const std::string endpoint) -> drogon::Task<> {
         auto &config = Config::instance();
+        config.imageGeneration.apiType = "openrouter";
         config.imageGeneration.baseUrl = endpoint;
         config.imageGeneration.path = "/image-generation";
         config.imageGeneration.apiKey = "fixture";
@@ -192,6 +193,26 @@ namespace {
         } catch (const std::exception &) { failed = true; }
         require(failed, "upstream rejection was silently ignored");
         fixture.failImage = false;
+
+        config.imageGeneration.apiType = "openai";
+        config.imageGeneration.path = "/v1/images/generations";
+        config.imageGeneration.editPath = "/custom/images/edits";
+        for (const auto &references : {std::vector<std::string>{}, std::vector<std::string>{"first"},
+                 std::vector<std::string>{"first", "second", "third"}}) {
+            co_await ImageGenerationService::generate("test", "1024x1024", 500, references);
+            const auto request = fixture.images().back();
+            require(!request.contains("input_references"), "OpenAI request used OpenRouter references");
+            require(request["_testPath"] == (references.empty() ? "/v1/images/generations" : "/custom/images/edits"),
+                "OpenAI did not switch generation/edit paths");
+            if (references.empty()) {
+                require(!request.contains("images"), "OpenAI text generation included images");
+            } else {
+                require(request["images"].size() == references.size(), "OpenAI dropped references");
+                for (size_t index = 0; index < references.size(); ++index)
+                    require(request["images"][index] == json{{"image_url", references[index]}},
+                        "OpenAI image_url must be a string in reference order");
+            }
+        }
 
         auto &registry = ToolRegistry::instance();
         const json record = {{"message_id", "5001"}, {"assets", {{"images", {
@@ -228,15 +249,17 @@ namespace {
             co_await drogon::sleepCoro(drogon::app().getLoop(), 0.01);
         require(fixture.messages().size() == sentBefore + 1, "generated image was not delivered");
         const auto request = fixture.images().back();
-        require(request["input_references"].size() == 3 &&
+        require(request["images"].size() == 3 && request["_testPath"] == "/custom/images/edits" &&
             getStr(request, "prompt").starts_with("第一张参考图是你的角色形象图"),
             "mixed references lost the character image or retained duplicate chat references");
-        for (const auto &reference : request["input_references"])
-            require(reference["image_url"]["url"] == *ImageDescriptionService::staticImageDataUrl(imageBytes()),
+        for (const auto &reference : request["images"])
+            require(reference["image_url"] == *ImageDescriptionService::staticImageDataUrl(imageBytes()),
                 "references were not converted to image data URLs");
         co_await drogon::sleepCoro(drogon::app().getLoop(), 0.02);
         std::filesystem::current_path(originalPath);
         std::filesystem::remove_all(temporary);
+        config.imageGeneration.apiType = "openrouter";
+        config.imageGeneration.path = "/image-generation";
 
         // A failed download must release the task slot without sending a text-only generation request.
         auto broken = record;
@@ -504,11 +527,14 @@ auto main() -> int {
             response->setBody(body.dump());
             callback(response);
         }, {drogon::Post});
-    drogon::app().registerHandler("/image-generation",
+    for (const auto *path : {"/image-generation", "/v1/images/generations", "/custom/images/edits"}) {
+    drogon::app().registerHandler(path,
         [](const drogon::HttpRequestPtr &request, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
             {
                 std::lock_guard lock(fixture.mutex);
-                fixture.imageRequests.push_back(json::parse(request->body()));
+                auto body = json::parse(request->body());
+                body["_testPath"] = request->path();
+                fixture.imageRequests.push_back(std::move(body));
             }
             auto response = drogon::HttpResponse::newHttpResponse();
             response->setContentTypeCode(drogon::CT_APPLICATION_JSON);
@@ -516,6 +542,7 @@ auto main() -> int {
             response->setBody(R"({"data":[{"url":"https://example.com/generated.png"}]})");
             callback(response);
         }, {drogon::Post});
+    }
     for (const auto *path : {"/send_group_msg", "/send_private_msg"}) {
         drogon::app().registerHandler(path,
             [](const drogon::HttpRequestPtr &request, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {

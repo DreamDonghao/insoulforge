@@ -1622,6 +1622,55 @@ namespace {
         std::filesystem::remove(path);
     }
 
+    void testImageApiConfig() {
+        constexpr std::string_view kTestName = "image API configuration";
+        const auto path = std::filesystem::temp_directory_path() /
+            ("insoulforge-image-api-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".json");
+        auto &config = insoulforge::Config::instance();
+        check(config.initialize(path.string()).has_value(), "new configuration initializes", kTestName);
+        auto settings = config.getLLMConfig("imageGeneration");
+        check(settings["apiType"] == "openai" && settings["editPath"] == "/images/edits" &&
+                config.imageGeneration.apiType == "openai", "new installations default to OpenAI", kTestName);
+        settings["baseUrl"] = "https://proxy.example.com/v1";
+        settings["model"] = "gpt-image-2.5-sunburst";
+        settings["editPath"] = "/custom/edits";
+        check(config.saveLLMConfig("imageGeneration", settings).has_value() &&
+                config.imageGeneration.editPath == "/custom/edits", "edit path updates at runtime", kTestName);
+        for (const auto &invalid : insoulforge::json::array({"unknown", "", 123, nullptr})) {
+            auto bad = settings;
+            bad["apiType"] = invalid;
+            check(!config.saveLLMConfig("imageGeneration", bad) &&
+                    config.getLLMConfig("imageGeneration") == settings && config.imageGeneration.apiType == "openai",
+                "invalid protocol preserves configuration", kTestName);
+        }
+        for (const auto &invalid : insoulforge::json::array({"", " \t", 123, nullptr})) {
+            auto bad = settings;
+            bad["editPath"] = invalid;
+            check(!config.saveLLMConfig("imageGeneration", bad) && config.getLLMConfig("imageGeneration") == settings,
+                "invalid edit path preserves configuration", kTestName);
+        }
+        auto oldClient = settings;
+        oldClient.erase("apiType");
+        oldClient.erase("editPath");
+        check(config.saveLLMConfig("imageGeneration", oldClient).has_value() &&
+                config.getLLMConfig("imageGeneration") == settings,
+            "older clients preserve protocol and edit path", kTestName);
+        settings["apiType"] = "openrouter";
+        check(config.saveLLMConfig("imageGeneration", settings).has_value() &&
+                config.imageGeneration.apiType == "openrouter", "protocol switches without restart", kTestName);
+        check(config.initialize(path.string()).has_value() && config.imageGeneration.apiType == "openrouter" &&
+                config.imageGeneration.editPath == "/custom/edits", "protocol persists after restart", kTestName);
+        {
+            std::ofstream output(path);
+            output << R"({"llm":{"imageGeneration":{"apiKey":"old-key","baseUrl":"https://old.example.com","path":"/custom/images","model":"old-model"}}})";
+        }
+        check(config.initialize(path.string()).has_value() && config.imageGeneration.apiType == "openrouter" &&
+                config.imageGeneration.path == "/custom/images" && config.imageGeneration.apiKey == "old-key" &&
+                config.getLLMConfig("imageGeneration")["apiType"] == "openrouter",
+            "legacy image settings retain their original protocol and connection", kTestName);
+        std::filesystem::remove(path);
+    }
+
     void testMemoryModelConfigMigration() {
         constexpr std::string_view kTestName = "memory model config migration";
         const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -2930,6 +2979,7 @@ auto main() -> int {
     testSessionShortTermMemory();
     testRemovedShortTermLimit();
     testMemoryModelConfigMigration();
+    testImageApiConfig();
     testConfigFacade();
     testExecutionConfig();
     testGroupCardSettings();

@@ -269,6 +269,11 @@ Executor 在一次回复开始时把这些见闻冻结到 `shared_conversations`
 按数组顺序提交且重复引用自动去重。开启角色参考时，后台角色形象图放在第一张，其后附加聊天参考图；任何参考图读取失败都会终止任务，不会忽略原图直接生图。
 参考图数量受所配置上游接口的支持范围限制。原 `edit_image` 工具已合并到 `generate_image`。
 
+在“模型配置 → 图片生成”选择接口类型：`OpenAI / CLIProxyAPI` 无参考图时调用生成路径（默认 `/images/generations`），
+有参考图时调用编辑路径（默认 `/images/edits`），通过 JSON 的 `images[].image_url` 发送原图；`OpenRouter` 使用同一生成路径
+（通常为 `/images`），参考图通过 `input_references` 发送。Base URL 已包含 `/v1` 时，路径不再重复添加该前缀。
+新配置默认使用 OpenAI；升级时已有配置保留 OpenRouter 请求格式，需要在后台手动切换。配置保存后生效，已启动任务仍使用其读取到的配置。
+
 ### 提示词定制
 
 在管理后台可修改 Router 与 Executor 的系统提示词，支持 `{botName}` 占位符自动替换。

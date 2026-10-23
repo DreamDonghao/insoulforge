@@ -39,7 +39,7 @@ namespace insoulforge::ConfigStore {
 
         auto defaultImageGenerationConfig() -> json {
             return {{"apiKey", ""}, {"baseUrl", "https://api.openai.com/v1"}, {"path", "/images/generations"},
-              {"model", "gpt-image-2.5-flare"}};
+              {"model", "gpt-image-2.5-flare"}, {"apiType", "openai"}, {"editPath", "/images/edits"}};
         }
 
         /// @brief 默认使用 OpenRouter Decisions API；密钥留空时不启用 Jev。
@@ -165,6 +165,10 @@ namespace insoulforge::ConfigStore {
                 auto &modelConfig = entry.value();
                 if (!modelConfig.is_object())
                     continue;
+                if (entry.key() == "imageGeneration" && !modelConfig.contains("apiType")) {
+                    modelConfig["apiType"] = "openrouter";
+                    changed = true;
+                }
                 if (modelConfig.contains("top_P")) {
                     if (!modelConfig.contains("topP")) {
                         modelConfig["topP"] = modelConfig["top_P"];
@@ -340,6 +344,16 @@ namespace insoulforge::ConfigStore {
         json persistedConfig = config;
         persistedConfig.erase("name");
         persistedConfig.erase("top_P");
+        if (name == "imageGeneration") {
+            const auto &current = atOrNull(llm, "imageGeneration");
+            if (!persistedConfig.contains("apiType"))
+                persistedConfig["apiType"] = getStr(current, "apiType", "openrouter");
+            if (!persistedConfig.contains("editPath"))
+                persistedConfig["editPath"] = getStr(current, "editPath", "/images/edits");
+        } else {
+            persistedConfig.erase("apiType");
+            persistedConfig.erase("editPath");
+        }
         if (name == "embedding" || name == "jev" || name == "imageGeneration") {
             persistedConfig.erase("maxTokens");
             persistedConfig.erase("temperature");

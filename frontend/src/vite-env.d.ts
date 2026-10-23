@@ -21,6 +21,8 @@ export interface LLMConfig {
     topP: number
     reasoningEffort: string
     minConfidence?: number
+    apiType?: 'openai' | 'openrouter'
+    editPath?: string
 }
 
 export interface MemoryConfig {

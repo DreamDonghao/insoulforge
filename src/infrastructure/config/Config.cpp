@@ -35,6 +35,14 @@ namespace insoulforge {
                         return std::unexpected(ConfigError{
                           .type = ConfigErrorType::InvalidArgument, .message = key + " 必须是 i32 范围内的整数"});
                     }
+                } else if (key == "apiType") {
+                    if (!field.is_string() || (field != "openai" && field != "openrouter"))
+                        return std::unexpected(ConfigError{.type = ConfigErrorType::InvalidArgument,
+                          .message = "apiType 必须为 openai 或 openrouter"});
+                } else if (key == "editPath") {
+                    if (!field.is_string() || trim(field.get<std::string>()).empty())
+                        return std::unexpected(ConfigError{.type = ConfigErrorType::InvalidArgument,
+                          .message = "editPath 必须是非空字符串"});
                 } else if (key == "defaultPrivateEnabled") {
                     if (!field.is_boolean()) {
                         return std::unexpected(ConfigError{
@@ -116,6 +124,8 @@ namespace insoulforge {
         loadLLMConfig(llm, "executorThinking", executorThinking, &executorThinkingParams);
         loadLLMConfig(llm, "image", image, &imageParams);
         loadLLMConfig(llm, "imageGeneration", imageGeneration);
+        imageGeneration.apiType = getStr(llm.at("imageGeneration"), "apiType", "openrouter");
+        imageGeneration.editPath = trim(getStr(llm.at("imageGeneration"), "editPath", "/images/edits"));
         loadLLMConfig(llm, "memory", memory, &memoryParams);
         loadLLMConfig(llm, "embedding", embedding);
         loadLLMConfig(llm, "jev", jev);

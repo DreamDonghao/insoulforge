@@ -8,6 +8,11 @@ const hasGenerationParameters = computed(() => hasParameters.value && props.name
 const emit = defineEmits<{saved: [name: string, config: LLMConfig]}>()
 const showToast = inject<(msg: string, isError?: boolean) => void>('showToast')
 const llmConfig = reactive<LLMConfig>({...props.initialConfig})
+watch(() => llmConfig.apiType, type => {
+  if (props.name !== 'imageGeneration') return
+  if (type === 'openai' && llmConfig.path === '/images') llmConfig.path = '/images/generations'
+  if (type === 'openrouter' && llmConfig.path === '/images/generations') llmConfig.path = '/images'
+})
 const saving: Ref<boolean> = ref(false)
 const showApiKey: Ref<boolean> = ref(false)
 watch(() => props.initialConfig, config => Object.assign(llmConfig, config))
@@ -42,6 +47,19 @@ const saveLLMConfig = async (): Promise<void> => {
     <p v-if="name === 'executorFallback'" class="fallback-hint">仅在默认模型请求失败时用于本次重试；留空不启用，下次请求仍优先使用默认模型。</p>
     <div class="config-section">
       <h3 class="section-title">接口与模型</h3>
+      <div v-if="name === 'imageGeneration'" class="form-row">
+        <div class="form-group">
+          <label class="form-label">接口类型</label>
+          <select v-model="llmConfig.apiType" class="form-input">
+            <option value="openai">OpenAI / CLIProxyAPI</option>
+            <option value="openrouter">OpenRouter</option>
+          </select>
+        </div>
+        <div v-if="llmConfig.apiType === 'openai'" class="form-group">
+          <label class="form-label">编辑路径（Edit Path）</label>
+          <input v-model="llmConfig.editPath" class="form-input" placeholder="/images/edits" type="text">
+        </div>
+      </div>
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">API 密钥</label>
@@ -60,7 +78,7 @@ const saveLLMConfig = async (): Promise<void> => {
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label">请求路径（Path）</label>
+          <label class="form-label">{{ name === 'imageGeneration' ? '生成路径（Path）' : '请求路径（Path）' }}</label>
           <input v-model="llmConfig.path" class="form-input" placeholder="/v1/chat/completions" type="text">
         </div>
         <div class="form-group">

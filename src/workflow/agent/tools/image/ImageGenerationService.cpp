@@ -83,14 +83,25 @@ namespace insoulforge::ImageGenerationService {
         }
 
         json request = {{"model", config.model}, {"prompt", std::move(prompt)}, {"size", std::move(size)}};
+        if (config.apiType != "openai" && config.apiType != "openrouter")
+            throw std::runtime_error("不支持的图片生成接口类型: " + config.apiType);
+        std::string path = config.path;
         if (!referenceDataUrls.empty()) {
-            auto &references = request["input_references"] = json::array();
+            const bool openai = config.apiType == "openai";
+            if (openai) {
+                if (config.editPath.empty()) throw std::runtime_error("OpenAI 图片编辑路径尚未配置");
+                path = config.editPath;
+            }
+            auto &references = request[openai ? "images" : "input_references"] = json::array();
             for (auto &url : referenceDataUrls) {
-                references.push_back({{"type", "image_url"}, {"image_url", {{"url", std::move(url)}}}});
+                if (openai)
+                    references.push_back({{"image_url", std::move(url)}});
+                else
+                    references.push_back({{"type", "image_url"}, {"image_url", {{"url", std::move(url)}}}});
             }
         }
         // 响应可能包含数十 MB 的图片数据；调试记录只保留非图片字段。
-        const auto response = co_await HttpUtil::send("ImageGeneration", config.baseUrl, config.path, drogon::Post,
+        const auto response = co_await HttpUtil::send("ImageGeneration", config.baseUrl, path, drogon::Post,
           request, config.apiKey, 180.0, sessionId, false);
         if (!response) {
             throw std::runtime_error("图片生成接口请求失败: " + response.error().substr(0, 500));

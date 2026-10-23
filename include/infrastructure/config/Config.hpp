@@ -23,6 +23,12 @@ namespace insoulforge {
         std::string reasoningEffort; // "none"/"medium"/"high"，空串表示不发送
     };
 
+    /// @brief 生图协议及独立编辑路径；旧配置保留 OpenRouter 协议。
+    struct ImageGenerationConfig : LLMApiConfig {
+        std::string apiType = "openrouter";
+        std::string editPath = "/images/edits";
+    };
+
     /// @brief Chat 模型的生成参数；向量模型不使用这些字段
     struct LLMModelParams {
         i32 maxTokens = 1024;
@@ -57,7 +63,7 @@ namespace insoulforge {
         LLMModelParams executorThinkingParams;
         LLMApiConfig image;
         LLMModelParams imageParams;
-        LLMApiConfig imageGeneration; // 文生图接口，不使用 Chat 采样参数
+        ImageGenerationConfig imageGeneration; // 不使用 Chat 采样参数
         LLMApiConfig memory; // 记忆提取与整理模型配置
         LLMModelParams memoryParams;
         LLMApiConfig embedding; // Embedding 模型配置（长期记忆向量化）
