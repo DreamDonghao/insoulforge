@@ -170,9 +170,9 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.process-memory { margin-bottom: 20px; padding: 20px; border: 1px solid var(--border); border-radius: 0; background: var(--card-bg); min-width: 0; }
+.process-memory { padding: 24px 0; min-width: 0; }
 header, .chart-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
-h2, h3 { margin: 0; color: var(--text-primary); font-size: 14px; font-weight: 600; }
+h2, h3 { margin: 0; color: var(--text-primary); font-size: 16px; font-weight: 600; }
 .updated, .chart-heading span, .scale, .time-axis { font-size: 12px; color: var(--text-secondary); }
 .stale { font-size: 12px; color: var(--warning); }
 .memory-body { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 28px; margin-top: 20px; }
@@ -196,7 +196,6 @@ svg { display: block; width: 100%; height: 144px; overflow: visible; touch-actio
   dl { grid-template-columns: repeat(3, minmax(0, 1fr)); padding-right: 0; border-right: 0; }
 }
 @media (max-width: 600px) {
-  .process-memory { padding: 16px; }
   dl { gap: 10px; }
   dd { font-size: 16px; }
   .scale { flex-basis: 58px; font-size: 10px; }

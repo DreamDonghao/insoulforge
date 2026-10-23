@@ -35,13 +35,13 @@ namespace insoulforge::CommandProcessor {
 
     auto isCommand(const json &message) -> bool {
         const auto sessionId = getUInt(message, "session_id");
-        if (sessionId == 0 ||
-            (!SessionId::isPrivate(sessionId) && !MessageRecord::mentions(message, Config::instance().selfQQNumber))) {
+        if (sessionId == 0 || SessionId::isPrivate(sessionId) ||
+            !MessageRecord::mentions(message, Config::instance().selfQQNumber)) {
             return false;
         }
         if (commandText(message).empty())
             return false;
-        return SessionId::isPrivate(sessionId) || SessionStore::getSessionConfig(sessionId).commandEnabled;
+        return SessionStore::getSessionConfig(sessionId).commandEnabled;
     }
 
     auto execute(const json &message) -> drogon::Task<std::string> {
@@ -56,8 +56,8 @@ namespace insoulforge::CommandProcessor {
         if (command == "/help" || command == "/帮助") {
             co_return "可用命令:\n"
                       "【会话管理】\n"
-                      "/enable [会话ID] - 启用当前会话（群聊传群号，私聊可不带参数）\n"
-                      "/disable [会话ID] - 禁用当前会话（私聊可不带参数）\n"
+                      "/enable [群号] - 启用指定群聊，省略时为当前群\n"
+                      "/disable [群号] - 禁用指定群聊，省略时为当前群\n"
                       "/groups - 查看启用的会话列表\n"
                       "/status - 查看当前会话状态\n"
                       "/groupcard on|off - 开启或关闭本群向模型发送群名片\n"

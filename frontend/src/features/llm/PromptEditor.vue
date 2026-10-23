@@ -21,11 +21,11 @@ const selectedPrompt: Ref<string> = ref('executor_system')
 const prompts = reactive<Record<string, string>>({})
 const promptContent: Ref<string> = ref('')
 const editorModes = [
-  {key: 'edit', label: '编辑'},
   {key: 'preview', label: '预览'},
+  {key: 'edit', label: '编辑'},
   {key: 'split', label: '分栏'}
 ] as const
-const editorMode = ref<'edit' | 'preview' | 'split'>('edit')
+const editorMode = ref<'edit' | 'preview' | 'split'>('preview')
 // 预览只渲染文本排版；链接、图片和 HTML 保留原文，不解释提示词内容。
 const promptMarkdown = new Marked({
   tokenizer: {

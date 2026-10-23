@@ -122,7 +122,8 @@ const qqConfig = reactive<QQConfigType>({
   oneBotTransport: 'http',
   qqHttpHost: '',
   qqWebSocketHost: '',
-  botName: '机器人'
+  botName: '机器人',
+  defaultPrivateEnabled: false
 })
 
 // Bot 头像（QQ 公开头像 CDN，失败时回退为线条图标）
@@ -324,7 +325,7 @@ onUnmounted(disconnectWebSocket)
 
   <div v-else class="container">
     <!-- 侧边栏 -->
-    <div class="sidebar">
+    <div class="sidebar" :style="{'--nav-item-count': dailyNavItems.length + systemNavItems.length + 1}">
       <div class="sidebar-header">
         <div class="sidebar-logo">
           <div class="logo-icon">
@@ -346,44 +347,53 @@ onUnmounted(disconnectWebSocket)
         <span class="nav-indicator" aria-hidden="true"
               :style="{height: `${navIndicator.height}px`, transform: `translateY(${navIndicator.top}px)`}"></span>
         <div class="nav-section">
-          <div
+          <button
               v-for="item in dailyNavItems"
+              type="button"
               :key="item.key"
+              :title="item.label"
+              :aria-label="item.label"
               :class="{ active: currentView === item.key }"
               class="nav-item"
               @click="currentView = item.key"
           >
             <NavIcon :name="item.icon"/>
             {{ item.label }}
-          </div>
+          </button>
         </div>
 
         <div class="nav-divider nav-divider-line"></div>
 
         <div class="nav-section">
-          <div
+          <button
               v-for="item in systemNavItems"
+              type="button"
               :key="item.key"
+              :title="item.label"
+              :aria-label="item.label"
               :class="{ active: currentView === item.key }"
               class="nav-item"
               @click="currentView = item.key"
           >
             <NavIcon :name="item.icon"/>
             {{ item.label }}
-          </div>
+          </button>
         </div>
 
         <div class="nav-divider nav-divider-line"></div>
 
         <div class="nav-section">
-          <div
+          <button
+              type="button"
               :class="{ active: currentView === 'about' }"
+              title="关于"
+              aria-label="关于"
               class="nav-item"
               @click="currentView = 'about'"
           >
             <NavIcon name="info"/>
             关于
-          </div>
+          </button>
         </div>
       </nav>
 
@@ -407,7 +417,7 @@ onUnmounted(disconnectWebSocket)
             </svg>
             <span>{{ theme === 'dark' ? '深色模式' : '浅色模式' }}</span>
           </button>
-          <button class="sidebar-action sidebar-action-danger" type="button" @click="logout">
+          <button class="sidebar-action sidebar-action-danger" type="button" aria-label="退出登录" title="退出登录" @click="logout">
             <svg fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                  viewBox="0 0 24 24">
               <path d="M10 17l5-5-5-5M15 12H3M21 19V5a2 2 0 0 0-2-2h-6"/>

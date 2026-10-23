@@ -86,11 +86,13 @@ onMounted(loadConfig)
         <p id="rounds-range" :class="{'invalid-range': !validRounds}" class="form-hint">1～100 轮</p>
       </div>
       <h2 class="card-title mcp-heading">MCP 工具按需启用</h2>
-      <div v-for="field in mcpFields" :key="field.key" class="form-group rounds-field">
-        <label class="form-label" :for="field.key">{{ field.label }}</label>
-        <input :id="field.key" v-model.number="config[field.key]" class="form-input" type="number" min="1"
-               :max="field.maximum" step="1" required :disabled="saving">
-        <p class="form-hint">1～{{ field.maximum }}</p>
+      <div class="form-row mcp-fields">
+        <div v-for="field in mcpFields" :key="field.key" class="form-group rounds-field">
+          <label class="form-label" :for="field.key">{{ field.label }}</label>
+          <input :id="field.key" v-model.number="config[field.key]" class="form-input" type="number" min="1"
+                 :max="field.maximum" step="1" required :disabled="saving">
+          <p class="form-hint">1～{{ field.maximum }}</p>
+        </div>
       </div>
       <p v-if="config.mcpMaxToolsPerEnable > config.mcpMaxToolsPerReply" class="invalid-range" role="alert">单次启用上限不能大于本次回复上限</p>
       <button :disabled="saving || !validConfig" class="btn btn-primary" type="submit">
@@ -105,6 +107,7 @@ onMounted(loadConfig)
   max-width: 360px;
 }
 .mcp-heading {margin: 24px 0 16px; padding-top: 20px; border-top: 1px solid var(--border)}
+.mcp-fields { grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); }
 
 .load-error {
   margin-bottom: 16px;

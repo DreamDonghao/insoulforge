@@ -118,15 +118,11 @@ const copyJoinUrl = async (): Promise<void> => {
 </template>
 
 <style scoped>
-.about-hero {
-  background: var(--card-bg);
-  border-color: var(--neon-cyan-glow);
-}
-
 .hero-head {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .hero-title {
@@ -158,11 +154,13 @@ const copyJoinUrl = async (): Promise<void> => {
 
 .info-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   gap: 16px;
 }
 
 .info-item {
+  min-width: 0;
+  overflow-wrap: anywhere;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -184,6 +182,7 @@ const copyJoinUrl = async (): Promise<void> => {
   display: flex;
   align-items: center;
   gap: 24px;
+  flex-wrap: wrap;
 }
 
 .qr-img {

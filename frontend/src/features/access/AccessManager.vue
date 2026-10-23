@@ -247,15 +247,22 @@ onMounted(() => void Promise.all([loadAdmins(), loadBlacklist()]))
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-template-rows: auto auto;
-  gap: 16px;
+  gap: 0;
+  border-top: 1px solid var(--border);
 }
 
 .access-grid section {
   display: grid;
   grid-template-rows: subgrid;
   grid-row: 1 / span 2;
-  gap: 16px;
+  gap: 0;
   min-width: 0;
+  padding-right: 28px;
+}
+
+.access-grid section + section {
+  padding: 0 0 0 28px;
+  border-left: 1px solid var(--border);
 }
 
 .access-grid .card {
@@ -264,7 +271,8 @@ onMounted(() => void Promise.all([loadAdmins(), loadBlacklist()]))
 }
 
 .access-form-card {
-  padding: 12px 16px;
+  padding: 24px 0;
+  border-top: 0;
 }
 
 .access-card-header {
@@ -274,7 +282,7 @@ onMounted(() => void Promise.all([loadAdmins(), loadBlacklist()]))
 
 .access-card-title {
   margin-bottom: 0;
-  font-size: 15px;
+  font-size: 16px;
 }
 
 .access-form-row {
@@ -321,6 +329,18 @@ onMounted(() => void Promise.all([loadAdmins(), loadBlacklist()]))
   .access-grid section {
     grid-template-rows: auto auto;
     grid-row: auto;
+    padding: 0;
   }
+
+  .access-grid section + section {
+    padding: 0;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+}
+
+@media (max-width: 440px) {
+  .access-form-row { flex-wrap: wrap; }
+  .access-form-group { flex-basis: 100%; }
 }
 </style>

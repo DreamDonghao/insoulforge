@@ -938,9 +938,10 @@ onUnmounted(() => {
 .filter-tabs {
   display: flex;
   gap: 4px;
-  background: var(--bg-secondary);
+  background: transparent;
   border-radius: 0;
-  padding: 3px;
+  padding: 0;
+  border-bottom: 1px solid var(--border);
 }
 
 .filter-tab {
@@ -959,9 +960,14 @@ onUnmounted(() => {
 }
 
 .filter-tab.active {
-  background: var(--card-bg);
+  background: var(--primary-soft);
   color: var(--primary);
   font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  .chat-header-actions { width: 100%; margin-left: 0; justify-content: space-between; gap: 16px; }
+  .chat-container .chat-message { max-width: 100%; }
 }
 
 .group-row:hover td {
@@ -988,8 +994,9 @@ onUnmounted(() => {
 .chat-container {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
-  background: var(--bg-secondary);
+  padding: 16px 0;
+  background: transparent;
+  border-top: 1px solid var(--border);
   min-height: 0;
   max-height: none;
 }

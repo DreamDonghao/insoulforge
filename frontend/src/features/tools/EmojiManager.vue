@@ -102,12 +102,10 @@ onMounted(loadEmojis)
           </div>
         </template>
         <template v-else>
-          <div style="display:flex;flex-wrap:wrap;gap:16px;padding:16px">
+          <div class="emoji-grid">
             <div v-for="(emoji, i) in emojis" :key="emoji.res_id || i"
-                 style="width:140px;text-align:center">
-              <div style="width:100%;height:100px;display:flex;align-items:center;justify-content:center;
-                          background:var(--bg-secondary, #f5f5f5);border-radius: 0;
-                          border:1px solid var(--border-color)">
+                 class="emoji-item">
+              <div class="emoji-preview">
                 <img v-if="emoji.url" :alt="emoji.name" :src="emoji.url"
                      loading="lazy"
                      style="max-width:100%;max-height:100%;object-fit:contain"
@@ -140,3 +138,9 @@ onMounted(loadEmojis)
     </div>
   </div>
 </template>
+
+<style scoped>
+.emoji-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(140px, 100%), 1fr)); gap: 24px 16px; }
+.emoji-item { min-width: 0; text-align: center; }
+.emoji-preview { display: flex; align-items: center; justify-content: center; height: 100px; background: var(--bg-secondary); border: 1px solid var(--border); }
+</style>

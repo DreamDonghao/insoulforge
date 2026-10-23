@@ -270,16 +270,26 @@ onUnmounted(() => window.clearInterval(timer))
 </template>
 
 <style scoped>
+.request-debug {
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - 32px);
+  min-height: 0;
+}
+
 .toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
-  margin-bottom: 16px;
+  flex-shrink: 0;
+  border-top: 0;
+  padding: 0 0 20px;
 }
 
 .search {
   max-width: 320px;
+  flex: 1 1 220px;
 }
 
 .auto-refresh {
@@ -293,36 +303,49 @@ onUnmounted(() => window.clearInterval(timer))
 
 .layout {
   display: grid;
-  grid-template-columns: minmax(360px, 5fr) 7fr;
-  gap: 16px;
+  grid-template-columns: minmax(240px, 5fr) minmax(0, 7fr);
+  gap: 0;
   align-items: stretch;
+  flex: 1;
+  min-height: 0;
+  border-top: 1px solid var(--border);
 }
 
 .layout > .card {
   display: flex;
   flex-direction: column;
-  min-height: 160px;
-  max-height: max(240px, calc(100vh - 240px));
+  min-width: 0;
+  min-height: 0;
+  border-top: 0;
   margin-bottom: 0;
   overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
 }
 
 @media (max-width: 1100px) {
   .layout {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(100px, 35%) minmax(0, 1fr);
+  }
+
+  .layout > .detail-card {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    padding: 20px 0;
   }
 }
 
 .trace-list-card {
-  padding: 8px;
+  padding: 0;
 }
 
 .trace-item {
   flex-shrink: 0;
-  padding: 10px 12px;
+  padding: 14px 16px;
   border-radius: 0;
   cursor: pointer;
-  border: 1px solid transparent;
+  border-bottom: 1px solid var(--border);
 }
 
 .trace-item:hover {
@@ -330,8 +353,8 @@ onUnmounted(() => window.clearInterval(timer))
 }
 
 .trace-item.active {
-  background: var(--primary-soft);
-  border-color: var(--primary);
+  background: var(--bg-secondary);
+  box-shadow: inset 3px 0 var(--primary);
 }
 
 .row1,
@@ -353,6 +376,8 @@ onUnmounted(() => window.clearInterval(timer))
 }
 
 .time {
+  min-width: 0;
+  overflow-wrap: anywhere;
   flex: 1;
   font-size: 12px;
   color: var(--text-light);
@@ -397,6 +422,7 @@ onUnmounted(() => window.clearInterval(timer))
 }
 
 .url {
+  min-width: 0;
   font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -413,7 +439,8 @@ onUnmounted(() => window.clearInterval(timer))
 
 .detail-card {
   min-width: 0;
-  padding: 16px;
+  padding: 20px 0 20px 28px;
+  border-left: 1px solid var(--border);
 }
 
 .detail-meta {
@@ -442,7 +469,6 @@ onUnmounted(() => window.clearInterval(timer))
 .body-content {
   margin: 0;
   padding: 12px;
-  max-height: calc((100vh - 320px) / 2);
   overflow: auto;
   background: var(--code-bg);
   color: var(--code-text);
@@ -457,7 +483,7 @@ onUnmounted(() => window.clearInterval(timer))
   flex: 1;
   display: grid;
   place-items: center;
-  padding: 40px;
+  padding: 32px 16px;
   text-align: center;
   color: var(--text-light);
 }

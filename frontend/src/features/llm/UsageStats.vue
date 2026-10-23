@@ -63,11 +63,13 @@ const fmtPct = (n: number): string => n.toFixed(1) + '%'
 const roleLabels: Record<string, string> = {
   router: 'Router',
   jev: 'Jev',
-  executor: 'Executor',
+  executor: '回复生成',
   executorFallback: '备用模型',
-  executorThinking: 'Executor思考',
-  memory: 'Memory',
-  image: 'Image'
+  executorThinking: '深度思考',
+  memory: '记忆维护',
+  image: '图片识别',
+  imageGeneration: '图片生成',
+  embedding: '向量化'
 }
 const roleLabel = (role: string): string => roleLabels[role] || role || '未知'
 
@@ -261,7 +263,7 @@ onMounted(loadUsage)
           <tbody>
           <tr v-for="r in mergedRoles" :key="r.role">
             <td><span class="role-name">{{ roleLabel(r.role) }}</span></td>
-            <td><code>{{ r.model }}</code></td>
+            <td><code class="model-code" :title="r.model">{{ r.model }}</code></td>
             <td class="col-num">{{ r.todayCalls > 0 ? fmtNum(r.todayCalls) : '—' }}</td>
             <td class="col-num">{{ r.todayTokens > 0 ? fmtNum(r.todayTokens) : '—' }}</td>
             <td class="col-num">{{ r.todayCacheRate }}</td>
@@ -335,7 +337,7 @@ onMounted(loadUsage)
           <tr v-for="(r, i) in recent" :key="i">
             <td class="cell-time">{{ r.time }}</td>
             <td>{{ roleLabel(r.role) }}</td>
-            <td><code>{{ r.model }}</code></td>
+            <td><code class="model-code" :title="r.model">{{ r.model }}</code></td>
             <td class="col-num">{{ fmtNum(r.prompt) }}</td>
             <td class="col-num">{{ fmtNum(r.completion) }}</td>
             <td class="col-num">{{ fmtNum(r.total) }}</td>
@@ -355,17 +357,19 @@ onMounted(loadUsage)
 /* ====== 概览卡片 ====== */
 .overview-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 14px;
-  margin-bottom: 20px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 24px 0;
+  padding: 24px 0;
+  border-top: 1px solid var(--border);
 }
 
 .overview-card {
-  background: var(--card-bg);
-  border: 1px solid var(--border);
-  border-radius: 0;
-  padding: 16px 20px;
+  min-width: 0;
+  padding: 0 24px;
+  border-left: 1px solid var(--border);
 }
+
+.overview-card:first-child { border-left: 0; padding-left: 0; }
 
 .ov-label {
   font-size: 12px;
@@ -376,6 +380,7 @@ onMounted(loadUsage)
 }
 
 .ov-value {
+  overflow-wrap: anywhere;
   font-size: 22px;
   font-weight: 700;
   color: var(--text-primary);
@@ -422,6 +427,7 @@ onMounted(loadUsage)
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .card-subtitle {
@@ -431,6 +437,7 @@ onMounted(loadUsage)
 
 /* ====== 角色名称 ====== */
 .role-name {
+  white-space: nowrap;
   font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
@@ -438,8 +445,19 @@ onMounted(loadUsage)
 
 /* ====== 数字列右对齐 ====== */
 .col-num {
+  white-space: nowrap;
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+.model-code {
+  display: block;
+  max-width: 260px;
+  padding: 0;
+  background: transparent;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ====== 占比条 ====== */
@@ -513,10 +531,11 @@ onMounted(loadUsage)
   font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
-  width: 70px;
+  width: 100px;
   flex-shrink: 0;
   text-align: right;
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 .trend-calls {
@@ -525,6 +544,7 @@ onMounted(loadUsage)
   width: 48px;
   flex-shrink: 0;
   text-align: right;
+  overflow-wrap: anywhere;
 }
 
 /* ====== 调用明细 ====== */
@@ -537,13 +557,17 @@ onMounted(loadUsage)
 /* ====== 响应式 ====== */
 @media (max-width: 900px) {
   .overview-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .overview-card:nth-child(odd) { border-left: 0; padding-left: 0; }
 }
 
 @media (max-width: 560px) {
   .overview-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
   }
+  .overview-card { border: 0; padding: 16px 0; }
+  .overview-card + .overview-card { border-top: 1px solid var(--border); }
 }
 </style>

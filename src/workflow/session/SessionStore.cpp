@@ -9,9 +9,38 @@
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
+#include <workflow/message/SessionId.hpp>
 #include <workflow/session/SessionStore.hpp>
 
 namespace insoulforge::SessionStore {
+    void initializeSession(const u64 sessionId, const bool defaultPrivateEnabled) {
+        const auto &db = Database::instance();
+        std::unique_lock lock(db.mutex());
+        {
+            const Statement existing(db.handle(), "SELECT 1 FROM group_config WHERE group_id = ?");
+            existing.bind(1, sessionId);
+            if (existing.step()) return;
+        }
+        auto *handle = db.handle();
+        Statement(handle, "BEGIN IMMEDIATE").execOrThrow();
+        try {
+            const Statement config(handle, "INSERT INTO group_config (group_id) VALUES (?)");
+            config.bind(1, sessionId);
+            config.execOrThrow();
+            if (SessionId::isPrivate(sessionId)) {
+                const Statement status(handle,
+                  "INSERT INTO enabled_groups (group_id, enabled) VALUES (?, ?) ON CONFLICT(group_id) DO NOTHING");
+                status.bind(1, sessionId);
+                status.bind(2, defaultPrivateEnabled ? 1 : 0);
+                status.execOrThrow();
+            }
+            Statement(handle, "COMMIT").execOrThrow();
+        } catch (...) {
+            sqlite3_exec(handle, "ROLLBACK", nullptr, nullptr, nullptr);
+            throw;
+        }
+    }
+
     auto getSessionConfig(const u64 sessionId) -> SessionConfig {
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());

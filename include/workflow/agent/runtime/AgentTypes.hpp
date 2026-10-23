@@ -32,7 +32,7 @@ namespace insoulforge {
         std::string tone = "friendly";
         i32 maxLength = 25;
         bool isPriority = false;
-        bool isPrivate = false; ///< 是否私聊会话（决定 Executor 使用私聊人设提示词）
+        bool isPrivate = false; ///< Router 决策所属的会话类型；Executor 独立从会话 ID 选择人设
 
         [[nodiscard]] static constexpr auto actionToString(Action a) -> std::string_view {
             constexpr std::array names = {"skip", "reply"};

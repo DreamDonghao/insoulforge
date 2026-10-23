@@ -94,17 +94,6 @@ const llmLabels: Record<string, string> = {
   memory: '记忆维护',
   embedding: '向量化'
 }
-const roleColors: Record<string, string> = {
-  router: 'var(--primary)',
-  jev: 'var(--warning)',
-  executor: 'var(--neon-cyan)',
-  executorFallback: 'var(--neon-cyan)',
-  executorThinking: 'var(--neon-pink)',
-  image: 'var(--success)',
-  imageGeneration: 'var(--neon-cyan)',
-  memory: 'var(--primary)',
-  embedding: 'var(--warning)'
-}
 const llmModels: Ref<Record<string, string>> = ref({})
 const llmLoading: Ref<boolean> = ref(true)
 
@@ -346,27 +335,15 @@ onUnmounted(() => {
       <!-- 左列 -->
       <div class="dash-col">
         <!-- 运行时间 -->
-        <div class="bento-card">
-          <div class="bento-header">
-            <svg class="bento-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-              <circle cx="12" cy="12" r="10"/>
-              <polyline points="12 6 12 12 16 14"/>
-            </svg>
-            <span class="bento-title">运行时间</span>
-          </div>
+        <section class="overview-section" aria-label="运行时间">
+          <h2 class="section-title">运行时间</h2>
           <div class="runtime-value">{{ uptimeText }}</div>
           <div class="runtime-sub">启动于 {{ fmtDateTime(startTimeEpoch) }}</div>
-        </div>
+        </section>
 
         <!-- OneBot 配置 -->
-        <div class="bento-card">
-          <div class="bento-header">
-            <svg class="bento-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-              <path
-                  d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
-            </svg>
-            <span class="bento-title">OneBot 配置</span>
-          </div>
+        <section class="overview-section" aria-label="OneBot 配置">
+          <h2 class="section-title">OneBot 配置</h2>
           <div class="kv-list">
             <div class="kv-row">
               <span class="kv-label">Bot 名称</span>
@@ -391,21 +368,15 @@ onUnmounted(() => {
               <code class="kv-code kv-wrap">{{ oneBotStatus.address || '—' }}</code>
             </div>
           </div>
-        </div>
+        </section>
 
         <!-- 资源 -->
-        <div class="bento-card">
-          <div class="bento-header">
-            <svg class="bento-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-              <circle cx="9" cy="7" r="4"/>
-            </svg>
-            <span class="bento-title">资源</span>
-          </div>
+        <section class="overview-section" aria-label="资源">
+          <h2 class="section-title">资源</h2>
           <div class="resource-grid">
             <div class="resource-tile">
               <div class="resource-value">{{ enabledCount }}<span class="resource-total">/{{ groupCount }}</span></div>
-              <div class="resource-label">群聊（启用/总）</div>
+              <div class="resource-label">会话（启用/总）</div>
             </div>
             <div class="resource-tile">
               <div class="resource-value">{{ fmtNum(totalMessages) }}</div>
@@ -424,45 +395,35 @@ onUnmounted(() => {
               <div class="resource-label">工具</div>
             </div>
           </div>
-        </div>
+        </section>
       </div>
 
       <!-- 右列 -->
       <div class="dash-col">
         <!-- 模型配置 -->
-        <div class="bento-card">
-          <div class="bento-header">
-            <svg class="bento-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-            </svg>
-            <span class="bento-title">模型配置</span>
-          </div>
+        <section class="overview-section" aria-label="模型配置">
+          <h2 class="section-title">模型配置</h2>
           <div class="models-list">
             <template v-if="llmLoading">
-              <span class="bento-muted">加载中...</span>
+              <span class="section-muted">加载中...</span>
             </template>
             <template v-else-if="llmOrder.every(n => !llmModels[n])">
-              <span class="bento-muted">未配置</span>
+              <span class="section-muted">未配置</span>
             </template>
             <template v-else>
               <div v-for="name in llmOrder" :key="name" class="model-row">
-                <span :style="{ background: roleColors[name] }" class="model-dot"></span>
                 <span class="model-name">{{ llmLabels[name] }}</span>
                 <code class="model-code">{{ llmModels[name] || '未配置' }}</code>
               </div>
             </template>
           </div>
-        </div>
+        </section>
 
         <!-- 每日用量 -->
-        <div class="bento-card">
-          <div class="bento-header">
-            <svg class="bento-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-              <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/>
-              <path d="M12 6v6l4 2"/>
-            </svg>
-            <span class="bento-title">每日用量</span>
-            <span class="bento-sub">今日</span>
+        <section class="overview-section" aria-label="每日用量">
+          <div class="section-header">
+            <h2 class="section-title">每日用量</h2>
+            <span class="section-sub">今日</span>
           </div>
 
           <div class="usage-kpis">
@@ -488,7 +449,7 @@ onUnmounted(() => {
               <span class="usage-day">{{ d.day.slice(5) }}</span>
             </div>
           </div>
-        </div>
+        </section>
       </div>
     </div>
   </div>
@@ -498,12 +459,9 @@ onUnmounted(() => {
 /* ====== 状态条 ====== */
 .dash-status-bar {
   display: flex;
-  gap: 24px;
-  margin-bottom: 16px;
-  padding: 12px 18px;
-  background: var(--card-bg);
-  border: 1px solid var(--border);
-  border-radius: 0;
+  gap: 16px 24px;
+  padding: 0 0 20px;
+  border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
 }
 
@@ -516,7 +474,7 @@ onUnmounted(() => {
 }
 
 .bot-control-item {
-  padding-right: 8px;
+  padding-right: 24px;
   border-right: 1px solid var(--border);
 }
 
@@ -543,67 +501,71 @@ onUnmounted(() => {
   background: var(--text-light);
 }
 
-/* ====== 仪表盘布局（左 3 右 2） ====== */
+/* 底部资源与用量共用行轨道，使分区边界保持对齐。 */
 .dash-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
-  gap: 16px;
+  gap: 0;
   grid-template-rows: auto auto auto;
   align-items: stretch;
+  border-top: 1px solid var(--border);
 }
 
 .dash-col {
   display: grid;
   grid-template-rows: subgrid;
   grid-row: 1 / span 3;
-  gap: 16px;
+  gap: 0;
   min-width: 0;
+  padding-right: 28px;
 }
 
-.dash-col:last-child > .bento-card:first-child {
+.dash-col + .dash-col {
+  border-left: 1px solid var(--border);
+  padding: 0 0 0 28px;
+}
+
+.dash-col:last-child > .overview-section:first-child {
   grid-row: span 2;
 }
 
-.bento-card {
+.overview-section {
   min-width: 0;
   flex: none;
-  background: var(--card-bg);
-  border: 1px solid var(--border);
-  border-radius: 0;
-  padding: 18px 20px;
+  padding: 24px 0;
   display: flex;
   flex-direction: column;
 }
 
-/* ====== 卡片头部 ====== */
-.bento-header {
+.overview-section + .overview-section {
+  border-top: 1px solid var(--border);
+}
+
+.section-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 14px;
+  gap: 16px;
+  margin-bottom: 16px;
 }
 
-.bento-icon {
-  width: 18px;
-  height: 18px;
-  flex-shrink: 0;
-  color: var(--primary);
-  opacity: 0.8;
+.section-header .section-title {
+  margin-bottom: 0;
 }
 
-.bento-title {
+.section-title {
+  margin: 0 0 16px;
   font-weight: 600;
-  font-size: 14px;
+  font-size: 16px;
   color: var(--text-primary);
 }
 
-.bento-sub {
+.section-sub {
   margin-left: auto;
   font-size: 12px;
   color: var(--text-light);
 }
 
-.bento-muted {
+.section-muted {
   font-size: 13px;
   color: var(--text-light);
 }
@@ -617,22 +579,15 @@ onUnmounted(() => {
 
 .model-row {
   display: grid;
-  grid-template-columns: 8px 88px minmax(0, 1fr);
+  grid-template-columns: 96px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
-  padding: 8px 0;
+  padding: 10px 0;
   border-bottom: 1px solid var(--border);
 }
 
 .model-row:last-child {
   border-bottom: 0;
-}
-
-.model-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  flex-shrink: 0;
 }
 
 .model-name {
@@ -649,6 +604,8 @@ onUnmounted(() => {
   max-width: 100%;
   overflow-wrap: anywhere;
   white-space: normal;
+  padding: 0;
+  background: transparent;
 }
 
 /* ====== 每日用量 ====== */
@@ -792,6 +749,8 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding: 0;
+  background: transparent;
 }
 
 .kv-wrap {
@@ -848,6 +807,13 @@ onUnmounted(() => {
     display: flex;
     flex-direction: column;
     grid-row: auto;
+    padding: 0;
+  }
+
+  .dash-col + .dash-col {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    padding: 0;
   }
 }
 
@@ -857,8 +823,14 @@ onUnmounted(() => {
   }
 
   .model-row {
-    grid-template-columns: 7px 74px minmax(0, 1fr);
+    grid-template-columns: 80px minmax(0, 1fr);
     gap: 8px;
+  }
+
+  .bot-control-item {
+    border-right: 0;
+    padding-right: 0;
+    flex-wrap: wrap;
   }
 }
 </style>

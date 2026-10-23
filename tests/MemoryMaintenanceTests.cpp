@@ -452,9 +452,13 @@ namespace {
             }
             const ChatRecordManager records(privateId, std::move(chat));
             const MemoryManager memory(privateId);
-            const auto reply = co_await ExecutorAgent::execute(records, memory, {.isPrivate = true});
+            const auto reply = co_await ExecutorAgent::execute(records, memory);
             require(
               reply && reply->content == "context verified", "executor context ordering or global injection failed");
+            const ChatRecordManager groupRecords(100, records.getRecords());
+            const auto groupReply = co_await ExecutorAgent::execute(groupRecords, memory,
+              RouterDecision{.reason = "group strategy", .tone = "serious", .maxLength = 123});
+            require(groupReply && groupReply->content == "context verified", "group Router strategy was lost");
             registry.unregisterPlugin("contract.context");
             auto transitional = sessionMemory();
             transitional["legacy_entries"] = {"旧偏好一", "旧偏好二"};
@@ -680,16 +684,19 @@ auto main() -> int {
           std::vector<std::string> keys;
           for (const auto &[key, value]: context.items())
               keys.push_back(key);
-          const std::vector<std::string> expected = {"current_session", "session_memory", "earlier_messages",
-            "person_memories", "shared_conversations", "recent_messages", "response_requirements"};
+          const bool isPrivate = context["current_session"]["type"] == "private";
+          std::vector<std::string> expected = {"current_session", "session_memory", "earlier_messages",
+            "person_memories", "shared_conversations", "recent_messages"};
+          if (!isPrivate) expected.push_back("response_requirements");
           const auto state = json::parse(messages.back()["content"].get<std::string>());
           bool valid = keys == expected && messages.back()["role"] == "system" && state.size() == 1 &&
-                       state["execution_state"]["current_round"] == executorRequests &&
+                       state["execution_state"]["current_round"] == (isPrivate ? executorRequests : 1) &&
                        context["person_memories"].size() == 1 && context["person_memories"][0]["qq"] == "11" &&
                        context["person_memories"][0]["pending_entries"].size() == 2 &&
                        context["shared_conversations"].empty();
           valid = valid && context["session_memory"] == sessionMemory() &&
-              context["current_session"]["type"] == "private" && context["current_session"]["qq"] == 22 &&
+              (isPrivate ? context["current_session"]["qq"] == 22 :
+                context["current_session"]["group_id"] == 100) &&
               context["earlier_messages"].size() == 2 && context["earlier_messages"][0] == "legacy text" &&
               context["earlier_messages"][1]["segments"][0]["text"] == std::string(500, 'x') + "…" &&
               context["recent_messages"].size() == 12 &&
@@ -718,9 +725,17 @@ auto main() -> int {
           std::vector<std::string> exampleKeys;
           for (const auto &[key, value] : example.items()) exampleKeys.push_back(key);
           valid = valid && exampleKeys == expected;
+          if (isPrivate) {
+              valid = valid && !context.contains("response_requirements") &&
+                systemPrompt.contains("这是私聊，直接回复即可");
+          } else {
+              valid = valid && context["response_requirements"] == json({{"tone", "serious"},
+                {"max_length", 123}, {"reply_reason", "group strategy"}}) &&
+                !systemPrompt.contains("这是私聊，直接回复即可");
+          }
           if (executorRequests == 1)
               frozenUser = messages[1];
-          else
+          else if (isPrivate)
               valid = valid && messages[1] == frozenUser && messages.size() == 5 && messages[3]["role"] == "tool" &&
                   messages[3]["content"] == "source";
           auto reply = drogon::HttpResponse::newHttpResponse();

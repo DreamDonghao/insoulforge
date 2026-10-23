@@ -164,6 +164,9 @@ a {
 
 /* ============ 侧边栏 ============ */
 .sidebar {
+    --sidebar-footer-height: 100px;
+    --nav-divider-height: 18px;
+    --nav-item-height: clamp(36px, calc((100dvh - var(--app-header-height) - var(--sidebar-footer-height) - var(--nav-divider-height) * 2 - 8px) / var(--nav-item-count)), 46px);
     width: 260px;
     background: var(--bg-sidebar);
     border-right: 1px solid var(--border);
@@ -171,6 +174,7 @@ a {
     flex-direction: column;
     position: fixed;
     height: 100vh;
+    height: 100dvh;
     overflow: hidden;
     transition: background-color 0.25s ease, border-color 0.25s ease;
 }
@@ -238,7 +242,7 @@ a {
 .sidebar-nav {
     position: relative;
     isolation: isolate;
-    padding: 0;
+    padding: 0 0 8px;
     flex: 1;
     min-height: 0;
     overflow-y: auto;
@@ -249,7 +253,7 @@ a {
 }
 
 .nav-divider {
-    height: 18px;
+    height: var(--nav-divider-height);
     margin: 0;
 }
 
@@ -275,11 +279,16 @@ a {
 
 .nav-item {
     position: relative;
+    width: 100%;
+    border: 0;
+    background: transparent;
+    font-family: inherit;
+    text-align: left;
     display: flex;
     align-items: center;
     gap: 10px;
-    min-height: 46px;
-    padding: 12px 24px;
+    min-height: var(--nav-item-height);
+    padding: 0 24px;
     line-height: 20px;
     border-radius: 0;
     cursor: pointer;
@@ -306,6 +315,8 @@ a {
     background: var(--primary-softer);
     color: var(--text-primary);
 }
+
+.nav-item:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 
 .nav-item.active {
     color: var(--primary);
@@ -374,13 +385,6 @@ a {
     opacity: 0.75;
 }
 
-@media (max-height: 880px) {
-    .nav-item {
-        min-height: 42px;
-        padding-block: 10px;
-    }
-}
-
 @media (max-height: 800px) {
     .container {
         --app-header-height: 60px;
@@ -390,13 +394,9 @@ a {
         padding-block: 6px;
     }
 
-    .nav-divider {
-        height: 16px;
-    }
-
-    .nav-item {
-        min-height: 36px;
-        padding-block: 7px;
+    .sidebar {
+        --sidebar-footer-height: 88px;
+        --nav-divider-height: 16px;
     }
 
     .sidebar-action {
@@ -515,21 +515,38 @@ a {
     margin-top: 0;
     font-size: 13px;
     line-height: 18px;
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+    .container { --content-padding: 16px; }
+    .sidebar { width: 64px; }
+    .sidebar-header { padding-inline: 12px; }
+    .sidebar-logo { gap: 0; }
+    .sidebar-logo > :last-child { display: none; }
+    .nav-item { justify-content: center; gap: 0; padding-inline: 12px; font-size: 0; }
+    .sidebar-footer { padding-inline: 0; }
+    .sidebar-action { justify-content: center; }
+    .sidebar-action span { display: none; }
+    .main { margin-left: 64px; }
+    .page-header { padding-block: 8px; }
 }
 
 /* ============ 日志 ============ */
 .log-viewer {
     display: flex;
     flex-direction: column;
-    height: calc(100vh - 32px);
+    height: calc(100dvh - 32px);
+    min-height: 0;
 }
 
 .log-toolbar {
     display: flex;
     flex-direction: column;
     gap: 10px;
-    padding: 12px 16px;
-    margin-bottom: 12px;
+    padding: 0 0 20px;
+    margin-bottom: 0;
+    flex-shrink: 0;
 }
 
 .log-toolbar .form-group {
@@ -567,7 +584,7 @@ a {
 
 .log-line {
     display: grid;
-    grid-template-columns: 190px 70px 140px 110px minmax(0, 1fr);
+    grid-template-columns: minmax(23ch, max-content) 56px minmax(80px, 120px) minmax(72px, 100px) minmax(0, 1fr);
     gap: 12px;
     padding: 8px 16px;
     border-bottom: 1px solid var(--border);
@@ -637,28 +654,41 @@ a {
     color: var(--neon-pink);
 }
 
-/* ============ 卡片 ============ */
+/* 页面分区沿用 card 类名；弹窗、输入框及独立内容项保留各自边界。 */
 .card {
-    background: var(--card-bg);
-    border-radius: 0;
-    padding: 24px;
-    margin-bottom: 20px;
-    border: 1px solid var(--border);
-    box-shadow: none;
-    transition: background-color 0.25s ease, border-color 0.25s ease;
+    min-width: 0;
+    background: transparent;
+    padding: 24px 0;
+    margin: 0;
+    border: 0;
+    border-top: 1px solid var(--border);
 }
 
 .card-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 18px;
+    flex-wrap: wrap;
+    gap: 12px 20px;
+    margin-bottom: 16px;
 }
 
 .card-title {
-    font-size: 15px;
+    font-size: 16px;
     font-weight: 600;
     color: var(--text-primary);
+}
+
+.card.log-toolbar { border-top: 0; padding: 0 0 20px; }
+.card.log-list-card { padding: 0; }
+
+@media (max-width: 1100px) {
+    .log-line { grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; }
+    .log-time { grid-column: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+    .log-level { grid-column: 2; grid-row: 1; }
+    .log-group, .log-source { white-space: normal; overflow-wrap: anywhere; }
+    .log-message { grid-column: 1 / -1; }
+    .log-footer { flex-wrap: wrap; }
 }
 
 /* ============ 标签页 ============ */
@@ -700,6 +730,8 @@ a {
 
 /* ============ 表格 ============ */
 .table-container {
+    min-width: 0;
+    max-width: 100%;
     overflow-x: auto;
 }
 
@@ -823,6 +855,7 @@ tr:hover td {
 
 /* ============ 表单 ============ */
 .form-group {
+    min-width: 0;
     margin-bottom: 16px;
 }
 
@@ -835,6 +868,7 @@ tr:hover td {
 }
 
 .form-input {
+    min-width: 0;
     width: 100%;
     padding: 10px 14px;
     border: 1px solid var(--border);
@@ -874,7 +908,7 @@ select.form-input {
 
 .form-row {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
     gap: 16px;
 }
 

@@ -1000,7 +1000,7 @@ onMounted(() => {
 .test-content {
   padding: 12px;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -1031,10 +1031,16 @@ onMounted(() => {
   padding: 12px 20px;
   border-top: 1px solid var(--border);
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
   background: var(--bg-secondary);
   position: sticky;
   bottom: 0;
+}
+
+@media (max-width: 600px) {
+  .test-content { grid-template-columns: minmax(0, 1fr); }
+  .dialog-header, .dialog-body, .dialog-footer { padding-inline: 16px; }
 }
 </style>

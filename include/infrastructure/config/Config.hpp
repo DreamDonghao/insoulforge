@@ -78,6 +78,7 @@ namespace insoulforge {
         // QQ Bot 配置
         std::string accessToken;
         u64 selfQQNumber = 0;
+        std::atomic<bool> defaultPrivateEnabled{false}; // 仅用于首次收到消息的新私聊
         std::string oneBotTransport = "http"; // http 或 websocket；同一时刻只使用一种
         std::string qqHttpHost;
         std::string qqWebSocketHost;

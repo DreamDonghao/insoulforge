@@ -49,6 +49,7 @@
 #include <onebot/incoming/OneBotEventNormalizer.hpp>
 #include <onebot/messaging/MessageFormatter.hpp>
 #include <workflow/OneBotEventWorkflow.hpp>
+#include <workflow/SessionWorkflowState.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/http/HttpUtil.hpp>
@@ -228,7 +229,12 @@ namespace {
 
         const insoulforge::json privateCommand = {
           {"session_id", 1ULL << 63 | 11ULL}, {"segments", {{{"type", "text"}, {"text", "\t/help"}}}}};
-        check(insoulforge::CommandProcessor::isCommand(privateCommand), "private command needs no mention", kTestName);
+        check(!insoulforge::CommandProcessor::isCommand(privateCommand), "private slash text is ordinary message",
+          kTestName);
+        auto privateMentionCommand = groupCommand;
+        privateMentionCommand["session_id"] = insoulforge::SessionId::fromPrivateUser(11);
+        check(!insoulforge::CommandProcessor::isCommand(privateMentionCommand),
+          "private bot mention does not enable commands", kTestName);
 
         insoulforge::SessionStore::setCommandEnabled(100, false);
         check(!insoulforge::CommandProcessor::isCommand(groupCommand), "disabled commands use ordinary message path",
@@ -237,12 +243,92 @@ namespace {
           insoulforge::SessionStore::getSessionConfig(200).commandEnabled, "other groups remain enabled", kTestName);
         insoulforge::SessionStore::setCommandEnabled(insoulforge::SessionId::fromPrivateUser(11), false);
         check(
-          insoulforge::CommandProcessor::isCommand(privateCommand), "private commands ignore group setting", kTestName);
+          !insoulforge::CommandProcessor::isCommand(privateCommand), "private commands remain unsupported", kTestName);
         insoulforge::SessionStore::setCommandEnabled(100, true);
         check(
           insoulforge::CommandProcessor::isCommand(groupCommand), "re-enabling restores command parsing", kTestName);
 
         config.selfQQNumber = originalSelfId;
+        db.close();
+    }
+
+    void testDefaultPrivateSessionState() {
+        constexpr std::string_view kTestName = "default private session state";
+        auto &db = insoulforge::Database::instance();
+        const auto path = std::filesystem::temp_directory_path() /
+          ("insoulforge-private-default-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".db");
+        check(db.initialize(path.string()).has_value(), "initializes database", kTestName);
+        using namespace insoulforge;
+        const auto disabled = SessionId::fromPrivateUser(11);
+        const auto enabled = SessionId::fromPrivateUser(22);
+        SessionStore::initializeSession(disabled, false);
+        SessionStore::initializeSession(enabled, true);
+        SessionStore::initializeSession(100, true);
+        check(SessionStore::hasSessionConfig(disabled) && !SessionStore::isSessionEnabled(disabled) &&
+                SessionStore::isSessionEnabled(enabled) && !SessionStore::isSessionEnabled(100),
+          "default only enables new private sessions", kTestName);
+        check(SessionStore::getAllSessionsWithStatus().size() == 2 &&
+                !SessionStore::getSessionConfig(enabled).crossSessionSharing,
+          "disabled private sessions are visible without enabling sharing", kTestName);
+        SessionStore::initializeSession(disabled, true);
+        SessionStore::initializeSession(enabled, false);
+        check(!SessionStore::isSessionEnabled(disabled) && SessionStore::isSessionEnabled(enabled),
+          "changing default preserves existing sessions", kTestName);
+        SessionStore::disableSession(enabled);
+        SessionStore::initializeSession(enabled, true);
+        check(!SessionStore::isSessionEnabled(enabled), "manual disabling is not reverted", kTestName);
+        const auto manual = SessionId::fromPrivateUser(33);
+        SessionStore::enableSession(manual);
+        SessionStore::updateSessionName(manual, "kept name");
+        SessionStore::initializeSession(manual, false);
+        check(SessionStore::isSessionEnabled(manual) && SessionStore::getSessionName(manual) == "kept name",
+          "preconfigured status and name survive first message", kTestName);
+        const auto legacy = SessionId::fromPrivateUser(44);
+        SessionStore::saveSessionConfig(legacy, {.allMesCount = 42});
+        SessionStore::initializeSession(legacy, true);
+        check(!SessionStore::isSessionEnabled(legacy) && SessionStore::getSessionConfig(legacy).allMesCount == 42,
+          "legacy disabled session is not auto-enabled", kTestName);
+        db.close();
+        check(db.initialize(path.string()).has_value(), "reopens database", kTestName);
+        SessionStore::initializeSession(disabled, true);
+        check(!SessionStore::isSessionEnabled(disabled) && SessionStore::isSessionEnabled(manual),
+          "restart preserves per-session choices", kTestName);
+        db.close();
+        std::filesystem::remove(path);
+    }
+
+    void testSessionReplyCoalescing() {
+        constexpr std::string_view kTestName = "session reply coalescing";
+        auto &db = insoulforge::Database::instance();
+        check(db.initialize(":memory:").has_value(), "initializes database", kTestName);
+        {
+            insoulforge::SessionWorkflowState privateState(insoulforge::SessionId::fromPrivateUser(11), db,
+              insoulforge::Config::instance());
+            check(privateState.requestReplyProcessing("first", true) == "first",
+              "idle private session starts immediately", kTestName);
+            check(!privateState.requestReplyProcessing("second", true) &&
+                    !privateState.requestReplyProcessing("third", true),
+              "new private messages do not start concurrent replies", kTestName);
+            check(privateState.completeReplyProcessing() == "third",
+              "private messages coalesce into latest trigger", kTestName);
+            check(!privateState.requestReplyProcessing("fourth", true),
+              "next reply retains exclusive processing", kTestName);
+            check(privateState.completeReplyProcessing() == "fourth" && !privateState.completeReplyProcessing(),
+              "later messages are processed and pending trigger is consumed once", kTestName);
+            check(privateState.requestReplyProcessing("fifth", true) == "fifth" &&
+                    !privateState.completeReplyProcessing(),
+              "private session becomes idle after draining", kTestName);
+
+            insoulforge::SessionWorkflowState groupState(100, db, insoulforge::Config::instance());
+            check(groupState.requestReplyProcessing("first", false) == "first" &&
+                    !groupState.requestReplyProcessing("ordinary", false) && !groupState.completeReplyProcessing(),
+              "ordinary group messages do not schedule another reply", kTestName);
+            check(groupState.requestReplyProcessing("next", false) == "next" &&
+                    !groupState.requestReplyProcessing("mention", true) &&
+                    !groupState.requestReplyProcessing("ordinary", false) &&
+                    groupState.completeReplyProcessing() == "mention" && !groupState.completeReplyProcessing(),
+              "eligible group trigger is preserved across ordinary messages", kTestName);
+        }
         db.close();
     }
 
@@ -1661,6 +1747,9 @@ namespace {
           "retry creates defaults at the explicitly selected path", kTestName);
         check(insoulforge::Config::instance().getExecutionConfig()["maxToolRounds"] == 8,
           "created defaults are readable", kTestName);
+        check(!insoulforge::Config::instance().defaultPrivateEnabled.load() &&
+                insoulforge::Config::instance().getQQConfig()["defaultPrivateEnabled"] == false,
+          "new private sessions default to disabled", kTestName);
         std::filesystem::remove_all(directory);
     }
 
@@ -1673,12 +1762,15 @@ namespace {
         const auto path = directory / "config.json";
         auto &config = insoulforge::Config::instance();
         check(config.initialize(path.string()).has_value(), "initializes storage and runtime together", kTestName);
-        check(config.saveQQConfig({{"botName", "facade-bot"}, {"selfQQNumber", 3457355246ULL}}).has_value() &&
-                config.botName == "facade-bot" && config.selfQQNumber == 3457355246ULL,
+        check(config.saveQQConfig({{"botName", "facade-bot"}, {"selfQQNumber", 3457355246ULL},
+                  {"defaultPrivateEnabled", true}}).has_value() &&
+                config.botName == "facade-bot" && config.selfQQNumber == 3457355246ULL &&
+                config.defaultPrivateEnabled.load() && config.getQQConfig()["defaultPrivateEnabled"] == true,
           "saving immediately applies typed QQ configuration", kTestName);
         const auto oldQQ = config.getQQConfig();
         for (const auto &invalid:
-          insoulforge::json::array({{{"selfQQNumber", -1}}, {{"selfQQNumber", 123.5}}, {{"botName", 23}}})) {
+          insoulforge::json::array({{{"selfQQNumber", -1}}, {{"selfQQNumber", 123.5}}, {{"botName", 23}},
+            {{"defaultPrivateEnabled", "true"}}, {{"defaultPrivateEnabled", 1}}})) {
             const auto result = config.saveQQConfig(invalid);
             check(!result && result.error().type == insoulforge::ConfigErrorType::InvalidArgument &&
                     config.getQQConfig() == oldQQ && config.botName == "facade-bot",
@@ -2076,23 +2168,21 @@ namespace {
                             std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".db");
         check(db.initialize(path.string()).has_value(), "initializes database", kTestName);
         insoulforge::PromptService::initialize(db);
-        insoulforge::RouterDecision decision;
-        const auto base = insoulforge::ExecutorAgent::buildSystemPrompt(decision, 100);
+        const auto base = insoulforge::ExecutorAgent::buildSystemPrompt(100);
         check(insoulforge::SessionStore::getSessionConfig(100).additionalPrompt.empty(), "defaults empty", kTestName);
         const std::string prompt = "本群回复使用中文。\n保留专业名词。";
         insoulforge::SessionStore::setAdditionalPrompt(100, prompt);
         insoulforge::SessionStore::setSendGroupCard(100, true);
         insoulforge::SessionStore::setAutoReply(100, false);
         insoulforge::SessionStore::incrementMessageCount(100);
-        const auto combined = insoulforge::ExecutorAgent::buildSystemPrompt(decision, 100);
+        const auto combined = insoulforge::ExecutorAgent::buildSystemPrompt(100);
         check(combined.starts_with(base) && combined.ends_with(prompt), "appends without replacing global prompt",
           kTestName);
-        check(insoulforge::ExecutorAgent::buildSystemPrompt(decision, 200) == base,
+        check(insoulforge::ExecutorAgent::buildSystemPrompt(200) == base,
           "other groups do not inherit prompt", kTestName);
         const auto privateId = insoulforge::SessionId::fromPrivateUser(11);
         insoulforge::SessionStore::setAdditionalPrompt(privateId, "private-marker");
-        decision.isPrivate = true;
-        check(insoulforge::ExecutorAgent::buildSystemPrompt(decision, privateId).find("private-marker") ==
+        check(insoulforge::ExecutorAgent::buildSystemPrompt(privateId).find("private-marker") ==
                 std::string::npos,
           "private session does not receive group prompt", kTestName);
         insoulforge::SessionStore::disableSession(100);
@@ -2788,6 +2878,8 @@ auto main() -> int {
     testNewWorkflowNormalizesOneBotEvent();
     testNewWorkflowNormalizesOneBotNotices();
     testNewWorkflowDetectsCommands();
+    testDefaultPrivateSessionState();
+    testSessionReplyCoalescing();
     testMessageRecordSemanticQueries();
     testNewWorkflowRouterHardRules();
     testJevUnconfiguredFallsBackToExistingBehavior();

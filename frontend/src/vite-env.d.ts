@@ -7,6 +7,7 @@ export interface QQConfig {
     qqHttpHost: string
     qqWebSocketHost: string
     botName: string
+    defaultPrivateEnabled: boolean
 }
 
 export interface LLMConfig {

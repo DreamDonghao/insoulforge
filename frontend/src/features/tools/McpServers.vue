@@ -364,6 +364,7 @@ onUnmounted(() => {
 .mcp-tools li p {margin: 0; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65}
 .mcp-overlay {position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.5); display: grid; place-items: center; padding: 20px}
 .mcp-dialog {background: var(--card-bg); border: 1px solid var(--border); border-radius: 0; padding: 24px; width: min(520px, 100%); max-height: calc(100dvh - 40px); overflow-y: auto; box-sizing: border-box}
+.mcp-dialog textarea.form-input {min-height: 96px; height: 112px}
 .mcp-enabled {display: flex; align-items: center; gap: 8px}
 .mcp-footer {justify-content: flex-end; margin-top: 24px}
 .mcp-header-label {justify-content: space-between; margin-bottom: 8px}
@@ -375,4 +376,10 @@ onUnmounted(() => {
   .mcp-tools li {grid-template-columns: minmax(0, 1fr); gap: 6px}
 }
 @media (max-width: 600px) {.mcp-dialog {padding: 18px}}
+@media (max-width: 440px) {
+  .mcp-row {grid-template-columns: minmax(0, 1fr)}
+  .mcp-row > .mcp-actions {grid-column: 1}
+  .mcp-header-row {grid-template-columns: minmax(0, 1fr) auto}
+  .mcp-header-row input:first-child {grid-column: 1 / -1}
+}
 </style>

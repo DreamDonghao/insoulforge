@@ -5,6 +5,7 @@
  */
 import {inject, onMounted, ref, type Ref} from 'vue'
 import type {ApiResponse, QQConfig} from '../../vite-env.d'
+import EnabledSwitch from '../../components/EnabledSwitch.vue'
 
 const showToast = inject<(msg: string, isError?: boolean) => void>('showToast')
 const qqConfig = inject<QQConfig>('qqConfig')
@@ -66,6 +67,11 @@ onMounted(() => {
             <p class="form-hint">机器人在群聊中的显示名称</p>
           </div>
         </div>
+      </section>
+
+      <section class="config-section">
+        <h3 class="section-title">新私聊默认启用</h3>
+        <EnabledSwitch v-model="qqConfig!.defaultPrivateEnabled" :disabled="saving" label="新私聊默认启用"/>
       </section>
 
       <section class="config-section connection-section">
@@ -155,7 +161,7 @@ onMounted(() => {
 .section-title {
   margin: 0 0 14px;
   color: var(--text-primary);
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
 }
 

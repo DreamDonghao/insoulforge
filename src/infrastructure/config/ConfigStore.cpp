@@ -58,7 +58,7 @@ namespace insoulforge::ConfigStore {
                   {"embedding", defaultEmbeddingConfig()}, {"jev", defaultJevConfig()}}},
               {"qq", {{"accessToken", ""}, {"selfQQNumber", 0}, {"oneBotTransport", "websocket"},
                        {"qqHttpHost", "http://127.0.0.1:3000"}, {"qqWebSocketHost", "ws://127.0.0.1:3001"},
-                       {"botName", "机器人"}}},
+                       {"botName", "机器人"}, {"defaultPrivateEnabled", false}}},
               {"memory",
                 {{"contextWindowLimit", 100}, {"sharedConversationMessageCount", 10},
                   {"memorySummaryTriggerCount", 100}, {"memorySummaryBatchSize", 50}, {"memorySummaryContextCount", 10},

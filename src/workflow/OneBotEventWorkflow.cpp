@@ -28,8 +28,10 @@
 namespace insoulforge {
     namespace {
         /// @brief 判断已有回复任务时是否保留该消息作为下一轮触发目标
-        [[nodiscard]] auto shouldQueueWhileReplying(const json &message, const Config &config) -> bool {
-            return MessageRecord::isSystem(message) || MessageRecord::mentions(message, config.selfQQNumber);
+        [[nodiscard]] auto shouldQueueWhileReplying(
+          const u64 sessionId, const json &message, const Config &config) -> bool {
+            return SessionId::isPrivate(sessionId) || MessageRecord::isSystem(message) ||
+                   MessageRecord::mentions(message, config.selfQQNumber);
         }
 
         /// @brief 记录已完成主处理消息的会话统计
@@ -273,7 +275,8 @@ namespace insoulforge {
 
             try {
                 if (!SessionConfigManager::contains(sessionId)) {
-                    SessionConfigManager::addConfig(sessionId);
+                    SessionStore::initializeSession(sessionId,
+                      m_dependencies->config.defaultPrivateEnabled.load(std::memory_order_relaxed));
                 }
                 if (CommandProcessor::isCommand(currentMessage)) {
                     Logger::info(
@@ -300,7 +303,7 @@ namespace insoulforge {
 
                     const auto triggerMessageId = getStr(update->back(), "message_id");
                     if (const auto replyTrigger = sessionState->requestReplyProcessing(
-                          triggerMessageId, shouldQueueWhileReplying(update->back(), m_dependencies->config));
+                          triggerMessageId, shouldQueueWhileReplying(sessionId, update->back(), m_dependencies->config));
                       replyTrigger) {
                         drogon::async_run([this, sessionId, triggerMessageId = *replyTrigger]() -> drogon::Task<> {
                             co_await processReplyWorkflow(sessionId, triggerMessageId);
@@ -330,14 +333,18 @@ namespace insoulforge {
                 if (!m_dependencies->agent.isReady()) {
                     Logger::warn(sessionId, "Workflow", "回复任务跳过：Agent 不可用");
                 } else {
-                    auto routerDecision = co_await MessageRouter::route(sessionId, triggerMessageId, messageSnapshot);
+                    std::optional<RouterDecision> routerDecision;
+                    if (SessionId::isPrivate(sessionId)) {
+                        Logger::info(sessionId, "Workflow", "私聊直接执行，跳过 Router");
+                    } else {
+                        routerDecision = co_await MessageRouter::route(sessionId, triggerMessageId, messageSnapshot);
+                        Logger::info(sessionId, "Router",
+                          fmt::format("决策={} | reason={} | priority={} | maxLength={}",
+                            routerDecision->shouldReply ? "reply" : "skip", routerDecision->reason,
+                            routerDecision->isPriority, routerDecision->maxLength));
+                    }
 
-                    Logger::info(sessionId, "Router",
-                      fmt::format("决策={} | reason={} | priority={} | maxLength={}",
-                        routerDecision.shouldReply ? "reply" : "skip", routerDecision.reason, routerDecision.isPriority,
-                        routerDecision.maxLength));
-
-                    if (routerDecision.shouldReply) {
+                    if (!routerDecision || routerDecision->shouldReply) {
                         const auto records = ChatRecordManager{sessionId, std::move(messageSnapshot)};
                         const auto memory = MemoryManager{sessionId};
                         const auto replyDecision =

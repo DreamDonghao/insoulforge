@@ -29,6 +29,8 @@ namespace insoulforge {
     ///          未存在启用状态记录的会话视为未启用。
     namespace SessionStore {
         inline constexpr size_t kMaxAdditionalPromptBytes = 16000;
+        /// @brief 首次创建会话配置；新私聊按默认值登记启用状态，已有配置或手动状态不变。
+        void initializeSession(u64 sessionId, bool defaultPrivateEnabled);
         /// @brief 保存本群附加提示词，空字符串清空设置，超长文本抛出 invalid_argument。
         void setAdditionalPrompt(u64 sessionId, std::string_view prompt);
         /// @brief 单独保存群名片开关，不改变消息统计或会话启用状态。

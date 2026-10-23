@@ -107,3 +107,27 @@ test('authenticated content excludes the login shell and logout returns to the s
   assert.ok(login.includes('<form'))
   assert.equal(login.split('class="login-identity"').length - 1, 1)
 })
+
+test('compact navigation retains names, button behavior and an accurate item count', async () => {
+  const view = page()
+  view.state.authenticationChecked = true
+  view.state.authenticated = true
+  view.state.dailyNavItems = [{key: 'dashboard', label: '首页', icon: 'home'},
+    {key: 'people', label: '人物信息', icon: 'admins'}]
+  view.state.systemNavItems = [{key: 'llm', label: '模型配置', icon: 'llm'}]
+  await view.html()
+  const sidebar = () => view.find(node => node.props?.class === 'sidebar')
+  assert.equal(sidebar().props.style['--nav-item-count'], 4)
+  assert.equal(view.find(node => node.props?.['aria-label'] === '退出登录').props.title, '退出登录')
+  for (const [label, key] of [['人物信息', 'people'], ['模型配置', 'llm'], ['关于', 'about']]) {
+    const button = view.find(node => node.props?.['aria-label'] === label)
+    assert.equal(button.type, 'button')
+    assert.equal(button.props.type, 'button')
+    assert.equal(button.props.title, label)
+    button.props.onClick()
+    assert.equal(view.state.currentView, key)
+  }
+  view.state.dailyNavItems.push({key: 'groups', label: '会话管理', icon: 'groups'})
+  await view.html()
+  assert.equal(sidebar().props.style['--nav-item-count'], 5)
+})

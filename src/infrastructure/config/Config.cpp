@@ -35,6 +35,11 @@ namespace insoulforge {
                         return std::unexpected(ConfigError{
                           .type = ConfigErrorType::InvalidArgument, .message = key + " 必须是 i32 范围内的整数"});
                     }
+                } else if (key == "defaultPrivateEnabled") {
+                    if (!field.is_boolean()) {
+                        return std::unexpected(ConfigError{
+                          .type = ConfigErrorType::InvalidArgument, .message = "defaultPrivateEnabled 必须是布尔值"});
+                    }
                 } else if (key == "selfQQNumber") {
                     if (!field.is_number_integer() || (!field.is_number_unsigned() && field.get<i64>() < 0)) {
                         return std::unexpected(ConfigError{
@@ -158,6 +163,7 @@ namespace insoulforge {
         if (const auto &qqCfg = value.at("qq"); !qqCfg.is_null()) {
             accessToken = trim(getStr(qqCfg, "accessToken"));
             selfQQNumber = qqCfg.at("selfQQNumber").get<u64>();
+            defaultPrivateEnabled.store(getBool(qqCfg, "defaultPrivateEnabled", false), std::memory_order_relaxed);
             oneBotTransport = getStr(qqCfg, "oneBotTransport", "http");
             qqHttpHost = trim(getStr(qqCfg, "qqHttpHost"));
             qqWebSocketHost = trim(getStr(qqCfg, "qqWebSocketHost"));
@@ -216,6 +222,8 @@ namespace insoulforge {
     void Config::applyQQValues(Config &value) {
         accessToken = std::move(value.accessToken);
         selfQQNumber = value.selfQQNumber;
+        defaultPrivateEnabled.store(value.defaultPrivateEnabled.load(std::memory_order_relaxed),
+          std::memory_order_relaxed);
         oneBotTransport = std::move(value.oneBotTransport);
         qqHttpHost = std::move(value.qqHttpHost);
         qqWebSocketHost = std::move(value.qqWebSocketHost);
