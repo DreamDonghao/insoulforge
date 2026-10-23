@@ -4,7 +4,6 @@
 #include <stdexcept>
 
 #include <regex>
-#include <limits>
 #include <set>
 #include <vector>
 
@@ -23,6 +22,7 @@
 #include <workflow/agent/tools/ToolRuntime.hpp>
 #include <workflow/agent/tools/image/CharacterImageStore.hpp>
 #include <workflow/agent/tools/image/ImageGenerationService.hpp>
+#include <workflow/agent/tools/image/ImageReferences.hpp>
 #include <workflow/agent/tools/plugins/ActionToolsPlugin.hpp>
 #include <workflow/history/ChatRecordStore.hpp>
 #include <workflow/message/MessageRecord.hpp>
@@ -188,14 +188,7 @@ namespace insoulforge {
                   {"use_self_reference",
                     {{"type", "boolean"},
                       {"description", "画面主体是你自己时设为 true，引用后台上传的角色形象图；默认 false"}}},
-                  {"reference_images", {{"type", "array"},
-                    {"description", "当前会话中的聊天参考图，按此顺序附加在角色形象图之后；不提供时不引用聊天图片"},
-                    {"items", {{"type", "object"},
-                      {"properties", {
-                        {"message_id", {{"type", "string"}, {"description", "原图所在消息的 message_id"}}},
-                        {"image_index", {{"type", "integer"}, {"minimum", 0},
-                          {"description", "原图在消息中的索引，从 0 开始"}}}}},
-                      {"required", {"message_id", "image_index"}}}}}}}},
+                  {"reference_images", ImageReferences::schema()}}},
               {"required", {"prompt"}}},
             .handler = [](const json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
                 const auto prompt = trim(argString(args, "prompt"));
@@ -223,37 +216,9 @@ namespace insoulforge {
                 }
                 std::vector<std::string> referenceUrls;
                 if (const auto &images = atOrNull(args, "reference_images"); args.contains("reference_images")) {
-                    if (!images.is_array()) co_return std::string("reference_images 必须是图片引用数组。");
-                    std::set<std::pair<u64, size_t>> seen;
-                    for (const auto &image : images) {
-                        const auto &id = atOrNull(image, "message_id");
-                        const auto &index = atOrNull(image, "image_index");
-                        const u64 messageId = id.is_string() ? parseUInt64(id.get<std::string>()) : 0;
-                        if (messageId == 0 || !index.is_number_integer() || index < 0 ||
-                            index > std::numeric_limits<i32>::max()) {
-                            co_return std::string("请提供有效的图片消息 ID 和从 0 开始的整数图片索引。");
-                        }
-                        const auto imageIndex = index.get<size_t>();
-                        if (!seen.emplace(messageId, imageIndex).second) continue;
-                        json record;
-                        for (const json &message : ctx.messageSnapshot) {
-                            if (parseUInt64(getStr(message, "message_id")) == messageId) {
-                                record = message;
-                                break;
-                            }
-                        }
-                        if (record.is_null()) {
-                            const auto content = ChatRecordStore::findContentByMessageId(ctx.sessionId, messageId);
-                            if (!content || !tryParseJson(*content, record)) {
-                                co_return std::string("未找到该会话中的图片消息。");
-                            }
-                        }
-                        const auto source = MessageRecord::findImageSource(record, imageIndex);
-                        if (!source || source->url.empty()) {
-                            co_return std::string("该消息没有可下载的原图，请让用户重新发送静态图片。");
-                        }
-                        referenceUrls.push_back(source->url);
-                    }
+                    auto resolved = ImageReferences::resolve(images, ctx);
+                    if (!resolved) co_return resolved.error();
+                    referenceUrls = std::move(*resolved);
                 }
                 co_return startImageTask(ctx.sessionId, prompt, *size, std::move(referenceUrls), std::move(referenceDataUrl));
             },

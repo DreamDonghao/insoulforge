@@ -11,9 +11,11 @@
 #include <workflow/agent/tools/ToolArgument.hpp>
 #include <workflow/agent/tools/ToolRegistry.hpp>
 #include <workflow/agent/tools/ToolRuntime.hpp>
+#include <workflow/agent/tools/image/ImageReferences.hpp>
 #include <workflow/agent/tools/plugins/InfoToolsPlugin.hpp>
 #include <workflow/history/SharedConversationContext.hpp>
 #include <workflow/message/SessionId.hpp>
+#include <workflow/message/image/ImageDescriptionService.hpp>
 #include <workflow/scheduling/TaskStore.hpp>
 #include <workflow/session/SessionStore.hpp>
 
@@ -39,6 +41,30 @@ namespace insoulforge {
 
     /// @brief 注册内容获取工具（INFORMATION，查询数据、获取答案，不产生副作用）
     void InfoToolsPlugin::registerTools(ToolRegistry &registry) const {
+
+        auto imagesSchema = ImageReferences::schema();
+        imagesSchema["minItems"] = 1;
+        registry.registerTool({
+            .name = "ask_images",
+            .description = "根据当前会话中的一张或多张原图回答具体问题，支持细节识别、文字提取、图表分析和多图比较。"
+                "现有图片描述不足时调用；GIF 按播放时间抽帧分析。question 必须包含完整问题和必要背景，不会附带聊天上下文。"
+                "用 images 中的 message_id 和 image_index 指定图片，不要传入或猜测 URL。结果返回后据此组织回复。",
+            .parameters = {{"type", "object"}, {"properties", {
+                {"question", {{"type", "string"}, {"description", "具体问题及必要条件、背景；不得只写分析刚才的图片"}}},
+                {"images", std::move(imagesSchema)}}}, {"required", {"question", "images"}}},
+            .handler = [](json args, ToolCallContext ctx) -> drogon::Task<std::string> {
+                const auto &question = atOrNull(args, "question");
+                if (!question.is_string() || trim(question.get<std::string>()).empty())
+                    co_return std::string("ask_images 需要非空字符串 question，请提供具体问题和必要背景。");
+                const auto &images = atOrNull(args, "images");
+                if (!images.is_array() || images.empty())
+                    co_return std::string("images 必须是非空图片引用数组。");
+                auto urls = ImageReferences::resolve(images, ctx);
+                if (!urls) co_return urls.error();
+                const auto result = co_await ImageDescriptionService::ask(
+                    question.get<std::string>(), std::move(*urls), ctx.sessionId);
+                co_return result ? "【原图问答结果】\n" + *result : result.error();
+            }}, ToolCategory::INFORMATION);
 
         registry.registerTool(
           {

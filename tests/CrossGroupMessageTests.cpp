@@ -12,6 +12,7 @@
 #include <trantor/net/EventLoopThread.h>
 
 #include <infrastructure/config/Config.hpp>
+#include <infrastructure/http/HttpUtil.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <workflow/OneBotEventWorkflow.hpp>
 #include <workflow/agent/runtime/AgentSystem.hpp>
@@ -30,11 +31,18 @@ namespace {
         std::mutex mutex;
         std::vector<json> sends;
         std::vector<json> imageRequests;
+        std::vector<json> visionRequests;
         std::atomic<i32> stickerQueries{0};
         std::atomic<i32> modelQueries{0};
         std::atomic_bool fail{false};
         std::atomic<i32> qzoneRight{1};
         std::atomic_bool failImage{false};
+        std::atomic<i32> visionMode{0};
+
+        auto visions() -> std::vector<json> {
+            std::lock_guard lock(mutex);
+            return visionRequests;
+        }
 
         auto images() -> std::vector<json> {
             std::lock_guard lock(mutex);
@@ -59,6 +67,101 @@ namespace {
             reinterpret_cast<const unsigned char *>(encoded.data()), static_cast<int>(encoded.size()));
         bytes.resize(static_cast<size_t>(length) - 2);
         return bytes;
+    }
+
+    auto gifBytes() -> std::string {
+        const std::string encoded = "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+        std::string bytes(encoded.size() / 4 * 3, '\0');
+        const auto length = EVP_DecodeBlock(reinterpret_cast<unsigned char *>(bytes.data()),
+            reinterpret_cast<const unsigned char *>(encoded.data()), static_cast<int>(encoded.size()));
+        bytes.resize(static_cast<size_t>(length));
+        // Repeat the complete frame block after the header and global color table.
+        const auto frame = bytes.substr(19, bytes.size() - 20);
+        bytes.insert(bytes.size() - 1, frame);
+        return bytes;
+    }
+
+    auto testImageQuestions(const std::string endpoint) -> drogon::Task<> {
+        auto &config = Config::instance();
+        config.image.baseUrl = endpoint;
+        config.image.path = "/vision-question";
+        config.image.apiKey = "fixture";
+        config.image.model = "vision-fixture";
+        auto &registry = ToolRegistry::instance();
+        const auto sentBefore = fixture.messages().size();
+        const json record = {{"message_id", "6001"}, {"segments", {{{"type", "text"}, {"text", "secret chat"}}}},
+            {"assets", {{"images", {
+                {{"description", "stale summary"}, {"source", {{"url", endpoint + "/reference.png"}}}},
+                {{"description", "stale gif summary"}, {"source", {{"url", endpoint + "/reference.gif"}}}}}}}}};
+        const ToolCallContext context{.sessionId = 600, .messageSnapshot = json::array({record})};
+        const json image = {{"message_id", "6001"}, {"image_index", 0}};
+        json args = {{"question", "图片上的小字是什么？"}, {"images", json::array({image})}};
+        for (const auto &invalid : {json::object(), json{{"question", " \t"}, {"images", {image}}},
+                 json{{"question", 12}, {"images", {image}}}, json{{"question", "test"}},
+                 json{{"question", "test"}, {"images", json::array()}},
+                 json{{"question", "test"}, {"images", {42}}},
+                 json{{"question", "test"}, {"images", {{{"message_id", "6001"}, {"image_index", -1}}}}}}) {
+            const auto error = co_await registry.executeTool("ask_images", invalid, context);
+            require(!error.starts_with("【原图问答结果】") && fixture.visions().empty(),
+                "invalid image question reached the model");
+        }
+        require(registry.saveBuiltinToolConfig("ask_images", {{"enabled", false}}).has_value(),
+            "image question tool is not configurable");
+        const auto disabled = co_await registry.executeTool("ask_images", args, context);
+        require(disabled.contains("工具已关闭"), "disabled image question tool ran");
+        require(registry.saveBuiltinToolConfig("ask_images", {{"enabled", true}}).has_value(), "tool enable failed");
+        auto error = co_await registry.executeTool("ask_images", args, {.sessionId = 601});
+        require(error.contains("未找到该会话"), "image question read another session");
+        const auto model = config.image.model;
+        config.image.model.clear();
+        error = co_await registry.executeTool("ask_images", args, context);
+        require(error.contains("尚未配置"), "missing vision configuration was ignored");
+        config.image.model = model;
+
+        // The existing description cache remains active, but must never answer a specific question.
+        require((co_await ImageDescriptionService::describe(endpoint + "/reference.png", 600)).has_value(),
+            "automatic description failed");
+        require((co_await ImageDescriptionService::describe(endpoint + "/reference.png", 600)).has_value() &&
+            fixture.visions().size() == 1, "automatic description cache stopped working");
+        for (const auto *question : {"图片上的小字是什么？", "第二个问题，不应复用上次答案"}) {
+            args["question"] = question;
+            const auto answer = co_await registry.executeTool("ask_images", args, context);
+            require(answer == "【原图问答结果】\nvision answer", "image question failed");
+            const auto request = fixture.visions().back();
+            const auto &messages = request["messages"];
+            require(messages.size() == 2 && messages[0]["role"] == "system" && messages[1]["role"] == "user" &&
+                messages[1]["content"][0]["text"] == question &&
+                messages[1]["content"][2]["image_url"]["url"] == *ImageDescriptionService::staticImageDataUrl(imageBytes()) &&
+                !messages.dump().contains("stale summary") && !messages.dump().contains("secret chat") &&
+                !messages.dump().contains("300字"), "question request lost pixels or leaked chat/summary");
+            require(HttpUtil::redactImagePayloads(request)["messages"][1]["content"][2]["image_url"]["url"] ==
+                "[图片数据已省略]", "question trace leaks image data");
+        }
+        require(fixture.visions().size() == 3, "different questions reused description/answer cache");
+        args["images"].push_back({{"message_id", "6001"}, {"image_index", 1}});
+        args["images"].push_back(image);
+        const auto mixed = co_await registry.executeTool("ask_images", args, context);
+        require(mixed.starts_with("【原图问答结果】"), "mixed GIF question failed");
+        const auto content = fixture.visions().back()["messages"][1]["content"];
+        require(content.size() == 8 && content[1]["text"] == "图片 1（静态原图）" &&
+            getStr(content[3], "text").starts_with("图片 2（GIF") && content[4]["text"] == "图片 2，帧 1/2" &&
+            content[6]["text"] == "图片 2，帧 2/2", "image/frame order or deduplication changed");
+        for (const auto mode : {1, 2}) {
+            fixture.visionMode = mode;
+            error = co_await registry.executeTool("ask_images", args, context);
+            require(error.contains("原图问答失败"), "failed/empty vision response reported an answer");
+        }
+        fixture.visionMode = 0;
+        auto broken = record;
+        broken["assets"]["images"][1]["source"]["url"] = endpoint + "/missing.png";
+        const auto beforeFailure = fixture.visions().size();
+        error = co_await registry.executeTool("ask_images", args,
+            {.sessionId = 600, .messageSnapshot = json::array({broken})});
+        require(error.contains("图片 2 下载失败") && fixture.visions().size() == beforeFailure,
+            "missing image was ignored or replaced with a description");
+        require(fixture.messages().size() == sentBefore, "image question sent a message directly");
+        require((co_await ImageDescriptionService::describe(endpoint + "/reference.png", 600)).has_value() &&
+            fixture.visions().size() == beforeFailure, "image questions altered the automatic description cache");
     }
 
     auto testImageGeneration(const std::string endpoint) -> drogon::Task<> {
@@ -360,6 +463,7 @@ namespace {
             fixture.fail = false;
             config.oneBotTransport = "http";
             co_await testImageGeneration(endpoint);
+            co_await testImageQuestions(endpoint);
             exitCode = 0;
             std::cout << "All cross-group message tests passed\n";
         } catch (const std::exception &error) {
@@ -380,6 +484,26 @@ auto main() -> int {
             response->setBody(imageBytes());
             callback(response);
         }, {drogon::Get});
+    drogon::app().registerHandler("/reference.gif",
+        [](const drogon::HttpRequestPtr &, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+            auto response = drogon::HttpResponse::newHttpResponse();
+            response->setBody(gifBytes());
+            callback(response);
+        }, {drogon::Get});
+    drogon::app().registerHandler("/vision-question",
+        [](const drogon::HttpRequestPtr &request, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+            {
+                std::lock_guard lock(fixture.mutex);
+                fixture.visionRequests.push_back(json::parse(request->body()));
+            }
+            auto response = drogon::HttpResponse::newHttpResponse();
+            response->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            if (fixture.visionMode == 1) response->setStatusCode(drogon::k400BadRequest);
+            const json body = {{"choices", {{{"message", {{"role", "assistant"},
+                {"content", fixture.visionMode == 2 ? "" : "vision answer"}}}}}}};
+            response->setBody(body.dump());
+            callback(response);
+        }, {drogon::Post});
     drogon::app().registerHandler("/image-generation",
         [](const drogon::HttpRequestPtr &request, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
             {
