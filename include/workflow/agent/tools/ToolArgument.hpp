@@ -17,6 +17,19 @@ namespace insoulforge {
     /// @return 参数值；缺失或类型不匹配时返回空字符串
     inline auto argString(const json &args, const char *key) -> std::string { return getStr(args, key); }
 
+    /// @brief 读取私聊目标 QQ 号，不接受内部私聊会话 ID 或系统账号。
+    inline auto userIdArgument(const json &args) -> std::expected<u64, std::string> {
+        const auto &value = atOrNull(args, "user_id");
+        if (!value.is_string()) return std::unexpected("user_id 必须是数字字符串 QQ 号");
+        const auto &text = value.get_ref<const std::string &>();
+        u64 userId = 0;
+        const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), userId);
+        if (error != std::errc{} || end != text.data() + text.size() || userId == 0 ||
+            SessionId::isPrivate(userId) || userId == SessionId::kSystemAccountId)
+            return std::unexpected("user_id 无效，必须填写有效的 QQ 号，不能使用内部会话 ID");
+        return userId;
+    }
+
     /// @brief 严格读取必填 group_id，仅接受有效的数字字符串群号。
     inline auto groupIdArgument(const json &args) -> std::expected<u64, std::string> {
         const auto &value = atOrNull(args, "group_id");

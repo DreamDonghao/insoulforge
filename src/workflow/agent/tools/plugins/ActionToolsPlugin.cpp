@@ -36,14 +36,25 @@
 namespace insoulforge {
     namespace {
         auto messageTarget(const json &args, const u64 currentSession) -> std::expected<u64, std::string> {
-            if (!args.contains("group_id"))
+            const bool privateTarget = args.contains("user_id");
+            if (privateTarget && args.contains("group_id"))
+                return std::unexpected("group_id 和 user_id 不能同时指定，请只选择一个发送目标");
+            if (!privateTarget && !args.contains("group_id"))
                 return currentSession;
-            const auto groupId = groupIdArgument(args);
-            if (!groupId)
-                return std::unexpected(groupId.error());
-            if (!SessionStore::isSessionEnabled(*groupId))
-                return std::unexpected(fmt::format("目标群 {} 未在后台启用，未发送消息", *groupId));
-            return groupId;
+            const auto id = privateTarget ? userIdArgument(args) : groupIdArgument(args);
+            if (!id) return std::unexpected(id.error());
+            const auto target = privateTarget ? SessionId::fromPrivateUser(*id) : *id;
+            if (!SessionStore::isSessionEnabled(target))
+                return std::unexpected(fmt::format("目标{} {} 未在后台启用，未发送消息", privateTarget ? "私聊" : "群", *id));
+            if (privateTarget && BlacklistStore::contains(*id))
+                return std::unexpected(fmt::format("目标私聊 {} 在全局黑名单中，未发送消息", *id));
+            return target;
+        }
+
+        auto messageDestination(const json &args, const u64 target) -> std::string {
+            if (args.contains("user_id")) return fmt::format("目标私聊 {}：", SessionId::privateUserId(target));
+            if (args.contains("group_id")) return fmt::format("目标群 {}：", target);
+            return {};
         }
 
         auto sendToSession(const u64 sessionId, std::string content) -> drogon::Task<std::expected<u64, std::string>> {
@@ -310,7 +321,11 @@ namespace insoulforge {
                     },
                     "group_id": {
                         "type": "string",
-                        "description": "可选目标群号，仅可发送到后台已启用的群；省略则发送到当前会话"
+                        "description": "可选目标群号，仅可发送到后台已启用的群；与 user_id 互斥"
+                    },
+                    "user_id": {
+                        "type": "string",
+                        "description": "可选目标私聊 QQ 号，仅可发送到后台已启用的私聊；与 group_id 互斥。两者均省略则发送到当前会话"
                     }
                 },
                 "required": ["name"]
@@ -320,7 +335,8 @@ namespace insoulforge {
             .name = "send_sticker",
             .description = "中途发送一张QQ收藏表情包（独立消息直接发出，不经reply；发出后回合不结束，"
                            "最终仍用reply/no_reply收尾）。先调list_stickers查看可用表情名。"
-                           "可选group_id指定后台已启用的目标群，不受跨会话共享开关限制；省略则发送到当前会话。"
+                           "可选group_id指定目标群，或user_id指定私聊QQ号，不能同时填写。目标必须在后台启用，"
+                           "不受跨会话共享开关限制；均省略则发送到当前会话。"
                            "发送失败或超时不要自动重发。",
             .parameters = stickerParams,
             .handler = [](const json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
@@ -331,8 +347,7 @@ namespace insoulforge {
                 const auto target = messageTarget(args, ctx.sessionId);
                 if (!target)
                     co_return target.error();
-                const auto destination =
-                  args.contains("group_id") ? fmt::format("目标群 {}：", *target) : std::string{};
+                const auto destination = messageDestination(args, *target);
                 const json emoji = co_await ToolRuntime::findFavoriteEmoji(name, ctx.sessionId);
                 if (emoji.is_null()) {
                     co_return fmt::format("{}表情'{}'不存在，先调list_stickers查看可用表情", destination, name);
@@ -371,7 +386,11 @@ namespace insoulforge {
                     },
                     "group_id": {
                         "type": "string",
-                        "description": "可选目标群号，仅可发送到后台已启用的群；省略则发送到当前会话"
+                        "description": "可选目标群号，仅可发送到后台已启用的群；与 user_id 互斥"
+                    },
+                    "user_id": {
+                        "type": "string",
+                        "description": "可选目标私聊 QQ 号，仅可发送到后台已启用的私聊；与 group_id 互斥。两者均省略则发送到当前会话"
                     }
                 },
                 "required": ["content"]
@@ -380,8 +399,9 @@ namespace insoulforge {
           {
             .name = "reply_and_continue",
             .description = "发送一条消息后继续处理（发出后回合不结束，最终仍用reply/no_reply收尾）。"
-                           "可选group_id指定后台已启用的目标群，不受跨会话共享开关限制；省略则发送到当前会话。"
-                           "可用于跨群发送消息，或以下场景："
+                           "可选group_id指定目标群，或user_id指定私聊QQ号，不能同时填写。目标必须在后台启用，"
+                           "不受跨会话共享开关限制；均省略则发送到当前会话。"
+                           "可用于跨会话发送消息，或以下场景："
                            "1) 接下来要执行耗时操作（搜索、深度思考、查资料等用户需要等待的事），先发一句"
                            "「稍等，我去查一下」，再调用耗时工具，拿到结果后用 reply 给出最终回复"
                            "（操作失败也要 reply 说明）；2) 想在正式回复前先发其他内容（连续多条消息）。"
@@ -397,8 +417,7 @@ namespace insoulforge {
                 const auto target = messageTarget(args, ctx.sessionId);
                 if (!target)
                     co_return target.error();
-                const auto destination =
-                  args.contains("group_id") ? fmt::format("目标群 {}：", *target) : std::string{};
+                const auto destination = messageDestination(args, *target);
                 const auto messageId = co_await sendToSession(*target, content);
                 if (!messageId) {
                     co_return fmt::format("{}消息发送未确认成功：{}。请继续处理，不要认为该消息已送达，不要自动重发。",

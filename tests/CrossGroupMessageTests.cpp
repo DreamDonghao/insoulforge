@@ -15,6 +15,7 @@
 #include <infrastructure/http/HttpUtil.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <workflow/OneBotEventWorkflow.hpp>
+#include <workflow/access/BlacklistStore.hpp>
 #include <workflow/agent/runtime/AgentSystem.hpp>
 #include <workflow/agent/tools/ToolRegistry.hpp>
 #include <workflow/agent/tools/image/CharacterImageStore.hpp>
@@ -288,6 +289,84 @@ namespace {
         co_await drogon::sleepCoro(drogon::app().getLoop(), 0.02);
     }
 
+    auto testPrivateTargets() -> drogon::Task<> {
+        auto &registry = ToolRegistry::instance();
+        auto &workflow = OneBotEventWorkflow::instance();
+        auto &config = Config::instance();
+        constexpr auto target = SessionId::fromPrivateUser(702);
+        constexpr auto source = SessionId::fromPrivateUser(703);
+        SessionStore::enableSession(target);
+        SessionStore::enableSession(SessionId::fromPrivateUser(701));
+        SessionStore::disableSession(SessionId::fromPrivateUser(701));
+        const auto sentBefore = fixture.messages().size();
+        const auto stickerQueriesBefore = fixture.stickerQueries.load();
+        const auto invalidIds = json::array({nullptr, false, 702, "", " ", "0", "-1", "+702", "702x", "702.0",
+            "18446744073709551616", std::to_string(target), std::to_string(SessionId::kSystemAccountId),
+            "700", "701", "200"});
+        for (const auto *tool : {"reply_and_continue", "send_sticker"}) {
+            for (const auto &id : invalidIds) {
+                const json args = {{"content", "test"}, {"name", "fixture"}, {"user_id", id}};
+                const auto error = co_await registry.executeTool(tool, args, {.sessionId = 100});
+                require(error.contains("user_id") || error.contains("未在后台启用"), "invalid private target accepted");
+            }
+            const auto conflict = co_await registry.executeTool(tool,
+                {{"content", "test"}, {"name", "fixture"}, {"group_id", "200"}, {"user_id", "702"}}, {.sessionId = 100});
+            require(conflict.contains("不能同时"), "ambiguous target was sent");
+            BlacklistStore::add(702);
+            const auto blocked = co_await registry.executeTool(tool,
+                {{"content", "test"}, {"name", "fixture"}, {"user_id", "702"}}, {.sessionId = 100});
+            BlacklistStore::remove(702);
+            require(blocked.contains("黑名单"), "blacklisted private target accepted");
+        }
+        require(fixture.messages().size() == sentBefore && fixture.stickerQueries == stickerQueriesBefore &&
+            !SessionStore::isSessionEnabled(SessionId::fromPrivateUser(700)) && !workflow.getSessionMessages(target),
+            "rejected target performed network requests or enabled a private session");
+        const auto callerRecords = workflow.getSessionMessages(100)->size();
+        for (const auto caller : {u64{100}, source}) {
+            for (const auto *tool : {"reply_and_continue", "send_sticker"}) {
+                const auto result = co_await registry.executeTool(tool,
+                    {{"content", "cross-private text"}, {"name", "fixture"}, {"user_id", "702"}}, {.sessionId = caller});
+                require(result.contains("目标私聊 702") && (result.contains("消息已发送") || result.contains("已发送表情")),
+                    "private send omitted target or failed");
+            }
+        }
+        const auto sends = fixture.messages();
+        for (size_t index = sentBefore; index < sends.size(); ++index)
+            require(sends[index]["user_id"] == 702 && !sends[index].contains("group_id"),
+                "private send used internal session ID or group endpoint");
+        require(workflow.getSessionMessages(target)->size() == 4 && !workflow.getSessionMessages(source) &&
+            workflow.getSessionMessages(100)->size() == callerRecords,
+            "private sends were copied into the calling session");
+        constexpr u64 largeQQ = 9007199254740993ULL;
+        SessionStore::enableSession(SessionId::fromPrivateUser(largeQQ));
+        const auto large = co_await registry.executeTool("reply_and_continue",
+            {{"content", "large QQ"}, {"user_id", std::to_string(largeQQ)}}, {.sessionId = 100});
+        require(large.contains(std::to_string(largeQQ)) && fixture.messages().back()["user_id"] == largeQQ,
+            "private target lost integer precision");
+        fixture.fail = true;
+        const auto beforeFailure = fixture.messages().size();
+        for (const auto *tool : {"reply_and_continue", "send_sticker"}) {
+            const auto error = co_await registry.executeTool(tool,
+                {{"content", "failed"}, {"name", "fixture"}, {"user_id", "702"}}, {.sessionId = 100});
+            require(error.contains("目标私聊 702") && error.contains("未确认成功"), "failed private send reported success");
+        }
+        require(fixture.messages().size() == beforeFailure + 2, "failed private sends were retried");
+        fixture.fail = false;
+        config.oneBotTransport = "websocket";
+        const auto disconnected = co_await registry.executeTool("reply_and_continue",
+            {{"content", "unconfirmed"}, {"user_id", "702"}}, {.sessionId = 100});
+        require(disconnected.contains("未确认成功") && fixture.messages().size() == beforeFailure + 2,
+            "disconnected private send fell back to HTTP");
+        config.oneBotTransport = "http";
+        workflow.flushMessageListsToStorage();
+        const auto records = workflow.getSessionMessages(target);
+        require(records->size() == 7 && records->back().contains("send_error") &&
+            ChatRecordStore::getChatRecords(Database::instance(), target).size() == 7,
+            "private send records were lost or persisted under the wrong session");
+        co_await drogon::sleepCoro(drogon::app().getLoop(), 0.02);
+        require(fixture.modelQueries == 0, "outgoing private message triggered another reply");
+    }
+
     auto testGroupMessageQuery() -> drogon::Task<> {
         auto &workflow = OneBotEventWorkflow::instance();
         auto &registry = ToolRegistry::instance();
@@ -399,6 +478,7 @@ namespace {
                 const auto &definition = tool["function"];
                 if (definition["name"] == "reply_and_continue" || definition["name"] == "send_sticker") {
                     require(definition["parameters"]["properties"]["group_id"]["type"] == "string" &&
+                        definition["parameters"]["properties"]["user_id"]["type"] == "string" &&
                         definition["parameters"]["required"].size() == 1, "group_id must be optional string");
                 }
                 if (definition["name"] == "get_group_messages") {
@@ -485,6 +565,7 @@ namespace {
             require(fixture.modelQueries == 0, "outgoing message triggered automatic model reply or summary");
             fixture.fail = false;
             config.oneBotTransport = "http";
+            co_await testPrivateTargets();
             co_await testImageGeneration(endpoint);
             co_await testImageQuestions(endpoint);
             exitCode = 0;
