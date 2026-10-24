@@ -1,5 +1,5 @@
 /// @file MemoryManager.cpp
-/// @brief 短期记忆管理器 - 实现
+/// @brief 会话外号存储读取适配器 - 实现
 
 #include <infrastructure/NumericTypes.hpp>
 #include <workflow/agent/memory/MemoryManager.hpp>

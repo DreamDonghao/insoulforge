@@ -25,6 +25,7 @@
 #include <workflow/agent/llm/prompts/PromptService.hpp>
 #include <workflow/agent/memory/MemoryManager.hpp>
 #include <workflow/agent/memory/MemoryStore.hpp>
+#include <workflow/agent/memory/LongTermMemoryStore.hpp>
 #include <workflow/agent/memory/PersonMemoryStore.hpp>
 #include <workflow/agent/memory/affinity/AffinityStore.hpp>
 #include <workflow/agent/memory/maintenance/MemoryMaintenanceCoordinator.hpp>
@@ -225,6 +226,7 @@ namespace {
         Success,
         ExtractFailure,
         ReconcileFailure,
+        OutputEmbeddingFailure,
         ManyShortTerm,
         InvalidSessionMemory,
         EventOnly,
@@ -244,9 +246,10 @@ namespace {
     };
 
     auto sessionMemory(const bool legacy = false) -> json {
-        return {{"aliases", {{{"qq", "11"}, {"names", {"阿梨"}}}}},
-          {"recent_events", {"正在组织周末联机，时间尚未确定"}},
-          {"legacy_entries", legacy ? json::array({"原记忆"}) : json::array()}};
+        json result = {{"aliases", {{{"qq", "11"}, {"names", {"阿梨"}}}}}};
+        if (legacy)
+            result["legacy_entries"] = {"原记忆"};
+        return result;
     }
 
     void require(const bool condition, const char *message) {
@@ -405,7 +408,7 @@ namespace {
             const auto emptyBefore = requests.load();
             require(co_await MemoryMaintenanceCoordinator::process(database, 100, original, json::array()),
               "empty results were treated as failure");
-            require(requests.load() - emptyBefore == 2 && AffinityStore::getAffinityMap()[22] == 3 &&
+            require(requests.load() - emptyBefore == 1 && AffinityStore::getAffinityMap()[22] == 3 &&
                       PersonMemoryStore::getForSenders(original) == profiles &&
                       json::parse(MemoryStore::getShortTermMemory(100)) == sessionMemory(true),
               "empty person extraction skipped session summary or changed global state");
@@ -424,40 +427,20 @@ namespace {
                       privateProfiles[0]["pending_entries"][1]["source_session"] == std::to_string(privateId),
               "private entries were not globally shared or altered affinity");
 
-            config.embedding.baseUrl = endpoint;
-            config.embedding.path = "/embedding-fixture";
-            config.embedding.model = "fixture";
             mode.store(Mode::EventOnly);
-            const auto eventMessages = json::array(
-              {{{"sender", {{"qq", "11"}}}, {"segments", {{{"type", "text"}, {"text", "联机改到周六晚上"}}}}}});
-            require(co_await MemoryMaintenanceCoordinator::process(database, 100, eventMessages, json::array()),
-              "event-only summary failed or attempted unrelated long-term work");
-            require(json::parse(MemoryStore::getShortTermMemory(100))["recent_events"][0] == "联机已定周六晚上" &&
-                      PersonMemoryStore::getForSenders(original) == privateProfiles &&
-                      AffinityStore::getAffinityMap()[22] == 5,
-              "session event did not update independently of global extraction");
-            config.embedding = {};
+            const auto eventBefore = requests.load();
+            require(co_await MemoryMaintenanceCoordinator::process(database, 100, original, json::array()),
+              "empty event extraction failed");
+            require(requests.load() - eventBefore == 1 &&
+                      json::parse(MemoryStore::getShortTermMemory(100)) == sessionMemory(true),
+              "empty extraction still generated a session event summary");
             mode.store(Mode::AliasCorrection);
-            const auto correction = json::array(
-              {{{"sender", {{"qq", "11"}}}, {"segments", {{{"type", "text"}, {"text", "以后只叫我摄影佬"}}}}}});
-            require(co_await MemoryMaintenanceCoordinator::process(database, 100, correction, json::array()),
+            require(co_await MemoryMaintenanceCoordinator::process(database, 100, original, json::array()),
               "alias correction failed");
-            const auto corrected = json::parse(MemoryStore::getShortTermMemory(100));
-            require(corrected["aliases"][0]["names"] == json::array({"摄影佬"}) &&
-                      corrected["recent_events"] == json::array({"联机已定周六晚上"}) &&
-                      PersonMemoryStore::getForSenders(original) == privateProfiles,
-              "alias correction affected unrelated events or global memory");
-            mode.store(Mode::EventRetired);
-            require(co_await MemoryMaintenanceCoordinator::process(database, 100,
-                      json::array({{{"sender", {{"qq", "11"}}},
-                        {"segments", {{{"type", "text"}, {"text", "联机已经结束，没有后续安排"}}}}}}),
-                      json::array()),
-              "completed event summary failed");
-            const auto retired = json::parse(MemoryStore::getShortTermMemory(100));
-            require(retired["recent_events"].empty() && retired["aliases"] == corrected["aliases"] &&
-                      PersonMemoryStore::getForSenders(original) == privateProfiles &&
-                      AffinityStore::getAffinityMap()[22] == 5,
-              "event retirement removed aliases or global state");
+            require(json::parse(MemoryStore::getShortTermMemory(100))["aliases"][0]["names"] == json::array({"摄影佬"}) &&
+                      MemoryStore::pendingLegacyEntries(MemoryStore::getShortTermMemory(100)) ==
+                        std::vector<std::string>{"原记忆"},
+              "alias correction lost deferred historical memory");
 
             mode.store(Mode::DuplicateMemory);
             const auto deduplicated = co_await MemoryMaintenanceService::prepare(100, original, json::array());
@@ -520,6 +503,7 @@ namespace {
                 chat.push_back(record);
             }
             const ChatRecordManager records(privateId, std::move(chat));
+            MemoryStore::updateShortTermMemory(privateId, sessionMemory().dump());
             const MemoryManager memory(privateId);
             const auto reply = co_await ExecutorAgent::execute(records, memory);
             require(
@@ -555,33 +539,67 @@ namespace {
             }
             registry.unregisterPlugin("contract.thinking");
             auto transitional = sessionMemory();
+            transitional["recent_events"] = {"旧事件"};
             transitional["legacy_entries"] = {"旧偏好一", "旧偏好二"};
             MemoryStore::updateShortTermMemory(600, transitional.dump());
+            MemoryStore::updateShortTermMemory(700, "小王喜欢摄影\n某人的职业尚未关联QQ\n");
             const auto beforeLegacy = PersonMemoryStore::getForSenders(original);
             mode.store(Mode::LegacyForget);
-            MemoryStore::updateShortTermMemory(700, "小王喜欢摄影\n某人的职业尚未关联QQ\n");
-            require(co_await MemoryMaintenanceCoordinator::process(database, 700, original, json::array()),
-              "initial legacy preference conversion failed");
-            require(json::parse(MemoryStore::getShortTermMemory(700))["legacy_entries"] ==
-                      json::array({"小王喜欢摄影", "某人的职业尚未关联QQ"}),
-              "initial conversion lost preferences or ambiguous legacy ownership");
-            require(co_await MemoryMaintenanceCoordinator::process(database, 600, original, json::array()),
-              "gradual legacy cleanup failed");
-            const auto afterLegacy = MemoryStore::getShortTermMemory(600);
-            require(json::parse(afterLegacy)["legacy_entries"] == json::array({"旧偏好二"}) &&
-                      PersonMemoryStore::getForSenders(original) == beforeLegacy,
-              "legacy cleanup removed unrelated legacy or global memory");
-            mode.store(Mode::LegacyInjection);
+            require(co_await MemoryMaintenanceCoordinator::process(database, 600, original, json::array()) &&
+                      MemoryStore::getShortTermMemory(600) == transitional.dump(),
+              "unconfigured embedding consumed historical memory");
+            config.embedding.baseUrl = endpoint;
+            config.embedding.path = "/embedding-fixture";
+            config.embedding.model = "fixture";
+            mode.store(Mode::OutputEmbeddingFailure);
             require(!(co_await MemoryMaintenanceCoordinator::process(database, 600, original, json::array())) &&
-                      MemoryStore::getShortTermMemory(600) == afterLegacy &&
+                      MemoryStore::getShortTermMemory(600) == transitional.dump() &&
                       PersonMemoryStore::getForSenders(original) == beforeLegacy,
-              "new information was allowed into legacy storage");
+              "failed migration consumed historical contents or committed person entries");
+            mode.store(Mode::LegacyForget);
+            for (const auto id: {600ULL, 700ULL}) {
+                require(co_await MemoryMaintenanceCoordinator::process(database, id, original, json::array()),
+                  "historical migration failed");
+                require(MemoryStore::pendingLegacyEntries(MemoryStore::getShortTermMemory(id)).empty() &&
+                          LongTermMemoryStore::countMemories(id) > 0,
+                  "historical contents were not converted into long-term memory");
+                const auto count = LongTermMemoryStore::countMemories(id);
+                const auto before = requests.load();
+                require(co_await MemoryMaintenanceCoordinator::process(database, id, original, json::array()) &&
+                          LongTermMemoryStore::countMemories(id) == count && requests.load() - before == 1,
+                  "historical migration ran more than once");
+            }
+            require(PersonMemoryStore::getForSenders(original) == beforeLegacy,
+              "historical session migration changed global person memory");
+
+            // Whole-set replacement: repeated recalls are deduplicated; only supplied old IDs disappear.
+            MemoryMaintenanceStore::apply(database, 800, {.longTerm = {
+              {.content = "11: 喜欢旧语言", .embedding = {1.0F, 0.0F}},
+              {.content = "11: 使用 C++", .embedding = {1.0F, 0.0F}},
+              {.content = "不相关的旧记忆", .embedding = {0.0F, 1.0F}}}});
+            const auto old = LongTermMemoryStore::listMemories(800, 10, 0);
+            mode.store(Mode::MemoryOnly);
+            require(co_await MemoryMaintenanceCoordinator::process(database, 800, original, json::array()),
+              "long-term replacement failed");
+            const auto replaced = LongTermMemoryStore::listMemories(800, 10, 0);
+            require(replaced.size() == 4 && std::ranges::all_of(old, [&](const auto &entry) {
+                      const bool retained = std::ranges::any_of(replaced, [&](const auto &next) { return next.id == entry.id; });
+                      return retained == (entry.content == "不相关的旧记忆");
+                    }),
+              "recalled old IDs survived or unrelated memory was removed");
+            const auto snapshot = MemoryStore::getShortTermMemory(800);
+            for (const auto failure: {Mode::ReconcileFailure, Mode::InvalidSessionMemory, Mode::LegacyInjection,
+                   Mode::OutputEmbeddingFailure}) {
+                mode.store(failure);
+                require(!(co_await MemoryMaintenanceCoordinator::process(database, 800, original, json::array())) &&
+                          LongTermMemoryStore::listMemories(800, 10, 0).size() == replaced.size() &&
+                          MemoryStore::getShortTermMemory(800) == snapshot,
+                  "failed reconciliation deleted existing memory");
+            }
             mode.store(Mode::ManyShortTerm);
-            require(co_await MemoryMaintenanceCoordinator::process(database, 500, original, json::array()),
-              "large short-term memory result failed");
-            const auto storedShortTerm = json::parse(MemoryStore::getShortTermMemory(500));
-            require(storedShortTerm["recent_events"].size() == 20 && storedShortTerm["recent_events"][19] == "event 19",
-              "short-term memory was truncated to the former 15-entry limit");
+            require(co_await MemoryMaintenanceCoordinator::process(database, 500, original, json::array()) &&
+                      LongTermMemoryStore::countMemories(500) == 20,
+              "long-term entries were truncated to a former short-term limit");
             co_await testPersonConsolidation(endpoint);
             co_await testPersonNames(endpoint, nameRequests);
             exitCode = 0;
@@ -692,10 +710,12 @@ auto main() -> int {
             });
       }, {drogon::Post});
     drogon::app().registerHandler("/embedding-fixture",
-      [](const drogon::HttpRequestPtr &, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+      [&mode](const drogon::HttpRequestPtr &request, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
           auto reply = drogon::HttpResponse::newHttpResponse();
           reply->setContentTypeCode(drogon::CT_APPLICATION_JSON);
-          reply->setBody(R"({"data":[]})");
+          const auto input = json::parse(request->body())["input"][0].get<std::string>();
+          const bool failed = mode.load() == Mode::Success || input == "prepared embedding failure";
+          reply->setBody(failed ? R"({"data":[]})" : R"({"data":[{"embedding":[1.0,0.0]}]})");
           callback(reply);
       },
       {drogon::Post});
@@ -707,7 +727,7 @@ auto main() -> int {
           const auto prompt = body["messages"][0]["content"].get<std::string>();
           const bool extraction = prompt.find("人物记忆提取器") != std::string::npos;
           const auto current = mode.load();
-          if (current == Mode::Projection) {
+          if (current == Mode::Projection && extraction) {
               const auto input = body["messages"][1]["content"].get<std::string>();
               const std::string heading = extraction ? "=== 待提取消息 ===\n" : "=== 待总结消息 ===\n";
               const std::string contextHeading = "\n=== 补充上下文（不得提取） ===\n";
@@ -739,47 +759,35 @@ auto main() -> int {
           if ((extraction && current == Mode::ExtractFailure) || (!extraction && current == Mode::ReconcileFailure)) {
               output = "invalid result";
           } else if (!extraction) {
-              const auto input = body["messages"][1]["content"].get<std::string>();
-              if (input.find("=== 待总结消息 ===") == std::string::npos ||
-                  input.find("=== 补充上下文（不得提取） ===") == std::string::npos ||
-                  prompt.find("新消息的个人喜好") == std::string::npos ||
-                  (current == Mode::EventOnly && input.find("联机改到周六晚上") == std::string::npos) ||
-                  (current == Mode::AliasCorrection && input.find("以后只叫我摄影佬") == std::string::npos)) {
-                  output = "missing session summary inputs";
-              } else if (current == Mode::InvalidSessionMemory) {
-                  output = R"({"shortTerm":{"aliases":[],"recent_events":"invalid"},"longTerm":[]})";
-              } else if (current == Mode::ManyShortTerm) {
-                  json entries = json::array();
-                  for (int index = 0; index < 20; ++index)
-                      entries.push_back("event " + std::to_string(index));
-                  output = prompt.find("最多") == std::string::npos
-                             ? json{{"shortTerm", {{"aliases", json::array()}, {"recent_events", std::move(entries)}}},
-                                 {"longTerm", json::array()}}
-                                 .dump()
-                             : "obsolete prompt limit";
-              } else {
-                  auto shortTerm = sessionMemory();
-                  shortTerm.erase("legacy_entries");
-                  if (current == Mode::LegacyForget)
-                      shortTerm["legacy_entries"] = {"旧偏好二"};
-                  if (current == Mode::LegacyInjection)
-                      shortTerm["legacy_entries"] = {"新喜好"};
-                  if (current == Mode::EventOnly || current == Mode::AliasCorrection) {
-                      shortTerm["recent_events"] = {"联机已定周六晚上"};
-                  }
-                  if (current == Mode::AliasCorrection)
-                      shortTerm["aliases"][0]["names"] = {"摄影佬"};
-                  if (current == Mode::EventRetired) {
-                      shortTerm["aliases"][0]["names"] = {"摄影佬"};
-                      shortTerm["recent_events"] = json::array();
-                  }
-                  output = json{{"shortTerm", std::move(shortTerm)}, {"longTerm", json::array()}}.dump();
+              const auto input = json::parse(body["messages"][1]["content"].get<std::string>());
+              auto aliases = input["aliases"];
+              if (current == Mode::Success)
+                  aliases = sessionMemory()["aliases"];
+              if (current == Mode::AliasCorrection)
+                  aliases = {{{"qq", "11"}, {"names", {"摄影佬"}}}};
+              auto entries = json::array();
+              if (prompt.find("向量服务未配置") == std::string::npos) {
+                  for (const auto *key: {"pending_entries", "legacy_entries", "recalled_memories"})
+                      for (const auto &entry: input[key])
+                          entries.push_back(entry);
               }
+              if (current == Mode::InvalidSessionMemory)
+                  aliases = "invalid";
+              if (current == Mode::LegacyInjection)
+                  entries = {42};
+              if (current == Mode::OutputEmbeddingFailure)
+                  entries = {"prepared embedding failure"};
+              if (current == Mode::ManyShortTerm) {
+                  entries = json::array();
+                  for (int i = 0; i < 20; ++i)
+                      entries.push_back("entry " + std::to_string(i));
+              }
+              output = json{{"aliases", std::move(aliases)}, {"longTerm", std::move(entries)}}.dump();
           } else {
               json extracted = {{"memories", json::array()}, {"affinity_changes", json::array()}};
               if (current != Mode::Empty && current != Mode::Projection && current != Mode::AffinityOnly &&
-                  current != Mode::EventOnly && current != Mode::AliasCorrection && current != Mode::EventRetired &&
-                  current != Mode::LegacyForget && current != Mode::LegacyInjection) {
+                  current != Mode::EventOnly && current != Mode::EventRetired &&
+                  current != Mode::LegacyForget) {
                   extracted["memories"].push_back({{"qq", "11"}, {"entries", {"喜欢编程"}}});
               }
               if (current != Mode::Empty && current != Mode::Projection && current != Mode::MemoryOnly &&
@@ -787,6 +795,8 @@ auto main() -> int {
                   current != Mode::EventRetired && current != Mode::LegacyForget && current != Mode::LegacyInjection) {
                   extracted["affinity_changes"].push_back({{"qq", "22"}, {"delta", 2}});
               }
+              if (current == Mode::AliasCorrection)
+                  extracted["memories"][0]["entries"] = {"以后只叫我摄影佬"};
               if (current == Mode::InvalidQq)
                   extracted["memories"][0]["qq"] = "self";
               if (current == Mode::ContextOnlyQq)
@@ -824,7 +834,7 @@ auto main() -> int {
           bool valid = keys == expected && messages.back()["role"] == "system" && state.size() == 1 &&
                        state["execution_state"]["current_round"] == (isPrivate ? executorRequests : 1) &&
                        context["person_memories"].size() == 1 && context["person_memories"][0]["qq"] == "11" &&
-                       context["person_memories"][0]["pending_entries"].size() == 2 &&
+                       context["person_memories"][0]["pending_entries"].size() == 3 &&
                        context["shared_conversations"].empty();
           valid = valid && context["session_memory"] == sessionMemory() &&
               (isPrivate ? context["current_session"]["qq"] == 22 :

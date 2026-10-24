@@ -86,6 +86,19 @@ const saveLLMConfig = async (): Promise<void> => {
           <input v-model="llmConfig.model" class="form-input" placeholder="gpt-4" type="text">
         </div>
       </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">请求超时（秒）</label>
+          <input v-model.number="llmConfig.timeoutSeconds" class="form-input" type="number" min="1" max="3600" step="1">
+          <p class="form-hint">每次尝试独立计时，保存后对后续请求生效。</p>
+        </div>
+        <div class="form-group">
+          <label class="form-label">失败重试次数</label>
+          <input v-model.number="llmConfig.maxRetries" class="form-input" type="number" min="0" max="10" step="1">
+          <p class="form-hint">不包含首次请求；0 表示不重试，每次重试间隔 1 秒。</p>
+        </div>
+      </div>
+      <p v-if="name === 'imageGeneration'" class="form-hint">生图超时不代表服务端未完成，开启重试可能重复生成并计费，默认不重试。</p>
     </div>
     <div v-if="hasParameters" class="config-section">
       <h3 class="section-title">{{ name === 'jev' ? '决策参数' : '生成参数' }}</h3>

@@ -28,24 +28,28 @@ namespace insoulforge::ConfigStore {
             return instance;
         }
 
-        auto defaultChatConfig(const i32 maxTokens, const f64 temperature, const f64 topP) -> json {
+        auto defaultChatConfig(const i32 maxTokens, const f64 temperature, const f64 topP,
+          const i32 timeoutSeconds = 90, const i32 maxRetries = 3) -> json {
             return {{"apiKey", ""}, {"baseUrl", ""}, {"path", "/chat/completions"}, {"model", ""},
-              {"maxTokens", maxTokens}, {"temperature", temperature}, {"topP", topP}, {"reasoningEffort", ""}};
+              {"maxTokens", maxTokens}, {"temperature", temperature}, {"topP", topP}, {"reasoningEffort", ""},
+              {"timeoutSeconds", timeoutSeconds}, {"maxRetries", maxRetries}};
         }
 
         auto defaultEmbeddingConfig() -> json {
-            return {{"apiKey", ""}, {"baseUrl", ""}, {"path", "/embeddings"}, {"model", ""}};
+            return {{"apiKey", ""}, {"baseUrl", ""}, {"path", "/embeddings"}, {"model", ""},
+              {"timeoutSeconds", 30}, {"maxRetries", 0}};
         }
 
         auto defaultImageGenerationConfig() -> json {
             return {{"apiKey", ""}, {"baseUrl", "https://api.openai.com/v1"}, {"path", "/images/generations"},
-              {"model", "gpt-image-2.5-flare"}, {"apiType", "openai"}, {"editPath", "/images/edits"}};
+              {"model", "gpt-image-2.5-flare"}, {"apiType", "openai"}, {"editPath", "/images/edits"},
+              {"timeoutSeconds", 180}, {"maxRetries", 0}};
         }
 
         /// @brief 默认使用 OpenRouter Decisions API；密钥留空时不启用 Jev。
         auto defaultJevConfig() -> json {
             return {{"apiKey", ""}, {"baseUrl", "https://openrouter.ai/api/alpha"}, {"path", "/decisions"},
-              {"model", "~typesafe/jev-latest"}, {"minConfidence", 0.6}};
+              {"model", "~typesafe/jev-latest"}, {"minConfidence", 0.6}, {"timeoutSeconds", 10}, {"maxRetries", 0}};
         }
 
         auto defaultConfig() -> json {
@@ -53,8 +57,8 @@ namespace insoulforge::ConfigStore {
               {"llm",
                 {{"router", defaultChatConfig(100, 0.3, 0.9)}, {"executor", defaultChatConfig(150, 0.7, 0.9)},
                   {"executorFallback", defaultChatConfig(150, 0.7, 0.9)},
-                  {"executorThinking", defaultChatConfig(512, 0.7, 0.9)}, {"image", defaultChatConfig(1024, 0.7, 0.9)},
-                  {"imageGeneration", defaultImageGenerationConfig()}, {"memory", defaultChatConfig(4000, 0.4, 0.9)},
+                  {"executorThinking", defaultChatConfig(512, 0.7, 0.9)}, {"image", defaultChatConfig(1024, 0.7, 0.9, 90, 0)},
+                  {"imageGeneration", defaultImageGenerationConfig()}, {"memory", defaultChatConfig(4000, 0.4, 0.9, 180, 0)},
                   {"embedding", defaultEmbeddingConfig()}, {"jev", defaultJevConfig()}}},
               {"qq", {{"accessToken", ""}, {"selfQQNumber", 0}, {"oneBotTransport", "websocket"},
                        {"qqHttpHost", "http://127.0.0.1:3000"}, {"qqWebSocketHost", "ws://127.0.0.1:3001"},
@@ -121,6 +125,9 @@ namespace insoulforge::ConfigStore {
             bool changed = false;
             for (const auto &[key, defaultValue]: defaults.items()) {
                 auto value = config.find(key);
+                // 显式填写的请求控制参数必须通过严格校验，不能悄悄修复错误类型。
+                if (value != config.end() && (key == "timeoutSeconds" || key == "maxRetries"))
+                    continue;
                 if (value == config.end() || !compatibleType(*value, defaultValue)) {
                     config[key] = defaultValue;
                     changed = true;
@@ -154,6 +161,8 @@ namespace insoulforge::ConfigStore {
                 memoryConfig["maxTokens"] = maxTokens > 0 ? maxTokens : 4000;
                 memoryConfig["temperature"] = 0.4;
                 memoryConfig["topP"] = 0.9;
+                memoryConfig["timeoutSeconds"] = 180;
+                memoryConfig["maxRetries"] = 0;
                 (*llm)["memory"] = std::move(memoryConfig);
                 changed = true;
             }
@@ -344,6 +353,10 @@ namespace insoulforge::ConfigStore {
         json persistedConfig = config;
         persistedConfig.erase("name");
         persistedConfig.erase("top_P");
+        for (const auto *key: {"timeoutSeconds", "maxRetries"}) {
+            if (!persistedConfig.contains(key) && atOrNull(llm, name.c_str()).contains(key))
+                persistedConfig[key] = llm[name][key];
+        }
         if (name == "imageGeneration") {
             const auto &current = atOrNull(llm, "imageGeneration");
             if (!persistedConfig.contains("apiType"))

@@ -1,5 +1,5 @@
 /// @file MemoryStore.cpp
-/// @brief 短期记忆存储 - 实现
+/// @brief 会话外号与历史内容存储 - 实现
 
 #include <algorithm>
 #include <unordered_map>
@@ -15,10 +15,10 @@
 namespace insoulforge::MemoryStore {
     auto normalizeSessionMemory(const json &value) -> std::optional<json> {
         if (!value.is_object() || !atOrNull(value, "aliases").is_array() ||
-            !atOrNull(value, "recent_events").is_array() ||
+            (value.contains("recent_events") && !value["recent_events"].is_array()) ||
             (value.contains("legacy_entries") && !value["legacy_entries"].is_array()))
             return std::nullopt;
-        json result = {{"aliases", json::array()}, {"recent_events", json::array()}, {"legacy_entries", json::array()}};
+        json result = {{"aliases", json::array()}};
         std::unordered_map<u64, size_t> aliasIndices;
         for (const auto &alias: value["aliases"]) {
             const auto qq = parseUInt64(getStr(alias, "qq"));
@@ -40,6 +40,9 @@ namespace insoulforge::MemoryStore {
             }
         }
         for (const auto *key: {"recent_events", "legacy_entries"}) {
+            if (!value.contains(key))
+                continue;
+            result[key] = json::array();
             std::unordered_set<std::string> seen;
             for (const auto &entry: atOrNull(value, key)) {
                 if (!entry.is_string())
@@ -56,14 +59,37 @@ namespace insoulforge::MemoryStore {
         json parsed;
         if (tryParseJson(memory, parsed)) {
             if (auto structured = normalizeSessionMemory(parsed))
-                return std::move(*structured);
+                return {{"aliases", std::move((*structured)["aliases"])}};
         }
-        json lines = json::array();
+        return {{"aliases", json::array()}};
+    }
+
+    auto pendingLegacyEntries(const std::string &memory) -> std::vector<std::string> {
+        std::vector<std::string> lines;
+        std::unordered_set<std::string> seen;
+        const auto append = [&](const std::string &text) {
+            auto value = trim(text);
+            if (!value.empty() && seen.insert(value).second)
+                lines.push_back(std::move(value));
+        };
+        json parsed;
+        if (tryParseJson(memory, parsed)) {
+            if (auto structured = normalizeSessionMemory(parsed)) {
+                for (const auto *key: {"recent_events", "legacy_entries"})
+                    for (const auto &entry: atOrNull(*structured, key))
+                        append(entry.get<std::string>());
+                return lines;
+            }
+            if (parsed.is_array() && std::ranges::all_of(parsed, [](const json &entry) { return entry.is_string(); })) {
+                for (const auto &entry: parsed)
+                    append(entry.get<std::string>());
+                return lines;
+            }
+        }
         for (size_t start = 0; start < memory.size();) {
             const auto end = memory.find('\n', start);
             const auto stop = end == std::string::npos ? memory.size() : end;
-            if (auto line = trim(memory.substr(start, stop - start)); !line.empty())
-                lines.push_back(std::move(line));
+            append(memory.substr(start, stop - start));
             start = stop + 1;
         }
         return lines;

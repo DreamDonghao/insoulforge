@@ -642,7 +642,7 @@ onUnmounted(() => {
                 </td>
                 <td class="session-actions">
                   <button class="btn btn-secondary btn-sm"
-                          @click.stop="viewMemory(sessionKey(group), sessionLabel(group))">短期记忆
+                          @click.stop="viewMemory(sessionKey(group), sessionLabel(group))">会话外号
                   </button>
                   <button class="btn btn-secondary btn-sm" style="margin-left: 6px;"
                           @click.stop="viewLongTermMemory(sessionKey(group), sessionLabel(group))">长期记忆
@@ -788,7 +788,7 @@ onUnmounted(() => {
     <div v-if="memoryGroupId" class="modal-overlay" @click.self="closeMemory">
       <div class="modal-content">
         <div class="modal-header">
-          <h2>{{ memoryGroupName }} - 短期记忆</h2>
+          <h2>{{ memoryGroupName }} - 会话外号</h2>
           <button class="btn btn-secondary btn-sm" @click="closeMemory">关闭</button>
         </div>
         <div class="modal-body">
@@ -799,7 +799,7 @@ onUnmounted(() => {
               v-else
               v-model="groupMemory"
               class="memory-editor"
-              placeholder="暂无短期记忆，可在此编辑..."
+              placeholder='{"aliases": [{"qq": "123456", "names": ["外号"]}]}'
           ></textarea>
         </div>
         <div class="modal-footer">

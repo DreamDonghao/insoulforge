@@ -5,6 +5,7 @@
 #pragma once
 
 #include <optional>
+#include <expected>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -38,6 +39,13 @@ namespace insoulforge::LlmClient {
     /// @brief 判断 API 配置是否具备发起请求所需的地址、路径和模型名。
     [[nodiscard]] auto isConfigured(const LLMApiConfig &api) -> bool;
 
+    /// @brief 按模型配置快照发送 POST 请求；仅网络失败及 HTTP 429/500/503 重试，间隔 1 秒。
+    /// @note 超时与重试参数只在本地使用，调用方负责业务响应校验与用量记录。
+    auto sendModelRequest(std::string label, LLMApiConfig api, json body,
+      std::optional<u64> sessionId = std::nullopt, bool traceResponse = true,
+      std::shared_ptr<MaintenanceRequestControl> control = {})
+      -> drogon::Task<std::expected<drogon::HttpResponsePtr, std::string>>;
+
     /// @brief 构建 OpenAI 兼容 chat 请求体（model/messages/采样参数；reasoningEffort 非空才附带）
     /// @param tools 工具定义；非 null 时附带 tools 字段
     auto buildChatRequestBody(const LLMApiConfig &api, const LLMModelParams &params, json messages, json tools = {})
@@ -56,8 +64,8 @@ namespace insoulforge::LlmClient {
     /// @param tools 工具定义；null 表示不附带
     /// @param sessionId 会话 ID
     /// @return 校验通过的完整响应 JSON；不可恢复错误或重试耗尽时返回 std::nullopt
-    auto requestChat(std::string label, std::string usageRole, const LLMApiConfig &apiConfig,
-      const LLMModelParams &params, json messages, json tools = {}, u64 sessionId = 0)
+    auto requestChat(std::string label, std::string usageRole, LLMApiConfig apiConfig,
+      LLMModelParams params, json messages, json tools = {}, u64 sessionId = 0)
       -> drogon::Task<std::optional<json>>;
 
     /// @brief 使用 Memory 模型配置执行记忆或好感度维护请求。

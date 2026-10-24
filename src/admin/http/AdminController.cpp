@@ -787,7 +787,7 @@ auto AdminController::updateSessionMemory(HttpRequestPtr req, std::function<void
         json parsed;
         const auto structured = tryParseJson(memory, parsed) ? MemoryStore::normalizeSessionMemory(parsed) : std::nullopt;
         if (!structured) {
-            auto response = jsonResponse(AdminResponse::errorJson("短期记忆 JSON 需要有效的 aliases、recent_events 及可选 legacy_entries 数组"));
+            auto response = jsonResponse(AdminResponse::errorJson("会话外号 JSON 需要有效的 aliases 数组；历史 recent_events、legacy_entries 如存在也必须为字符串数组"));
             response->setStatusCode(drogon::k400BadRequest);
             callback(response);
             co_return;

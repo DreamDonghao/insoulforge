@@ -25,7 +25,7 @@ namespace insoulforge {
                   "accessToken", "oneBotTransport", "qqHttpHost", "qqWebSocketHost", "botName"};
                 constexpr std::array integerFields{"maxTokens", "contextWindowLimit", "memorySummaryTriggerCount",
                   "memorySummaryBatchSize", "memorySummaryContextCount", "routerWindowTriggerCount",
-                  "routerWindowKeepCount", "maxToolRounds", "sharedConversationMessageCount"};
+                  "routerWindowKeepCount", "maxToolRounds", "sharedConversationMessageCount", "timeoutSeconds", "maxRetries"};
                 if (std::ranges::find(integerFields, key) != integerFields.end()) {
                     if (!field.is_number_integer() ||
                         (field.is_number_unsigned()
@@ -35,6 +35,10 @@ namespace insoulforge {
                         return std::unexpected(ConfigError{
                           .type = ConfigErrorType::InvalidArgument, .message = key + " 必须是 i32 范围内的整数"});
                     }
+                    if ((key == "timeoutSeconds" && (field < 1 || field > 3600)) ||
+                        (key == "maxRetries" && (field < 0 || field > 10)))
+                        return std::unexpected(ConfigError{
+                          .type = ConfigErrorType::InvalidArgument, .message = key + " 超出允许范围"});
                 } else if (key == "apiType") {
                     if (!field.is_string() || (field != "openai" && field != "openrouter"))
                         return std::unexpected(ConfigError{.type = ConfigErrorType::InvalidArgument,
@@ -87,6 +91,8 @@ namespace insoulforge {
             apiConfig.baseUrl = trim(getStr(cfg, "baseUrl"));
             apiConfig.path = trim(getStr(cfg, "path"));
             apiConfig.model = trim(getStr(cfg, "model"));
+            apiConfig.timeoutSeconds = getInt(cfg, "timeoutSeconds");
+            apiConfig.maxRetries = getInt(cfg, "maxRetries");
             if (cfg.contains("reasoningEffort")) {
                 apiConfig.reasoningEffort = getStr(cfg, "reasoningEffort");
             }

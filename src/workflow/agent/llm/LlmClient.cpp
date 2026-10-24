@@ -12,15 +12,6 @@
 
 namespace insoulforge {
     namespace {
-        /// @brief 网络异常/临时性 HTTP 错误的最大重试次数
-        constexpr i32 kMaxRetries = 3;
-
-        /// @brief 重试间隔
-        constexpr std::chrono::seconds kRetryDelay{1};
-
-        /// @brief LLM 请求超时（秒）
-        constexpr f64 kLlmTimeoutSeconds = 90.0;
-
         /// @brief 日志中错误响应体的截断长度
         constexpr size_t kErrorBodyMaxChars = 500;
 
@@ -29,7 +20,7 @@ namespace insoulforge {
 
         /// @brief 通用 API 请求函数
         auto requestStr(json messages, const LLMApiConfig api, const LLMModelParams params, const std::string role,
-          const std::optional<u64> sessionId, const f64 timeoutSeconds,
+          const std::optional<u64> sessionId,
           const std::shared_ptr<LlmClient::MaintenanceRequestControl> control)
           -> drogon::Task<std::optional<std::string>> {
             if (control && control->isCancelled())
@@ -43,8 +34,7 @@ namespace insoulforge {
                 co_return std::nullopt;
             }
             json body = LlmClient::buildChatRequestBody(api, params, std::move(messages));
-            const auto resp = co_await HttpUtil::send(
-              "LLM", api.baseUrl, api.path, drogon::Post, std::move(body), api.apiKey, timeoutSeconds, sessionId);
+            const auto resp = co_await LlmClient::sendModelRequest("LLM", api, std::move(body), sessionId, true, control);
             if (!resp || (control && control->isCancelled())) {
                 co_return std::nullopt;
             }
@@ -125,41 +115,46 @@ namespace insoulforge {
             return parsed;
         }
 
-        auto requestChat(std::string label, std::string usageRole, const LLMApiConfig &apiConfig,
-          const LLMModelParams &params, json messages, json tools, const u64 sessionId)
+        auto sendModelRequest(std::string label, LLMApiConfig api, json body,
+          const std::optional<u64> sessionId, const bool traceResponse,
+          std::shared_ptr<MaintenanceRequestControl> control)
+          -> drogon::Task<std::expected<drogon::HttpResponsePtr, std::string>> {
+            for (i32 attempt = 0;; ++attempt) {
+                if (control && control->isCancelled())
+                    co_return std::unexpected("模型请求已取消");
+                auto response = co_await HttpUtil::send(label, api.baseUrl, api.path, drogon::Post, body,
+                  api.apiKey, api.timeoutSeconds, sessionId, traceResponse);
+                if (control && control->isCancelled())
+                    co_return std::unexpected("模型请求已取消");
+                if (attempt >= api.maxRetries ||
+                    (response && !isRetryableStatus(static_cast<i32>((*response)->getStatusCode()))))
+                    co_return response;
+                Logger::warn(sessionId.value_or(0), label,
+                  fmt::format("请求失败，第 {}/{} 次重试", attempt + 1, api.maxRetries));
+                co_await drogon::sleepCoro(drogon::app().getLoop(), std::chrono::seconds{1});
+            }
+        }
+
+        auto requestChat(std::string label, std::string usageRole, LLMApiConfig apiConfig,
+          LLMModelParams params, json messages, json tools, const u64 sessionId)
           -> drogon::Task<std::optional<json>> {
             if (!isConfigured(apiConfig)) {
                 Logger::warn(sessionId, label, "未配置服务地址、请求路径或模型名，跳过请求");
                 co_return std::nullopt;
             }
-
             const json body = buildChatRequestBody(apiConfig, params, std::move(messages), std::move(tools));
-
-            for (i32 attempt = 0;; ++attempt) {
-                const auto resp = co_await HttpUtil::send(label, apiConfig.baseUrl, apiConfig.path, drogon::Post, body,
-                  apiConfig.apiKey, kLlmTimeoutSeconds, sessionId);
-
-                if (!resp) {
-                    Logger::warn(sessionId, label, "网络异常");
-                } else if (const auto respJson = validChatJson(*resp)) {
-                    logUsage(*respJson, apiConfig.model, usageRole, sessionId);
-                    co_return respJson;
-                } else {
-                    const i32 status = static_cast<i32>((*resp)->getStatusCode());
-                    const std::string respBody = std::string((*resp)->getBody()).substr(0, kErrorBodyMaxChars);
-                    Logger::error(sessionId, label, fmt::format("请求失败: status={} body={}", status, respBody));
-                    if (!isRetryableStatus(status)) {
-                        co_return std::nullopt; // 不可恢复的错误（鉴权、参数等）
-                    }
-                    Logger::warn(sessionId, label, "临时性错误");
-                }
-
-                if (attempt >= kMaxRetries) {
-                    co_return std::nullopt; // 重试耗尽
-                }
-                Logger::warn(sessionId, label, fmt::format("第 {}/{} 次重试", attempt + 1, kMaxRetries));
-                co_await drogon::sleepCoro(drogon::app().getLoop(), kRetryDelay);
+            const auto resp = co_await sendModelRequest(label, apiConfig, body, sessionId);
+            if (!resp) {
+                Logger::warn(sessionId, label, "网络异常");
+                co_return std::nullopt;
             }
+            if (const auto respJson = validChatJson(*resp)) {
+                logUsage(*respJson, apiConfig.model, usageRole, sessionId);
+                co_return respJson;
+            }
+            Logger::error(sessionId, label, fmt::format("请求失败: status={} body={}",
+              static_cast<i32>((*resp)->getStatusCode()), std::string((*resp)->getBody()).substr(0, kErrorBodyMaxChars)));
+            co_return std::nullopt;
         }
     } // namespace LlmClient
 
@@ -172,12 +167,12 @@ namespace insoulforge {
             params.maxTokens = *maxTokens;
         }
         co_return co_await requestStr(
-          std::move(messages), config.memory, params, std::move(usageRole), sessionId, 180.0, std::move(control));
+          std::move(messages), config.memory, params, std::move(usageRole), sessionId, std::move(control));
     }
 
     auto LlmClient::requestEmbedding(std::string text, const std::optional<u64> sessionId)
       -> drogon::Task<std::optional<std::vector<f32>>> {
-        const auto &config = Config::instance().embedding;
+        const auto config = Config::instance().embedding;
         if (!isConfigured(config)) {
             Logger::debug(0, "LLM", fmt::format("Embedding 未配置，跳过向量化"));
             co_return std::nullopt;
@@ -187,8 +182,7 @@ namespace insoulforge {
         body["model"] = config.model;
         body["input"].push_back(std::move(text));
 
-        const auto resp = co_await HttpUtil::send(
-          "Embedding", config.baseUrl, config.path, drogon::Post, std::move(body), config.apiKey, 30.0, sessionId);
+        const auto resp = co_await LlmClient::sendModelRequest("Embedding", config, std::move(body), sessionId);
         if (!resp) {
             co_return std::nullopt;
         }

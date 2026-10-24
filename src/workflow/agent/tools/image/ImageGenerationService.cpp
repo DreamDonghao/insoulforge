@@ -5,7 +5,7 @@
 #include <string_view>
 
 #include <infrastructure/config/Config.hpp>
-#include <infrastructure/http/HttpUtil.hpp>
+#include <workflow/agent/llm/LlmClient.hpp>
 #include <workflow/agent/tools/image/ImageGenerationService.hpp>
 
 namespace insoulforge::ImageGenerationService {
@@ -101,8 +101,9 @@ namespace insoulforge::ImageGenerationService {
             }
         }
         // 响应可能包含数十 MB 的图片数据；调试记录只保留非图片字段。
-        const auto response = co_await HttpUtil::send("ImageGeneration", config.baseUrl, path, drogon::Post,
-          request, config.apiKey, 180.0, sessionId, false);
+        LLMApiConfig api = config;
+        api.path = path;
+        const auto response = co_await LlmClient::sendModelRequest("ImageGeneration", api, request, sessionId, false);
         if (!response) {
             throw std::runtime_error("图片生成接口请求失败: " + response.error().substr(0, 500));
         }

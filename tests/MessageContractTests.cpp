@@ -1300,7 +1300,7 @@ namespace {
         };
         check(noTaskTables(), "fresh schema has no maintenance queues", kTestName);
         const insoulforge::PreparedLongTermMemory longTerm{
-          .content = "Alice 喜欢 C++", .embedding = {0.1F, 0.2F}, .replacedIds = {}};
+          .content = "Alice 喜欢 C++", .embedding = {0.1F, 0.2F}};
         insoulforge::MemoryMaintenanceStore::apply(
           database, 100, {.shortTerm = "近期状态", .longTerm = {longTerm},
             .personEntries = {{11, "喜欢 C++"}}, .affinity = {{11, 3}}});
@@ -1326,6 +1326,19 @@ namespace {
             failed = true;
         }
         check(failed && resultsPreserved(), "affinity failure rolls back all memory writes", kTestName);
+        // 删除旧记忆后发生的写入失败也必须恢复原 ID，不能只回滚新条目。
+        const auto existingId = insoulforge::LongTermMemoryStore::listMemories(100, 1, 0).front().id;
+        failed = false;
+        try {
+            insoulforge::MemoryMaintenanceStore::apply(database, 100,
+              {.shortTerm = "不能保存", .longTerm = {longTerm}, .replacedLongTermIds = {existingId},
+                .affinity = {{12, 5}}});
+        } catch (const insoulforge::DbError &) {
+            failed = true;
+        }
+        check(failed && resultsPreserved() &&
+                insoulforge::LongTermMemoryStore::listMemories(100, 1, 0).front().id == existingId,
+          "failed commit restores deleted old IDs and original session memory", kTestName);
         check(sqlite3_exec(database.handle(), "DROP TRIGGER reject_affinity", nullptr, nullptr, nullptr) == SQLITE_OK,
           "removes failure fixture", kTestName);
         insoulforge::MemoryMaintenanceStore::apply(database, 100, {});
@@ -1348,14 +1361,19 @@ namespace {
         const auto oldEntries = insoulforge::LongTermMemoryStore::listMemories(200, 1, 0);
         const i64 sourceId = oldEntries.front().id;
         const insoulforge::PreparedLongTermMemory replacementA{
-          .content = "Alice 喜欢编程", .embedding = {0.1F, 0.2F}, .replacedIds = {sourceId, sourceId}};
+          .content = "Alice 喜欢编程", .embedding = {0.1F, 0.2F}};
         const insoulforge::PreparedLongTermMemory replacementB{
-          .content = "Alice 使用 C++", .embedding = {0.2F, 0.3F}, .replacedIds = {sourceId}};
-        insoulforge::MemoryMaintenanceStore::apply(database, 200, {.longTerm = {replacementA, replacementB}});
+          .content = "Alice 使用 C++", .embedding = {0.2F, 0.3F}};
+        insoulforge::MemoryMaintenanceStore::apply(database, 200, {.longTerm = {replacementA, replacementB}, .replacedLongTermIds = {sourceId, sourceId}});
         const auto replacements = insoulforge::LongTermMemoryStore::listMemories(200, 10, 0);
         check(replacements.size() == 2 &&
                 std::ranges::none_of(replacements, [sourceId](const auto &entry) { return entry.id == sourceId; }),
           "store deduplicates replacement IDs across all new memories", kTestName);
+        // 外号吸收了全部信息时，允许空向量结果独立删除旧条目；删除必须限定当前会话。
+        insoulforge::MemoryMaintenanceStore::apply(database, 200,
+          {.replacedLongTermIds = {replacements[0].id, replacements[1].id, existingId}});
+        check(insoulforge::LongTermMemoryStore::countMemories(200) == 0 && resultsPreserved(),
+          "empty replacement deletes supplied old IDs without affecting another session", kTestName);
         database.close();
     }
 
@@ -1635,6 +1653,12 @@ namespace {
         const auto legacyNormalized = MemoryStore::normalizeSessionMemory(legacyInput);
         check(legacyNormalized && (*legacyNormalized)["legacy_entries"] == json::array({"喜欢摄影", "以前的约定"}),
           "legacy contents remain readable and are deduplicated", kTestName);
+        check(MemoryStore::normalizeSessionMemory({{"aliases", json::array()}}).has_value() &&
+                MemoryStore::pendingLegacyEntries(R"(["旧条目","旧条目","第二条"])") ==
+                  std::vector<std::string>{"旧条目", "第二条"} &&
+                MemoryStore::pendingLegacyEntries(dumpJson(*legacyNormalized)) ==
+                  std::vector<std::string>{"联机待定", "喜欢摄影", "以前的约定"},
+          "accepts alias-only records and migrates old arrays and historical fields once", kTestName);
         legacyInput["legacy_entries"] = "invalid";
         check(!MemoryStore::normalizeSessionMemory(legacyInput), "rejects malformed legacy entries", kTestName);
         for (const auto &invalid: json::array({nullptr, json::array(),
@@ -1644,7 +1668,8 @@ namespace {
             check(!MemoryStore::normalizeSessionMemory(invalid), "rejects malformed structure", kTestName);
         }
         MemoryStore::updateShortTermMemory(100, " 旧事件 \n\n旧称呼\n");
-        check(MemoryStore::projectShortTermMemory(MemoryStore::getShortTermMemory(100)) == json::array({"旧事件", "旧称呼"}),
+        check(MemoryStore::projectShortTermMemory(MemoryStore::getShortTermMemory(100)) == json{{"aliases", json::array()}} &&
+                MemoryStore::pendingLegacyEntries(MemoryStore::getShortTermMemory(100)) == std::vector<std::string>{"旧事件", "旧称呼"},
           "legacy memory remains readable without rewriting storage", kTestName);
         const AdminController controller;
         drogon::HttpResponsePtr response;
@@ -1655,17 +1680,17 @@ namespace {
         };
         save(dumpJson(input));
         check(response->getStatusCode() == drogon::k200OK &&
-                MemoryStore::projectShortTermMemory(MemoryStore::getShortTermMemory(100)) == *normalized,
+                MemoryStore::projectShortTermMemory(MemoryStore::getShortTermMemory(100)) == json{{"aliases", (*normalized)["aliases"]}},
           "manual editing saves normalized structured memory", kTestName);
         drogon::sync_wait(controller.getSessionMemory(drogon::HttpRequest::newHttpRequest(),
           [&](const auto &value) { response = value; }, "100"));
         const auto displayed = getStr(json::parse(response->body()), "memory");
         check(displayed.find('\n') != std::string::npos && json::parse(displayed) == *normalized,
           "existing editor receives formatted JSON", kTestName);
-        for (const auto &bad: {std::string{"{"}, std::string{R"({"aliases":[]})"}}) {
+        for (const auto &bad: {std::string{"{"}, std::string{R"({"aliases":"invalid"})"}}) {
             save(bad);
             check(response->getStatusCode() == drogon::k400BadRequest &&
-                    MemoryStore::projectShortTermMemory(MemoryStore::getShortTermMemory(100)) == *normalized,
+                    MemoryStore::projectShortTermMemory(MemoryStore::getShortTermMemory(100)) == json{{"aliases", (*normalized)["aliases"]}},
               "invalid manual JSON preserves saved memory", kTestName);
         }
         check(MemoryStore::getShortTermMemory(200).empty() && PersonMemoryStore::getForSenders(
@@ -1733,7 +1758,8 @@ namespace {
         oldClient.erase("apiType");
         oldClient.erase("editPath");
         check(config.saveLLMConfig("imageGeneration", oldClient).has_value() &&
-                config.getLLMConfig("imageGeneration") == settings,
+                nlohmann::json::parse(config.getLLMConfig("imageGeneration").dump()) ==
+                  nlohmann::json::parse(settings.dump()),
             "older clients preserve protocol and edit path", kTestName);
         settings["apiType"] = "openrouter";
         check(config.saveLLMConfig("imageGeneration", settings).has_value() &&

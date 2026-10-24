@@ -20,6 +20,8 @@ export interface LLMConfig {
     temperature: number
     topP: number
     reasoningEffort: string
+    timeoutSeconds?: number
+    maxRetries?: number
     minConfidence?: number
     apiType?: 'openai' | 'openrouter'
     editPath?: string

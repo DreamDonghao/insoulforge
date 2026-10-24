@@ -247,7 +247,7 @@ MessageService → OneBot API
   `message_id` / `reply_to` 供引用关系判断。
 - Jev 一次请求给出 `action`、`tone` 和 `maxLength`。仅当 `answers.action.choice` 为 `reply` / `skip` 且
   `answers.action.confidence` 有效并达到 `jevMinConfidence` 时采纳；`unclear`、低置信度、响应异常或请求失败均交给原有
-  Router LLM。`probabilities.reply` 不是当前阈值的比较对象。Jev 请求超时为 10 秒；Router LLM 兜底仍保留原有
+  Router LLM。`probabilities.reply` 不是当前阈值的比较对象。Jev 默认超时 10 秒、不重试，可在模型配置中调整；Router LLM 兜底仍保留原有
   fail-open 行为。
 - 预处理、路由、执行或发送的异常均限制在当前消息或当前回复任务内，不能使同会话队列停滞。工作流不使用轮询或忙等待。
 
@@ -316,6 +316,12 @@ MessageService → OneBot API
 
 `HttpUtil::send` 返回 `std::expected<HttpResponsePtr, std::string>`：网络、地址或超时失败在 `error()` 中，收到的 HTTP 4xx/5xx 仍是有效响应，由调用方检查状态码。调试记录保持原有脱敏规则；对模型只回传必要、限长的错误详情。
 
+所有模型 POST 请求使用 `LlmClient::sendModelRequest`，从 `LLMApiConfig` 快照读取 `timeoutSeconds`（1～3600 秒）和
+`maxRetries`（0～10 次，不含首次请求）。仅网络失败和 HTTP 429/500/503 重试，间隔 1 秒；业务响应校验、用量记录仍由调用方负责。
+旧配置补齐各角色原有默认值，保存时严格校验并热更新；旧客户端未传这两个字段时保留已保存的值。
+每次逻辑请求固定地址、身份、超时、重试次数及请求体，重试期间不切换配置。维护请求取消后不再重试，并丢弃迟到响应。
+图片生成和编辑共用其角色设置及响应脱敏规则；图片下载、MCP 与 OneBot 请求不使用这些参数。
+
 此管理器与 `TaskScheduler`（到点触发）及 `MemoryMaintenanceCoordinator`（聊天记忆与好感度维护）用途不同。每个会话仅有一个
 运行中的耗时任务，不同会话可以并行；正常退出时 `main` 在 `MessageList` 落库前调用 `stop()` 记录中断，但不会等待处理器
 完成。需要重启恢复、取消或进度查询的实际能力应另外设计持久化状态，不能假设该接口已有这些保证。
@@ -323,29 +329,26 @@ MessageService → OneBot API
 ### 记忆维护
 
 记忆模块包括聊天记忆和好感度：前者保存对话中值得记住的信息，后者保存机器人对用户的互动印象。
-统一入口在一次调用中提取人物记忆与全局好感度，再沿用现有会话记忆整理流程，全部成功后一起保存。
+统一入口在一次调用中提取人物记忆与全局好感度，再整理本会话外号与长期记忆，全部成功后一起保存。
 
-- **短期记忆**：`MemoryManager` 按统一会话 ID 从 SQLite 原文本列读取会话记忆；新内容为 `aliases` 和 `recent_events` JSON 对象，
-  Executor 通过 `MemoryStore::projectShortTermMemory` 直接注入对象，旧纯文本在成功整理前仍按行注入。后台沿用原编辑入口，返回格式化 JSON。
-  `MemoryStore::normalizeSessionMemory` 统一校验结构并合并重复 QQ、称呼和事件，不限制条数。
-  称呼只属于本会话，保留已有值，有明确纠正时才更新，不采纳一次性调侃；事件更新进展，模型可根据完成状态和后续价值移除过时内容，无固定过期天数。
-  新消息的个人属性不写入会话记忆，也不清理全局人物档案或好感度；旧文本在下一次成功整理时转换，无独立数据库迁移。
-  `legacy_entries` 是旧内容过渡区，首次转换时由程序保留全部旧文本条目并继续注入上下文。后续模型只能从已有原文条目中选留或删除，
-  依据新证据、重复程度及相关性逐步遗忘，不设固定期限；不得新增或改写，遗漏该字段时保留原值。旧两字段结构兼容为空过渡区，无法恢复此前已丢失的数据。
+- **会话外号**：复用 `short_term_memory` 原文本列，按统一会话 ID 保存 `aliases` JSON 对象。
+  Executor 只注入结构化外号，`normalizeSessionMemory` 合并重复 QQ 和称呼，不限制条数。
+  原编辑接口兼容读取和修改历史字段；旧 `recent_events`、`legacy_entries`、纯文本及字符串数组不再直接注入上下文，
+  作为会话内的待整理历史内容参与下一次成功的长期记忆整理。未配置向量服务或整理失败时保留，成功后只保存外号，无独立数据库迁移。
 - **长期记忆**：`LongTermMemory` 封装 `long_term_memory` 表的读取与向量检索；embedding 以 `f32` 数组存入 BLOB。
 - **维护批次**：工作流在每条消息预处理结束后检查消息列表；达到或超过 `memorySummaryTriggerCount` 且没有待处理总结任务时，
   选取最旧的 `memorySummaryBatchSize` 条消息作为待总结内容，并复制随后最多
   `memorySummaryContextCount` 条只读上下文。待总结消息在任务成功前继续保留在列表中。
   追加机器人回复或内部记录不会单独触发总结；任务成功收尾只清理已总结消息，下一批由后续消息预处理触发。
   启动时不恢复维护任务，也不为历史消息主动创建新批次。
-- **内存任务**：`MemoryMaintenanceCoordinator` 调用 `MemoryMaintenanceService` 联合提取人物条目和好感度，再整理旧会话记忆；全部成功后，
+- **内存任务**：`MemoryMaintenanceCoordinator` 调用 `MemoryMaintenanceService` 联合提取人物条目和好感度，再整理会话外号与长期记忆；全部成功后，
   由 `MemoryMaintenanceStore` 在同一 SQLite 事务中保存结果。任务本身不写入数据库，不保存完成状态或重试次数。
   数据库升级到 v18 时删除旧维护任务表，不迁移未完成任务；已有消息、记忆和好感度结果保留。
-- **聊天记忆总结**：`MemoryMaintenanceService` 的整理请求直接接收当前会话记忆、待总结消息和只读补充上下文，
-  没有新增人物记忆或只有好感度变化时也执行会话总结；补充上下文不得作为新记忆来源。复用原整理请求，不增加第三次模型调用。
-  长期记忆仍只依据原来的新人物记忆及召回材料处理，无新人物条目时不触发向量召回或长期写入。按 `longTermRecallThreshold`
-  召回相似长期记忆，用于合并、去重和替换；计算期间不写入结果。
-  未配置向量模型时只维护短期记忆；已配置但向量化失败时，本批次不提交，等待后续消息重新触发。
+- **聊天记忆整理**：第一次请求提取人物待整理条目与好感度；新条目及历史待迁移内容按 `longTermRecallThreshold`
+  逐条召回本会话旧记忆，按 ID 去重并限制实际交给模型的条数。第二次请求只接收本批条目、历史内容、召回旧记忆和已有外号，不再接收原始聊天。
+  模型输出 `aliases` 完整列表及 `longTerm` 字符串数组，不再返回 `sources`。程序独立记录实际参与整理的旧 ID，
+  全部结果向量化成功后，在同一事务中写入新记忆、删除这些旧 ID 并更新外号、人物条目和好感度；未参与整理的记忆不受影响。
+  没有新条目且没有可迁移历史内容时跳过第二次调用。未配置向量模型时只更新外号并保留历史内容；已配置但向量化失败时本批次不提交。
 - **人物记忆**：`person_memories` 按 QQ 保存 `profile`、`relationship` 和 `recent_interactions` 字符串数组；
   `person_memory_entries` 保存追加的待整理条目、来源会话和 UTC 写入时间。群聊与私聊共用，不受原始消息共享开关影响。
   `PersonMemoryConsolidator` 每分钟按本地日历检查凌晨 03:00 的每日任务，使用 Memory 模型逐人处理有待整理条目的人，不重叠执行。

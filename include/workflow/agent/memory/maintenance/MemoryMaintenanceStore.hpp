@@ -17,7 +17,6 @@ namespace insoulforge {
     struct PreparedLongTermMemory {
         std::string content;
         std::vector<f32> embedding;
-        std::vector<i64> replacedIds;
     };
 
     struct PersonMemoryEntry {
@@ -27,10 +26,12 @@ namespace insoulforge {
 
     using AffinityDeltas = std::vector<std::pair<u64, i32>>;
 
-    /// @brief 聊天记忆计算结果；短期记忆为空值时保留原内容
+    /// @brief 聊天记忆计算结果；shortTerm 复用旧列保存外号，为空值时保留原内容
     struct MemoryMaintenanceResult {
         std::optional<std::string> shortTerm;
         std::vector<PreparedLongTermMemory> longTerm;
+        // 实际交给整理模型的旧条目，由程序整体替换，不依赖模型报告来源。
+        std::vector<i64> replacedLongTermIds;
         std::vector<PersonMemoryEntry> personEntries;
         AffinityDeltas affinity;
     };

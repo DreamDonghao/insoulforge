@@ -5,16 +5,12 @@
 
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
-#include <infrastructure/http/HttpUtil.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <workflow/agent/llm/JevClient.hpp>
 #include <workflow/agent/llm/LlmClient.hpp>
 
 namespace insoulforge::JevClient {
     namespace {
-        /// @brief Jev 请求超时（秒），为 LLM 兜底预留时间。
-        constexpr f64 kJevTimeoutSeconds = 10.0;
-
         /// @brief 日志中错误响应体的截断长度
         constexpr size_t kErrorBodyMaxChars = 500;
 
@@ -27,7 +23,7 @@ namespace insoulforge::JevClient {
         return !api.baseUrl.empty() && !api.path.empty() && !api.model.empty() && !api.apiKey.empty();
     }
 
-    auto requestSystemOne(const LLMApiConfig &api, json state, json questions, const u64 sessionId)
+    auto requestSystemOne(LLMApiConfig api, json state, json questions, const u64 sessionId)
       -> drogon::Task<std::optional<json>> {
         if (!isConfigured(api)) {
             Logger::warn(sessionId, "Jev", "未配置服务地址、请求路径、模型名或密钥，跳过请求");
@@ -36,8 +32,7 @@ namespace insoulforge::JevClient {
 
         json body{{"state", std::move(state)}, {"model", api.model}, {"questions", std::move(questions)}};
 
-        const auto resp = co_await HttpUtil::send(
-          "Jev", api.baseUrl, api.path, drogon::Post, std::move(body), api.apiKey, kJevTimeoutSeconds, sessionId);
+        const auto resp = co_await LlmClient::sendModelRequest("Jev", api, std::move(body), sessionId);
         if (!resp) {
             Logger::warn(sessionId, "Jev", "网络异常");
             co_return std::nullopt;

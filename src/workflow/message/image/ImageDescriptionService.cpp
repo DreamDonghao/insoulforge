@@ -8,7 +8,6 @@
 
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
-#include <infrastructure/http/HttpUtil.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <workflow/agent/llm/LlmClient.hpp>
 #include <workflow/message/image/ImageDescriptionService.hpp>
@@ -306,8 +305,7 @@ namespace insoulforge::ImageDescriptionService {
             LLMApiConfig api = config.image;
             api.reasoningEffort.clear();
             const json body = LlmClient::buildChatRequestBody(api, config.imageParams, messages);
-            const auto response = co_await HttpUtil::send(
-              "[Image]", api.baseUrl, api.path, drogon::Post, body, api.apiKey, 90.0, sessionId);
+            const auto response = co_await LlmClient::sendModelRequest("[Image]", api, body, sessionId);
             const auto parsed = response ? LlmClient::validChatJson(*response) : std::nullopt;
             if (!parsed) {
                 co_return std::nullopt;

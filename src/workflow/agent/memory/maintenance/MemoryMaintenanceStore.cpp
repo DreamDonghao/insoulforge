@@ -47,7 +47,6 @@ namespace insoulforge::MemoryMaintenanceStore {
                 statement.execOrThrow();
             }
 
-            std::unordered_set<i64> replacedIds;
             for (const PreparedLongTermMemory &memory: result.longTerm) {
                 const Statement statement(
                   handle, "INSERT INTO long_term_memory (group_id, content, embedding) VALUES (?, ?, ?)");
@@ -55,8 +54,8 @@ namespace insoulforge::MemoryMaintenanceStore {
                 statement.bind(2, memory.content);
                 statement.bind(3, toBytes(memory.embedding));
                 statement.execOrThrow();
-                replacedIds.insert(memory.replacedIds.begin(), memory.replacedIds.end());
             }
+            const std::unordered_set<i64> replacedIds(result.replacedLongTermIds.begin(), result.replacedLongTermIds.end());
             for (const i64 memoryId: replacedIds) {
                 const Statement statement(handle, "DELETE FROM long_term_memory WHERE id = ? AND group_id = ?");
                 statement.bind(1, memoryId);

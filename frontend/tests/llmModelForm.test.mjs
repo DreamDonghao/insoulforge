@@ -74,3 +74,26 @@ test('chat model forms do not expose image API controls or rewrite paths', async
     assert.equal(view.state.llmConfig.path, '/chat/completions')
   } finally { view.dispose() }
 })
+
+test('all model forms show and save independent request timeout and retry settings', async () => {
+  for (const name of ['router', 'executor', 'executorFallback', 'executorThinking', 'image',
+    'memory', 'imageGeneration', 'embedding', 'jev']) {
+    const view = form(name, {timeoutSeconds: 180, maxRetries: 0})
+    try {
+      const html = await view.html()
+      assert.ok(html.includes('请求超时（秒）') && html.includes('失败重试次数'))
+      assert.ok(html.includes('min="1"') && html.includes('max="3600"') && html.includes('max="10"'))
+      assert.equal(html.includes('可能重复生成并计费'), name === 'imageGeneration')
+      view.state.llmConfig.timeoutSeconds = 600
+      view.state.llmConfig.maxRetries = 2
+      await view.state.saveLLMConfig()
+      assert.equal(view.requests[0].body.timeoutSeconds, 600)
+      assert.equal(view.requests[0].body.maxRetries, 2)
+      assert.equal(view.requests[0].body.name, name)
+      view.props.initialConfig = {...view.props.initialConfig, timeoutSeconds: 45, maxRetries: 1}
+      await vue.nextTick()
+      assert.equal(view.state.llmConfig.timeoutSeconds, 45)
+      assert.equal(view.state.llmConfig.maxRetries, 1)
+    } finally { view.dispose() }
+  }
+})
