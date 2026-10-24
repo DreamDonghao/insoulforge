@@ -20,7 +20,7 @@ namespace insoulforge {
         std::string baseUrl;
         std::string path;
         std::string model;
-        std::string reasoningEffort; // "none"/"medium"/"high"，空串表示不发送
+        std::string reasoningEffort; // 原样发送 reasoning_effort，由服务端校验模型支持的取值；空串表示不发送
     };
 
     /// @brief 生图协议及独立编辑路径；旧配置保留 OpenRouter 协议。

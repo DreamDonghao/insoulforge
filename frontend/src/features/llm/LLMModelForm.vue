@@ -116,10 +116,14 @@ const saveLLMConfig = async (): Promise<void> => {
           <select v-model="llmConfig.reasoningEffort" class="form-input">
             <option value="">不发送（默认）</option>
             <option value="none">关闭思考 (none)</option>
+            <option value="minimal">极低强度 (minimal)</option>
+            <option value="low">低强度 (low)</option>
             <option value="medium">中等思考 (medium)</option>
             <option value="high">深度思考 (high)</option>
+            <option value="xhigh">极高强度 (xhigh)</option>
+            <option value="max">最大强度 (max)</option>
           </select>
-          <p class="form-hint">仅在模型支持时设置；不发送则使用服务端默认值。</p>
+          <p class="form-hint">各模型支持的选项不同，部分模型不支持关闭思考；不发送则使用服务端默认值。</p>
         </div>
       </div>
     </div>
