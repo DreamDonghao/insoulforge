@@ -11,6 +11,7 @@
 #include <workflow/agent/memory/MemoryStore.hpp>
 #include <workflow/agent/memory/affinity/AffinityStore.hpp>
 #include <workflow/agent/memory/PersonMemoryStore.hpp>
+#include <workflow/agent/memory/maintenance/PersonMemoryConsolidator.hpp>
 #include <workflow/agent/runtime/AgentSystem.hpp>
 #include <workflow/agent/tools/ToolRuntime.hpp>
 #include <workflow/history/ChatRecordStore.hpp>
@@ -827,6 +828,52 @@ auto AdminController::getPerson(HttpRequestPtr req, std::function<void(const Htt
     co_return;
 }
 
+auto AdminController::consolidatePerson(HttpRequestPtr req,
+  std::function<void(const HttpResponsePtr &)> callback, const std::string &qq) const -> Task<> {
+    auto status = drogon::k400BadRequest;
+    std::string message = "无效的 QQ 号";
+    const auto id = parseUInt64(qq);
+    if (id && !SessionId::isPrivate(id) && id != SessionId::kSystemAccountId) {
+        if (PersonMemoryStore::getPerson(id).is_null()) {
+            status = drogon::k404NotFound;
+            message = "没有该人物的记录";
+        } else {
+            using Result = PersonMemoryConsolidator::Result;
+            const auto result = co_await PersonMemoryConsolidator::instance().runPerson(id);
+            switch (result) {
+            case Result::Updated:
+                status = drogon::k200OK;
+                message = "人物记忆已整理";
+                break;
+            case Result::NoMemory:
+                status = drogon::k200OK;
+                message = "暂无需要整理的记忆";
+                break;
+            case Result::Busy:
+                status = drogon::k409Conflict;
+                message = "人物整理正在进行，请稍后重试";
+                break;
+            case Result::Conflict:
+                status = drogon::k409Conflict;
+                message = "人物记忆在整理期间已变化，本次结果未保存，请刷新后重试";
+                break;
+            case Result::Stopped:
+                status = drogon::k503ServiceUnavailable;
+                message = "人物整理服务已停止，请稍后重试";
+                break;
+            case Result::Failed:
+                status = drogon::k502BadGateway;
+                message = "人物整理失败，模型请求失败或结果无效，原记忆已保留";
+                break;
+            }
+        }
+    }
+    auto response = jsonResponse(status == drogon::k200OK ? AdminResponse::okJson(message) : AdminResponse::errorJson(message));
+    response->setStatusCode(status);
+    callback(response);
+    co_return;
+}
+
 namespace {
     auto validPersonEdit(const json &body) -> bool {
         if (!body.is_object() || !body.contains("expected") || !body["expected"].is_object() ||
@@ -835,7 +882,7 @@ namespace {
         if (!edit.is_object()) return false;
         const auto &score = atOrNull(edit, "affinity");
         if (!score.is_number_integer() || score < -100 || score > 100) return false;
-        for (const auto key : {"stable_memory", "recent_interactions"}) {
+        for (const auto key : {"profile", "relationship", "recent_interactions"}) {
             const auto &items = atOrNull(edit, key);
             if (!items.is_array()) return false;
             for (const auto &item : items)

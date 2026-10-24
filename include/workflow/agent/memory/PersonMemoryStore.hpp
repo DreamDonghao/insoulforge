@@ -5,9 +5,14 @@
 
 #include <infrastructure/JsonUtil.hpp>
 #include <optional>
+#include <stdexcept>
 #include <vector>
 
 namespace insoulforge::PersonMemoryStore {
+    class ConsolidationConflict : public std::runtime_error {
+    public:
+        using std::runtime_error::runtime_error;
+    };
     /// @brief 按最近聊天的真实发送者去重、批量读取档案，排除机器人、系统和没有记忆的人。
     [[nodiscard]] auto getForSenders(const json &recentConversation) -> json;
     [[nodiscard]] auto listPeople() -> json;
@@ -25,7 +30,8 @@ namespace insoulforge::PersonMemoryStore {
         std::string runningDay;
     };
     [[nodiscard]] auto pendingPeople() -> std::vector<u64>;
-    [[nodiscard]] auto pendingSnapshot(u64 qq) -> std::optional<PendingSnapshot>;
+    /// @brief 手动整理可包含没有待整理条目的现有档案；空档案不请求模型。
+    [[nodiscard]] auto pendingSnapshot(u64 qq, bool includeExisting = false) -> std::optional<PendingSnapshot>;
     void applyConsolidation(const PendingSnapshot &snapshot, const json &profile);
     [[nodiscard]] auto dailyState() -> DailyState;
     void saveDailyState(const DailyState &state);

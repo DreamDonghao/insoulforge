@@ -221,7 +221,7 @@ test('session helpers preserve large IDs and each page keeps its own fallback la
     for (const id of ['0', '123', '9007199254740993']) {
       assert.equal(logView.state.groupTag(id), `群 ${id}`)
       assert.equal(requestView.state.sessionLabel(id), `群 ${id}`)
-      assert.equal(peopleView.state.sourceLabel(id), `群聊 ${id}`)
+      assert.equal(peopleView.state.sourceLabel(id), id === '0' ? '历史记忆迁移' : `群聊 ${id}`)
     }
     for (const id of [null, undefined, '']) assert.equal(requestView.state.sessionLabel(id), '系统请求')
     assert.equal(requestView.state.sessionLabel('invalid'), 'invalid')

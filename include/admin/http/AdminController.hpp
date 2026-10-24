@@ -126,6 +126,7 @@ namespace insoulforge {
         ADD_METHOD_TO(AdminController::getSessionAffinity, "/admin/api/affinity/{sessionId}", drogon::Get);
         ADD_METHOD_TO(AdminController::getPeople, "/admin/api/people", drogon::Get);
         ADD_METHOD_TO(AdminController::getPerson, "/admin/api/people/{qq}", drogon::Get);
+        ADD_METHOD_TO(AdminController::consolidatePerson, "/admin/api/people/{qq}/consolidate", drogon::Post);
         ADD_METHOD_TO(AdminController::updatePerson, "/admin/api/people/{qq}", drogon::Put);
         ADD_METHOD_TO(AdminController::deletePerson, "/admin/api/people/{qq}", drogon::Delete);
 
@@ -467,6 +468,8 @@ namespace insoulforge {
         auto getPerson(drogon::HttpRequestPtr req,
           std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &qq) const -> drogon::Task<>;
         auto updatePerson(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &qq) const -> drogon::Task<>;
+        auto consolidatePerson(drogon::HttpRequestPtr req,
           std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &qq) const -> drogon::Task<>;
         auto deletePerson(drogon::HttpRequestPtr req,
           std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &qq) const -> drogon::Task<>;

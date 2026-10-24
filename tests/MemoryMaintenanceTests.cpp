@@ -16,6 +16,7 @@
 #include <trantor/net/EventLoopThread.h>
 
 #include <infrastructure/config/Config.hpp>
+#include <infrastructure/CommonUtil.hpp>
 #include <admin/http/AdminController.hpp>
 #include <admin/http/PersonNameResolver.hpp>
 #include <infrastructure/storage/Database.hpp>
@@ -45,6 +46,9 @@ namespace {
         std::atomic<i32> requests{0};
         std::atomic_bool fail{true};
         std::atomic_bool injectNew{true};
+        std::atomic_bool editRelationship{false};
+        std::atomic_bool omitRelationship{false};
+        std::atomic_bool delay{false};
         std::atomic<PersonMemoryConsolidator *> stopService{nullptr};
         std::atomic<LlmClient::MaintenanceRequestControl *> cancelRequest{nullptr};
     } personFixture;
@@ -74,7 +78,8 @@ namespace {
         PersonMemoryConsolidator service;
         co_await service.runDue(today);
         auto person = PersonMemoryStore::getPerson(88001);
-        if (personFixture.requests != 4 || person["stable_memory"] != json::array({"整理后的固定记忆"}) ||
+        if (personFixture.requests != 4 || person["profile"] != json::array({"整理后的人物档案"}) ||
+            person["relationship"] != json::array({"相处随意"}) ||
             person["pending_entries"].size() != 1 || person["pending_entries"][0]["content"] != "请求期间新增" ||
             PersonMemoryStore::getPerson(88002)["pending_entries"].size() != 1 ||
             PersonMemoryStore::getPerson(88003)["pending_entries"].size() != 1 ||
@@ -95,6 +100,67 @@ namespace {
         co_await restarted.runDue(std::mktime(&local));
         if (personFixture.requests != 7)
             throw std::runtime_error("empty daily run called model");
+
+        using Result = PersonMemoryConsolidator::Result;
+        const auto checkpoint = PersonMemoryStore::dailyState();
+        const auto beforeManual = personFixture.requests.load();
+        if (co_await restarted.runPerson(999999) != Result::NoMemory ||
+            co_await restarted.runPerson(88001) != Result::Updated ||
+            personFixture.requests != beforeManual + 1 ||
+            PersonMemoryStore::dailyState().completedDay != checkpoint.completedDay ||
+            PersonMemoryStore::dailyState().runningDay != checkpoint.runningDay)
+            throw std::runtime_error("manual consolidation cannot reorganize existing memory or changes daily checkpoint");
+        personFixture.editRelationship = true;
+        if (co_await restarted.runPerson(88001) != Result::Conflict ||
+            PersonMemoryStore::getPerson(88001)["relationship"] != json::array({"人工修改关系"}))
+            throw std::runtime_error("manual consolidation overwrote concurrent relationship edit");
+        personFixture.omitRelationship = true;
+        const auto beforeInvalid = PersonMemoryStore::getPerson(88001);
+        if (co_await restarted.runPerson(88001) != Result::Failed ||
+            PersonMemoryStore::getPerson(88001) != beforeInvalid)
+            throw std::runtime_error("invalid model profile overwrote original data");
+        personFixture.delay = true;
+        std::atomic_bool manualDone{false};
+        Result manualResult = Result::Failed;
+        const auto beforeBusy = personFixture.requests.load();
+        drogon::async_run([&]() -> drogon::Task<> {
+            manualResult = co_await restarted.runPerson(88001);
+            manualDone = true;
+        });
+        while (personFixture.requests == beforeBusy)
+            co_await drogon::sleepCoro(drogon::app().getLoop(), 0.001);
+        const auto busy = co_await restarted.runPerson(88002);
+        co_await restarted.runDue(today);
+        while (!manualDone)
+            co_await drogon::sleepCoro(drogon::app().getLoop(), 0.001);
+        personFixture.delay = false;
+        if (busy != Result::Busy || manualResult != Result::Updated || personFixture.requests != beforeBusy + 1)
+            throw std::runtime_error("manual and daily consolidation overlap");
+        const AdminController controller;
+        drogon::HttpResponsePtr apiResponse;
+        const auto callback = [&](const drogon::HttpResponsePtr &response) { apiResponse = response; };
+        auto request = drogon::HttpRequest::newHttpRequest();
+        co_await controller.consolidatePerson(request, callback, "invalid");
+        if (apiResponse->statusCode() != drogon::k400BadRequest)
+            throw std::runtime_error("manual API accepts invalid QQ");
+        co_await controller.consolidatePerson(request, callback, "999999");
+        if (apiResponse->statusCode() != drogon::k404NotFound)
+            throw std::runtime_error("manual API accepts absent person");
+        MemoryMaintenanceStore::apply(db, 100, {.affinity = {{88005, 1}}});
+        const auto beforeEmpty = personFixture.requests.load();
+        co_await controller.consolidatePerson(request, callback, "88005");
+        if (apiResponse->statusCode() != drogon::k200OK || personFixture.requests != beforeEmpty)
+            throw std::runtime_error("empty manual API calls model");
+        co_await controller.consolidatePerson(request, callback, "88001");
+        if (apiResponse->statusCode() != drogon::k200OK || personFixture.requests != beforeEmpty + 1)
+            throw std::runtime_error("manual API did not consolidate existing profile");
+        personFixture.fail = true;
+        const auto beforeFailure = PersonMemoryStore::getPerson(88003);
+        co_await controller.consolidatePerson(request, callback, "88003");
+        if (apiResponse->statusCode() != drogon::k502BadGateway ||
+            PersonMemoryStore::getPerson(88003) != beforeFailure)
+            throw std::runtime_error("manual API failed to preserve original data on model failure");
+        personFixture.fail = false;
         MemoryMaintenanceStore::apply(db, 100, {.personEntries = {{88004, "退出期间保留"}}});
         ++local.tm_mday;
         const auto interruptedDay = std::mktime(&local);
@@ -122,7 +188,7 @@ namespace {
         personFixture.cancelRequest = control.get();
         const auto cancelled = co_await LlmClient::requestMaintenance(
           json::array({{{"role", "system"}, {"content", "fixture"}},
-            {{"role", "user"}, {"content", R"({"qq":"88004"})"}}}), 0, "memory", std::nullopt, control);
+            {{"role", "user"}, {"content", R"({"qq":"88004","profile":[],"relationship":[],"recent_interactions":[],"pending_entries":[]})"}}}), 0, "memory", std::nullopt, control);
         const auto requestCount = personFixture.requests.load();
         const auto alreadyCancelled = co_await LlmClient::requestMaintenance(
           json::array(), 0, "memory", std::nullopt, control);
@@ -331,7 +397,7 @@ namespace {
             require(list.fullSnapshot().size() == 1 &&
                       json::parse(MemoryStore::getShortTermMemory(100)) == sessionMemory(true) &&
                       AffinityStore::getAffinityMap()[22] == 3 && profiles.size() == 1 && profiles[0]["qq"] == "11" &&
-                      profiles[0]["pending_entries"].size() == 1 && profiles[0]["stable_memory"].empty() &&
+                      profiles[0]["pending_entries"].size() == 1 && profiles[0]["profile"].empty() &&
                       profiles[0]["recent_interactions"].empty(),
               "success failed to atomically save independent people and preserve old reconciliation");
 
@@ -568,8 +634,16 @@ auto main() -> int {
           const auto body = json::parse(request->body());
           const auto profile = json::parse(body["messages"][1]["content"].get<std::string>());
           const auto qq = profile["qq"].get<std::string>();
+          if (!profile.contains("relationship") || profile.contains("stable_memory"))
+              throw std::runtime_error("consolidation receives obsolete person schema");
           if (qq == "88001" && personFixture.injectNew.exchange(false)) {
               MemoryMaintenanceStore::apply(Database::instance(), 200, {.personEntries = {{88001, "请求期间新增"}}});
+          }
+          if (personFixture.editRelationship.exchange(false)) {
+              const auto original = PersonMemoryStore::getPerson(parseUInt64(qq));
+              auto edited = original;
+              edited["relationship"] = {"人工修改关系"};
+              PersonMemoryStore::updatePerson(parseUInt64(qq), original, edited);
           }
           if (auto *service = personFixture.stopService.exchange(nullptr)) {
               service->stop();
@@ -585,12 +659,16 @@ auto main() -> int {
               response->setStatusCode(drogon::k400BadRequest);
               response->setBody("{}");
           } else {
-              const auto content = qq == "88002" && personFixture.fail ? R"({"stable_memory":"invalid"})" :
-                R"({"stable_memory":["整理后的固定记忆"],"recent_interactions":["整理后的近期互动"]})";
+              const auto content = personFixture.omitRelationship.exchange(false) ? R"({"profile":[],"recent_interactions":[]})" :
+                qq == "88002" && personFixture.fail ? R"({"profile":"invalid"})" :
+                R"({"profile":["整理后的人物档案"],"relationship":["相处随意"],"recent_interactions":["待跟进的近期事项"]})";
               response->setBody(json{{"choices", {{{"message", {{"content", content}}}}}},
                 {"usage", {{"prompt_tokens", 10}, {"completion_tokens", 5}, {"total_tokens", 15}}}}.dump());
           }
-          callback(response);
+          if (personFixture.delay)
+              drogon::app().getLoop()->runAfter(0.05, [callback = std::move(callback), response] { callback(response); });
+          else
+              callback(response);
       }, {drogon::Post});
     drogon::app().registerHandler("/get_stranger_info",
       [&nameRequests](const drogon::HttpRequestPtr &request,
@@ -647,8 +725,10 @@ auto main() -> int {
               };
               if (records.size() != 305 || records[304]["message_id"] != "304" ||
                   !std::ranges::all_of(records, validRecord) || context.size() != 1 || !validRecord(context[0]) ||
-                  prompt.find("身份元数据只用于识别人") == std::string::npos ||
-                  prompt.find("只有聊天正文明确表达称呼约定时才记录别称") == std::string::npos) {
+                  prompt.find(extraction ? "昵称、群名片和 @ 名称只用于识别人" : "身份元数据只用于识别人") == std::string::npos ||
+                  prompt.find(extraction ? "只有聊天正文明确说明称呼时才记录" : "只有聊天正文明确表达称呼约定时才记录别称") == std::string::npos ||
+                  (extraction && (prompt.find("## 信息来源") == std::string::npos ||
+                    prompt.find("机器人名称：" + json(Config::instance().botName).dump()) == std::string::npos))) {
                   auto reply = drogon::HttpResponse::newHttpResponse();
                   reply->setStatusCode(drogon::k400BadRequest);
                   callback(reply);
