@@ -259,10 +259,29 @@ namespace insoulforge {
 
         void migrateV21ToV22(sqlite3 *db) { execAll(db, v22Tables); }
 
+        void migrateV22ToV23(sqlite3 *db) {
+            if (columnExists(db, "person_memories", "stable_memory"))
+                execSQL(db, "ALTER TABLE person_memories RENAME COLUMN stable_memory TO profile");
+            ensureColumn(db, "person_memories", "relationship", "relationship TEXT NOT NULL DEFAULT '[]'");
+        }
+
+        void migrateV23ToV24(sqlite3 *db) {
+            // 历史档案没有可靠的来源会话，0 表示历史迁移；时间仅为本次入队时间。
+            // 迁移框架在事务内执行，全部入队成功后才清空旧分类，重启不会重复入队。
+            for (const auto *field: {"profile", "relationship", "recent_interactions"}) {
+                execSQL(db, fmt::format(
+                  "INSERT INTO person_memory_entries (qq_number, source_session, content) "
+                  "SELECT p.qq_number, 0, item.value FROM person_memories p, json_each(p.{}) item "
+                  "ORDER BY p.qq_number, item.key", field));
+            }
+            execSQL(db, "UPDATE person_memories SET profile='[]', relationship='[]', recent_interactions='[]'");
+        }
+
         void createFreshSchema(sqlite3 *db) {
             execAll(db, v2Tables);
             execAll(db, v21Tables);
             execAll(db, v22Tables);
+            migrateV22ToV23(db);
             execAll(db, v6Tables);
             execAll(db, v7Tables);
             execAll(db, v11Tables);
@@ -594,6 +613,8 @@ namespace insoulforge {
               &migrateV19ToV20, // 跨会话近期消息共享，默认关闭
               &migrateV20ToV21, // 全局人物记忆与好感度；旧分数按 QQ 取平均
               &migrateV21ToV22, // 人物记忆每日整理执行状态
+              &migrateV22ToV23, // 人物档案与机器人关系，完整保留旧记忆
+              &migrateV23ToV24, // 旧分类全部移入待整理条目，按新规则重新归类
             };
 
             for (i32 v = version; v < kLatestVersion; ++v) {

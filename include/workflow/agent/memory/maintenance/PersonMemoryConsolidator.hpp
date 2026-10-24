@@ -1,5 +1,5 @@
 /// @file PersonMemoryConsolidator.hpp
-/// @brief 全局人物记忆每日整理与启动补跑。
+/// @brief 全局人物记忆每日整理、启动补跑与手动整理。
 #pragma once
 
 #include <mutex>
@@ -23,11 +23,18 @@ namespace insoulforge {
           -> std::optional<std::string>;
         /// @brief 执行到期的一轮；同一进程不允许重叠，停止后不再访问数据库。
         auto runDue(std::time_t now) -> drogon::Task<>;
+        enum class Result { Updated, NoMemory, Busy, Stopped, Failed, Conflict };
+        /// @brief 立即整理一个人物，与每日整理互斥，不改变每日执行标记。
+        auto runPerson(u64 qq) -> drogon::Task<Result>;
 
     private:
+        struct BusyGuard {
+            PersonMemoryConsolidator &service;
+            ~BusyGuard();
+        };
         void poll();
-        auto consolidatePerson(u64 qq, std::shared_ptr<LlmClient::MaintenanceRequestControl> control)
-          -> drogon::Task<bool>;
+        auto consolidatePerson(u64 qq, std::shared_ptr<LlmClient::MaintenanceRequestControl> control,
+          bool includeExisting = false) -> drogon::Task<Result>;
         std::mutex m_mutex;
         bool m_busy = false;
         std::shared_ptr<LlmClient::MaintenanceRequestControl> m_requestControl =

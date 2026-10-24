@@ -648,6 +648,67 @@ namespace {
         check(sqlite3_prepare_v2(db, "SELECT * FROM custom_tools", -1, &stmt, nullptr) != SQLITE_OK,
           "v12 upgrade removes legacy table", kTestName);
         sqlite3_finalize(stmt);
+        check(sqlite3_exec(db,
+                "ALTER TABLE person_memories RENAME COLUMN profile TO stable_memory;"
+                "ALTER TABLE person_memories DROP COLUMN relationship;"
+                "INSERT INTO person_memories VALUES(42, '[\"旧偏好\"]', '[\"旧互动\"]');"
+                "INSERT INTO person_memory_entries(qq_number,source_session,content) VALUES(42,100,'新材料');"
+                "INSERT INTO person_affinity VALUES(42,7);"
+                "INSERT INTO person_memory_daily_state VALUES(1,'2026-10-23','');"
+                "PRAGMA user_version=22", nullptr, nullptr, nullptr) == SQLITE_OK,
+          "creates populated v22 person fixture", kTestName);
+        insoulforge::SchemaMigrator::migrate(db);
+        insoulforge::SchemaMigrator::migrate(db);
+        {
+            const insoulforge::Statement person(db,
+              "SELECT p.profile,p.relationship,p.recent_interactions,e.content,a.affinity,s.completed_day "
+              "FROM person_memories p JOIN person_memory_entries e USING(qq_number) "
+              "JOIN person_affinity a USING(qq_number) JOIN person_memory_daily_state s ON s.id=1 WHERE p.qq_number=42");
+            check(person.step() && person.getText(0) == "[]" && person.getText(1) == "[]" &&
+                    person.getText(2) == "[]" && person.getText(3) == "新材料" &&
+                    person.getInt(4) == 7 && person.getText(5) == "2026-10-23",
+              "v22 upgrade clears old categories and preserves existing entries, affinity and checkpoint", kTestName);
+            const insoulforge::Statement migrated(db,
+              "SELECT COUNT(*), SUM(source_session=0 AND content IN ('旧偏好','旧互动')) "
+              "FROM person_memory_entries WHERE qq_number=42");
+            check(migrated.step() && migrated.getInt(0) == 3 && migrated.getInt(1) == 2,
+              "old memory text moves to pending once without duplication", kTestName);
+        }
+        check(sqlite3_exec(db,
+                "INSERT INTO person_memories VALUES(43,'[\"档案原文\"]','[\"互动原文\"]','[\"关系原文\"]');"
+                "INSERT INTO person_memories(qq_number) VALUES(44);"
+                "INSERT INTO person_memory_entries(qq_number,source_session,content,created_at) "
+                "VALUES(43,200,'已有条目','2026-10-20 01:02:03');"
+                "CREATE TRIGGER reject_history_migration BEFORE INSERT ON person_memory_entries "
+                "WHEN NEW.content='关系原文' BEGIN SELECT RAISE(ABORT,'test'); END;"
+                "PRAGMA user_version=23", nullptr, nullptr, nullptr) == SQLITE_OK,
+          "creates populated v23 migration failure fixture", kTestName);
+        bool migrationFailed = false;
+        try { insoulforge::SchemaMigrator::migrate(db); }
+        catch (const insoulforge::DbError &) { migrationFailed = true; }
+        {
+            const insoulforge::Statement original(db,
+              "SELECT profile,relationship,recent_interactions,"
+              "(SELECT COUNT(*) FROM person_memory_entries WHERE qq_number=43) "
+              "FROM person_memories WHERE qq_number=43");
+            check(migrationFailed && original.step() && original.getText(0) == "[\"档案原文\"]" &&
+                    original.getText(1) == "[\"关系原文\"]" && original.getText(2) == "[\"互动原文\"]" &&
+                    original.getInt(3) == 1,
+              "migration insert failure rolls back all enqueues and preserves old categories", kTestName);
+        }
+        sqlite3_exec(db, "DROP TRIGGER reject_history_migration", nullptr, nullptr, nullptr);
+        insoulforge::SchemaMigrator::migrate(db);
+        insoulforge::SchemaMigrator::migrate(db);
+        {
+            const insoulforge::Statement migrated(db,
+              "SELECT COUNT(*), SUM(source_session=0 AND content IN ('档案原文','关系原文','互动原文')),"
+              "SUM(source_session=200 AND content='已有条目' AND created_at='2026-10-20 01:02:03') "
+              "FROM person_memory_entries WHERE qq_number=43");
+            check(migrated.step() && migrated.getInt(0) == 4 && migrated.getInt(1) == 3 && migrated.getInt(2) == 1,
+              "v23 upgrade moves all categories once and preserves existing pending metadata", kTestName);
+            const insoulforge::Statement empty(db, "SELECT COUNT(*) FROM person_memory_entries WHERE qq_number=44");
+            check(empty.step() && empty.getInt(0) == 0, "empty old categories create no pending entries", kTestName);
+        }
         sqlite3_close(db);
     }
 
@@ -1347,7 +1408,7 @@ namespace {
                 !person["pending_entries"][1].contains("created_at") &&
                 profiles[0]["pending_entries"][0]["created_at"] == person["pending_entries"][1]["time"],
           "model uses created_at while admin API retains original timestamp contract", kTestName);
-        check(PersonMemoryStore::getPerson(33)["stable_memory"].empty() &&
+        check(PersonMemoryStore::getPerson(33)["profile"].empty() &&
                 PersonMemoryStore::getPerson(44)["affinity"] == 0 && PersonMemoryStore::getPerson(999).is_null(),
           "handles score-only, memory-only and unknown profiles", kTestName);
         const AdminController controller;
@@ -1418,7 +1479,8 @@ namespace {
         check(snapshot.has_value(), "reads pending snapshot", kTestName);
         if (snapshot) {
             MemoryMaintenanceStore::apply(db, SessionId::fromPrivateUser(11), {.personEntries = {{11, "并发新增"}}});
-            const json profile = {{"stable_memory", {"喜欢摄影"}}, {"recent_interactions", {"一起讨论摄影"}}};
+            const json profile = {{"profile", {"喜欢摄影"}}, {"relationship", {"经常交流摄影"}},
+              {"recent_interactions", {"准备一起拍照"}}};
             check(sqlite3_exec(db.handle(),
                     "CREATE TRIGGER reject_person_delete BEFORE DELETE ON person_memory_entries "
                     "BEGIN SELECT RAISE(ABORT, 'test'); END", nullptr, nullptr, nullptr) == SQLITE_OK,
@@ -1426,14 +1488,15 @@ namespace {
             bool failed = false;
             try { PersonMemoryStore::applyConsolidation(*snapshot, profile); }
             catch (const DbError &) { failed = true; }
-            check(failed && PersonMemoryStore::getPerson(11)["stable_memory"].empty() &&
+            check(failed && PersonMemoryStore::getPerson(11)["profile"].empty() &&
                     PersonMemoryStore::getPerson(11)["pending_entries"].size() == 2,
               "delete failure rolls back profile update and preserves entries", kTestName);
             check(sqlite3_exec(db.handle(), "DROP TRIGGER reject_person_delete", nullptr, nullptr, nullptr) == SQLITE_OK,
               "removes failure trigger", kTestName);
             PersonMemoryStore::applyConsolidation(*snapshot, profile);
             const auto person = PersonMemoryStore::getPerson(11);
-            check(person["stable_memory"] == profile["stable_memory"] && person["pending_entries"].size() == 1 &&
+            check(person["profile"] == profile["profile"] && person["pending_entries"].size() == 1 &&
+                    person["relationship"] == profile["relationship"] &&
                     person["pending_entries"][0]["content"] == "并发新增" && person["affinity"] == 3 &&
                     MemoryStore::getShortTermMemory(100).empty(),
               "snapshot commit keeps new entries and does not touch affinity or session memory", kTestName);
@@ -1442,7 +1505,7 @@ namespace {
         auto original = PersonMemoryStore::getPerson(11);
         auto edited = original;
         edited["affinity"] = -100;
-        edited["stable_memory"] = json::array();
+        edited["profile"] = json::array();
         edited["pending_entries"][0]["content"] = "人工修正";
         const auto stale = PersonMemoryStore::pendingSnapshot(11);
         check(PersonMemoryStore::updatePerson(11, original, edited), "updates person atomically", kTestName);
@@ -1453,9 +1516,9 @@ namespace {
                 !PersonMemoryStore::deletePerson(11, original), "rejects stale admin snapshots", kTestName);
         bool conflict = false;
         try { PersonMemoryStore::applyConsolidation(*stale,
-            {{"stable_memory", {"过期结果"}}, {"recent_interactions", json::array()}}); }
-        catch (const DbError &) { conflict = true; }
-        check(conflict && PersonMemoryStore::getPerson(11)["stable_memory"].empty(),
+            {{"profile", {"过期结果"}}, {"recent_interactions", json::array()}}); }
+        catch (const PersonMemoryStore::ConsolidationConflict &) { conflict = true; }
+        check(conflict && PersonMemoryStore::getPerson(11)["profile"].empty(),
           "daily consolidation cannot overwrite manual edits", kTestName);
         original = PersonMemoryStore::getPerson(11);
         edited = original;
@@ -1470,17 +1533,34 @@ namespace {
           "deletes all person data without touching others", kTestName);
         conflict = false;
         try { PersonMemoryStore::applyConsolidation(*beforeDelete,
-            {{"stable_memory", {"过期结果"}}, {"recent_interactions", json::array()}}); }
-        catch (const DbError &) { conflict = true; }
+            {{"profile", {"过期结果"}}, {"recent_interactions", json::array()}}); }
+        catch (const PersonMemoryStore::ConsolidationConflict &) { conflict = true; }
         check(conflict && PersonMemoryStore::getPerson(11).is_null(),
           "daily consolidation cannot recreate deleted person", kTestName);
         MemoryMaintenanceStore::apply(db, 100, {.affinity = {{33, 1}}});
         original = PersonMemoryStore::getPerson(33);
         edited = original;
-        edited["stable_memory"] = {"首次手动记忆"};
+        edited["profile"] = {"首次手动记忆"};
+        edited["relationship"] = {"熟悉的聊天伙伴"};
         check(PersonMemoryStore::updatePerson(33, original, edited) &&
-                PersonMemoryStore::getPerson(33)["stable_memory"] == edited["stable_memory"],
+                PersonMemoryStore::getPerson(33)["profile"] == edited["profile"],
           "affinity-only person can receive a profile", kTestName);
+        check(!PersonMemoryStore::pendingSnapshot(33) && PersonMemoryStore::pendingSnapshot(33, true),
+          "manual snapshot includes existing profile without pending entries", kTestName);
+        const auto manual = PersonMemoryStore::pendingSnapshot(33, true);
+        edited = PersonMemoryStore::getPerson(33);
+        original = edited;
+        edited["relationship"] = {"人工修改关系"};
+        check(PersonMemoryStore::updatePerson(33, original, edited), "edits relationship", kTestName);
+        conflict = false;
+        try { PersonMemoryStore::applyConsolidation(*manual, original); }
+        catch (const PersonMemoryStore::ConsolidationConflict &) { conflict = true; }
+        check(conflict && PersonMemoryStore::getPerson(33)["relationship"] == edited["relationship"],
+          "manual consolidation checks relationship even without pending entries", kTestName);
+        const auto context = PersonMemoryStore::getForSenders(
+          json::array({{{"sender", {{"qq", "33"}}}}}));
+        check(context.size() == 1 && context[0]["relationship"] == edited["relationship"] &&
+                !context[0].contains("stable_memory"), "context exposes new profile and relationship fields", kTestName);
         const AdminController controller;
         drogon::HttpResponsePtr response;
         const auto callback = [&](const drogon::HttpResponsePtr &value) { response = value; };
@@ -1514,10 +1594,10 @@ namespace {
               "API rejects invalid affinity without writing", kTestName);
         }
         edited["affinity"] = 100;
-        edited["stable_memory"] = {" "};
+        edited["profile"] = {" "};
         check(update({{"expected", original}, {"replacement", edited}}) == drogon::k400BadRequest,
           "API rejects blank memory items", kTestName);
-        edited["stable_memory"] = json::array();
+        edited["profile"] = json::array();
         edited["pending_entries"] = {{{"id", "999999"}, {"content", "伪造条目"}}};
         check(update({{"expected", original}, {"replacement", edited}}) == drogon::k400BadRequest,
           "API cannot add arbitrary pending IDs", kTestName);

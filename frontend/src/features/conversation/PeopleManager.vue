@@ -14,7 +14,8 @@ interface PersonSummary extends PersonIdentity {
   updated_at: string
 }
 interface PersonDetail extends PersonIdentity {
-  stable_memory: string[]
+  profile: string[]
+  relationship: string[]
   recent_interactions: string[]
   pending_entries: {id: string; content: string; source_session: string; time: string}[]
 }
@@ -31,6 +32,8 @@ const ascending = ref(false)
 const editing = ref(false)
 const draftText = ref('')
 const saving = ref(false)
+const consolidating = ref(false)
+const consolidationMessage = ref('')
 const editError = ref('')
 let nameTimer: ReturnType<typeof setTimeout> | undefined
 let disposed = false
@@ -53,11 +56,13 @@ const detailName = computed(() => {
   return person?.name && person.name !== '未知' ? person.name : detail.value?.name || '未知'
 })
 const memorySections = computed(() => detail.value ? [
-  {key: 'stable', title: '固定记忆', items: detail.value.stable_memory},
+  {key: 'profile', title: '人物档案', items: detail.value.profile},
+  {key: 'relationship', title: '与机器人的关系', items: detail.value.relationship},
   {key: 'recent', title: '近期互动', items: detail.value.recent_interactions}
 ] : [])
 const scoreClass = (value: number) => value > 0 ? 'positive' : value < 0 ? 'negative' : ''
 const sourceLabel = (session: string) => {
+  if (session === '0') return '历史记忆迁移'
   const userId = privateSessionUserId(session)
   return userId !== null ? `私聊 ${userId}` : `群聊 ${session}`
 }
@@ -66,6 +71,8 @@ const formatTime = (value: string) => value ? new Date(value.replace(' ', 'T') +
 async function fetchPeopleJson(path: string, signal: AbortSignal, options: RequestInit = {}) {
   const response = await fetch(path, {...options, signal})
   if (!response.ok) {
+    const body = await response.json().catch(() => null)
+    if (typeof body?.error === 'string') throw new Error(body.error)
     if (response.status === 409) throw new Error('人物信息已变化，请重新读取后编辑；当前草稿已保留')
     if (response.status === 400) throw new Error('输入无效，请检查好感度及记忆内容')
     if (response.status === 404) throw new Error('人物查询接口不存在，请更新并重启后端服务')
@@ -87,9 +94,10 @@ async function fetchPeopleJson(path: string, signal: AbortSignal, options: Reque
 }
 
 async function selectPerson(qq: string) {
-  if (saving.value || (editing.value && !window.confirm('放弃未保存的修改？'))) return
+  if (saving.value || consolidating.value || (editing.value && !window.confirm('放弃未保存的修改？'))) return
   editing.value = false
   editError.value = ''
+  consolidationMessage.value = ''
   detailController?.abort()
   const controller = detailController = new AbortController()
   selected.value = qq
@@ -109,7 +117,7 @@ async function selectPerson(qq: string) {
 }
 
 async function loadPeople(refreshDetail = true) {
-  if (disposed || loading.value || editing.value || saving.value) return
+  if (disposed || loading.value || editing.value || saving.value || consolidating.value) return
   clearTimeout(nameTimer)
   const controller = summaryController = new AbortController()
   loading.value = true
@@ -136,11 +144,11 @@ async function loadPeople(refreshDetail = true) {
   }
 }
 function beginEdit() {
-  if (!detail.value) return
+  if (!detail.value || consolidating.value) return
   clearTimeout(nameTimer)
   editing.value = true
-  const {affinity, stable_memory, recent_interactions, pending_entries} = detail.value
-  draftText.value = JSON.stringify({affinity, stable_memory, recent_interactions,
+  const {affinity, profile, relationship, recent_interactions, pending_entries} = detail.value
+  draftText.value = JSON.stringify({affinity, profile, relationship, recent_interactions,
     pending_entries: pending_entries.map(({id, content}) => ({id, content}))}, null, 2)
   editError.value = ''
 }
@@ -172,7 +180,7 @@ async function savePerson() {
   if (!editing.value && !disposed) await loadPeople()
 }
 async function deletePerson() {
-  if (!detail.value || saving.value || !window.confirm(`删除 ${detailName.value}（${selected.value}）的全部人物记忆和好感度？聊天记录不受影响，后续聊天可重新建立档案。`)) return
+  if (!detail.value || saving.value || consolidating.value || !window.confirm(`删除 ${detailName.value}（${selected.value}）的全部人物记忆和好感度？聊天记录不受影响，后续聊天可重新建立档案。`)) return
   const index = filtered.value.findIndex(person => person.qq === selected.value)
   const next = filtered.value[index + 1]?.qq || filtered.value[index - 1]?.qq || ''
   saving.value = true
@@ -188,6 +196,24 @@ async function deletePerson() {
     return
   } finally { saving.value = false }
   if (!disposed) await loadPeople()
+}
+async function consolidatePerson() {
+  if (!detail.value || editing.value || saving.value || consolidating.value) return
+  clearTimeout(nameTimer)
+  consolidating.value = true
+  consolidationMessage.value = ''
+  editError.value = ''
+  try {
+    const data = await fetchPeopleJson(`/admin/api/people/${encodeURIComponent(selected.value)}/consolidate`,
+      new AbortController().signal, {method: 'POST'})
+    consolidating.value = false
+    if (!disposed) {
+      await loadPeople()
+      consolidationMessage.value = data.message || '人物记忆已整理'
+    }
+  } catch (cause) {
+    if (!disposed) editError.value = cause instanceof Error ? cause.message : '整理失败，原记忆已保留'
+  } finally { consolidating.value = false }
 }
 onMounted(loadPeople)
 onUnmounted(() => {
@@ -205,7 +231,7 @@ onUnmounted(() => {
       <input v-model="search" class="form-input" placeholder="搜索昵称或 QQ 号" aria-label="搜索人物">
       <span>{{ filtered.length }} / {{ people.length }} 人</span>
       <button class="btn btn-secondary icon-button" :title="ascending ? '好感度：从低到高' : '好感度：从高到低'" :aria-label="ascending ? '好感度：从低到高' : '好感度：从高到低'" @click="ascending = !ascending"><ArrowUpNarrowWide v-if="ascending" :size="18"/><ArrowDownWideNarrow v-else :size="18"/></button>
-      <button class="btn btn-secondary" :disabled="loading || editing || saving" @click="loadPeople()">刷新</button>
+      <button class="btn btn-secondary" :disabled="loading || editing || saving || consolidating" @click="loadPeople()">刷新</button>
     </div>
     <p v-if="error" role="alert">{{ error }}</p>
     <p v-else-if="loading && !people.length" class="empty">加载中...</p>
@@ -215,6 +241,7 @@ onUnmounted(() => {
         <p v-if="!filtered.length" class="empty">没有匹配的人物</p>
         <button v-for="person in filtered" :key="person.qq" class="person-row"
                 :class="{selected: selected === person.qq}" :aria-pressed="selected === person.qq"
+                :disabled="consolidating || saving"
                 @click="selectPerson(person.qq)">
           <span class="person-identity"><strong>{{ person.name || '未知' }}</strong><small>{{ person.qq }} · {{ person.pending_count }} 条待整理</small></span>
           <span :class="scoreClass(person.affinity)">{{ person.affinity > 0 ? '+' : '' }}{{ person.affinity }}</span>
@@ -225,9 +252,11 @@ onUnmounted(() => {
         <p v-else-if="detailError" role="alert">{{ detailError }}</p>
         <template v-else-if="detail">
           <div class="person-actions" v-if="!editing">
-            <button class="btn btn-secondary" :disabled="saving" @click="beginEdit"><Pencil :size="16"/>编辑</button>
-            <button class="btn btn-danger icon-button" title="删除人物" aria-label="删除人物" :disabled="saving" @click="deletePerson"><Trash2 :size="16"/></button>
+            <button class="btn btn-secondary" :disabled="saving || consolidating" @click="consolidatePerson">{{ consolidating ? '整理中...' : '立即整理' }}</button>
+            <button class="btn btn-secondary" :disabled="saving || consolidating" @click="beginEdit"><Pencil :size="16"/>编辑</button>
+            <button class="btn btn-danger icon-button" title="删除人物" aria-label="删除人物" :disabled="saving || consolidating" @click="deletePerson"><Trash2 :size="16"/></button>
           </div>
+          <p v-if="consolidationMessage" role="status">{{ consolidationMessage }}</p>
           <p v-if="editError" role="alert">{{ editError }}</p>
           <form v-if="editing" class="person-editor" @submit.prevent="savePerson">
             <fieldset :disabled="saving">
