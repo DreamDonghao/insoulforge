@@ -375,11 +375,7 @@ namespace {
         const auto mention = drogon::sync_wait(insoulforge::MessageRouter::route(100, "mention", mentionSnapshot));
         check(mention.shouldReply, "bot mention replies without LLM", kTestName);
         check(mention.isPriority, "bot mention is priority", kTestName);
-
-        const insoulforge::json shortSnapshot = insoulforge::json::array({{{"message_id", "short"},
-          {"sender", {{"qq", "11"}}}, {"segments", insoulforge::json::array({{{"type", "text"}, {"text", "嗯"}}})}}});
-        const auto shortMessage = drogon::sync_wait(insoulforge::MessageRouter::route(100, "short", shortSnapshot));
-        check(!shortMessage.shouldReply, "short group message skips without LLM", kTestName);
+        check(!mention.maxLength, "bot mention does not suggest a reply length", kTestName);
 
         auto assistantAfterMention = mentionSnapshot;
         assistantAfterMention.push_back(
@@ -400,6 +396,7 @@ namespace {
               drogon::sync_wait(insoulforge::MessageRouter::route(100, "1790000000000001", systemSnapshot));
             check(systemDecision.shouldReply && systemDecision.isPriority,
               "async task result triggers a priority reply", kTestName);
+            check(systemDecision.maxLength == 100, "system message keeps its reply length", kTestName);
         }
         const auto privateSystemEvent = insoulforge::OneBotEventNormalizer::normalize({{"post_type", "message"},
           {"message_type", "private"}, {"user_id", 11}, {"self_id", 42}, {"message_id", 1'790'000'000'000'002LL},
@@ -428,6 +425,12 @@ namespace {
         const auto fallback = drogon::sync_wait(insoulforge::MessageRouter::route(100, "plain", plainSnapshot));
         check(fallback.shouldReply, "unconfigured jev falls back to existing fail-open path", kTestName);
         check(fallback.reason == "Router 请求失败", "fallback reason is unchanged", kTestName);
+
+        const insoulforge::json shortSnapshot = insoulforge::json::array({{{"message_id", "short"},
+          {"sender", {{"qq", "11"}}}, {"segments", insoulforge::json::array({{{"type", "text"}, {"text", "嗯"}}})}}});
+        const auto shortMessage = drogon::sync_wait(insoulforge::MessageRouter::route(100, "short", shortSnapshot));
+        check(shortMessage.shouldReply && shortMessage.reason == "Router 请求失败",
+          "single-character message reaches the same routing fallback as ordinary text", kTestName);
 
         config.jev = originalJev;
         config.router = originalRouter;

@@ -10,6 +10,7 @@
 
 #include <array>
 #include <format>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -30,7 +31,7 @@ namespace insoulforge {
         // 回复策略
         bool shouldReply = true;
         std::string tone = "friendly";
-        i32 maxLength = 25;
+        std::optional<i32> maxLength = 25; ///< 未指定时由回复模型根据问题与人设决定长度
         bool isPriority = false;
         bool isPrivate = false; ///< Router 决策所属的会话类型；Executor 独立从会话 ID 选择人设
 

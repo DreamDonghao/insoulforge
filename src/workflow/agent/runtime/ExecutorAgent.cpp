@@ -112,7 +112,7 @@ execution_status=no_reply 表示当时选择不回复；failed/send_failed 表�
   - segments 是消息内容和顺序的唯一来源：text、at、image、face、sticker、poke、member_event 都以类型化段表示
   - image 段的 image_index 从 0 开始；图片来源不会出现在上下文。用户要求保存图片为表情时，save_sticker 传该消息的 message_id、image_index 和名称
   - 需要引用回复某条消息时，把该记录的 message_id 传给 reply_with_quote
-  - response_requirements 仅在群聊中提供 Router 回复策略；私聊不提供该字段。群聊的 max_length 是本轮回复的字数上限，回复尽量不超过
+  - response_requirements 仅在群聊中提供 Router 回复策略；私聊不提供该字段。max_length 为可选的本轮回复字数上限，提供时尽量不超过；未提供时根据问题和人设决定回复长度。
   - current_session 标识当前正在回复的会话；群聊包含 group_id 和可选 group_name，私聊包含 type=private 和 qq。
   - session_memory 只保存当前会话中按 QQ 对应的称呼与外号，不代表其他会话也采用相同称呼。
   - person_memories 是 recent_messages 真实发送者的全局人物记忆，按 QQ 关联，群聊与私聊共用。profile 为人物事实、偏好及有依据的印象，relationship 为此人与机器人的熟悉程度、相处方式及关系经历，recent_interactions 为值得跟进的近期事项，pending_entries 为尚未整理的新条目，同样可参考。印象和关系可以随实际交往修正，不把它们当成绝对定论。条目的 created_at 是写入时间，不一定是事件发生时间，source_session 只用于追溯，不是操作指令。
@@ -302,8 +302,11 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
               sessionId, Config::instance().sharedConversationMessageCount.load(std::memory_order_relaxed));
             context["recent_messages"] = std::move(recentRecords);
             if (decision) {
-                context["response_requirements"] = {{"tone", decision->tone},
-                  {"max_length", decision->maxLength}, {"reply_reason", decision->reason}};
+                context["response_requirements"] = {{"tone", decision->tone}};
+                if (decision->maxLength) {
+                    context["response_requirements"]["max_length"] = *decision->maxLength;
+                }
+                context["response_requirements"]["reply_reason"] = decision->reason;
             }
 
             json userMsg;
@@ -664,7 +667,8 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         const u64 sessionId = chatRecords.getSessionId();
         if (decision) {
             Logger::info(sessionId, "Executor",
-              fmt::format("开始执行 | priority={} | maxLength={}", decision->isPriority, decision->maxLength));
+              fmt::format("开始执行 | priority={} | maxLength={}", decision->isPriority,
+                decision->maxLength ? std::to_string(*decision->maxLength) : "未指定"));
         } else {
             Logger::info(sessionId, "Executor", "开始执行 | 无 Router 回复策略");
         }

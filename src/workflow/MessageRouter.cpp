@@ -31,7 +31,7 @@ namespace insoulforge::MessageRouter {
         constexpr std::string_view kJevActionUnclear = "unclear";
 
         [[nodiscard]] auto makeDecision(const RouterDecision::Action action, std::string reason,
-          const i32 maxLength = 25, const bool priority = false) -> RouterDecision {
+          const std::optional<i32> maxLength = 25, const bool priority = false) -> RouterDecision {
             return {.action = action,
               .reason = std::move(reason),
               .shouldReply = action == RouterDecision::Action::REPLY,
@@ -42,24 +42,6 @@ namespace insoulforge::MessageRouter {
         [[nodiscard]] auto applySessionType(RouterDecision decision, const u64 sessionId) -> RouterDecision {
             decision.isPrivate = SessionId::isPrivate(sessionId);
             return decision;
-        }
-
-        /// @brief 统计 UTF-8 字符数量，不将多字节汉字误计为多个字符
-        [[nodiscard]] auto utf8CharacterCount(const std::string_view text) -> size_t {
-            return static_cast<size_t>(std::ranges::count_if(
-              text, [](const unsigned char character) -> bool { return (character & 0xC0U) != 0x80U; }));
-        }
-
-        [[nodiscard]] auto isSpam(const json &message) -> bool {
-            const bool hasNonTextSegment = std::ranges::any_of(atOrNull(message, "segments"),
-              [](const json &segment) -> bool { return getStr(segment, "type") != "text"; });
-            if (hasNonTextSegment) {
-                return false;
-            }
-            std::string text = MessageRecord::extractText(message);
-            std::erase_if(
-              text, [](const char character) -> int { return std::isspace(static_cast<unsigned char>(character)); });
-            return text.empty() || utf8CharacterCount(text) <= 2;
         }
 
         [[nodiscard]] auto compactMessage(const json &message, const bool includeGroupCard) -> json {
@@ -340,16 +322,13 @@ namespace insoulforge::MessageRouter {
               makeDecision(RouterDecision::Action::REPLY, "系统消息触发", 100, true), sessionId);
         }
         if (MessageRecord::mentions(*trigger, Config::instance().selfQQNumber)) {
-            co_return applySessionType(makeDecision(RouterDecision::Action::REPLY, "用户@提及", 100, true), sessionId);
+            co_return applySessionType(
+              makeDecision(RouterDecision::Action::REPLY, "用户@提及", std::nullopt, true), sessionId);
         }
         // 只阻止普通群消息的自动路由；明确提及和系统任务已经在上方处理。
         if (!SessionId::isPrivate(sessionId) && !SessionStore::getSessionConfig(sessionId).autoReply) {
             co_return makeDecision(RouterDecision::Action::SKIP, "本群已关闭自动回复");
         }
-        if (!SessionId::isPrivate(sessionId) && isSpam(*trigger)) {
-            co_return applySessionType(makeDecision(RouterDecision::Action::SKIP, "刷屏或短文本"), sessionId);
-        }
-
         const auto &config = Config::instance();
 
         // 群聊先由 Jev 判断；无法确定时沿用原有 Router LLM。

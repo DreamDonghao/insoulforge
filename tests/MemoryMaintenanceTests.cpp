@@ -512,6 +512,10 @@ namespace {
             const auto groupReply = co_await ExecutorAgent::execute(groupRecords, memory,
               RouterDecision{.reason = "group strategy", .tone = "serious", .maxLength = 123});
             require(groupReply && groupReply->content == "context verified", "group Router strategy was lost");
+            const auto mentionReply = co_await ExecutorAgent::execute(groupRecords, memory,
+              RouterDecision{.reason = "用户@提及", .maxLength = std::nullopt, .isPriority = true});
+            require(mentionReply && mentionReply->content == "context verified",
+              "mention context did not omit the reply length");
             registry.unregisterPlugin("contract.context");
             require(registry.registerPlugin("contract.thinking", [](ToolRegistry &staged) {
                 InfoToolsPlugin{}.registerTools(staged);
@@ -871,8 +875,12 @@ auto main() -> int {
               valid = valid && !context.contains("response_requirements") &&
                 systemPrompt.contains("这是私聊，直接回复即可");
           } else {
-              valid = valid && context["response_requirements"] == json({{"tone", "serious"},
-                {"max_length", 123}, {"reply_reason", "group strategy"}}) &&
+              const auto &requirements = context["response_requirements"];
+              const bool mention = requirements["reply_reason"] == "用户@提及";
+              const auto expectedRequirements = mention
+                ? json{{"tone", "friendly"}, {"reply_reason", "用户@提及"}}
+                : json{{"tone", "serious"}, {"max_length", 123}, {"reply_reason", "group strategy"}};
+              valid = valid && requirements == expectedRequirements &&
                 !systemPrompt.contains("这是私聊，直接回复即可");
           }
           if (executorRequests == 1)

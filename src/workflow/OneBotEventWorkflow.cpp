@@ -341,7 +341,8 @@ namespace insoulforge {
                         Logger::info(sessionId, "Router",
                           fmt::format("决策={} | reason={} | priority={} | maxLength={}",
                             routerDecision->shouldReply ? "reply" : "skip", routerDecision->reason,
-                            routerDecision->isPriority, routerDecision->maxLength));
+                            routerDecision->isPriority,
+                            routerDecision->maxLength ? std::to_string(*routerDecision->maxLength) : "未指定"));
                     }
 
                     if (!routerDecision || routerDecision->shouldReply) {
