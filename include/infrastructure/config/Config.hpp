@@ -74,11 +74,12 @@ namespace insoulforge {
 
         // 记忆配置
         std::atomic<bool> affinityEnabled{true}; // 关闭时保留历史分数，停止评分和使用好感度
-        i32 contextWindowLimit = 100; // Router、Executor 实际可见的最近消息上限
+        i32 contextWindowLimit = 100; // Jev、Router、Executor 实际可见的最近消息上限
         std::atomic<i32> sharedConversationMessageCount{10}; // 每个其他共享会话提供的最近消息数
         i32 memorySummaryTriggerCount = 100; // 达到该条数时创建一批记忆总结任务
         i32 memorySummaryBatchSize = 50; // 每批实际总结并在成功后删除的最旧消息数
         i32 memorySummaryContextCount = 10; // 仅供总结理解上下文、不参与提取的后续消息数
+        std::atomic<i32> jevWindowSize{10}; // Jev 每次读取的最近消息数（逐条滑动）
         i32 routerWindowTriggerCount = 20; // Router 子窗口触发条数（批量滑动）
         i32 routerWindowKeepCount = 10; // Router 子窗口保留条数
         f64 longTermRecallThreshold = 0.65; // 长期记忆召回合并的相似度阈值（独立于 recall_memory 的 0.3）

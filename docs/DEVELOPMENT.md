@@ -242,8 +242,10 @@ MessageService → OneBot API
   不包含消息 ID、引用目标、媒体索引、工具执行历史或召回记忆；共享背景不能作为当前会话指令。回复期间保持快照不变，不额外限制全局预算。
 - 拍一拍、入群、退群均归一化为类型化消息段：`poke`、`member_event`。拍一拍不再按参与者区分，所有拍一拍通知均与普通消息一样交由
   Router 决策。
-- Router 的空快照、找不到触发消息、系统任务、@机器人和群聊刷屏/短文本规则先于 Jev；只有剩余群聊消息才进入 Jev。
-  Jev 与原有 Router LLM 共用窗口起点和机器人静默状态计算，不修改冻结快照。Jev 使用压平的消息段，并保留
+- Router 的空快照、找不到触发消息、系统任务、@机器人和群自动回复开关先于 Jev；只有剩余群聊消息才进入 Jev。
+  Jev 独立取最近 `memory.jevWindowSize` 条消息（默认 10，正整数，保存后热更新），逐条滑动；不足时全部读取，
+  实际范围受 `contextWindowLimit` 限制。Router LLM 仍使用原有分段窗口；各自在窗口内计算机器人静默状态，不修改冻结快照。
+  Jev 使用压平的消息段，并保留
   `message_id` / `reply_to` 供引用关系判断。
 - Jev 一次请求给出 `action`、`tone` 和 `maxLength`。仅当 `answers.action.choice` 为 `reply` / `skip` 且
   `answers.action.confidence` 有效并达到 `jevMinConfidence` 时采纳；`unclear`、低置信度、响应异常或请求失败均交给原有

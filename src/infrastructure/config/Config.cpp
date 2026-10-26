@@ -25,7 +25,7 @@ namespace insoulforge {
                   "accessToken", "oneBotTransport", "qqHttpHost", "qqWebSocketHost", "botName"};
                 constexpr std::array integerFields{"maxTokens", "contextWindowLimit", "memorySummaryTriggerCount",
                   "memorySummaryBatchSize", "memorySummaryContextCount", "routerWindowTriggerCount",
-                  "routerWindowKeepCount", "maxToolRounds", "sharedConversationMessageCount", "timeoutSeconds", "maxRetries"};
+                  "routerWindowKeepCount", "jevWindowSize", "maxToolRounds", "sharedConversationMessageCount", "timeoutSeconds", "maxRetries"};
                 if (std::ranges::find(integerFields, key) != integerFields.end()) {
                     if (!field.is_number_integer() ||
                         (field.is_number_unsigned()
@@ -36,7 +36,8 @@ namespace insoulforge {
                           .type = ConfigErrorType::InvalidArgument, .message = key + " 必须是 i32 范围内的整数"});
                     }
                     if ((key == "timeoutSeconds" && (field < 1 || field > 3600)) ||
-                        (key == "maxRetries" && (field < 0 || field > 10)))
+                        (key == "maxRetries" && (field < 0 || field > 10)) ||
+                        (key == "jevWindowSize" && field < 1))
                         return std::unexpected(ConfigError{
                           .type = ConfigErrorType::InvalidArgument, .message = key + " 超出允许范围"});
                 } else if (key == "apiType") {
@@ -153,6 +154,7 @@ namespace insoulforge {
             memorySummaryTriggerCount = getInt(memCfg, "memorySummaryTriggerCount");
             memorySummaryBatchSize = getInt(memCfg, "memorySummaryBatchSize");
             memorySummaryContextCount = getInt(memCfg, "memorySummaryContextCount");
+            jevWindowSize.store(getInt(memCfg, "jevWindowSize", 10), std::memory_order_relaxed);
             routerWindowTriggerCount = getInt(memCfg, "routerWindowTriggerCount");
             routerWindowKeepCount = getInt(memCfg, "routerWindowKeepCount");
             longTermRecallThreshold = getDouble(memCfg, "longTermRecallThreshold");
@@ -255,6 +257,7 @@ namespace insoulforge {
         memorySummaryTriggerCount = value.memorySummaryTriggerCount;
         memorySummaryBatchSize = value.memorySummaryBatchSize;
         memorySummaryContextCount = value.memorySummaryContextCount;
+        jevWindowSize.store(value.jevWindowSize.load(std::memory_order_relaxed), std::memory_order_relaxed);
         routerWindowTriggerCount = value.routerWindowTriggerCount;
         routerWindowKeepCount = value.routerWindowKeepCount;
         longTermRecallThreshold = value.longTermRecallThreshold;
@@ -323,6 +326,8 @@ namespace insoulforge {
             return result;
         }
         json normalized = value;
+        if (!normalized.contains("jevWindowSize"))
+            normalized["jevWindowSize"] = jevWindowSize.load(std::memory_order_relaxed);
         if (!normalized.contains("affinityEnabled"))
             normalized["affinityEnabled"] = affinityEnabled.load(std::memory_order_relaxed);
         if (normalized.contains("sharedConversationMessageCount") &&

@@ -14,6 +14,7 @@
 
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/storage/Database.hpp>
+#include <workflow/MessageRouter.hpp>
 #include <workflow/agent/llm/JevClient.hpp>
 #include <workflow/agent/llm/LlmClient.hpp>
 #include <workflow/agent/tools/image/ImageGenerationService.hpp>
@@ -61,6 +62,22 @@ namespace {
             require(settings["timeoutSeconds"] == timeout && settings["maxRetries"] == retries,
               "legacy model defaults changed");
         }
+        require(config.jevWindowSize.load() == 10 && config.getMemoryConfig()["jevWindowSize"] == 10,
+          "legacy Jev window did not default to ten");
+        auto memorySettings = config.getMemoryConfig();
+        memorySettings["jevWindowSize"] = 4;
+        require(config.saveMemoryConfig(memorySettings).has_value() && config.jevWindowSize.load() == 4,
+          "Jev window did not hot update");
+        for (const auto &bad: json::array({0, -1, 1.5, true, "10", nullptr, 2147483648ULL})) {
+            auto invalid = memorySettings;
+            invalid["jevWindowSize"] = bad;
+            require(!config.saveMemoryConfig(invalid) && config.getMemoryConfig() == memorySettings &&
+                      config.jevWindowSize.load() == 4, "invalid Jev window changed settings");
+        }
+        memorySettings.erase("jevWindowSize");
+        require(config.saveMemoryConfig(memorySettings).has_value() && config.jevWindowSize.load() == 4 &&
+                  config.initialize(path.string()).has_value() && config.jevWindowSize.load() == 4,
+          "old client or restart reset Jev window");
         auto settings = config.getLLMConfig("memory");
         settings["timeoutSeconds"] = 600;
         settings["maxRetries"] = 2;
@@ -109,10 +126,63 @@ namespace {
           .timeoutSeconds = timeout, .maxRetries = retries};
     }
 
+    auto testJevWindow(const std::string &endpoint) -> drogon::Task<> {
+        auto &config = Config::instance();
+        config.jevWindowSize.store(10);
+        for (const int size: {5, 20, 21, 22, 23}) {
+            const auto key = "jev-window-" + std::to_string(size);
+            config.jev = apiFor(endpoint, key, 0);
+            json records = json::array();
+            for (int index = 0; index < size; ++index) {
+                records.push_back({{"message_id", std::to_string(index)},
+                  {"sender", {{"qq", index == 12 ? "self" : "11"}}},
+                  {"segments", json::array({{{"type", "text"}, {"text", "test"}}})}});
+            }
+            const auto decision = co_await MessageRouter::route(100, std::to_string(size - 1), records);
+            require(!decision.shouldReply && fixture.count(key) == 1, "Jev decision unexpectedly fell back");
+            json state;
+            { std::lock_guard lock(fixture.mutex); state = fixture.bodies.at(key).at("state"); }
+            const auto &window = state.at("chat_records");
+            const int start = std::max(0, size - 10);
+            require(window.size() == static_cast<size_t>(size - start), "wrong Jev window size");
+            for (int index = start; index < size; ++index) {
+                const auto &record = window.at(static_cast<size_t>(index - start));
+                require(record.at("message_id") == std::to_string(index) &&
+                          record.value("is_current", false) == (index == size - 1),
+                  "Jev window order or trigger marker changed");
+            }
+            const bool spoke = start <= 12 && size > 12;
+            require(state["bot_silence"]["spoke_in_window"] == spoke &&
+                      state["bot_silence"]["messages_since_last_speak"] == (spoke ? size - 13 : size - start),
+              "Jev silence statistics used a different window");
+        }
+        // 自定义窗口独立于 Router；低置信度时 Router 仍采用原有分段窗口。
+        config.jevWindowSize.store(4);
+        config.jev = apiFor(endpoint, "jev-window-fallback", 0);
+        config.router = apiFor(endpoint, "router-window", 0);
+        config.routerWindowTriggerCount = 20;
+        config.routerWindowKeepCount = 10;
+        json records = json::array();
+        for (int index = 0; index < 25; ++index)
+            records.push_back({{"message_id", std::to_string(index)}, {"sender", {{"qq", "11"}}},
+              {"segments", json::array({{{"type", "text"}, {"text", "test"}}})}});
+        (void) co_await MessageRouter::route(100, "24", records);
+        {
+            std::lock_guard lock(fixture.mutex);
+            require(fixture.bodies.at("jev-window-fallback")["state"]["chat_records"].size() == 4,
+              "custom Jev window was ignored");
+            const auto &messages = fixture.bodies.at("router-window").at("messages");
+            const auto context = json::parse(messages.back().at("content").get<std::string>());
+            require(context["chat_records"].size() == 15 && context["chat_records"][0]["message_id"] == "10",
+              "Router fallback stopped using its batched window");
+        }
+    }
+
     auto runTests(std::string endpoint, int &exitCode) -> drogon::Task<> {
         try {
             auto &config = Config::instance();
             require(Database::instance().initialize(":memory:").has_value(), "test database failed");
+            co_await testJevWindow(endpoint);
             const json messages = json::array({{{"role", "user"}, {"content", "test"}}});
             for (const auto *key: {"chat", "fallback", "status429", "status500", "status503"}) {
                 const auto response = co_await LlmClient::requestChat("test", "executor", apiFor(endpoint, key),
@@ -197,6 +267,18 @@ int main() {
         const auto response = drogon::HttpResponse::newHttpResponse();
         response->setContentTypeCode(drogon::CT_APPLICATION_JSON);
         response->setBody(R"({"choices":[{"message":{"content":"answer"}}],"answers":{"answer":{}},"data":[{"embedding":[1,0],"url":"https://example.com/image.png"}]})");
+        if (key.starts_with("jev-window-")) {
+            response->setBody(key == "jev-window-fallback"
+              ? R"({"answers":{"action":{"choice":"skip","confidence":0.1}}})"
+              : R"({"answers":{"action":{"choice":"skip","confidence":1.0}}})");
+            callback(response);
+            return;
+        }
+        if (key == "router-window") {
+            response->setBody(R"({"choices":[{"message":{"content":"{\"action\":\"skip\"}"}}]})");
+            callback(response);
+            return;
+        }
         if (key == "malformed") response->setBody("invalid JSON");
         else if (key.starts_with("exhaust")) response->setStatusCode(drogon::k500InternalServerError);
         else if (key.starts_with("status")) {

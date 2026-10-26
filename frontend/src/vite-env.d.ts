@@ -34,6 +34,7 @@ export interface MemoryConfig {
     memorySummaryTriggerCount: number
     memorySummaryBatchSize: number
     memorySummaryContextCount: number
+    jevWindowSize: number
     routerWindowTriggerCount: number
     routerWindowKeepCount: number
     longTermRecallThreshold: number

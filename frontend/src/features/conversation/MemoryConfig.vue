@@ -16,6 +16,7 @@ const memoryConfig = reactive<MemoryConfig>({
   memorySummaryTriggerCount: 100,
   memorySummaryBatchSize: 50,
   memorySummaryContextCount: 10,
+  jevWindowSize: 10,
   routerWindowTriggerCount: 20,
   routerWindowKeepCount: 10,
   longTermRecallThreshold: 0.65,
@@ -71,7 +72,7 @@ const saveMemoryConfig = async (): Promise<void> => {
         <div class="form-group">
           <label class="form-label">近期上下文上限</label>
           <input v-model="memoryConfig.contextWindowLimit" class="form-input" type="number">
-          <p class="form-hint">Router 与 Agent 实际可见的最近消息数</p>
+          <p class="form-hint">Jev、Router 与 Agent 实际可见的最近消息数上限</p>
         </div>
         <div class="form-group">
           <label class="form-label">总结触发条数</label>
@@ -101,6 +102,13 @@ const saveMemoryConfig = async (): Promise<void> => {
           <label class="form-label">Router 窗口保留条数</label>
           <input v-model="memoryConfig.routerWindowKeepCount" class="form-input" type="number">
           <p class="form-hint">滑动后保留的条数，必须小于触发条数</p>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Jev 窗口条数</label>
+          <input v-model="memoryConfig.jevWindowSize" class="form-input" min="1" step="1" type="number">
+          <p class="form-hint">每次取最近 N 条消息判断是否回复，默认 10 条；受近期上下文上限限制</p>
         </div>
       </div>
       <div class="form-row">

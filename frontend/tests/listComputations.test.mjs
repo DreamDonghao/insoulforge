@@ -111,9 +111,12 @@ test('memory settings save the affinity switch as a boolean with the other param
   })
   try {
     assert.equal(view.state.memoryConfig.affinityEnabled, true)
+    assert.equal(view.state.memoryConfig.jevWindowSize, 10)
+    view.state.memoryConfig.jevWindowSize = 15
     view.state.memoryConfig.affinityEnabled = false
     await view.state.saveMemoryConfig()
     assert.equal(saved.affinityEnabled, false)
+    assert.equal(saved.jevWindowSize, 15)
     assert.equal(saved.memorySummaryBatchSize, 50)
     assert.equal(view.state.saving, false)
   } finally { view.dispose() }

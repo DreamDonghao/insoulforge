@@ -66,7 +66,7 @@ namespace insoulforge::ConfigStore {
               {"memory",
                 {{"affinityEnabled", true}, {"contextWindowLimit", 100}, {"sharedConversationMessageCount", 10},
                   {"memorySummaryTriggerCount", 100}, {"memorySummaryBatchSize", 50}, {"memorySummaryContextCount", 10},
-                  {"routerWindowTriggerCount", 20}, {"routerWindowKeepCount", 10}, {"longTermRecallThreshold", 0.65},
+                  {"jevWindowSize", 10}, {"routerWindowTriggerCount", 20}, {"routerWindowKeepCount", 10}, {"longTermRecallThreshold", 0.65},
                   {"longTermInjectThreshold", 0.45}}},
               {"execution", {{"maxToolRounds", ExecutionSettings::kDefaultMaxToolRounds}, {"mcpToolPageSize", 10},
                               {"mcpMaxToolsPerEnable", 4}, {"mcpMaxToolsPerReply", 12}}},
@@ -125,8 +125,8 @@ namespace insoulforge::ConfigStore {
             bool changed = false;
             for (const auto &[key, defaultValue]: defaults.items()) {
                 auto value = config.find(key);
-                // 显式填写的请求控制参数必须通过严格校验，不能悄悄修复错误类型。
-                if (value != config.end() && (key == "timeoutSeconds" || key == "maxRetries" || key == "affinityEnabled"))
+                // 显式填写的严格校验字段不能悄悄修复错误类型。
+                if (value != config.end() && (key == "timeoutSeconds" || key == "maxRetries" || key == "affinityEnabled" || key == "jevWindowSize"))
                     continue;
                 if (value == config.end() || !compatibleType(*value, defaultValue)) {
                     config[key] = defaultValue;

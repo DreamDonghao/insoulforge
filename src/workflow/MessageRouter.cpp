@@ -153,12 +153,14 @@ namespace insoulforge::MessageRouter {
             return record;
         }
 
-        /// @brief 使用 Router 的上下文窗口构建 Jev 状态。
+        /// @brief 使用独立的最近 N 条滑动窗口构建 Jev 状态。
         [[nodiscard]] auto buildJevState(
           const u64 sessionId, const std::string_view triggerMessageId, const json &snapshot) -> json {
             const bool includeGroupCard =
               !SessionId::isPrivate(sessionId) && SessionStore::getSessionConfig(sessionId).sendGroupCard;
-            const size_t startIndex = windowStartIndex(snapshot.size());
+            const auto windowSize = static_cast<size_t>(
+              std::max(1, Config::instance().jevWindowSize.load(std::memory_order_relaxed)));
+            const size_t startIndex = snapshot.size() > windowSize ? snapshot.size() - windowSize : 0;
             const auto [spokeInWindow, silentCount] = computeBotSilence(snapshot, startIndex);
 
             json records = json::array();
