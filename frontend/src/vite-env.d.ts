@@ -28,6 +28,7 @@ export interface LLMConfig {
 }
 
 export interface MemoryConfig {
+    affinityEnabled: boolean
     contextWindowLimit: number
     sharedConversationMessageCount: number
     memorySummaryTriggerCount: number

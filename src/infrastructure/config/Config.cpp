@@ -47,10 +47,10 @@ namespace insoulforge {
                     if (!field.is_string() || trim(field.get<std::string>()).empty())
                         return std::unexpected(ConfigError{.type = ConfigErrorType::InvalidArgument,
                           .message = "editPath 必须是非空字符串"});
-                } else if (key == "defaultPrivateEnabled") {
+                } else if (key == "defaultPrivateEnabled" || key == "affinityEnabled") {
                     if (!field.is_boolean()) {
                         return std::unexpected(ConfigError{
-                          .type = ConfigErrorType::InvalidArgument, .message = "defaultPrivateEnabled 必须是布尔值"});
+                          .type = ConfigErrorType::InvalidArgument, .message = key + " 必须是布尔值"});
                     }
                 } else if (key == "selfQQNumber") {
                     if (!field.is_number_integer() || (!field.is_number_unsigned() && field.get<i64>() < 0)) {
@@ -147,6 +147,7 @@ namespace insoulforge {
 
         // 加载记忆配置
         if (const auto &memCfg = value.at("memory"); !memCfg.is_null()) {
+            affinityEnabled.store(memCfg.value("affinityEnabled", true), std::memory_order_relaxed);
             contextWindowLimit = getInt(memCfg, "contextWindowLimit");
             sharedConversationMessageCount = std::max(getInt(memCfg, "sharedConversationMessageCount", 10), 1);
             memorySummaryTriggerCount = getInt(memCfg, "memorySummaryTriggerCount");
@@ -247,6 +248,7 @@ namespace insoulforge {
     }
 
     void Config::applyMemoryValues(const Config &value) {
+        affinityEnabled.store(value.affinityEnabled.load(std::memory_order_relaxed), std::memory_order_relaxed);
         contextWindowLimit = value.contextWindowLimit;
         sharedConversationMessageCount.store(
           value.sharedConversationMessageCount.load(std::memory_order_relaxed), std::memory_order_relaxed);
@@ -321,6 +323,8 @@ namespace insoulforge {
             return result;
         }
         json normalized = value;
+        if (!normalized.contains("affinityEnabled"))
+            normalized["affinityEnabled"] = affinityEnabled.load(std::memory_order_relaxed);
         if (normalized.contains("sharedConversationMessageCount") &&
             getInt(normalized, "sharedConversationMessageCount") <= 0) {
             return std::unexpected(

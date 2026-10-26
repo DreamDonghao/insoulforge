@@ -34,7 +34,7 @@ const llmUsages: Record<string, string> = {
   executorThinking: '用途：深度思考模式的分析阶段（最终执行仍走 Executor）',
   image: '用途：图片识别与描述',
   imageGeneration: '用途：异步文生图，生成完成后直接发送到会话',
-  memory: '用途：记忆提取、整理与好感度评分',
+  memory: '用途：人物记忆提取、会话记忆与人物档案整理',
   embedding: '用途：长期记忆向量化（记忆写入与检索时计算文本向量）'
 }
 const selectedLLM: Ref<string> = ref('router')

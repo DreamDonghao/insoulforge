@@ -18,7 +18,7 @@ const render = new Function('Vue', template.code)(vue)
 const person = () => ({qq: '42', name: '测试人物', affinity: 7, profile: ['喜欢飞钓'],
   relationship: ['经常闲聊'], recent_interactions: [], pending_entries: [], name_pending: false})
 
-function page(post) {
+function page(post, settings = {affinityEnabled: true}) {
   const requests = [], module = {exports: {}}
   const require = name => name === 'vue' ? {...vue, onMounted() {}, onUnmounted() {}} :
     name.includes('session') ? {privateSessionUserId: () => null} :
@@ -26,8 +26,11 @@ function page(post) {
   new Function('require', 'module', 'exports', 'fetch', outputText)(require, module, module.exports,
     async (url, options = {}) => {
       requests.push({url, ...options})
+      const current = person()
+      if (!settings.affinityEnabled) delete current.affinity
       const result = options.method === 'POST' ? await post() :
-        {status: 200, body: url === '/admin/api/people' ? [{...person(), pending_count: 0}] : person()}
+        {status: 200, body: url === '/admin/api/memory-config' ? settings :
+          url === '/admin/api/people' ? [{...current, pending_count: 0}] : current}
       return {ok: result.status === 200, status: result.status,
         headers: new Headers({'content-type': 'application/json'}),
         json: async () => result.body, text: async () => JSON.stringify(result.body)}
@@ -37,7 +40,9 @@ function page(post) {
   state.people = [{...person(), pending_count: 0}]
   state.detail = person()
   state.selected = '42'
-  return {state, requests, dispose: () => scope.stop(),
+  state.affinityEnabled = settings.affinityEnabled
+  if (!settings.affinityEnabled) delete state.detail.affinity
+  return {state, requests, settings, dispose: () => scope.stop(),
     html: () => renderToString(vue.createSSRApp({setup: () => ({...state}), render,
       components: require('@lucide/vue')}))}
 }
@@ -61,13 +66,13 @@ test('manual consolidation prevents duplicate submissions and edits, then refres
     assert.equal(view.state.consolidating, false)
     assert.equal(view.state.consolidationMessage, '人物记忆已整理')
     assert.deepEqual(view.requests.map(({url}) => url), [
-      '/admin/api/people/42/consolidate', '/admin/api/people', '/admin/api/people/42'])
+      '/admin/api/people/42/consolidate', '/admin/api/people', '/admin/api/memory-config', '/admin/api/people/42'])
     view.state.beginEdit()
     const draft = JSON.parse(view.state.draftText)
     assert.deepEqual(draft.relationship, ['经常闲聊'])
     assert.equal('stable_memory' in draft, false)
     await view.state.consolidatePerson()
-    assert.equal(view.requests.length, 3)
+    assert.equal(view.requests.length, 4)
   } finally { view.dispose() }
 })
 
@@ -80,5 +85,41 @@ test('manual consolidation errors preserve displayed memory and show the backend
     assert.deepEqual(view.state.detail.profile, ['喜欢飞钓'])
     assert.equal(view.state.sourceLabel('0'), '历史记忆迁移')
     assert.equal(view.requests.length, 1)
+  } finally { view.dispose() }
+})
+
+test('disabled affinity hides scores and sorting, edits only memory and orders numerically by QQ', async () => {
+  const view = page(async () => ({status: 200, body: {success: true}}), {affinityEnabled: false})
+  try {
+    view.state.people = [{...person(), qq: '42', affinity: 100}, {...person(), qq: '2', affinity: -100}]
+    assert.deepEqual(view.state.sortedPeople.map(person => person.qq), ['2', '42'])
+    const html = await view.html()
+    assert.equal(html.includes('全局好感度'), false)
+    assert.equal(html.includes('好感度：'), false)
+    view.state.beginEdit()
+    assert.equal('affinity' in JSON.parse(view.state.draftText), false)
+    await view.state.savePerson()
+    const saved = JSON.parse(view.requests.find(request => request.method === 'PUT').body)
+    assert.equal('affinity' in saved.replacement, false)
+    assert.deepEqual(saved.replacement.profile, ['喜欢飞钓'])
+  } finally { view.dispose() }
+})
+
+test('a configuration change during editing discards the old editor without submitting it', async () => {
+  const view = page(async () => ({status: 200, body: {success: true}}))
+  try {
+    view.state.beginEdit()
+    view.settings.affinityEnabled = false
+    await view.state.savePerson()
+    assert.equal(view.requests.some(request => request.method === 'PUT'), false)
+    assert.equal(view.state.editing, false)
+    assert.equal(view.state.affinityEnabled, false)
+    assert.equal(view.state.draftText, '')
+    assert.ok(view.state.editError.includes('好感度设置已变化'))
+    assert.equal('affinity' in view.state.detail, false)
+    view.settings.affinityEnabled = true
+    await view.state.loadPeople()
+    assert.equal(view.state.affinityEnabled, true)
+    assert.equal(view.state.detail.affinity, 7)
   } finally { view.dispose() }
 })

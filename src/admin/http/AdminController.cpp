@@ -881,7 +881,8 @@ namespace {
         const auto &edit = atOrNull(body, "replacement");
         if (!edit.is_object()) return false;
         const auto &score = atOrNull(edit, "affinity");
-        if (!score.is_number_integer() || score < -100 || score > 100) return false;
+        if (Config::instance().affinityEnabled.load(std::memory_order_relaxed) &&
+            (!score.is_number_integer() || score < -100 || score > 100)) return false;
         for (const auto key : {"profile", "relationship", "recent_interactions"}) {
             const auto &items = atOrNull(edit, key);
             if (!items.is_array()) return false;
@@ -908,7 +909,9 @@ auto AdminController::updatePerson(HttpRequestPtr req, std::function<void(const 
     const auto id = parseUInt64(qq);
     const auto body = parseJsonBody(req);
     auto status = drogon::k400BadRequest;
-    std::string message = "人物数据无效：好感度须为 -100～100 的整数，记忆须为非空文本";
+    std::string message = Config::instance().affinityEnabled.load(std::memory_order_relaxed)
+      ? "人物数据无效：好感度须为 -100～100 的整数，记忆须为非空文本"
+      : "人物数据无效：记忆须为非空文本";
     if (id && !SessionId::isPrivate(id) && id != SessionId::kSystemAccountId && body && validPersonEdit(*body)) {
         const bool saved = PersonMemoryStore::updatePerson(id, body->at("expected"), body->at("replacement"));
         status = saved ? drogon::k200OK : drogon::k409Conflict;
@@ -939,6 +942,12 @@ auto AdminController::deletePerson(HttpRequestPtr req, std::function<void(const 
 
 auto AdminController::getSessionAffinity(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
   const std::string &sessionId) const -> Task<> {
+    if (!Config::instance().affinityEnabled.load(std::memory_order_relaxed)) {
+        auto response = jsonResponse(AdminResponse::errorJson("好感度已关闭"));
+        response->setStatusCode(drogon::k403Forbidden);
+        callback(response);
+        co_return;
+    }
     const u64 gid = std::stoull(sessionId);
     auto affinityMap = AffinityStore::getAffinityMap();
 

@@ -354,6 +354,15 @@ namespace {
                   {"segments", {{{"type", "text"}, {"text", "我喜欢编程"}}}}});
             }
             const auto original = list.fullSnapshot();
+            config.affinityEnabled = false;
+            mode.store(Mode::Empty);
+            const auto withoutScores = co_await MemoryMaintenanceService::prepare(100, original, json::array());
+            require(withoutScores && withoutScores->affinity.empty(), "disabled extraction still requires scores");
+            mode.store(Mode::MalformedDelta);
+            const auto ignoredScores = co_await MemoryMaintenanceService::prepare(100, original, json::array());
+            require(ignoredScores && !ignoredScores->personEntries.empty() && ignoredScores->affinity.empty(),
+              "disabled extraction rejects or retains extra model scores");
+            config.affinityEnabled = true;
             for (const auto failure: {Mode::ExtractFailure, Mode::ReconcileFailure, Mode::InvalidQq,
                    Mode::DuplicateAffinity, Mode::MalformedDelta, Mode::ContextOnlyQq, Mode::InvalidSessionMemory}) {
                 mode.store(failure);
@@ -516,6 +525,12 @@ namespace {
               RouterDecision{.reason = "用户@提及", .maxLength = std::nullopt, .isPriority = true});
             require(mentionReply && mentionReply->content == "context verified",
               "mention context did not omit the reply length");
+            config.affinityEnabled = false;
+            const auto withoutScoreReply = co_await ExecutorAgent::execute(groupRecords, memory,
+              RouterDecision{.reason = "group strategy", .tone = "serious", .maxLength = 123});
+            require(withoutScoreReply && withoutScoreReply->content == "context verified",
+              "disabled affinity leaked into the executor context or prompt");
+            config.affinityEnabled = true;
             registry.unregisterPlugin("contract.context");
             require(registry.registerPlugin("contract.thinking", [](ToolRegistry &staged) {
                 InfoToolsPlugin{}.registerTools(staged);
@@ -789,6 +804,12 @@ auto main() -> int {
               output = json{{"aliases", std::move(aliases)}, {"longTerm", std::move(entries)}}.dump();
           } else {
               json extracted = {{"memories", json::array()}, {"affinity_changes", json::array()}};
+              if (!Config::instance().affinityEnabled && (prompt.contains("好感度") || prompt.contains("affinity_changes"))) {
+                  auto reply = drogon::HttpResponse::newHttpResponse();
+                  reply->setStatusCode(drogon::k400BadRequest);
+                  callback(reply);
+                  return;
+              }
               if (current != Mode::Empty && current != Mode::Projection && current != Mode::AffinityOnly &&
                   current != Mode::EventOnly && current != Mode::EventRetired &&
                   current != Mode::LegacyForget) {
@@ -811,6 +832,8 @@ auto main() -> int {
                   extracted["affinity_changes"].push_back(extracted["affinity_changes"][0]);
               if (current == Mode::DuplicateMemory)
                   extracted["memories"].push_back(extracted["memories"][0]);
+              if (!Config::instance().affinityEnabled && current == Mode::Empty)
+                  extracted.erase("affinity_changes");
               output = extracted.dump();
           }
           const json response = {{"choices", {{{"message", {{"content", output}}}}}}};
@@ -855,7 +878,9 @@ auto main() -> int {
                       record["time"] == "2026-10-20 12:00:00" && !record.contains("assets") &&
                       !record.dump().contains("https://example.com/private.png") &&
                       record["segments"][1]["description"] == "fixture image";
-                  if (record["sender"]["qq"] == "22")
+                  if (!Config::instance().affinityEnabled)
+                      valid = valid && !record["sender"].contains("affinity");
+                  else if (record["sender"]["qq"] == "22")
                       valid = valid && record["sender"]["affinity"] == 5;
               }
           }
@@ -864,6 +889,8 @@ auto main() -> int {
                   !entry["created_at"].get<std::string>().empty();
           }
           const auto systemPrompt = messages[0]["content"].get<std::string>();
+          if (!Config::instance().affinityEnabled)
+              valid = valid && !systemPrompt.contains("affinity") && !systemPrompt.contains("好感度");
           const auto formatBegin = systemPrompt.find("## 聊天记录格式说明");
           const auto exampleBegin = systemPrompt.find("```json\n", formatBegin) + std::string("```json\n").size();
           const auto exampleEnd = systemPrompt.find("\n```", exampleBegin);

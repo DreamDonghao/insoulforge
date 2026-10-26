@@ -5,10 +5,13 @@
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 #include <workflow/agent/memory/affinity/AffinityStore.hpp>
+#include <infrastructure/config/Config.hpp>
 
 
 namespace insoulforge::AffinityStore {
     auto getAffinityMap() -> std::unordered_map<u64, i32> {
+        if (!Config::instance().affinityEnabled.load(std::memory_order_relaxed))
+            return {};
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
         const Statement stmt(db.handle(), "SELECT qq_number, affinity FROM person_affinity");
@@ -20,6 +23,8 @@ namespace insoulforge::AffinityStore {
     }
 
     void adjustAffinity(const u64 qqNumber, const i32 delta) {
+        if (!Config::instance().affinityEnabled.load(std::memory_order_relaxed))
+            return;
         const auto &db = Database::instance();
         std::unique_lock lock(db.mutex());
         // max/min 标量函数在 SQL 层夹紧，并发叠加也不会越界

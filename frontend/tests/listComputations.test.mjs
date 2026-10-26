@@ -102,6 +102,23 @@ test('700+ people retain search and numeric ordering while searches reuse cached
   } finally { view.dispose() }
 })
 
+test('memory settings save the affinity switch as a boolean with the other parameters', async () => {
+  let saved
+  const view = setup('conversation/MemoryConfig', async (url, options) => {
+    assert.equal(url, '/admin/api/memory-config')
+    saved = JSON.parse(options.body)
+    return {json: async () => ({success: true})}
+  })
+  try {
+    assert.equal(view.state.memoryConfig.affinityEnabled, true)
+    view.state.memoryConfig.affinityEnabled = false
+    await view.state.saveMemoryConfig()
+    assert.equal(saved.affinityEnabled, false)
+    assert.equal(saved.memorySummaryBatchSize, 50)
+    assert.equal(view.state.saving, false)
+  } finally { view.dispose() }
+})
+
 test('tool grouping preserves category and tool order, global counts, and existing search rules', () => {
   const view = setup('tools/CustomTools')
   try {

@@ -2,6 +2,7 @@
 /// @brief 记忆维护批次计算与统一提交
 
 #include <infrastructure/logging/Logger.hpp>
+#include <infrastructure/config/Config.hpp>
 #include <workflow/agent/memory/maintenance/MemoryMaintenanceCoordinator.hpp>
 #include <workflow/agent/memory/maintenance/MemoryMaintenanceService.hpp>
 #include <workflow/agent/memory/maintenance/MemoryMaintenanceStore.hpp>
@@ -15,9 +16,10 @@ namespace insoulforge::MemoryMaintenanceCoordinator {
             co_return false;
         }
         MemoryMaintenanceStore::apply(database, sessionId, *memory);
-        Logger::info(sessionId, "Memory",
-          fmt::format("记忆维护完成: 人物条目 +{}，长期记忆 +{}，好感度更新 {} 人", memory->personEntries.size(),
-            memory->longTerm.size(), memory->affinity.size()));
+        auto message = fmt::format("记忆维护完成: 人物条目 +{}，长期记忆 +{}", memory->personEntries.size(), memory->longTerm.size());
+        if (Config::instance().affinityEnabled.load(std::memory_order_relaxed))
+            message += fmt::format("，好感度更新 {} 人", memory->affinity.size());
+        Logger::info(sessionId, "Memory", message);
         co_return true;
     }
 } // namespace insoulforge::MemoryMaintenanceCoordinator

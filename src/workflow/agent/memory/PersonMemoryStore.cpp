@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <infrastructure/CommonUtil.hpp>
+#include <infrastructure/config/Config.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 #include <workflow/agent/memory/PersonMemoryStore.hpp>
@@ -127,6 +128,7 @@ namespace insoulforge::PersonMemoryStore {
     }
 
     auto listPeople() -> json {
+        const bool affinityEnabled = Config::instance().affinityEnabled.load(std::memory_order_relaxed);
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
         const Statement query(db.handle(),
@@ -140,6 +142,8 @@ namespace insoulforge::PersonMemoryStore {
             result.push_back(
               {{"qq", std::to_string(static_cast<u64>(query.getInt64(0)))}, {"affinity", query.getInt64(1)},
                 {"pending_count", query.getInt64(2)}, {"updated_at", query.isNull(3) ? "" : query.getText(3)}});
+            if (!affinityEnabled)
+                result.back().erase("affinity");
         }
         return result;
     }
@@ -147,7 +151,10 @@ namespace insoulforge::PersonMemoryStore {
     auto getPerson(const u64 qq) -> json {
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
-        return readPerson(qq);
+        auto result = readPerson(qq);
+        if (result.is_object() && !Config::instance().affinityEnabled.load(std::memory_order_relaxed))
+            result.erase("affinity");
+        return result;
     }
 
     namespace {
@@ -176,12 +183,15 @@ namespace insoulforge::PersonMemoryStore {
     } // namespace
 
     namespace {
-        auto matches(const json &current, const json &expected) -> bool {
+        auto matches(const json &current, const json &expected, const bool affinityEnabled) -> bool {
             if (current.is_null() || !expected.is_object())
                 return false;
-            for (const auto key: {"qq", "affinity", "profile", "relationship", "recent_interactions", "pending_entries"})
+            for (const auto key: {"qq", "affinity", "profile", "relationship", "recent_interactions", "pending_entries"}) {
+                if (std::string_view(key) == "affinity" && !affinityEnabled)
+                    continue;
                 if (!expected.contains(key) || current.at(key) != expected.at(key))
                     return false;
+            }
             return true;
         }
 
@@ -191,7 +201,9 @@ namespace insoulforge::PersonMemoryStore {
             auto *handle = db.handle();
             Statement(handle, "BEGIN IMMEDIATE").execOrThrow();
             try {
-                if (!matches(readPerson(qq), expected)) {
+                const bool affinityEnabled = Config::instance().affinityEnabled.load(std::memory_order_relaxed);
+                if (!matches(readPerson(qq), expected, affinityEnabled) ||
+                    (replacement && affinityEnabled && !atOrNull(*replacement, "affinity").is_number_integer())) {
                     Statement(handle, "ROLLBACK").execOrThrow();
                     return false;
                 }
@@ -206,11 +218,13 @@ namespace insoulforge::PersonMemoryStore {
                     profile.bind(3, replacement->at("relationship").dump());
                     profile.bind(4, replacement->at("recent_interactions").dump());
                     profile.execOrThrow();
-                    const Statement score(handle, "INSERT INTO person_affinity (qq_number, affinity) VALUES (?, ?) ON "
-                                                  "CONFLICT(qq_number) DO UPDATE SET affinity=excluded.affinity");
-                    score.bind(1, qq);
-                    score.bind(2, replacement->at("affinity").get<i32>());
-                    score.execOrThrow();
+                    if (affinityEnabled && Config::instance().affinityEnabled.load(std::memory_order_relaxed)) {
+                        const Statement score(handle, "INSERT INTO person_affinity (qq_number, affinity) VALUES (?, ?) ON "
+                                                      "CONFLICT(qq_number) DO UPDATE SET affinity=excluded.affinity");
+                        score.bind(1, qq);
+                        score.bind(2, replacement->at("affinity").get<i32>());
+                        score.execOrThrow();
+                    }
                     std::unordered_map<std::string, std::string> contents;
                     for (const auto &entry: replacement->at("pending_entries"))
                         contents.emplace(getStr(entry, "id"), getStr(entry, "content"));

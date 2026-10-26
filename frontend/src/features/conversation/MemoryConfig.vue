@@ -5,10 +5,12 @@
  */
 import {inject, onMounted, reactive, ref, type Ref} from 'vue'
 import type {ApiResponse, MemoryConfig} from '../../vite-env.d'
+import EnabledSwitch from '../../components/EnabledSwitch.vue'
 
 const showToast = inject<(msg: string, isError?: boolean) => void>('showToast')
 
 const memoryConfig = reactive<MemoryConfig>({
+  affinityEnabled: true,
   contextWindowLimit: 100,
   sharedConversationMessageCount: 10,
   memorySummaryTriggerCount: 100,
@@ -59,6 +61,11 @@ const saveMemoryConfig = async (): Promise<void> => {
     <div class="card">
       <div class="card-header">
         <h3 class="card-title">参数设置</h3>
+      </div>
+      <div class="form-group">
+        <label class="form-label">启用好感度</label>
+        <EnabledSwitch v-model="memoryConfig.affinityEnabled" label="启用好感度" :disabled="saving"/>
+        <p class="form-hint">关闭后停止评分，模型和人物页面不再使用好感度；历史分数保留，重新开启后恢复。</p>
       </div>
       <div class="form-row">
         <div class="form-group">

@@ -50,8 +50,7 @@ execution_status=no_reply 表示当时选择不回复；failed/send_failed 表�
             "time": "消息时间，如 2026-09-02 19:59:54",
             "sender": {
                 "name": "发送者昵称",
-                "qq": "发送者QQ号",
-                "affinity": 0
+                "qq": "发送者QQ号"
             },
             "message_id": "消息ID（数字字符串）",
             "segments": "按原始顺序保存的富内容段；图片段带 image_index、识别状态和描述",
@@ -84,8 +83,7 @@ execution_status=no_reply 表示当时选择不回复；failed/send_failed 表�
             "time": "消息时间，如 2026-09-02 19:59:54",
             "sender": {
                 "name": "发送者昵称",
-                "qq": "发送者QQ号",
-                "affinity": 0
+                "qq": "发送者QQ号"
             },
             "message_id": "消息ID（数字字符串）",
             "segments": "按原始顺序保存的富内容段；图片描述仅在图片段出现一次",
@@ -107,8 +105,7 @@ execution_status=no_reply 表示当时选择不回复；failed/send_failed 表�
 
   字段说明：
 
-  - sender.qq 为 "self" 的记录是我自己发出的消息（name 形如「昵称(我)」），它没有 affinity 字段
-  - sender.affinity 是全局好感度，取值为 -100～100 的整数，陌生人为 0
+  - sender.qq 为 "self" 的记录是我自己发出的消息（name 形如「昵称(我)」）
   - segments 是消息内容和顺序的唯一来源：text、at、image、face、sticker、poke、member_event 都以类型化段表示
   - image 段的 image_index 从 0 开始；图片来源不会出现在上下文。用户要求保存图片为表情时，save_sticker 传该消息的 message_id、image_index 和名称
   - 需要引用回复某条消息时，把该记录的 message_id 传给 reply_with_quote
@@ -174,6 +171,8 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
                           "- 禁言要核实实际情况再决定\n";
             }
 
+            if (Config::instance().affinityEnabled.load(std::memory_order_relaxed))
+                prompt += "\n- sender.affinity 是全局好感度，取值 -100～100，陌生人为 0；机器人自己的记录不提供该字段。\n";
             return prompt;
         }
 
@@ -242,13 +241,14 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
 
         /// @brief 构建聊天记录上下文：
         /// 最新 kRecentRecordCount 条保留完整语义投影，更早记录的文本段截断到 500 字；
-        /// 每条 sender 注入当前好感度 affinity；消息预处理阶段已将召回记忆写入完整消息。
+        /// 好感度开启时为 sender 注入当前分数；消息预处理阶段已将召回记忆写入完整消息。
         auto buildChatContext(const ChatRecordManager &chatRecords) -> ChatContext {
             const auto &records = chatRecords.getRecords(); // 旧 → 新
             const size_t totalRecords = records.size();
             const size_t olderCount = totalRecords > kRecentRecordCount ? totalRecords - kRecentRecordCount : 0;
 
-            const auto affinityMap = AffinityStore::getAffinityMap();
+            const bool affinityEnabled = Config::instance().affinityEnabled.load(std::memory_order_relaxed);
+            const auto affinityMap = affinityEnabled ? AffinityStore::getAffinityMap() : std::unordered_map<u64, i32>{};
 
             const bool includeGroupCard = !SessionId::isPrivate(chatRecords.getSessionId()) &&
                                           SessionStore::getSessionConfig(chatRecords.getSessionId()).sendGroupCard;
@@ -257,8 +257,8 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
             for (size_t index = 0; index < totalRecords; ++index) {
                 const bool isOlder = index < olderCount;
                 auto &target = isOlder ? context.earlier : context.recent;
-                target.push_back(
-                  injectAffinity(projectRecordForAgent(records[index], isOlder, includeGroupCard), affinityMap));
+                auto record = projectRecordForAgent(records[index], isOlder, includeGroupCard);
+                target.push_back(affinityEnabled ? injectAffinity(std::move(record), affinityMap) : std::move(record));
             }
             return context;
         }

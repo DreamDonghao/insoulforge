@@ -1780,6 +1780,46 @@ namespace {
         std::filesystem::remove(path);
     }
 
+    void testAffinitySwitch() {
+        using namespace insoulforge;
+        constexpr std::string_view kTestName = "affinity switch";
+        auto &config = Config::instance();
+        auto &database = Database::instance();
+        check(database.initialize(":memory:").has_value(), "initializes database", kTestName);
+        config.affinityEnabled = true;
+        MemoryMaintenanceStore::apply(database, 100, {.personEntries = {{11, "喜欢摄影"}}, .affinity = {{11, 7}}});
+        config.affinityEnabled = false;
+        MemoryMaintenanceStore::apply(database, 100, {.personEntries = {{11, "会修相机"}}, .affinity = {{11, 5}, {22, 3}}});
+        AffinityStore::adjustAffinity(11, 5);
+        check(AffinityStore::getAffinityMap().empty(), "disabled scores cannot be read", kTestName);
+        auto person = PersonMemoryStore::getPerson(11);
+        check(!person.contains("affinity") && person["pending_entries"].size() == 2 &&
+                !PersonMemoryStore::listPeople()[0].contains("affinity"),
+          "disabled score is hidden while memory still updates", kTestName);
+        auto replacement = person;
+        replacement["profile"] = {"喜欢摄影，会修相机"};
+        replacement["affinity"] = 99;
+        check(PersonMemoryStore::updatePerson(11, person, replacement), "disabled score is ignored when editing", kTestName);
+        person = PersonMemoryStore::getPerson(11);
+        AdminController controller;
+        drogon::HttpResponsePtr response;
+        const auto callback = [&](const auto &value) { response = value; };
+        drogon::sync_wait(controller.getSessionAffinity(drogon::HttpRequest::newHttpRequest(), callback, "100"));
+        check(response->statusCode() == drogon::k403Forbidden, "legacy score API is disabled", kTestName);
+        auto request = drogon::HttpRequest::newHttpRequest();
+        request->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+        request->setBody(json{{"expected", person}, {"replacement", person}}.dump());
+        drogon::sync_wait(controller.updatePerson(request, callback, "11"));
+        check(response->statusCode() == drogon::k200OK, "memory API accepts edits without scores", kTestName);
+        config.affinityEnabled = true;
+        check(AffinityStore::getAffinityMap().at(11) == 7 && !AffinityStore::getAffinityMap().contains(22) &&
+                PersonMemoryStore::getPerson(11)["profile"] == replacement["profile"],
+          "re-enabling restores historical scores without backfilling", kTestName);
+        MemoryMaintenanceStore::apply(database, 100, {.affinity = {{11, 2}}});
+        check(AffinityStore::getAffinityMap().at(11) == 9, "updates resume after re-enabling", kTestName);
+        database.close();
+    }
+
     void testMemoryModelConfigMigration() {
         constexpr std::string_view kTestName = "memory model config migration";
         const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -1803,6 +1843,19 @@ namespace {
         check(!insoulforge::Config::instance().getMemoryConfig().contains("memoryExtractMaxTokens"),
           "removes legacy token field", kTestName);
         auto &config = insoulforge::Config::instance();
+        check(config.affinityEnabled && config.getMemoryConfig()["affinityEnabled"] == true,
+          "old configurations enable affinity by default", kTestName);
+        check(config.saveMemoryConfig({{"affinityEnabled", false}}).has_value() && !config.affinityEnabled,
+          "affinity switch hot updates", kTestName);
+        check(config.saveMemoryConfig({{"sharedConversationMessageCount", 10}}).has_value() && !config.affinityEnabled,
+          "old client preserves affinity switch", kTestName);
+        for (const auto &invalid: insoulforge::json::array({0, 1, "false", nullptr}))
+            check(!config.saveMemoryConfig({{"affinityEnabled", invalid}}) && !config.affinityEnabled,
+              "affinity switch rejects non-boolean values", kTestName);
+        check(config.initialize(path.string()).has_value() && !config.affinityEnabled,
+          "affinity switch persists", kTestName);
+        check(config.saveMemoryConfig({{"affinityEnabled", true}}).has_value() && config.affinityEnabled,
+          "affinity can be re-enabled", kTestName);
         check(config.sharedConversationMessageCount == 10 && config.getMemoryConfig()["sharedConversationMessageCount"] == 10,
           "old configuration receives ten shared messages per session", kTestName);
         check(config.saveMemoryConfig({{"sharedConversationMessageCount", 25}}).has_value() &&
@@ -3088,6 +3141,7 @@ auto main() -> int {
     testSessionShortTermMemory();
     testRemovedShortTermLimit();
     testMemoryModelConfigMigration();
+    testAffinitySwitch();
     testImageApiConfig();
     testConfigFacade();
     testExecutionConfig();

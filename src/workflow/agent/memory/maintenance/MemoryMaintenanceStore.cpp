@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/config/Config.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 #include <workflow/agent/memory/maintenance/MemoryMaintenanceStore.hpp>
@@ -76,6 +77,8 @@ namespace insoulforge::MemoryMaintenanceStore {
             }
 
             for (const auto &[qqNumber, delta]: result.affinity) {
+                if (!Config::instance().affinityEnabled.load(std::memory_order_relaxed))
+                    break;
                 const Statement statement(handle,
                   "INSERT INTO person_affinity (qq_number, affinity) VALUES (?, max(min(?, 100), -100)) "
                   "ON CONFLICT(qq_number) DO UPDATE SET affinity = max(min(affinity + ?, 100), -100)");

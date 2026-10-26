@@ -64,7 +64,7 @@ namespace insoulforge::ConfigStore {
                        {"qqHttpHost", "http://127.0.0.1:3000"}, {"qqWebSocketHost", "ws://127.0.0.1:3001"},
                        {"botName", "机器人"}, {"defaultPrivateEnabled", false}}},
               {"memory",
-                {{"contextWindowLimit", 100}, {"sharedConversationMessageCount", 10},
+                {{"affinityEnabled", true}, {"contextWindowLimit", 100}, {"sharedConversationMessageCount", 10},
                   {"memorySummaryTriggerCount", 100}, {"memorySummaryBatchSize", 50}, {"memorySummaryContextCount", 10},
                   {"routerWindowTriggerCount", 20}, {"routerWindowKeepCount", 10}, {"longTermRecallThreshold", 0.65},
                   {"longTermInjectThreshold", 0.45}}},
@@ -126,7 +126,7 @@ namespace insoulforge::ConfigStore {
             for (const auto &[key, defaultValue]: defaults.items()) {
                 auto value = config.find(key);
                 // 显式填写的请求控制参数必须通过严格校验，不能悄悄修复错误类型。
-                if (value != config.end() && (key == "timeoutSeconds" || key == "maxRetries"))
+                if (value != config.end() && (key == "timeoutSeconds" || key == "maxRetries" || key == "affinityEnabled"))
                     continue;
                 if (value == config.end() || !compatibleType(*value, defaultValue)) {
                     config[key] = defaultValue;

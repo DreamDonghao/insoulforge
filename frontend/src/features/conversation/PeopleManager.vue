@@ -7,7 +7,7 @@ interface PersonIdentity {
   qq: string
   name: string
   name_pending: boolean
-  affinity: number
+  affinity?: number
 }
 interface PersonSummary extends PersonIdentity {
   pending_count: number
@@ -29,6 +29,7 @@ const detailLoading = ref(false)
 const error = ref('')
 const detailError = ref('')
 const ascending = ref(false)
+const affinityEnabled = ref(true)
 const editing = ref(false)
 const draftText = ref('')
 const saving = ref(false)
@@ -43,7 +44,7 @@ const indexedPeople = computed(() => people.value.map(person => ({person, qq: Bi
 const sortedPeople = computed(() => {
   const direction = ascending.value ? 1 : -1
   return [...indexedPeople.value]
-    .sort((a, b) => direction * (a.person.affinity - b.person.affinity) ||
+    .sort((a, b) => (affinityEnabled.value ? direction * ((a.person.affinity ?? 0) - (b.person.affinity ?? 0)) : 0) ||
       (a.qq < b.qq ? -1 : a.qq > b.qq ? 1 : 0))
     .map(({person}) => person)
 })
@@ -60,7 +61,7 @@ const memorySections = computed(() => detail.value ? [
   {key: 'relationship', title: '与机器人的关系', items: detail.value.relationship},
   {key: 'recent', title: '近期互动', items: detail.value.recent_interactions}
 ] : [])
-const scoreClass = (value: number) => value > 0 ? 'positive' : value < 0 ? 'negative' : ''
+const scoreClass = (value = 0) => value > 0 ? 'positive' : value < 0 ? 'negative' : ''
 const sourceLabel = (session: string) => {
   if (session === '0') return '历史记忆迁移'
   const userId = privateSessionUserId(session)
@@ -74,7 +75,7 @@ async function fetchPeopleJson(path: string, signal: AbortSignal, options: Reque
     const body = await response.json().catch(() => null)
     if (typeof body?.error === 'string') throw new Error(body.error)
     if (response.status === 409) throw new Error('人物信息已变化，请重新读取后编辑；当前草稿已保留')
-    if (response.status === 400) throw new Error('输入无效，请检查好感度及记忆内容')
+    if (response.status === 400) throw new Error(affinityEnabled.value ? '输入无效，请检查好感度及记忆内容' : '输入无效，请检查记忆内容')
     if (response.status === 404) throw new Error('人物查询接口不存在，请更新并重启后端服务')
     if (response.status === 401 || response.status === 403) throw new Error('登录已失效，请重新登录')
     throw new Error(`人物查询失败：HTTP ${response.status}`)
@@ -106,8 +107,10 @@ async function selectPerson(qq: string) {
   detailError.value = ''
   try {
     const data = await fetchPeopleJson(`/admin/api/people/${encodeURIComponent(qq)}`, controller.signal)
-    if (!disposed && !controller.signal.aborted)
+    if (!disposed && !controller.signal.aborted) {
+      affinityEnabled.value = typeof data.affinity === 'number'
       detail.value = data
+    }
   } catch (cause) {
     if (!disposed && !controller.signal.aborted)
       detailError.value = cause instanceof Error ? cause.message : '读取人物失败'
@@ -123,15 +126,20 @@ async function loadPeople(refreshDetail = true) {
   loading.value = true
   error.value = ''
   try {
-    const data = await fetchPeopleJson('/admin/api/people', controller.signal)
+    const [data, config] = await Promise.all([
+      fetchPeopleJson('/admin/api/people', controller.signal),
+      fetchPeopleJson('/admin/api/memory-config', controller.signal)
+    ])
     if (disposed) return
     if (!Array.isArray(data)) throw new Error('人物列表响应格式不正确')
+    const changed = affinityEnabled.value !== (config.affinityEnabled ?? true)
+    affinityEnabled.value = config.affinityEnabled ?? true
     people.value = data
     const qq = data.some((person: PersonSummary) => person.qq === selected.value) ? selected.value : filtered.value[0]?.qq
     if (!qq) {
       selected.value = ''
       detail.value = null
-    } else if (refreshDetail) {
+    } else if (refreshDetail || changed) {
       await selectPerson(qq)
     }
   } catch (cause) {
@@ -148,7 +156,7 @@ function beginEdit() {
   clearTimeout(nameTimer)
   editing.value = true
   const {affinity, profile, relationship, recent_interactions, pending_entries} = detail.value
-  draftText.value = JSON.stringify({affinity, profile, relationship, recent_interactions,
+  draftText.value = JSON.stringify({...(affinityEnabled.value ? {affinity} : {}), profile, relationship, recent_interactions,
     pending_entries: pending_entries.map(({id, content}) => ({id, content}))}, null, 2)
   editError.value = ''
 }
@@ -168,16 +176,24 @@ async function savePerson() {
   }
   saving.value = true
   editError.value = ''
+  let configurationChanged = false
   try {
-    await fetchPeopleJson(`/admin/api/people/${encodeURIComponent(selected.value)}`, new AbortController().signal, {
-      method: 'PUT', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({expected: detail.value, replacement: value})
-    })
+    const signal = new AbortController().signal
+    const config = await fetchPeopleJson('/admin/api/memory-config', signal)
+    if ((config.affinityEnabled ?? true) === affinityEnabled.value) {
+      if (!affinityEnabled.value) delete value.affinity
+      await fetchPeopleJson(`/admin/api/people/${encodeURIComponent(selected.value)}`, signal, {
+        method: 'PUT', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({expected: detail.value, replacement: value})
+      })
+    } else configurationChanged = true
     editing.value = false
+    draftText.value = ''
   } catch (cause) {
     editError.value = cause instanceof Error ? cause.message : '保存失败'
   } finally { saving.value = false }
   if (!editing.value && !disposed) await loadPeople()
+  if (configurationChanged && !disposed) editError.value = '好感度设置已变化，已重新读取人物信息，请重新编辑'
 }
 async function deletePerson() {
   if (!detail.value || saving.value || consolidating.value || !window.confirm(`删除 ${detailName.value}（${selected.value}）的全部人物记忆和好感度？聊天记录不受影响，后续聊天可重新建立档案。`)) return
@@ -226,11 +242,11 @@ onUnmounted(() => {
 
 <template>
   <div class="people-page">
-    <div class="page-header"><h1 class="page-title">人物信息</h1><p class="page-subtitle">人物记忆与全局好感度</p></div>
+    <div class="page-header"><h1 class="page-title">人物信息</h1><p class="page-subtitle">{{ affinityEnabled ? '人物记忆与全局好感度' : '人物记忆' }}</p></div>
     <div class="people-toolbar">
       <input v-model="search" class="form-input" placeholder="搜索昵称或 QQ 号" aria-label="搜索人物">
       <span>{{ filtered.length }} / {{ people.length }} 人</span>
-      <button class="btn btn-secondary icon-button" :title="ascending ? '好感度：从低到高' : '好感度：从高到低'" :aria-label="ascending ? '好感度：从低到高' : '好感度：从高到低'" @click="ascending = !ascending"><ArrowUpNarrowWide v-if="ascending" :size="18"/><ArrowDownWideNarrow v-else :size="18"/></button>
+      <button v-if="affinityEnabled" class="btn btn-secondary icon-button" :title="ascending ? '好感度：从低到高' : '好感度：从高到低'" :aria-label="ascending ? '好感度：从低到高' : '好感度：从高到低'" @click="ascending = !ascending"><ArrowUpNarrowWide v-if="ascending" :size="18"/><ArrowDownWideNarrow v-else :size="18"/></button>
       <button class="btn btn-secondary" :disabled="loading || editing || saving || consolidating" @click="loadPeople()">刷新</button>
     </div>
     <p v-if="error" role="alert">{{ error }}</p>
@@ -244,7 +260,7 @@ onUnmounted(() => {
                 :disabled="consolidating || saving"
                 @click="selectPerson(person.qq)">
           <span class="person-identity"><strong>{{ person.name || '未知' }}</strong><small>{{ person.qq }} · {{ person.pending_count }} 条待整理</small></span>
-          <span :class="scoreClass(person.affinity)">{{ person.affinity > 0 ? '+' : '' }}{{ person.affinity }}</span>
+          <span v-if="affinityEnabled" :class="scoreClass(person.affinity)">{{ (person.affinity ?? 0) > 0 ? '+' : '' }}{{ person.affinity }}</span>
         </button>
       </aside>
       <section class="person-detail" aria-live="polite" :aria-busy="detailLoading">
@@ -270,7 +286,7 @@ onUnmounted(() => {
           <template v-else>
           <header class="person-heading">
             <div><h2>{{ detailName }}</h2><span>QQ {{ detail.qq }}</span></div>
-            <div class="score"><span>全局好感度</span><strong :class="scoreClass(detail.affinity)">{{ detail.affinity > 0 ? '+' : '' }}{{ detail.affinity }}</strong></div>
+            <div v-if="affinityEnabled" class="score"><span>全局好感度</span><strong :class="scoreClass(detail.affinity)">{{ (detail.affinity ?? 0) > 0 ? '+' : '' }}{{ detail.affinity }}</strong></div>
           </header>
           <section v-for="section in memorySections" :key="section.key" class="memory-section">
             <h3>{{ section.title }} <small>{{ section.items.length }}</small></h3>

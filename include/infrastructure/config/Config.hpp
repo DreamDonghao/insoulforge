@@ -73,6 +73,7 @@ namespace insoulforge {
         f64 jevMinConfidence = 0.6; // 低于此置信度时交由 Router LLM 判断
 
         // 记忆配置
+        std::atomic<bool> affinityEnabled{true}; // 关闭时保留历史分数，停止评分和使用好感度
         i32 contextWindowLimit = 100; // Router、Executor 实际可见的最近消息上限
         std::atomic<i32> sharedConversationMessageCount{10}; // 每个其他共享会话提供的最近消息数
         i32 memorySummaryTriggerCount = 100; // 达到该条数时创建一批记忆总结任务
