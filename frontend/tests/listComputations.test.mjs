@@ -131,6 +131,26 @@ test('memory settings save the affinity switch as a boolean with the other param
   } finally { view.dispose() }
 })
 
+test('execution settings load and save busy routing with the existing tool limits', async () => {
+  let saved
+  const loaded = {maxToolRounds: 8, routeWhileReplying: true, mcpToolPageSize: 10, mcpMaxToolsPerEnable: 4, mcpMaxToolsPerReply: 12}
+  const view = setup('agent/ExecutionConfig', async (url, options) => {
+    assert.equal(url, '/admin/api/execution-config')
+    if (!options) return {ok: true, json: async () => loaded}
+    saved = JSON.parse(options.body)
+    return {ok: true, json: async () => ({success: true})}
+  })
+  try {
+    assert.equal(view.state.config.routeWhileReplying, false)
+    await view.state.loadConfig()
+    assert.equal(view.state.config.routeWhileReplying, true)
+    view.state.config.routeWhileReplying = false
+    await view.state.saveConfig()
+    assert.deepEqual(saved, {...loaded, routeWhileReplying: false})
+    assert.equal(view.state.saving, false)
+  } finally { view.dispose() }
+})
+
 test('tool grouping preserves category and tool order, global counts, and existing search rules', () => {
   const view = setup('tools/CustomTools')
   try {

@@ -102,7 +102,7 @@ namespace insoulforge {
         auto processPreparationQueue(u64 sessionId) -> drogon::Task<>;
 
         /// @brief 处理一个会话的串行回复工作流，无待处理回复时立即退出
-        /// @param triggerMessageId 首轮回复的触发入站消息 ID
-        auto processReplyWorkflow(u64 sessionId, std::string triggerMessageId) -> drogon::Task<>;
+        /// @param request 首轮触发消息及可选的提前路由结果
+        auto processReplyWorkflow(u64 sessionId, ReplyRequest request) -> drogon::Task<>;
     };
 } // namespace insoulforge

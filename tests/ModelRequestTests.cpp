@@ -51,6 +51,25 @@ namespace {
         auto &config = Config::instance();
         { std::ofstream file(path); file << R"({"llm":{"memory":{}}})"; }
         require(config.initialize(path.string()).has_value(), "old configuration failed to load");
+        require(!config.execution.routeWhileReplying.load() && config.getExecutionConfig()["routeWhileReplying"] == false,
+          "busy routing must default off for old configurations");
+        auto execution = config.getExecutionConfig();
+        execution["routeWhileReplying"] = true;
+        require(config.saveExecutionConfig(execution).has_value() && config.execution.routeWhileReplying.load(),
+          "busy routing did not hot update");
+        for (const auto &bad: json::array({0, "true", nullptr})) {
+            auto invalid = execution;
+            invalid["routeWhileReplying"] = bad;
+            require(!config.saveExecutionConfig(invalid) && config.execution.routeWhileReplying.load() &&
+                      config.getExecutionConfig() == execution, "invalid busy routing setting changed configuration");
+        }
+        execution.erase("routeWhileReplying");
+        require(config.saveExecutionConfig(execution).has_value() && config.execution.routeWhileReplying.load() &&
+                  config.initialize(path.string()).has_value() && config.execution.routeWhileReplying.load(),
+          "old client or restart reset busy routing");
+        execution["routeWhileReplying"] = false;
+        require(config.saveExecutionConfig(execution).has_value() && !config.execution.routeWhileReplying.load(),
+          "busy routing could not be disabled");
         for (const auto *role: {"router", "executor", "executorFallback", "executorThinking", "image",
                "memory", "imageGeneration", "embedding", "jev"}) {
             const std::string name(role);

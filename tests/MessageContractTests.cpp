@@ -301,33 +301,58 @@ namespace {
         constexpr std::string_view kTestName = "session reply coalescing";
         auto &db = insoulforge::Database::instance();
         check(db.initialize(":memory:").has_value(), "initializes database", kTestName);
+        const auto triggerId = [](std::optional<insoulforge::ReplyRequest> request) -> std::optional<std::string> {
+            return request ? std::optional{std::move(request->messageId)} : std::nullopt;
+        };
         {
             insoulforge::SessionWorkflowState privateState(insoulforge::SessionId::fromPrivateUser(11), db,
               insoulforge::Config::instance());
-            check(privateState.requestReplyProcessing("first", true) == "first",
+            check(triggerId(privateState.requestReplyProcessing("first", true)) == "first",
               "idle private session starts immediately", kTestName);
             check(!privateState.requestReplyProcessing("second", true) &&
                     !privateState.requestReplyProcessing("third", true),
               "new private messages do not start concurrent replies", kTestName);
-            check(privateState.completeReplyProcessing() == "third",
+            check(triggerId(privateState.completeReplyProcessing()) == "third",
               "private messages coalesce into latest trigger", kTestName);
             check(!privateState.requestReplyProcessing("fourth", true),
               "next reply retains exclusive processing", kTestName);
-            check(privateState.completeReplyProcessing() == "fourth" && !privateState.completeReplyProcessing(),
+            check(triggerId(privateState.completeReplyProcessing()) == "fourth" && !privateState.completeReplyProcessing(),
               "later messages are processed and pending trigger is consumed once", kTestName);
-            check(privateState.requestReplyProcessing("fifth", true) == "fifth" &&
+            check(triggerId(privateState.requestReplyProcessing("fifth", true)) == "fifth" &&
                     !privateState.completeReplyProcessing(),
               "private session becomes idle after draining", kTestName);
 
             insoulforge::SessionWorkflowState groupState(100, db, insoulforge::Config::instance());
-            check(groupState.requestReplyProcessing("first", false) == "first" &&
+            check(triggerId(groupState.requestReplyProcessing("first", false)) == "first" &&
                     !groupState.requestReplyProcessing("ordinary", false) && !groupState.completeReplyProcessing(),
               "ordinary group messages do not schedule another reply", kTestName);
-            check(groupState.requestReplyProcessing("next", false) == "next" &&
+            check(triggerId(groupState.requestReplyProcessing("next", false)) == "next" &&
                     !groupState.requestReplyProcessing("mention", true) &&
                     !groupState.requestReplyProcessing("ordinary", false) &&
-                    groupState.completeReplyProcessing() == "mention" && !groupState.completeReplyProcessing(),
+                    triggerId(groupState.completeReplyProcessing()) == "mention" && !groupState.completeReplyProcessing(),
               "eligible group trigger is preserved across ordinary messages", kTestName);
+
+            check(!groupState.isReplyProcessing(), "drained session is idle", kTestName);
+            const auto first = groupState.requestReplyProcessing("active", false);
+            check(first && !first->decision && groupState.isReplyProcessing(), "starts without cached route", kTestName);
+            insoulforge::RouterDecision decision;
+            decision.reason = "new topic";
+            decision.maxLength = 50;
+            check(!groupState.requestReplyProcessing("routed", true, decision),
+              "positive route waits for current reply", kTestName);
+            check(!groupState.requestReplyProcessing("skipped", false),
+              "skipped message preserves positive pending route", kTestName);
+            const auto routed = groupState.completeReplyProcessing();
+            check(routed && routed->messageId == "routed" && routed->decision &&
+                    routed->decision->reason == "new topic" && routed->decision->maxLength == 50 &&
+                    groupState.isReplyProcessing(), "next reply reuses decision with exclusive ownership", kTestName);
+            check(!groupState.completeReplyProcessing(), "cached decision consumed once", kTestName);
+            const auto late = groupState.requestReplyProcessing("late-route", true, decision);
+            check(late && late->decision && late->messageId == "late-route",
+              "route finishing after current reply starts immediately without losing decision", kTestName);
+            check(!groupState.requestReplyProcessing("mention", true) &&
+                    triggerId(groupState.completeReplyProcessing()) == "mention" && !groupState.completeReplyProcessing(),
+              "later mandatory trigger replaces cached route and does not inherit its strategy", kTestName);
         }
         db.close();
     }

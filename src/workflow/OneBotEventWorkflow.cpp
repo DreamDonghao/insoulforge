@@ -302,11 +302,27 @@ namespace insoulforge {
                     pushRecordedMessage(sessionId, update->back());
 
                     const auto triggerMessageId = getStr(update->back(), "message_id");
-                    if (const auto replyTrigger = sessionState->requestReplyProcessing(
-                          triggerMessageId, shouldQueueWhileReplying(sessionId, update->back(), m_dependencies->config));
+                    bool mayWait = shouldQueueWhileReplying(sessionId, update->back(), m_dependencies->config);
+                    std::optional<RouterDecision> decision;
+                    if (!mayWait && m_dependencies->config.execution.routeWhileReplying.load(std::memory_order_relaxed) &&
+                        sessionState->isReplyProcessing()) {
+                        // 同会话预处理串行判断新消息，避免乱序结果覆盖较新的触发；当前回复继续执行。
+                        const auto routingSnapshot = sessionState->messageList()->snapshot();
+                        decision = co_await MessageRouter::route(sessionId, triggerMessageId, routingSnapshot);
+                        Logger::info(sessionId, "Router", fmt::format("回复期间决策={} | reason={}",
+                          decision->shouldReply ? "reply" : "skip", decision->reason));
+                        if (!decision->shouldReply) {
+                            recordMessageProcessingStats(sessionId);
+                            scheduleMemoryMaintenance(m_dependencies->database, sessionId, sessionState->messageList());
+                            continue;
+                        }
+                        mayWait = true;
+                    }
+                    if (auto replyTrigger = sessionState->requestReplyProcessing(
+                          triggerMessageId, mayWait, std::move(decision));
                       replyTrigger) {
-                        drogon::async_run([this, sessionId, triggerMessageId = *replyTrigger]() -> drogon::Task<> {
-                            co_await processReplyWorkflow(sessionId, triggerMessageId);
+                        drogon::async_run([this, sessionId, request = std::move(*replyTrigger)]() mutable -> drogon::Task<> {
+                            co_await processReplyWorkflow(sessionId, std::move(request));
                         });
                     } else {
                         recordMessageProcessingStats(sessionId);
@@ -322,7 +338,7 @@ namespace insoulforge {
         }
     }
 
-    auto OneBotEventWorkflow::processReplyWorkflow(u64 sessionId, std::string triggerMessageId) -> drogon::Task<> {
+    auto OneBotEventWorkflow::processReplyWorkflow(u64 sessionId, ReplyRequest request) -> drogon::Task<> {
         const auto sessionState = getOrCreateSessionState(sessionId);
         bool isInitialReply = true;
         while (true) {
@@ -333,11 +349,13 @@ namespace insoulforge {
                 if (!m_dependencies->agent.isReady()) {
                     Logger::warn(sessionId, "Workflow", "回复任务跳过：Agent 不可用");
                 } else {
-                    std::optional<RouterDecision> routerDecision;
+                    auto routerDecision = std::move(request.decision);
                     if (SessionId::isPrivate(sessionId)) {
                         Logger::info(sessionId, "Workflow", "私聊直接执行，跳过 Router");
                     } else {
-                        routerDecision = co_await MessageRouter::route(sessionId, triggerMessageId, messageSnapshot);
+                        if (!routerDecision) {
+                            routerDecision = co_await MessageRouter::route(sessionId, request.messageId, messageSnapshot);
+                        }
                         Logger::info(sessionId, "Router",
                           fmt::format("决策={} | reason={} | priority={} | maxLength={}",
                             routerDecision->shouldReply ? "reply" : "skip", routerDecision->reason,
@@ -380,11 +398,11 @@ namespace insoulforge {
                 recordMessageProcessingStats(sessionId);
                 isInitialReply = false;
             }
-            const auto nextTriggerMessageId = sessionState->completeReplyProcessing();
-            if (!nextTriggerMessageId) {
+            auto nextRequest = sessionState->completeReplyProcessing();
+            if (!nextRequest) {
                 co_return;
             }
-            triggerMessageId = *nextTriggerMessageId;
+            request = std::move(*nextRequest);
         }
     }
 } // namespace insoulforge

@@ -46,6 +46,7 @@ namespace insoulforge {
         static constexpr i32 kMaxToolRounds = 100;
 
         std::atomic<i32> maxToolRounds{kDefaultMaxToolRounds};
+        std::atomic<bool> routeWhileReplying{false}; // 群聊回复期间继续判断普通消息，需回复时合并到下一轮
     };
 
     /// @brief 进程内生效的全局配置

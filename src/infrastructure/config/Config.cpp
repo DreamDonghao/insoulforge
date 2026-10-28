@@ -58,7 +58,7 @@ namespace insoulforge {
                     if (!field.is_string() || trim(field.get<std::string>()).empty())
                         return std::unexpected(ConfigError{
                           .type = ConfigErrorType::InvalidArgument, .message = "editPath 必须是非空字符串"});
-                } else if (key == "defaultPrivateEnabled" || key == "affinityEnabled") {
+                } else if (key == "defaultPrivateEnabled" || key == "affinityEnabled" || key == "routeWhileReplying") {
                     if (!field.is_boolean()) {
                         return std::unexpected(
                           ConfigError{.type = ConfigErrorType::InvalidArgument, .message = key + " 必须是布尔值"});
@@ -155,6 +155,8 @@ namespace insoulforge {
         execution.maxToolRounds.store(
           getInt(value.at("execution"), "maxToolRounds", ExecutionSettings::kDefaultMaxToolRounds),
           std::memory_order_relaxed);
+        execution.routeWhileReplying.store(getBool(value.at("execution"), "routeWhileReplying"),
+          std::memory_order_relaxed);
 
         // 加载记忆配置
         if (const auto &memCfg = value.at("memory"); !memCfg.is_null()) {
@@ -235,6 +237,8 @@ namespace insoulforge {
         applyMemoryValues(value);
         execution.maxToolRounds.store(
           value.execution.maxToolRounds.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        execution.routeWhileReplying.store(
+          value.execution.routeWhileReplying.load(std::memory_order_relaxed), std::memory_order_relaxed);
     }
 
     void Config::applyLLMValues(const std::string_view name, Config &value) {
@@ -454,6 +458,8 @@ namespace insoulforge {
         }).transform([this, &next] -> void {
             execution.maxToolRounds.store(
               next.execution.maxToolRounds.load(std::memory_order_relaxed), std::memory_order_relaxed);
+            execution.routeWhileReplying.store(
+              next.execution.routeWhileReplying.load(std::memory_order_relaxed), std::memory_order_relaxed);
         });
     }
 } // namespace insoulforge

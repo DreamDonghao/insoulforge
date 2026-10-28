@@ -33,23 +33,28 @@ namespace insoulforge {
         return message;
     }
 
-    auto SessionWorkflowState::requestReplyProcessing(std::string triggerMessageId, const bool mayWaitForCurrentReply)
-      -> std::optional<std::string> {
+    auto SessionWorkflowState::isReplyProcessing() -> bool {
+        std::lock_guard lock(m_mutex);
+        return m_isReplyProcessing;
+    }
+
+    auto SessionWorkflowState::requestReplyProcessing(std::string triggerMessageId, const bool mayWaitForCurrentReply,
+      std::optional<RouterDecision> decision) -> std::optional<ReplyRequest> {
         std::lock_guard lock(m_mutex);
         if (m_isReplyProcessing) {
             if (mayWaitForCurrentReply) {
-                m_pendingReplyMessageId = std::move(triggerMessageId);
+                m_pendingReply = ReplyRequest{std::move(triggerMessageId), std::move(decision)};
             }
             return std::nullopt;
         }
         m_isReplyProcessing = true;
-        return triggerMessageId;
+        return ReplyRequest{std::move(triggerMessageId), std::move(decision)};
     }
 
-    auto SessionWorkflowState::completeReplyProcessing() -> std::optional<std::string> {
+    auto SessionWorkflowState::completeReplyProcessing() -> std::optional<ReplyRequest> {
         std::lock_guard lock(m_mutex);
-        if (m_pendingReplyMessageId) {
-            return std::exchange(m_pendingReplyMessageId, std::nullopt);
+        if (m_pendingReply) {
+            return std::exchange(m_pendingReply, std::nullopt);
         }
         m_isReplyProcessing = false;
         return std::nullopt;

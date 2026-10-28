@@ -1,9 +1,10 @@
 <script lang="ts" setup>
 import {computed, inject, onMounted, reactive, ref} from 'vue'
+import EnabledSwitch from '../../components/EnabledSwitch.vue'
 import type {ApiResponse, ExecutionConfig} from '../../vite-env.d'
 
 const showToast = inject<(message: string, isError?: boolean) => void>('showToast')
-const config = reactive<ExecutionConfig>({maxToolRounds: 8, mcpToolPageSize: 10, mcpMaxToolsPerEnable: 4, mcpMaxToolsPerReply: 12})
+const config = reactive<ExecutionConfig>({maxToolRounds: 8, routeWhileReplying: false, mcpToolPageSize: 10, mcpMaxToolsPerEnable: 4, mcpMaxToolsPerReply: 12})
 const mcpFields = [
   {key: 'mcpToolPageSize', label: '查询每页工具数量', maximum: 50},
   {key: 'mcpMaxToolsPerEnable', label: '单次启用工具上限', maximum: 20},
@@ -29,6 +30,7 @@ const loadConfig = async (): Promise<void> => {
       throw new Error('执行配置数据无效')
     }
     config.maxToolRounds = data.maxToolRounds
+    config.routeWhileReplying = data.routeWhileReplying ?? false
     for (const field of mcpFields) {
       if (!Number.isInteger(data[field.key]) || data[field.key] < 1 || data[field.key] > field.maximum) throw new Error('MCP 数量配置无效')
       config[field.key] = data[field.key]
@@ -95,6 +97,13 @@ onMounted(loadConfig)
         </div>
       </div>
       <p v-if="config.mcpMaxToolsPerEnable > config.mcpMaxToolsPerReply" class="invalid-range" role="alert">单次启用上限不能大于本次回复上限</p>
+      <h2 class="card-title mcp-heading">群聊消息判断</h2>
+      <div class="form-group">
+        <label class="form-label">回复期间继续判断新消息</label>
+        <EnabledSwitch :model-value="config.routeWhileReplying" :disabled="saving" label="回复期间继续判断新消息"
+                       @update:model-value="config.routeWhileReplying = $event" />
+        <p class="form-hint">默认关闭。开启后，普通群消息在回复期间仍由 Jev 优先判断，无法确定时回退回复决策模型；需要回复的消息合并到下一轮，不打断当前回复，也不同时生成多条回复。会增加路由请求量。</p>
+      </div>
       <button :disabled="saving || !validConfig" class="btn btn-primary" type="submit">
         {{ saving ? '保存中...' : '保存配置' }}
       </button>

@@ -74,7 +74,7 @@ namespace insoulforge::ConfigStore {
                   {"personInteractionEntryMaxChars", 60}, {"personInteractionMaxChars", 250}, {"jevWindowSize", 10},
                   {"routerWindowTriggerCount", 20}, {"routerWindowKeepCount", 10}, {"longTermRecallThreshold", 0.65},
                   {"longTermInjectThreshold", 0.45}}},
-              {"execution", {{"maxToolRounds", ExecutionSettings::kDefaultMaxToolRounds}, {"mcpToolPageSize", 10},
+              {"execution", {{"maxToolRounds", ExecutionSettings::kDefaultMaxToolRounds}, {"routeWhileReplying", false}, {"mcpToolPageSize", 10},
                               {"mcpMaxToolsPerEnable", 4}, {"mcpMaxToolsPerReply", 12}}},
               {"builtinTools", json::object()}, {"mcp", {{"servers", json::array()}}}};
         }
