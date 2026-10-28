@@ -25,6 +25,42 @@ const wsConnected = inject<Ref<boolean>>('wsConnected') as Ref<boolean>
 // 会话列表
 const groups: Ref<(Group & { enabled?: boolean })[]> = ref([])
 const loading: Ref<boolean> = ref(false)
+const showAddGroup = ref(false)
+const newGroupId = ref('')
+const addingGroup = ref(false)
+const closeAddGroup = (): void => {
+  if (addingGroup.value) return
+  showAddGroup.value = false
+  newGroupId.value = ''
+}
+const addGroup = async (): Promise<void> => {
+  if (addingGroup.value) return
+  const groupId = newGroupId.value.trim()
+  // 按字符串提交，避免 JavaScript 数值精度丢失；后端继续校验会话 ID。
+  if (!/^[1-9]\d*$/.test(groupId)) {
+    showToast?.('请输入有效群号', true)
+    return
+  }
+  addingGroup.value = true
+  try {
+    const resp = await fetch('/admin/api/group', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({groupId})
+    })
+    const data: ApiResponse = await resp.json()
+    if (!resp.ok || !data.success) throw new Error(data.error || '添加失败')
+    showAddGroup.value = false
+    newGroupId.value = ''
+    searchKeyword.value = groupId
+    typeFilter.value = 'group'
+    await loadGroups()
+    showToast?.('群聊已添加并启用，可在列表中调整设置')
+  } catch (error) {
+    showToast?.(error instanceof Error ? error.message : '添加失败', true)
+  } finally {
+    addingGroup.value = false
+  }
+}
 // 会话筛选
 const searchKeyword = ref('')
 const typeFilter: Ref<'all' | 'group' | 'private'> = ref('all')
@@ -565,6 +601,7 @@ onUnmounted(() => {
             </div>
             <span style="color: var(--text-secondary); font-size: 13px;">共 {{ filteredGroups.length }} 个会话</span>
             <button class="btn btn-secondary btn-sm" @click="refreshAllGroupNames">刷新会话名称</button>
+            <button class="btn btn-primary btn-sm" @click="showAddGroup = true">添加群聊</button>
           </div>
         </div>
         <div class="table-container">
@@ -576,7 +613,7 @@ onUnmounted(() => {
           <template v-else-if="filteredGroups.length === 0">
             <div class="empty-state">
               <div class="empty-icon">👥</div>
-              <p>{{ groups.length ? '没有符合筛选条件的会话' : '暂无会话，请通过 /enable 命令启用' }}</p>
+              <p>{{ groups.length ? '没有符合筛选条件的会话' : '暂无会话，可点击“添加群聊”输入群号' }}</p>
             </div>
           </template>
           <template v-else>
@@ -713,6 +750,26 @@ onUnmounted(() => {
           </div>
         </template>
       </div>
+    </div>
+
+    <div v-if="showAddGroup" class="modal-overlay" @click.self="closeAddGroup" @keydown.esc="closeAddGroup">
+      <form class="modal-content" style="max-width: 480px;" role="dialog" aria-modal="true"
+            aria-labelledby="add-group-title" @submit.prevent="addGroup">
+        <div class="modal-header">
+          <h2 id="add-group-title">添加群聊</h2>
+          <button type="button" :disabled="addingGroup" class="btn btn-secondary btn-sm" @click="closeAddGroup">关闭</button>
+        </div>
+        <div class="modal-body">
+          <label for="new-group-id" class="form-label">群号</label>
+          <input id="new-group-id" v-model="newGroupId" :disabled="addingGroup" class="form-input"
+                 inputmode="numeric" autocomplete="off" placeholder="输入机器人已加入的群号" required>
+          <p class="form-hint">添加后将启用该群聊，随后可在列表中调整自动回复、命令及共享设置。</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" :disabled="addingGroup" class="btn btn-secondary" @click="closeAddGroup">取消</button>
+          <button type="submit" :disabled="addingGroup" class="btn btn-primary">{{ addingGroup ? '添加中…' : '添加并启用' }}</button>
+        </div>
+      </form>
     </div>
 
     <!-- 定时任务弹窗 -->
