@@ -170,6 +170,10 @@ namespace {
             const Statement query(db.handle(), "SELECT COUNT(*) FROM llm_usage");
             return query.step() ? query.getInt(0) : -1;
         };
+        const json durableMemory = {{"aliases", json::array()}, {"conversation_summaries",
+          {{{"start_time", "2026-10-28 10:00:00"}, {"end_time", "2026-10-28 10:10:00"},
+            {"summary", "测试重启保留聊天摘要。"}}}}};
+        MemoryMaintenanceStore::apply(db, 99999, {.shortTerm = durableMemory.dump()});
         const auto beforeStop = usageCount();
         if (beforeStop == 0)
             throw std::runtime_error("normal consolidation did not record usage");
@@ -177,6 +181,9 @@ namespace {
         co_await interrupted.runDue(interruptedDay);
         if (db.handle() || !db.initialize(path.string()) || usageCount() != beforeStop)
             throw std::runtime_error("late response wrote usage after service stop and database closure");
+        if (MemoryStore::conversationSummaries(MemoryStore::getShortTermMemory(99999)) !=
+              durableMemory["conversation_summaries"])
+            throw std::runtime_error("database reopen lost conversation summaries");
         if (PersonMemoryStore::getPerson(88004)["pending_entries"].empty() ||
             PersonMemoryStore::dailyState().runningDay != "2026-10-23")
             throw std::runtime_error("stopped service committed late result or completed unfinished run");
@@ -242,6 +249,7 @@ namespace {
         MalformedDelta,
         ContextOnlyQq,
         DuplicateMemory,
+        MissingSummary,
         Projection
     };
 
@@ -250,6 +258,12 @@ namespace {
         if (legacy)
             result["legacy_entries"] = {"原记忆"};
         return result;
+    }
+
+    auto storedSessionMemory(const u64 sessionId) -> json {
+        auto value = json::parse(MemoryStore::getShortTermMemory(sessionId));
+        value.erase("conversation_summaries");
+        return value;
     }
 
     void require(const bool condition, const char *message) {
@@ -363,7 +377,7 @@ namespace {
             require(ignoredScores && !ignoredScores->personEntries.empty() && ignoredScores->affinity.empty(),
               "disabled extraction rejects or retains extra model scores");
             config.affinityEnabled = true;
-            for (const auto failure: {Mode::ExtractFailure, Mode::ReconcileFailure, Mode::InvalidQq,
+            for (const auto failure: {Mode::ExtractFailure, Mode::MissingSummary, Mode::ReconcileFailure, Mode::InvalidQq,
                    Mode::DuplicateAffinity, Mode::MalformedDelta, Mode::ContextOnlyQq, Mode::InvalidSessionMemory}) {
                 mode.store(failure);
                 const auto batch = list.createSummaryBatch();
@@ -407,7 +421,7 @@ namespace {
             list.finishSummaryBatch(batch->messages.size());
             const auto profiles = PersonMemoryStore::getForSenders(original);
             require(list.fullSnapshot().size() == 1 &&
-                      json::parse(MemoryStore::getShortTermMemory(100)) == sessionMemory(true) &&
+                      storedSessionMemory(100) == sessionMemory(true) &&
                       AffinityStore::getAffinityMap()[22] == 3 && profiles.size() == 1 && profiles[0]["qq"] == "11" &&
                       profiles[0]["pending_entries"].size() == 1 && profiles[0]["profile"].empty() &&
                       profiles[0]["recent_interactions"].empty(),
@@ -419,7 +433,7 @@ namespace {
               "empty results were treated as failure");
             require(requests.load() - emptyBefore == 1 && AffinityStore::getAffinityMap()[22] == 3 &&
                       PersonMemoryStore::getForSenders(original) == profiles &&
-                      json::parse(MemoryStore::getShortTermMemory(100)) == sessionMemory(true),
+                      storedSessionMemory(100) == sessionMemory(true),
               "empty person extraction skipped session summary or changed global state");
 
             const auto privateId = SessionId::fromPrivateUser(22);
@@ -441,8 +455,29 @@ namespace {
             require(co_await MemoryMaintenanceCoordinator::process(database, 100, original, json::array()),
               "empty event extraction failed");
             require(requests.load() - eventBefore == 1 &&
-                      json::parse(MemoryStore::getShortTermMemory(100)) == sessionMemory(true),
+                      storedSessionMemory(100) == sessionMemory(true),
               "empty extraction still generated a session event summary");
+            const auto summaryCount = MemoryStore::conversationSummaries(MemoryStore::getShortTermMemory(100)).size();
+            require(summaryCount == 3 &&
+                      MemoryStore::conversationSummaries(MemoryStore::getShortTermMemory(privateId)).size() == 2,
+              "summary-only extraction or session isolation failed");
+            config.conversationSummaryMaxCount = 2;
+            config.conversationSummaryMaxChars = 5; // 只约束提示词，不截断模型返回的完整摘要。
+            auto dated = original;
+            dated[0]["time"] = "2026-10-28 10:00:00";
+            dated[1]["time"] = "2026-10-28 10:01:00";
+            dated[2]["time"] = "2026-10-28 10:02:00";
+            require(co_await MemoryMaintenanceCoordinator::process(database, 100, dated, json::array()),
+              "dated summary batch failed");
+            const auto summaries = MemoryStore::conversationSummaries(MemoryStore::getShortTermMemory(100));
+            require(summaries.size() == 2 && summaries.back()["start_time"] == dated[0]["time"] &&
+                      summaries.back()["end_time"] == dated[2]["time"] &&
+                      summaries.back()["summary"] == "讨论了编程爱好和近期安排。" &&
+                      MemoryStore::pendingLegacyEntries(MemoryStore::getShortTermMemory(100)) ==
+                        std::vector<std::string>{"原记忆"},
+              "summary timestamp, retention or legacy separation failed");
+            config.conversationSummaryMaxCount = 10;
+            config.conversationSummaryMaxChars = 100;
             mode.store(Mode::AliasCorrection);
             require(co_await MemoryMaintenanceCoordinator::process(database, 100, original, json::array()),
               "alias correction failed");
@@ -512,7 +547,10 @@ namespace {
                 chat.push_back(record);
             }
             const ChatRecordManager records(privateId, std::move(chat));
-            MemoryStore::updateShortTermMemory(privateId, sessionMemory().dump());
+            auto executorMemory = sessionMemory();
+            executorMemory["conversation_summaries"] = {{{"start_time", "2026-10-19 10:00:00"},
+              {"end_time", "2026-10-19 10:10:00"}, {"summary", "讨论了部署方式，等待后续验证。"}}};
+            MemoryStore::updateShortTermMemory(privateId, executorMemory.dump());
             const MemoryManager memory(privateId);
             const auto reply = co_await ExecutorAgent::execute(records, memory);
             require(
@@ -565,14 +603,16 @@ namespace {
             const auto beforeLegacy = PersonMemoryStore::getForSenders(original);
             mode.store(Mode::LegacyForget);
             require(co_await MemoryMaintenanceCoordinator::process(database, 600, original, json::array()) &&
-                      MemoryStore::getShortTermMemory(600) == transitional.dump(),
+                      MemoryStore::pendingLegacyEntries(MemoryStore::getShortTermMemory(600)) ==
+                        std::vector<std::string>({"旧事件", "旧偏好一", "旧偏好二"}),
               "unconfigured embedding consumed historical memory");
+            const auto beforeMigration = MemoryStore::getShortTermMemory(600);
             config.embedding.baseUrl = endpoint;
             config.embedding.path = "/embedding-fixture";
             config.embedding.model = "fixture";
             mode.store(Mode::OutputEmbeddingFailure);
             require(!(co_await MemoryMaintenanceCoordinator::process(database, 600, original, json::array())) &&
-                      MemoryStore::getShortTermMemory(600) == transitional.dump() &&
+                      MemoryStore::getShortTermMemory(600) == beforeMigration &&
                       PersonMemoryStore::getForSenders(original) == beforeLegacy,
               "failed migration consumed historical contents or committed person entries");
             mode.store(Mode::LegacyForget);
@@ -746,6 +786,42 @@ auto main() -> int {
           const auto prompt = body["messages"][0]["content"].get<std::string>();
           const bool extraction = prompt.find("人物记忆提取器") != std::string::npos;
           const auto current = mode.load();
+          const auto &config = Config::instance();
+          const bool validLimits = extraction
+            ? prompt.contains(fmt::format("不能为空，最多 {} 字", config.conversationSummaryMaxChars.load())) &&
+              prompt.contains(fmt::format("每条记忆最多 {} 字", config.personMemoryEntryMaxChars.load()))
+            : prompt.contains(fmt::format("longTerm 每条最多 {} 字", config.longTermMemoryEntryMaxChars.load()));
+          if (!validLimits) {
+              auto reply = drogon::HttpResponse::newHttpResponse();
+              reply->setStatusCode(drogon::k400BadRequest);
+              callback(reply);
+              return;
+          }
+          if (extraction) {
+              const auto exampleHeading = prompt.find("### 完整示例\n\n");
+              const auto exampleStart = exampleHeading + std::string("### 完整示例\n\n").size();
+              const auto exampleEnd = prompt.find("\n\n示例只说明格式", exampleStart);
+              json example;
+              const bool validOutputFormat = exampleHeading != std::string::npos &&
+                exampleEnd != std::string::npos &&
+                tryParseJson(prompt.substr(exampleStart, exampleEnd - exampleStart), example) &&
+                example.is_object() && example.size() == (config.affinityEnabled ? 3 : 2) &&
+                atOrNull(example, "conversation_summary").is_string() &&
+                atOrNull(example, "memories").is_array() &&
+                example["memories"][0]["qq"].is_string() &&
+                example["memories"][0]["entries"].is_array() &&
+                prompt.contains("只返回一个合法的 JSON 对象") &&
+                prompt.contains(config.affinityEnabled ? "以上三个字段都必须提供" : "以上两个字段都必须提供") &&
+                prompt.contains("非空字符串数组") &&
+                (config.affinityEnabled ? atOrNull(example, "affinity_changes").is_array() &&
+                  prompt.contains("-5 到 5 的非零整数") : !prompt.contains("affinity_changes"));
+              if (!validOutputFormat) {
+                  auto reply = drogon::HttpResponse::newHttpResponse();
+                  reply->setStatusCode(drogon::k400BadRequest);
+                  callback(reply);
+                  return;
+              }
+          }
           if (current == Mode::Projection && extraction) {
               const auto input = body["messages"][1]["content"].get<std::string>();
               const std::string heading = extraction ? "=== 待提取消息 ===\n" : "=== 待总结消息 ===\n";
@@ -803,7 +879,10 @@ auto main() -> int {
               }
               output = json{{"aliases", std::move(aliases)}, {"longTerm", std::move(entries)}}.dump();
           } else {
-              json extracted = {{"memories", json::array()}, {"affinity_changes", json::array()}};
+              json extracted = {{"memories", json::array()}, {"affinity_changes", json::array()},
+                {"conversation_summary", "讨论了编程爱好和近期安排。"}};
+              if (current == Mode::MissingSummary)
+                  extracted.erase("conversation_summary");
               if (!Config::instance().affinityEnabled && (prompt.contains("好感度") || prompt.contains("affinity_changes"))) {
                   auto reply = drogon::HttpResponse::newHttpResponse();
                   reply->setStatusCode(drogon::k400BadRequest);
@@ -854,7 +933,7 @@ auto main() -> int {
           for (const auto &[key, value]: context.items())
               keys.push_back(key);
           const bool isPrivate = context["current_session"]["type"] == "private";
-          std::vector<std::string> expected = {"current_session", "session_memory", "earlier_messages",
+          std::vector<std::string> expected = {"current_session", "session_memory", "conversation_summaries", "earlier_messages",
             "person_memories", "shared_conversations", "recent_messages"};
           if (!isPrivate) expected.push_back("response_requirements");
           const auto state = json::parse(messages.back()["content"].get<std::string>());
@@ -863,6 +942,9 @@ auto main() -> int {
                        context["person_memories"].size() == 1 && context["person_memories"][0]["qq"] == "11" &&
                        context["person_memories"][0]["pending_entries"].size() == 3 &&
                        context["shared_conversations"].empty();
+          valid = valid && (isPrivate ? context["conversation_summaries"].size() == 1 &&
+              context["conversation_summaries"][0]["summary"] == "讨论了部署方式，等待后续验证。"
+              : !context["conversation_summaries"].empty());
           valid = valid && context["session_memory"] == sessionMemory() &&
               (isPrivate ? context["current_session"]["qq"] == 22 :
                 context["current_session"]["group_id"] == 100) &&

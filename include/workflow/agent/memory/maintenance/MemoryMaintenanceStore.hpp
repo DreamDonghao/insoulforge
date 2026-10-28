@@ -26,9 +26,10 @@ namespace insoulforge {
 
     using AffinityDeltas = std::vector<std::pair<u64, i32>>;
 
-    /// @brief 聊天记忆计算结果；shortTerm 复用旧列保存外号，为空值时保留原内容
+    /// @brief 聊天记忆计算结果；shortTerm 复用旧列保存外号和独立聊天摘要，为空值时保留原内容
     struct MemoryMaintenanceResult {
         std::optional<std::string> shortTerm;
+        std::optional<std::string> conversationSummary; // 本批消息的聊天摘要，不参与人物或向量记忆提取
         std::vector<PreparedLongTermMemory> longTerm;
         // 实际交给整理模型的旧条目，由程序整体替换，不依赖模型报告来源。
         std::vector<i64> replacedLongTermIds;

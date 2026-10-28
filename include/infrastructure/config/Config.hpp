@@ -79,6 +79,16 @@ namespace insoulforge {
         i32 memorySummaryTriggerCount = 100; // 达到该条数时创建一批记忆总结任务
         i32 memorySummaryBatchSize = 50; // 每批实际总结并在成功后删除的最旧消息数
         i32 memorySummaryContextCount = 10; // 仅供总结理解上下文、不参与提取的后续消息数
+        std::atomic<i32> conversationSummaryMaxChars{100}; // 会话聊天摘要目标字数
+        std::atomic<i32> conversationSummaryMaxCount{10}; // 每会话保留的最新摘要数
+        std::atomic<i32> personMemoryEntryMaxChars{30}; // 人物记忆提取单条目标字数
+        std::atomic<i32> longTermMemoryEntryMaxChars{100}; // 长期记忆单条目标字数
+        std::atomic<i32> personProfileEntryMaxChars{50}; // 人物档案单条目标字数
+        std::atomic<i32> personProfileMaxChars{300}; // 人物档案合计目标字数
+        std::atomic<i32> personRelationshipEntryMaxChars{60}; // 机器人关系单条目标字数
+        std::atomic<i32> personRelationshipMaxChars{150}; // 机器人关系合计目标字数
+        std::atomic<i32> personInteractionEntryMaxChars{60}; // 近期互动单条目标字数
+        std::atomic<i32> personInteractionMaxChars{250}; // 近期互动合计目标字数
         std::atomic<i32> jevWindowSize{10}; // Jev 每次读取的最近消息数（逐条滑动）
         i32 routerWindowTriggerCount = 20; // Router 子窗口触发条数（批量滑动）
         i32 routerWindowKeepCount = 10; // Router 子窗口保留条数

@@ -18,8 +18,8 @@ namespace insoulforge {
             for (const auto *field: {"profile", "relationship", "recent_interactions"}) {
                 if (const auto &items = atOrNull(profile, field);
                   !items.is_array() || !std::ranges::all_of(items, [](const json &item) -> bool {
-                        return item.is_string() && !trim(item.get_ref<const std::string &>()).empty();
-                    }))
+                      return item.is_string() && !trim(item.get_ref<const std::string &>()).empty();
+                  }))
                     return false;
             }
             return true;
@@ -86,9 +86,7 @@ namespace insoulforge {
 
 ## 建议篇幅
 
-- 人物档案：单条约 15～50 字，全部条目合计约 200～300 字。
-- 与机器人的关系：单条约 20～60 字，全部条目合计约 100～150 字。
-- 近期互动：单条约 20～60 字，全部条目合计约 150～250 字。
+篇幅目标由下方配置给出，每次整理都应据此压缩所有保留的内容。
 
 以上是精简目标，不是最低字数，不为凑字数补充内容。先去重、去掉聊天过程和无用修饰，再保留核心事实。
 超长旧条目必须重新压缩表达，不原样照抄；必要时可适当超出目标，不机械截断，也不为满足字数丢失重要事实。
@@ -170,8 +168,8 @@ namespace insoulforge {
     }
 
     auto PersonMemoryConsolidator::consolidatePerson(
-      const u64 qq, std::shared_ptr<LlmClient::MaintenanceRequestControl> control,
-      const bool includeExisting) -> drogon::Task<Result> {
+      const u64 qq, std::shared_ptr<LlmClient::MaintenanceRequestControl> control, const bool includeExisting)
+      -> drogon::Task<Result> {
         try {
             std::optional<PersonMemoryStore::PendingSnapshot> snapshot;
             {
@@ -183,9 +181,20 @@ namespace insoulforge {
             if (!snapshot)
                 co_return Result::NoMemory;
             // GCC 13 对 co_await 参数中的嵌套初始化列表有兼容性问题，先构建命名对象。
-            const std::string prompt = std::string(kPrompt) + "\n\n## 机器人身份\n\n机器人名称：" +
-              json(Config::instance().botName).dump() + "。\n消息中的 `qq=self` 表示机器人自己。\n"
-              "聊天中有人提到这个名称时，结合上下文判断是不是在说机器人，不要只看名字。";
+            const auto &config = Config::instance();
+            const auto limits = fmt::format("\n\n## 本次目标篇幅\n\n- 人物档案：单条最多 {} 字，合计最多 {} 字。\n"
+                                            "- 与机器人的关系：单条最多 {} 字，合计最多 {} 字。\n"
+                                            "- 近期互动：单条最多 {} 字，合计最多 {} 字。\n",
+              config.personProfileEntryMaxChars.load(std::memory_order_relaxed),
+              config.personProfileMaxChars.load(std::memory_order_relaxed),
+              config.personRelationshipEntryMaxChars.load(std::memory_order_relaxed),
+              config.personRelationshipMaxChars.load(std::memory_order_relaxed),
+              config.personInteractionEntryMaxChars.load(std::memory_order_relaxed),
+              config.personInteractionMaxChars.load(std::memory_order_relaxed));
+            const std::string prompt = std::string(kPrompt) + limits + "\n\n## 机器人身份\n\n机器人名称：" +
+                                       json(Config::instance().botName).dump() +
+                                       "。\n消息中的 `qq=self` 表示机器人自己。\n"
+                                       "聊天中有人提到这个名称时，结合上下文判断是不是在说机器人，不要只看名字。";
             const json messages = json::array(
               {{{"role", "system"}, {"content", prompt}}, {{"role", "user"}, {"content", snapshot->profile.dump()}}});
             const auto result = co_await LlmClient::requestMaintenance(messages, 0, "memory", std::nullopt, control);

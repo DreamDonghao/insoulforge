@@ -112,11 +112,20 @@ test('memory settings save the affinity switch as a boolean with the other param
   try {
     assert.equal(view.state.memoryConfig.affinityEnabled, true)
     assert.equal(view.state.memoryConfig.jevWindowSize, 10)
+    assert.equal(view.state.memoryConfig.conversationSummaryMaxChars, 100)
+    assert.equal(view.state.memoryConfig.conversationSummaryMaxCount, 10)
+    assert.equal(view.state.textLimitFields.length, 9)
+    view.state.memoryConfig.conversationSummaryMaxChars = 80
+    view.state.memoryConfig.conversationSummaryMaxCount = 5
+    view.state.memoryConfig.personProfileMaxChars = 200
     view.state.memoryConfig.jevWindowSize = 15
     view.state.memoryConfig.affinityEnabled = false
     await view.state.saveMemoryConfig()
     assert.equal(saved.affinityEnabled, false)
     assert.equal(saved.jevWindowSize, 15)
+    assert.equal(saved.conversationSummaryMaxChars, 80)
+    assert.equal(saved.conversationSummaryMaxCount, 5)
+    assert.equal(saved.personProfileMaxChars, 200)
     assert.equal(saved.memorySummaryBatchSize, 50)
     assert.equal(view.state.saving, false)
   } finally { view.dispose() }

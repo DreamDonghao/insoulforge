@@ -7,6 +7,7 @@
 
 #include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/config/Config.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 #include <workflow/agent/memory/MemoryStore.hpp>
@@ -52,7 +53,36 @@ namespace insoulforge::MemoryStore {
                     result[key].push_back(std::move(text));
             }
         }
+        if (value.contains("conversation_summaries")) {
+            const auto &summaries = value["conversation_summaries"];
+            if (!summaries.is_array())
+                return std::nullopt;
+            for (const auto &summary: summaries) {
+                if (!summary.is_object() || !atOrNull(summary, "start_time").is_string() ||
+                    !atOrNull(summary, "end_time").is_string() || !atOrNull(summary, "summary").is_string() ||
+                    trim(summary["summary"].get_ref<const std::string &>()).empty())
+                    return std::nullopt;
+            }
+            result["conversation_summaries"] = summaries;
+        }
         return result;
+    }
+
+    auto conversationSummaries(const std::string &memory) -> json {
+        json parsed;
+        if (!tryParseJson(memory, parsed))
+            return json::array();
+        const auto normalized = normalizeSessionMemory(parsed);
+        if (!normalized || !normalized->contains("conversation_summaries"))
+            return json::array();
+        auto summaries = (*normalized)["conversation_summaries"];
+        std::stable_sort(summaries.begin(), summaries.end(),
+          [](const json &left, const json &right) { return getStr(left, "start_time") < getStr(right, "start_time"); });
+        const auto limit =
+          static_cast<size_t>(Config::instance().conversationSummaryMaxCount.load(std::memory_order_relaxed));
+        if (summaries.size() > limit)
+            summaries.erase(summaries.begin(), summaries.end() - static_cast<json::difference_type>(limit));
+        return summaries;
     }
 
     auto projectShortTermMemory(const std::string &memory) -> json {

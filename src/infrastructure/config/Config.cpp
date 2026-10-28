@@ -25,7 +25,11 @@ namespace insoulforge {
                   "accessToken", "oneBotTransport", "qqHttpHost", "qqWebSocketHost", "botName"};
                 constexpr std::array integerFields{"maxTokens", "contextWindowLimit", "memorySummaryTriggerCount",
                   "memorySummaryBatchSize", "memorySummaryContextCount", "routerWindowTriggerCount",
-                  "routerWindowKeepCount", "jevWindowSize", "maxToolRounds", "sharedConversationMessageCount", "timeoutSeconds", "maxRetries"};
+                  "routerWindowKeepCount", "conversationSummaryMaxChars", "conversationSummaryMaxCount",
+                  "personMemoryEntryMaxChars", "longTermMemoryEntryMaxChars", "personProfileEntryMaxChars",
+                  "personProfileMaxChars", "personRelationshipEntryMaxChars", "personRelationshipMaxChars",
+                  "personInteractionEntryMaxChars", "personInteractionMaxChars", "jevWindowSize", "maxToolRounds",
+                  "sharedConversationMessageCount", "timeoutSeconds", "maxRetries"};
                 if (std::ranges::find(integerFields, key) != integerFields.end()) {
                     if (!field.is_number_integer() ||
                         (field.is_number_unsigned()
@@ -37,21 +41,27 @@ namespace insoulforge {
                     }
                     if ((key == "timeoutSeconds" && (field < 1 || field > 3600)) ||
                         (key == "maxRetries" && (field < 0 || field > 10)) ||
-                        (key == "jevWindowSize" && field < 1))
-                        return std::unexpected(ConfigError{
-                          .type = ConfigErrorType::InvalidArgument, .message = key + " 超出允许范围"});
+                        ((key == "jevWindowSize" || key == "conversationSummaryMaxChars" ||
+                           key == "conversationSummaryMaxCount" || key == "personMemoryEntryMaxChars" ||
+                           key == "longTermMemoryEntryMaxChars" || key == "personProfileEntryMaxChars" ||
+                           key == "personProfileMaxChars" || key == "personRelationshipEntryMaxChars" ||
+                           key == "personRelationshipMaxChars" || key == "personInteractionEntryMaxChars" ||
+                           key == "personInteractionMaxChars") &&
+                          field < 1))
+                        return std::unexpected(
+                          ConfigError{.type = ConfigErrorType::InvalidArgument, .message = key + " 超出允许范围"});
                 } else if (key == "apiType") {
                     if (!field.is_string() || (field != "openai" && field != "openrouter"))
-                        return std::unexpected(ConfigError{.type = ConfigErrorType::InvalidArgument,
-                          .message = "apiType 必须为 openai 或 openrouter"});
+                        return std::unexpected(ConfigError{
+                          .type = ConfigErrorType::InvalidArgument, .message = "apiType 必须为 openai 或 openrouter"});
                 } else if (key == "editPath") {
                     if (!field.is_string() || trim(field.get<std::string>()).empty())
-                        return std::unexpected(ConfigError{.type = ConfigErrorType::InvalidArgument,
-                          .message = "editPath 必须是非空字符串"});
+                        return std::unexpected(ConfigError{
+                          .type = ConfigErrorType::InvalidArgument, .message = "editPath 必须是非空字符串"});
                 } else if (key == "defaultPrivateEnabled" || key == "affinityEnabled") {
                     if (!field.is_boolean()) {
-                        return std::unexpected(ConfigError{
-                          .type = ConfigErrorType::InvalidArgument, .message = key + " 必须是布尔值"});
+                        return std::unexpected(
+                          ConfigError{.type = ConfigErrorType::InvalidArgument, .message = key + " 必须是布尔值"});
                     }
                 } else if (key == "selfQQNumber") {
                     if (!field.is_number_integer() || (!field.is_number_unsigned() && field.get<i64>() < 0)) {
@@ -154,6 +164,24 @@ namespace insoulforge {
             memorySummaryTriggerCount = getInt(memCfg, "memorySummaryTriggerCount");
             memorySummaryBatchSize = getInt(memCfg, "memorySummaryBatchSize");
             memorySummaryContextCount = getInt(memCfg, "memorySummaryContextCount");
+            conversationSummaryMaxChars.store(
+              getInt(memCfg, "conversationSummaryMaxChars", 100), std::memory_order_relaxed);
+            conversationSummaryMaxCount.store(
+              getInt(memCfg, "conversationSummaryMaxCount", 10), std::memory_order_relaxed);
+            personMemoryEntryMaxChars.store(getInt(memCfg, "personMemoryEntryMaxChars", 30), std::memory_order_relaxed);
+            longTermMemoryEntryMaxChars.store(
+              getInt(memCfg, "longTermMemoryEntryMaxChars", 100), std::memory_order_relaxed);
+            personProfileEntryMaxChars.store(
+              getInt(memCfg, "personProfileEntryMaxChars", 50), std::memory_order_relaxed);
+            personProfileMaxChars.store(getInt(memCfg, "personProfileMaxChars", 300), std::memory_order_relaxed);
+            personRelationshipEntryMaxChars.store(
+              getInt(memCfg, "personRelationshipEntryMaxChars", 60), std::memory_order_relaxed);
+            personRelationshipMaxChars.store(
+              getInt(memCfg, "personRelationshipMaxChars", 150), std::memory_order_relaxed);
+            personInteractionEntryMaxChars.store(
+              getInt(memCfg, "personInteractionEntryMaxChars", 60), std::memory_order_relaxed);
+            personInteractionMaxChars.store(
+              getInt(memCfg, "personInteractionMaxChars", 250), std::memory_order_relaxed);
             jevWindowSize.store(getInt(memCfg, "jevWindowSize", 10), std::memory_order_relaxed);
             routerWindowTriggerCount = getInt(memCfg, "routerWindowTriggerCount");
             routerWindowKeepCount = getInt(memCfg, "routerWindowKeepCount");
@@ -241,8 +269,8 @@ namespace insoulforge {
     void Config::applyQQValues(Config &value) {
         accessToken = std::move(value.accessToken);
         selfQQNumber = value.selfQQNumber;
-        defaultPrivateEnabled.store(value.defaultPrivateEnabled.load(std::memory_order_relaxed),
-          std::memory_order_relaxed);
+        defaultPrivateEnabled.store(
+          value.defaultPrivateEnabled.load(std::memory_order_relaxed), std::memory_order_relaxed);
         oneBotTransport = std::move(value.oneBotTransport);
         qqHttpHost = std::move(value.qqHttpHost);
         qqWebSocketHost = std::move(value.qqWebSocketHost);
@@ -257,6 +285,26 @@ namespace insoulforge {
         memorySummaryTriggerCount = value.memorySummaryTriggerCount;
         memorySummaryBatchSize = value.memorySummaryBatchSize;
         memorySummaryContextCount = value.memorySummaryContextCount;
+        conversationSummaryMaxChars.store(
+          value.conversationSummaryMaxChars.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        conversationSummaryMaxCount.store(
+          value.conversationSummaryMaxCount.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        personMemoryEntryMaxChars.store(
+          value.personMemoryEntryMaxChars.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        longTermMemoryEntryMaxChars.store(
+          value.longTermMemoryEntryMaxChars.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        personProfileEntryMaxChars.store(
+          value.personProfileEntryMaxChars.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        personProfileMaxChars.store(
+          value.personProfileMaxChars.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        personRelationshipEntryMaxChars.store(
+          value.personRelationshipEntryMaxChars.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        personRelationshipMaxChars.store(
+          value.personRelationshipMaxChars.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        personInteractionEntryMaxChars.store(
+          value.personInteractionEntryMaxChars.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        personInteractionMaxChars.store(
+          value.personInteractionMaxChars.load(std::memory_order_relaxed), std::memory_order_relaxed);
         jevWindowSize.store(value.jevWindowSize.load(std::memory_order_relaxed), std::memory_order_relaxed);
         routerWindowTriggerCount = value.routerWindowTriggerCount;
         routerWindowKeepCount = value.routerWindowKeepCount;
@@ -326,6 +374,28 @@ namespace insoulforge {
             return result;
         }
         json normalized = value;
+        if (!normalized.contains("conversationSummaryMaxChars"))
+            normalized["conversationSummaryMaxChars"] = conversationSummaryMaxChars.load(std::memory_order_relaxed);
+        if (!normalized.contains("conversationSummaryMaxCount"))
+            normalized["conversationSummaryMaxCount"] = conversationSummaryMaxCount.load(std::memory_order_relaxed);
+        if (!normalized.contains("personMemoryEntryMaxChars"))
+            normalized["personMemoryEntryMaxChars"] = personMemoryEntryMaxChars.load(std::memory_order_relaxed);
+        if (!normalized.contains("longTermMemoryEntryMaxChars"))
+            normalized["longTermMemoryEntryMaxChars"] = longTermMemoryEntryMaxChars.load(std::memory_order_relaxed);
+        if (!normalized.contains("personProfileEntryMaxChars"))
+            normalized["personProfileEntryMaxChars"] = personProfileEntryMaxChars.load(std::memory_order_relaxed);
+        if (!normalized.contains("personProfileMaxChars"))
+            normalized["personProfileMaxChars"] = personProfileMaxChars.load(std::memory_order_relaxed);
+        if (!normalized.contains("personRelationshipEntryMaxChars"))
+            normalized["personRelationshipEntryMaxChars"] =
+              personRelationshipEntryMaxChars.load(std::memory_order_relaxed);
+        if (!normalized.contains("personRelationshipMaxChars"))
+            normalized["personRelationshipMaxChars"] = personRelationshipMaxChars.load(std::memory_order_relaxed);
+        if (!normalized.contains("personInteractionEntryMaxChars"))
+            normalized["personInteractionEntryMaxChars"] =
+              personInteractionEntryMaxChars.load(std::memory_order_relaxed);
+        if (!normalized.contains("personInteractionMaxChars"))
+            normalized["personInteractionMaxChars"] = personInteractionMaxChars.load(std::memory_order_relaxed);
         if (!normalized.contains("jevWindowSize"))
             normalized["jevWindowSize"] = jevWindowSize.load(std::memory_order_relaxed);
         if (!normalized.contains("affinityEnabled"))

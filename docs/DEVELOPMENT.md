@@ -331,12 +331,20 @@ MessageService → OneBot API
 ### 记忆维护
 
 记忆模块包括聊天记忆和好感度：前者保存对话中值得记住的信息，后者保存机器人对用户的互动印象。
-统一入口在一次调用中提取人物记忆与全局好感度，再整理本会话外号与长期记忆，全部成功后一起保存。
+统一入口在一次调用中提取人物记忆、全局好感度和会话聊天摘要，再整理本会话外号与长期记忆，全部成功后一起保存。
 
 - **会话外号**：复用 `short_term_memory` 原文本列，按统一会话 ID 保存 `aliases` JSON 对象。
   Executor 只注入结构化外号，`normalizeSessionMemory` 合并重复 QQ 和称呼，不限制条数。
   原编辑接口兼容读取和修改历史字段；旧 `recent_events`、`legacy_entries`、纯文本及字符串数组不再直接注入上下文，
-  作为会话内的待整理历史内容参与下一次成功的长期记忆整理。未配置向量服务或整理失败时保留，成功后只保存外号，无独立数据库迁移。
+  作为会话内的待整理历史内容参与下一次成功的长期记忆整理。未配置向量服务或整理失败时保留，成功后保留外号和独立聊天摘要，无独立数据库迁移。
+- **会话聊天摘要**：`short_term_memory` JSON 中的 `conversation_summaries` 按批保存消息起止时间和摘要。
+  `memory.conversationSummaryMaxChars` 默认 100，`conversationSummaryMaxCount` 默认 10；摘要按时间从旧到新排列，超过条数删除最旧内容。
+  Executor 在 `session_memory` 之后、`earlier_messages` 之前注入独立的 `conversation_summaries` 字段，摘要不会作为原始消息或待迁移内容重新提取。
+  没有人物新条目时仍保存摘要；任一步骤失败不提交摘要，也不删除批次消息。旧配置自动补默认值，已有外号和历史内容保持兼容。
+- **总结篇幅**：`conversationSummaryMaxChars`、`personMemoryEntryMaxChars`、`longTermMemoryEntryMaxChars` 控制摘要、人物提取和长期记忆单条目标上限。
+  `personProfileEntryMaxChars`/`personProfileMaxChars`、`personRelationshipEntryMaxChars`/`personRelationshipMaxChars`、
+  `personInteractionEntryMaxChars`/`personInteractionMaxChars` 分别控制人物档案、机器人关系、近期互动的单条/合计目标字数。
+  都是正整数，保存后热更新；只约束模型提示词，不硬截断输出，实际长度可能受模型遵守程度影响。
 - **长期记忆**：`LongTermMemory` 封装 `long_term_memory` 表的读取与向量检索；embedding 以 `f32` 数组存入 BLOB。
 - **维护批次**：工作流在每条消息预处理结束后检查消息列表；达到或超过 `memorySummaryTriggerCount` 且没有待处理总结任务时，
   选取最旧的 `memorySummaryBatchSize` 条消息作为待总结内容，并复制随后最多
@@ -346,7 +354,7 @@ MessageService → OneBot API
 - **内存任务**：`MemoryMaintenanceCoordinator` 调用 `MemoryMaintenanceService` 联合提取人物条目和好感度，再整理会话外号与长期记忆；全部成功后，
   由 `MemoryMaintenanceStore` 在同一 SQLite 事务中保存结果。任务本身不写入数据库，不保存完成状态或重试次数。
   数据库升级到 v18 时删除旧维护任务表，不迁移未完成任务；已有消息、记忆和好感度结果保留。
-- **聊天记忆整理**：第一次请求提取人物待整理条目与好感度；新条目及历史待迁移内容按 `longTermRecallThreshold`
+- **聊天记忆整理**：第一次请求提取人物待整理条目、好感度与会话聊天摘要；新条目及历史待迁移内容按 `longTermRecallThreshold`
   逐条召回本会话旧记忆，按 ID 去重并限制实际交给模型的条数。第二次请求只接收本批条目、历史内容、召回旧记忆和已有外号，不再接收原始聊天。
   模型输出 `aliases` 完整列表及 `longTerm` 字符串数组，不再返回 `sources`。程序独立记录实际参与整理的旧 ID，
   全部结果向量化成功后，在同一事务中写入新记忆、删除这些旧 ID 并更新外号、人物条目和好感度；未参与整理的记忆不受影响。
@@ -367,7 +375,7 @@ MessageService → OneBot API
   人物昵称由 `PersonNameResolver` 后台查询，最多四路并发、同 QQ 去重，超时 5 秒、失败冷却 60 秒；接口立即返回缓存及 `name_pending`。
   前端有待查询昵称时每 2 秒刷新概要，不重新获取记忆正文，离开页面取消轮询和请求；进程退出时昵称队列停止接单并丢弃迟到结果。
   `PersonMemoryStore` 只批量读取 `recent_messages` 中去重后的真实发送者档案，不加载仅被提及、其他会话出现或没有档案的人。
-  上下文顺序为 `current_session → session_memory → earlier_messages → person_memories → shared_conversations → recent_messages → response_requirements`；
+  上下文顺序为 `current_session → session_memory → conversation_summaries → earlier_messages → person_memories → shared_conversations → recent_messages → response_requirements`；
   Executor 消息投影将原记录的 `memories` 输出为 `recalled_memories`，人物待整理条目的写入时间输出为 `created_at`；原始记录、数据库及前端 API 的字段不变。
   新条目也直接提供给模型，一次回复期间固定快照。旧自由文本记忆不猜测归属、不自动迁入人物档案。
 - **好感度评估**：联合提取返回独立的 `memories` 和 `affinity_changes` 数组，允许两者为空或涉及不同用户。

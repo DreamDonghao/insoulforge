@@ -34,6 +34,16 @@ export interface MemoryConfig {
     memorySummaryTriggerCount: number
     memorySummaryBatchSize: number
     memorySummaryContextCount: number
+    conversationSummaryMaxChars: number
+    conversationSummaryMaxCount: number
+    personMemoryEntryMaxChars: number
+    longTermMemoryEntryMaxChars: number
+    personProfileEntryMaxChars: number
+    personProfileMaxChars: number
+    personRelationshipEntryMaxChars: number
+    personRelationshipMaxChars: number
+    personInteractionEntryMaxChars: number
+    personInteractionMaxChars: number
     jevWindowSize: number
     routerWindowTriggerCount: number
     routerWindowKeepCount: number

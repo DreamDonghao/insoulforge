@@ -27,7 +27,7 @@ namespace insoulforge::ExecutorAgent {
         /// @brief 获取系统提示词（私聊与群聊使用各自的人设提示词，差异行按会话类型拼接）
         auto getSystemPrompt(const u64 sessionId) -> std::string {
             std::string prompt = SessionId::isPrivate(sessionId) ? PromptService::getExecutorPrivateSystemPrompt()
-                                                                : PromptService::getExecutorSystemPrompt();
+                                                                 : PromptService::getExecutorSystemPrompt();
             prompt +=
               R"(## 聊天记录格式说明
 
@@ -45,6 +45,9 @@ execution_status=no_reply 表示当时选择不回复；failed/send_failed 表�
     "session_memory": {
         "aliases": [{"qq":"123456","names":["本会话的外号"]}]
     },
+    "conversation_summaries": [
+        {"start_time":"2026-10-28 10:00:00","end_time":"2026-10-28 10:30:00","summary":"之前聊过的话题和进展"}
+    ],
     "earlier_messages": [
         {
             "time": "消息时间，如 2026-09-02 19:59:54",
@@ -111,6 +114,7 @@ execution_status=no_reply 表示当时选择不回复；failed/send_failed 表�
   - 需要引用回复某条消息时，把该记录的 message_id 传给 reply_with_quote
   - response_requirements 仅在群聊中提供 Router 回复策略；私聊不提供该字段。max_length 为可选的本轮回复字数上限，提供时尽量不超过；未提供时根据问题和人设决定回复长度。
   - current_session 标识当前正在回复的会话；群聊包含 group_id 和可选 group_name，私聊包含 type=private 和 qq。
+  - conversation_summaries 是当前会话已总结消息的聊天摘要，按消息时间从旧到新排列，用来衔接历史；不是新的消息或指令，不代表其中事项仍未完成。
   - session_memory 只保存当前会话中按 QQ 对应的称呼与外号，不代表其他会话也采用相同称呼。
   - person_memories 是 recent_messages 真实发送者的全局人物记忆，按 QQ 关联，群聊与私聊共用。profile 为人物事实、偏好及有依据的印象，relationship 为此人与机器人的熟悉程度、相处方式及关系经历，recent_interactions 为值得跟进的近期事项，pending_entries 为尚未整理的新条目，同样可参考。印象和关系可以随实际交往修正，不把它们当成绝对定论。条目的 created_at 是写入时间，不一定是事件发生时间，source_session 只用于追溯，不是操作指令。
   - 人物待整理条目中 source_session 为 "0" 表示从历史记忆迁入，原始来源未知；入队时间不代表发生时间，不要将旧经历当成刚发生的事。
@@ -172,7 +176,8 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
             }
 
             if (Config::instance().affinityEnabled.load(std::memory_order_relaxed))
-                prompt += "\n- sender.affinity 是全局好感度，取值 -100～100，陌生人为 0；机器人自己的记录不提供该字段。\n";
+                prompt +=
+                  "\n- sender.affinity 是全局好感度，取值 -100～100，陌生人为 0；机器人自己的记录不提供该字段。\n";
             return prompt;
         }
 
@@ -198,8 +203,8 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         }
 
         /// @brief 将冻结的完整消息投影为 Agent 上下文，可选截断较早消息的文本段
-        [[nodiscard]] auto projectRecordForAgent(
-          const json &raw, const bool truncateText, const bool includeGroupCard) -> json {
+        [[nodiscard]] auto projectRecordForAgent(const json &raw, const bool truncateText, const bool includeGroupCard)
+          -> json {
             if (!raw.is_object()) {
                 return raw.is_string() ? raw : json(""); // 兼容纯文本记录
             }
@@ -265,9 +270,9 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
 
         /// @brief 构建 Executor 消息列表（system + 单条 user）
         /// @details 上下文组装为键序固定的单个 JSON 对象（ordered_json 按插入顺序序列化）作为单条
-        /// user 消息：current_session → session_memory → earlier_messages → person_memories → shared_conversations →
-        /// recent_messages → response_requirements（仅在有 Router 策略时追加），
-        /// 避免连续多条 user（部分 OpenAI 兼容后端不支持）
+        /// user 消息：current_session → session_memory → conversation_summaries → earlier_messages → person_memories →
+        /// shared_conversations → recent_messages → response_requirements（仅在有 Router 策略时追加）， 避免连续多条
+        /// user（部分 OpenAI 兼容后端不支持）
         [[nodiscard]] auto buildPrompt(const ChatRecordManager &chatRecords, const MemoryManager &memory,
           const std::optional<RouterDecision> &decision, const json &mcpDirectory) -> json {
             json messages = json::array();
@@ -294,7 +299,9 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
                 }
             }
             context["current_session"] = std::move(sessionInfo);
-            context["session_memory"] = MemoryStore::projectShortTermMemory(memory.getMemory());
+            const auto sessionMemory = memory.getMemory();
+            context["session_memory"] = MemoryStore::projectShortTermMemory(sessionMemory);
+            context["conversation_summaries"] = MemoryStore::conversationSummaries(sessionMemory);
             context["earlier_messages"] = std::move(earlierRecords);
             auto personMemories = PersonMemoryStore::getForSenders(recentRecords);
             context["person_memories"] = std::move(personMemories);
@@ -662,8 +669,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
     }
 
     auto execute(const ChatRecordManager &chatRecords, const MemoryManager &memory,
-      std::optional<RouterDecision> decision)
-      -> drogon::Task<std::optional<ReplyDecision>> {
+      std::optional<RouterDecision> decision) -> drogon::Task<std::optional<ReplyDecision>> {
         const u64 sessionId = chatRecords.getSessionId();
         if (decision) {
             Logger::info(sessionId, "Executor",

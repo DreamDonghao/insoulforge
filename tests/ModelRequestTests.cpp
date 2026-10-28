@@ -78,6 +78,29 @@ namespace {
         require(config.saveMemoryConfig(memorySettings).has_value() && config.jevWindowSize.load() == 4 &&
                   config.initialize(path.string()).has_value() && config.jevWindowSize.load() == 4,
           "old client or restart reset Jev window");
+        const auto originalMemorySettings = config.getMemoryConfig();
+        require(originalMemorySettings["conversationSummaryMaxChars"] == 100 &&
+                  originalMemorySettings["conversationSummaryMaxCount"] == 10,
+          "legacy summary defaults changed");
+        for (const auto *key: {"conversationSummaryMaxChars", "conversationSummaryMaxCount",
+               "personMemoryEntryMaxChars", "longTermMemoryEntryMaxChars", "personProfileEntryMaxChars",
+               "personProfileMaxChars", "personRelationshipEntryMaxChars", "personRelationshipMaxChars",
+               "personInteractionEntryMaxChars", "personInteractionMaxChars"}) {
+            auto updated = config.getMemoryConfig();
+            updated[key] = 7;
+            require(config.saveMemoryConfig(updated).has_value(), "summary setting did not save");
+            for (const auto &bad: json::array({0, -1, 1.5, true, "10", nullptr, 2147483648ULL})) {
+                auto invalid = updated;
+                invalid[key] = bad;
+                require(!config.saveMemoryConfig(invalid) && config.getMemoryConfig() == updated,
+                  "invalid summary setting changed config");
+            }
+            updated.erase(key);
+            require(config.saveMemoryConfig(updated).has_value() && config.getMemoryConfig()[key] == 7 &&
+                      config.initialize(path.string()).has_value() && config.getMemoryConfig()[key] == 7,
+              "old client or restart reset summary setting");
+        }
+        require(config.saveMemoryConfig(originalMemorySettings).has_value(), "summary config restore failed");
         auto settings = config.getLLMConfig("memory");
         settings["timeoutSeconds"] = 600;
         settings["maxRetries"] = 2;

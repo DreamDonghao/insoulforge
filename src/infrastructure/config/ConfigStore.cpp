@@ -36,8 +36,8 @@ namespace insoulforge::ConfigStore {
         }
 
         auto defaultEmbeddingConfig() -> json {
-            return {{"apiKey", ""}, {"baseUrl", ""}, {"path", "/embeddings"}, {"model", ""},
-              {"timeoutSeconds", 30}, {"maxRetries", 0}};
+            return {{"apiKey", ""}, {"baseUrl", ""}, {"path", "/embeddings"}, {"model", ""}, {"timeoutSeconds", 30},
+              {"maxRetries", 0}};
         }
 
         auto defaultImageGenerationConfig() -> json {
@@ -54,19 +54,25 @@ namespace insoulforge::ConfigStore {
 
         auto defaultConfig() -> json {
             return {
-              {"llm",
-                {{"router", defaultChatConfig(100, 0.3, 0.9)}, {"executor", defaultChatConfig(150, 0.7, 0.9)},
-                  {"executorFallback", defaultChatConfig(150, 0.7, 0.9)},
-                  {"executorThinking", defaultChatConfig(512, 0.7, 0.9)}, {"image", defaultChatConfig(1024, 0.7, 0.9, 90, 0)},
-                  {"imageGeneration", defaultImageGenerationConfig()}, {"memory", defaultChatConfig(4000, 0.4, 0.9, 180, 0)},
-                  {"embedding", defaultEmbeddingConfig()}, {"jev", defaultJevConfig()}}},
+              {"llm", {{"router", defaultChatConfig(100, 0.3, 0.9)}, {"executor", defaultChatConfig(150, 0.7, 0.9)},
+                        {"executorFallback", defaultChatConfig(150, 0.7, 0.9)},
+                        {"executorThinking", defaultChatConfig(512, 0.7, 0.9)},
+                        {"image", defaultChatConfig(1024, 0.7, 0.9, 90, 0)},
+                        {"imageGeneration", defaultImageGenerationConfig()},
+                        {"memory", defaultChatConfig(4000, 0.4, 0.9, 180, 0)}, {"embedding", defaultEmbeddingConfig()},
+                        {"jev", defaultJevConfig()}}},
               {"qq", {{"accessToken", ""}, {"selfQQNumber", 0}, {"oneBotTransport", "websocket"},
                        {"qqHttpHost", "http://127.0.0.1:3000"}, {"qqWebSocketHost", "ws://127.0.0.1:3001"},
                        {"botName", "机器人"}, {"defaultPrivateEnabled", false}}},
               {"memory",
                 {{"affinityEnabled", true}, {"contextWindowLimit", 100}, {"sharedConversationMessageCount", 10},
                   {"memorySummaryTriggerCount", 100}, {"memorySummaryBatchSize", 50}, {"memorySummaryContextCount", 10},
-                  {"jevWindowSize", 10}, {"routerWindowTriggerCount", 20}, {"routerWindowKeepCount", 10}, {"longTermRecallThreshold", 0.65},
+                  {"conversationSummaryMaxChars", 100}, {"conversationSummaryMaxCount", 10},
+                  {"personMemoryEntryMaxChars", 30}, {"longTermMemoryEntryMaxChars", 100},
+                  {"personProfileEntryMaxChars", 50}, {"personProfileMaxChars", 300},
+                  {"personRelationshipEntryMaxChars", 60}, {"personRelationshipMaxChars", 150},
+                  {"personInteractionEntryMaxChars", 60}, {"personInteractionMaxChars", 250}, {"jevWindowSize", 10},
+                  {"routerWindowTriggerCount", 20}, {"routerWindowKeepCount", 10}, {"longTermRecallThreshold", 0.65},
                   {"longTermInjectThreshold", 0.45}}},
               {"execution", {{"maxToolRounds", ExecutionSettings::kDefaultMaxToolRounds}, {"mcpToolPageSize", 10},
                               {"mcpMaxToolsPerEnable", 4}, {"mcpMaxToolsPerReply", 12}}},
@@ -126,7 +132,14 @@ namespace insoulforge::ConfigStore {
             for (const auto &[key, defaultValue]: defaults.items()) {
                 auto value = config.find(key);
                 // 显式填写的严格校验字段不能悄悄修复错误类型。
-                if (value != config.end() && (key == "timeoutSeconds" || key == "maxRetries" || key == "affinityEnabled" || key == "jevWindowSize"))
+                if (value != config.end() &&
+                    (key == "timeoutSeconds" || key == "maxRetries" || key == "affinityEnabled" ||
+                      key == "jevWindowSize" || key == "conversationSummaryMaxChars" ||
+                      key == "conversationSummaryMaxCount" || key == "personMemoryEntryMaxChars" ||
+                      key == "longTermMemoryEntryMaxChars" || key == "personProfileEntryMaxChars" ||
+                      key == "personProfileMaxChars" || key == "personRelationshipEntryMaxChars" ||
+                      key == "personRelationshipMaxChars" || key == "personInteractionEntryMaxChars" ||
+                      key == "personInteractionMaxChars"))
                     continue;
                 if (value == config.end() || !compatibleType(*value, defaultValue)) {
                     config[key] = defaultValue;

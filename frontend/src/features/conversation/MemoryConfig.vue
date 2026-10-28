@@ -16,12 +16,33 @@ const memoryConfig = reactive<MemoryConfig>({
   memorySummaryTriggerCount: 100,
   memorySummaryBatchSize: 50,
   memorySummaryContextCount: 10,
+  conversationSummaryMaxChars: 100,
+  conversationSummaryMaxCount: 10,
+  personMemoryEntryMaxChars: 30,
+  longTermMemoryEntryMaxChars: 100,
+  personProfileEntryMaxChars: 50,
+  personProfileMaxChars: 300,
+  personRelationshipEntryMaxChars: 60,
+  personRelationshipMaxChars: 150,
+  personInteractionEntryMaxChars: 60,
+  personInteractionMaxChars: 250,
   jevWindowSize: 10,
   routerWindowTriggerCount: 20,
   routerWindowKeepCount: 10,
   longTermRecallThreshold: 0.65,
   longTermInjectThreshold: 0.45
 })
+const textLimitFields: {key: keyof MemoryConfig, label: string}[] = [
+  {key: 'conversationSummaryMaxChars', label: '会话聊天摘要（每条）'},
+  {key: 'personMemoryEntryMaxChars', label: '人物记忆提取（每条）'},
+  {key: 'longTermMemoryEntryMaxChars', label: '长期记忆（每条）'},
+  {key: 'personProfileEntryMaxChars', label: '人物档案（每条）'},
+  {key: 'personProfileMaxChars', label: '人物档案（合计）'},
+  {key: 'personRelationshipEntryMaxChars', label: '与机器人的关系（每条）'},
+  {key: 'personRelationshipMaxChars', label: '与机器人的关系（合计）'},
+  {key: 'personInteractionEntryMaxChars', label: '近期互动（每条）'},
+  {key: 'personInteractionMaxChars', label: '近期互动（合计）'},
+]
 const saving: Ref<boolean> = ref(false)
 
 onMounted(async () => {
@@ -130,6 +151,19 @@ const saveMemoryConfig = async (): Promise<void> => {
           <label class="form-label">每会话共享消息数</label>
           <input v-model.number="memoryConfig.sharedConversationMessageCount" class="form-input" min="1" step="1"
                  type="number">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">会话聊天摘要保留条数</label>
+        <input v-model.number="memoryConfig.conversationSummaryMaxCount" class="form-input" min="1" step="1" type="number">
+        <p class="form-hint">每次消息总结时生成摘要，按时间保留每个会话最近 N 条，放在回复上下文的历史消息之前。</p>
+      </div>
+      <h3 class="card-title">总结篇幅（字）</h3>
+      <p class="form-hint">字数为模型生成的目标上限，实际长度受模型遵守指令的程度影响，可能超出。程序不会强行截断。</p>
+      <div class="form-row">
+        <div v-for="field in textLimitFields" :key="field.key" class="form-group">
+          <label class="form-label">{{ field.label }}</label>
+          <input v-model.number="memoryConfig[field.key]" class="form-input" min="1" step="1" type="number">
         </div>
       </div>
       <button :disabled="saving" class="btn btn-primary" @click="saveMemoryConfig">
