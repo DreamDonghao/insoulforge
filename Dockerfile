@@ -53,6 +53,6 @@ COPY --from=builder /src/agentTools ./agentTools
 
 EXPOSE 7778
 
-VOLUME ["/app/data", "/app/logs", "/app/uploads"]
+VOLUME ["/app/data"]
 
 ENTRYPOINT ["./exe/insoulforge"]

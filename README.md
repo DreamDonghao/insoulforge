@@ -35,6 +35,8 @@ InSoulForge 的 HTTP 服务端口为 `7778`，用于访问管理后台；使用 
 
 ### 方式一：Docker 部署（推荐）
 
+单独部署 InSoulForge 可使用根目录的 [`compose.yaml`](compose.yaml)；与 NapCat 一起部署使用 [`docs/compose.napcat.yaml`](docs/compose.napcat.yaml)，配置和操作步骤见 [Docker Compose 部署说明](docs/DOCKER_COMPOSE.md)。
+
 镜像已发布至 Docker Hub 和 GitHub Container Registry，支持 **amd64 / arm64** 架构：
 
 Docker Hub （推荐，可配置国内镜像加速）

@@ -1,521 +1,413 @@
-# InSoulForge + NapCat QQ 机器人部署与更新示例
+# InSoulForge + NapCat Docker Compose 部署
 
-本教程使用 Docker 部署，不需要安装 C++ 编译器、Node.js，也不需要下载项目源码。InSoulForge 负责对话和管理后台，NapCat 负责登录 QQ 并收发消息，两者通过正向 WebSocket 连接。
+本文使用 [compose.napcat.yaml](compose.napcat.yaml) 联合部署 InSoulForge 和 NapCat，不需要安装编译器、Node.js，也不使用 `.env` 文件。仓库根目录的 [compose.yaml](../compose.yaml) 仅部署 InSoulForge，适用于已经单独部署 NapCat 的情况，OneBot 地址需按实际网络配置。
 
->  本教程以全新安装的 Ubuntu 系统为例，请根据自己机器的实际环境调整步骤。
+InSoulForge 负责对话与管理后台，NapCat 负责登录 QQ、收发消息。两个服务通过 Compose 默认网络通信，InSoulForge 连接 `ws://napcat:3001`。
 
-## 验证环境与准备工作
+## 1. 准备环境
 
-本教程在 Ubuntu 26.04.1 LTS、ARM64 虚拟机上逐步验证。测试机器的局域网 IP 为 `192.168.42.129`。其他系统和架构不能视为已经验证。
+准备：
 
-开始前准备：
+- 一台能够运行 Docker 的 Linux 服务器。
+- Docker Engine 和 Docker Compose 插件。
+- 用于登录 NapCat 的 QQ 账号。
+- 模型服务的 API Key、接口地址和模型名称。
 
-- 一台安装好 Ubuntu、可以联网的机器，以及具有 `sudo` 权限的账户。
-- 一个用于机器人的 QQ 账号，登录时需要手机 QQ 扫码并确认。
-- 一个支持 OpenAI 兼容聊天接口和工具调用的模型服务，以及它的 API Key、接口地址和模型名称。
-- 一台能访问服务器的电脑，用浏览器完成配置。
+尚未安装 Docker 时，按照 [Docker 官方 Ubuntu 安装说明](https://docs.docker.com/engine/install/ubuntu/)安装 Docker Engine 和 Compose 插件。其他发行版使用对应的官方安装说明。
 
-以下命令均在 Ubuntu 机器的终端执行，浏览器操作则在你的电脑上进行。每段命令成功后再执行下一段；不要在报错后继续往下操作。
-
-## 1. 检查系统 
-
-```bash
-cat /etc/os-release
-uname -m
-df -h /
-```
-
-测试机器显示 Ubuntu 26.04.1 LTS，架构为 `aarch64`，根目录剩余约 10 GB。`aarch64` 对应 Docker 的 `arm64`。镜像下载和解压会占用磁盘，不要在空间已经不足时继续安装。
-
-查看服务器的局域网地址：
-
-```bash
-ip -4 address
-```
-
-找到联网网卡上的 `inet` 地址，不要使用 `127.0.0.1` 或 Docker 网桥的地址。本文后面的 `192.168.42.129` 都需要换成你的服务器地址。
-
-## 2. 安装 Docker 
-
-> 已有docker环境可跳到第3节
-
-本教程使用 Ubuntu 软件仓库中的 Docker，不运行第三方一键安装脚本，也不需要 Docker Compose。
-
-```bash
-sudo apt update
-```
-
-```bash
-sudo apt install -y docker.io curl ca-certificates openssl
-```
-
-```bash
-sudo systemctl enable --now docker
-```
+检查环境：
 
 ```bash
 sudo docker version
+sudo docker compose version
 ```
 
-最后一条命令应同时显示 `Client` 和 `Server`。测试机器安装的是 Docker 29.1.3。只有客户端信息或提示无法连接 Docker daemon 时，先解决服务启动问题。
+第一条应同时显示 Docker Client 和 Server，第二条应输出 Compose 版本。
 
-本教程的 Docker 命令始终带 `sudo`，不需要把账户加入 `docker` 用户组。
+下文命令在服务器执行。示例使用 `sudo`，已经使用 root 登录时可以省略。
 
-### 软件源连接超时的处理
+## 2. 准备 Compose 和数据目录
 
-如果 `apt` 可以正常下载，跳过这一节。测试机器原来的 `cn.archive.ubuntu.com` 下载连接超时，改用清华 HTTPS 镜像后安装成功。
-
-先查看实际配置，不要直接覆盖已有文件：
+创建目录：
 
 ```bash
-cat /etc/apt/sources.list.d/ubuntu.sources
+sudo mkdir -p \
+  /opt/insoulforge/data \
+  /opt/napcat/qq \
+  /opt/napcat/config \
+  /opt/napcat/plugins
 ```
 
-下面的替换命令仅适用于本文测试机器的两个原始地址。它保留发行版名称、组件和签名验证配置；如果你的文件使用其他地址或格式，不要照搬。
+将仓库中的 `docs/compose.napcat.yaml` 上传或复制到以下位置，并命名为 `compose.yaml`：
+
+```text
+/opt/insoulforge/compose.yaml
+```
+
+进入部署目录：
 
 ```bash
-sudo cp -a /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list.d/ubuntu.sources.before-insoulforge
+cd /opt/insoulforge
 ```
+
+后续 `docker compose` 命令都在这个目录执行。
+
+### 数据目录
+
+| 宿主机目录 | 容器内目录 | 用途 |
+| --- | --- | --- |
+| `/opt/insoulforge/data` | `/app/data` | InSoulForge 配置、数据库及相关数据 |
+| `/opt/napcat/qq` | `/app/.config/QQ` | QQ 登录数据 |
+| `/opt/napcat/config` | `/app/napcat/config` | NapCat 配置 |
+| `/opt/napcat/plugins` | `/app/napcat/plugins` | NapCat 插件 |
+
+这些是绝对路径，不受执行命令的位置影响。不要把整个 `/app` 挂载到宿主机，否则会遮住镜像自带的程序和前端文件。
+
+已有部署迁移时，先核对原数据目录，再调整挂载路径。换成空目录不会迁移旧数据，而是创建一份新配置。
+
+### 修改部署参数
+
+编辑 Compose：
 
 ```bash
-sudo sed -i 's|http://cn.archive.ubuntu.com/ubuntu/|https://mirrors.tuna.tsinghua.edu.cn/ubuntu/|g; s|http://security.ubuntu.com/ubuntu/|https://mirrors.tuna.tsinghua.edu.cn/ubuntu/|g' /etc/apt/sources.list.d/ubuntu.sources
+sudo nano compose.yaml
 ```
 
-然后重新执行本节的 `sudo apt update` 和安装命令。备份文件不会作为软件源加载；`apt` 提示忽略它是正常的。
+当前配置：
 
-## 3. 下载镜像
+- InSoulForge 镜像：`dreamdonghao/insoulforge:latest`。
+- NapCat 镜像：`mlikiowa/napcat-docker:latest`。
+- 容器名：`insoulforge`、`napcat`。
+- 时区：`Asia/Shanghai`。
+- 两个服务均使用 `restart: unless-stopped`。
+- InSoulForge 停止时最多等待 60 秒，供程序保存消息并关闭数据库。
+- Docker 标准输出日志按每个文件 10 MiB、最多 3 个文件轮转。
 
-**先尝试官方镜像。只有官方镜像拉取失败时，才使用下面的国内镜像站。** 每个镜像下载成功后即可继续，不需要把所有来源都下载一遍。
+`napcat.environment.WEBUI_TOKEN` 已填入生成的后台登录令牌，可以按需修改。它是 NapCat 管理后台的令牌，不是 OneBot Access Token。
 
-### 官方发布仓库
+使用预发布版时，将 `insoulforge.image` 改为对应的版本标签。也可以使用官方 GHCR 镜像：
 
-依次执行：
+```text
+ghcr.io/dreamdonghao/insoulforge:latest
+```
+
+启动和更新都以 Compose 中的 `image` 为准。
+
+### 端口
+
+| 宿主机映射 | 用途 |
+| --- | --- |
+| `0.0.0.0:7778:7778` | InSoulForge 管理后台 |
+| `0.0.0.0:6099:6099` | NapCat 管理后台 |
+
+`0.0.0.0` 表示绑定宿主机所有 IPv4 接口。浏览器访问时使用服务器实际 IP，不使用 `0.0.0.0`。
+
+如果只通过服务器本机反向代理或 SSH 转发访问，可以将绑定地址改为 `127.0.0.1`。
+
+OneBot 的 `3001` 端口只供 Compose 网络内的服务通信，不需要映射到宿主机，也不需要手动创建网络。
+
+## 3. 启动服务
+
+先检查配置：
 
 ```bash
-sudo docker pull dreamdonghao/insoulforge:latest
+sudo docker compose config --quiet
 ```
+
+无错误后拉取镜像并启动：
 
 ```bash
-sudo docker pull mlikiowa/napcat-docker:latest
+sudo docker compose pull
+sudo docker compose up -d
 ```
 
-两条命令都成功时，直接进入第 4 节，跳过国内镜像站的命令。
-
-### 官方不可用时：使用国内镜像站
-
-如果上面的命令出现连接超时、无法连接仓库等网络错误，对下载失败的镜像执行对应的替代命令：
+查看状态：
 
 ```bash
-sudo docker pull docker.1ms.run/dreamdonghao/insoulforge:latest
+sudo docker compose ps
 ```
-
-```bash
-sudo docker pull docker.1ms.run/mlikiowa/napcat-docker:latest
-```
-
-等待下载完成后再继续。镜像站是第三方缓存，不是项目自己的发布仓库，其可用性和同步速度可能变化。
-
-### 启动与更新时使用同一来源
-
-**后续启动和更新命令默认使用官方镜像。** 如果你通过镜像站下载，必须将对应命令中的镜像地址替换为右侧地址，其他参数不变：
-
-| 镜像        | 默认官方地址                      | 官方不可用时替换为                               |
-|-------------|-----------------------------------|--------------------------------------------------|
-| InSoulForge | `dreamdonghao/insoulforge:latest` | `docker.1ms.run/dreamdonghao/insoulforge:latest` |
-| NapCat      | `mlikiowa/napcat-docker:latest`   | `docker.1ms.run/mlikiowa/napcat-docker:latest`   |
-
-不要只修改拉取命令而保留启动命令中的旧地址，否则 Docker 会查找另一个镜像名称，并可能重新从旧来源下载。切换镜像来源不需要更换数据目录或容器网络。
-
-InSoulForge 另有官方 GHCR 地址 `ghcr.io/dreamdonghao/insoulforge:latest`。能访问 GHCR 的用户也可以使用它，拉取、启动和更新时保持地址一致即可。
-
-`latest` 是可变标签，重新执行 `pull` 才会检查更新；已经运行的容器不会自动更新。
-
-## 4. 创建数据目录与容器网络
-
-```bash
-sudo mkdir -p /opt/insoulforge/data /opt/napcat/qq /opt/napcat/config /opt/napcat/plugins
-```
-
-这些是宿主机上的固定绝对路径，与执行命令所在目录无关：
-
-| 宿主机目录              | 容器内目录            | 用途                                           |
-|-------------------------|-----------------------|------------------------------------------------|
-| `/opt/insoulforge/data` | `/app/data`           | InSoulForge 配置、数据库及保存在该目录下的资源 |
-| `/opt/napcat/qq`        | `/app/.config/QQ`     | QQ 登录数据                                    |
-| `/opt/napcat/config`    | `/app/napcat/config`  | NapCat 配置                                    |
-| `/opt/napcat/plugins`   | `/app/napcat/plugins` | NapCat 插件                                    |
-
-不要把整个 `/app` 挂载到宿主机目录，否则会遮住镜像自带的程序和前端文件。InSoulForge 的 `/app/logs` 和 `/app/uploads` 不在上述持久化目录中；本教程不保留它们作为长期数据。
-
-创建供两个容器通信的网络：
-
-```bash
-sudo docker network create bot-net
-```
-
-这个网络只需创建一次。如果以后再次执行提示网络已经存在，不需要删除重建。
-
-## 5. 启动 InSoulForge
-
-以下端口绑定到测试机器的局域网 IP，执行前替换为你的服务器 IP：
-
-```bash
-sudo docker run -d \
-  --name insoulforge \
-  --restart unless-stopped \
-  --network bot-net \
-  -p 192.168.42.129:7778:7778 \
-  -v /opt/insoulforge/data:/app/data \
-  --log-opt max-size=10m \
-  --log-opt max-file=3 \
-  dreamdonghao/insoulforge:latest
-```
-
-如果第 3 节使用了国内镜像站，将命令最后一行替换为 `docker.1ms.run/dreamdonghao/insoulforge:latest`。
-
-`--restart unless-stopped` 让容器在 Docker 服务启动后自动运行，但手动停止后不会自动重新启动。日志参数限制 Docker 收集的标准输出日志大小，不控制程序内部日志文件的大小。
 
 查看启动日志：
 
 ```bash
-sudo docker logs --tail 40 insoulforge
+sudo docker compose logs --tail=100 napcat
+sudo docker compose logs --tail=100 insoulforge
 ```
 
-首次启动会创建：
+Compose 中固定了容器名。如果提示名称已被占用，先确认是否已有旧部署，核对并备份数据后再迁移，不要重复启动两份服务读取同一个数据库。
 
-- `/opt/insoulforge/data/config.json`：全局配置。
-- `/opt/insoulforge/data/insoulforge.db`：数据库。
+`depends_on` 只保证启动顺序，不保证 QQ 已登录或 OneBot 已就绪。完成后续配置前，InSoulForge 出现连接失败和自动重连日志是正常现象。
 
-日志应包含 `HTTP 服务启动 | port=7778` 和管理后台访问令牌。此时 NapCat 尚未配置，出现 OneBot WebSocket 连接失败和重连日志是预期现象。
+## 4. 登录 NapCat
 
-`7778` 是 InSoulForge 的 HTTP 服务端口，提供后台页面和管理接口；HTTP 模式的 OneBot 上报也使用它。本教程使用正向 WebSocket，所以不是通过 `7778` 接收 QQ 消息。
-
-## 6. 登录 InSoulForge 管理后台
-
-在电脑浏览器中打开：
+在浏览器中打开：
 
 ```text
-http://192.168.42.129:7778/index.html
+http://服务器IP:6099/webui
 ```
 
-把启动日志中的管理后台访问令牌填入登录页面，点击「进入后台」。本文的部署验证使用手动输入令牌的方式。
+使用 Compose 中的 `WEBUI_TOKEN` 登录，再用机器人账号的手机 QQ 扫码并确认。
 
-程序也会输出 `index.html#token=...` 自动登录链接，但测试时 Safari 打开这类链接出现了 404，普通 `index.html` 页面和手动登录正常。遇到相同情况时使用上面的地址并手动输入令牌，不要把自动链接作为唯一入口。
+如果二维码过期，在页面刷新二维码后重新扫码。
 
-令牌每次程序启动都会重新生成。重启容器后旧令牌失效，需要查看新的启动日志；它不是 OneBot 的 Access Token，也不是模型 API Key。
+`MODE=ws` 和 `WEBUI_TOKEN` 只初始化尚不存在的配置。已有配置不会因为修改环境变量而自动覆盖，应通过 NapCat 后台修改。
 
-本教程仅在可信局域网内通过 HTTP 管理。不要直接把这些管理端口暴露到公网；公网管理应使用 SSH 转发或另行配置 HTTPS 和访问限制。
+## 5. 登录 InSoulForge
 
-## 7. 启动 NapCat 并登录 QQ
-
-生成 NapCat 管理页面的令牌：
-
-```bash
-openssl rand -hex 24
-```
-
-保存输出的字符串，替换下面的 `YOUR_NAPCAT_WEBUI_TOKEN`。不要直接使用这个占位文本，也不要把自己的真实令牌发给其他人。
-
-```bash
-sudo docker run -d \
-  --name napcat \
-  --restart unless-stopped \
-  --network bot-net \
-  -p 192.168.42.129:6099:6099 \
-  -e MODE=ws \
-  -e WEBUI_TOKEN='YOUR_NAPCAT_WEBUI_TOKEN' \
-  -v /opt/napcat/qq:/app/.config/QQ \
-  -v /opt/napcat/config:/app/napcat/config \
-  -v /opt/napcat/plugins:/app/napcat/plugins \
-  --log-opt max-size=10m \
-  --log-opt max-file=3 \
-  mlikiowa/napcat-docker:latest
-```
-
-如果第 3 节使用了国内镜像站，将命令最后一行替换为 `docker.1ms.run/mlikiowa/napcat-docker:latest`。
-
-查看日志：
-
-```bash
-sudo docker logs --tail 60 napcat
-```
-
-测试镜像启动后显示 NapCat 4.18.37，随后输出 WebUI 地址、令牌和 QQ 登录二维码。日志中还出现了 DBus、EGL/GPU 初始化错误，但 WebUI 和扫码页面正常启动；不要仅凭这些字样判断整个容器启动失败。
-
-在电脑浏览器中打开：
+首次启动会在数据目录创建：
 
 ```text
-http://192.168.42.129:6099/webui
+/opt/insoulforge/data/config.json
+/opt/insoulforge/data/insoulforge.db
 ```
 
-1. 输入刚才生成的 WebUI 令牌，点击「登录」。
-2. 在 QQ 登录页选择「扫码登录」。
-3. 用机器人账号的手机 QQ 扫码，并在手机上确认登录。
-4. 如果二维码已过期，点击「刷新二维码」后重新扫码。
+从日志获取管理后台令牌：
 
-`6099` 是 NapCat 管理页面端口，不是 InSoulForge 管理页面，也不是 OneBot 消息接口。两个管理页面使用各自的令牌。
+```bash
+sudo docker compose logs --tail=100 insoulforge
+```
 
-启动命令没有向宿主机发布 `3001`。InSoulForge 与 NapCat 都在 `bot-net` 网络内，后续使用 `ws://napcat:3001` 通信，不需要额外开放宿主机端口。
+在浏览器中打开：
 
-`MODE=ws` 和 `WEBUI_TOKEN` 用于初始化缺失的配置。已有配置不会因重新设置这些环境变量而自动覆盖；后续更改应在 NapCat 页面完成。
+```text
+http://服务器IP:7778/index.html
+```
 
-## 8. 配置 OneBot 连接
+输入日志中的后台访问令牌。
+
+也可以使用日志输出的自动登录链接，将其中的主机地址替换成服务器实际 IP，并保留端口、路径和 `#token=...` 部分。
+
+InSoulForge 每次启动会重新生成后台令牌。重启后需要从新的启动日志获取令牌。
+
+## 6. 配置 OneBot 连接
 
 ### NapCat 端
 
-在 NapCat 左侧选择「网络配置」。`MODE=ws` 已创建名为 `ws` 的配置，点击其「编辑」，核对：
+进入「网络配置」，确认启用一个正向 WebSocket 服务端：
 
-| 字段         | 填写内容                              |
-|--------------|---------------------------------------|
-| 启用         | 开启                                  |
-| 类型         | Websocket服务器，不是 Websocket客户端 |
-| Host         | `0.0.0.0`                             |
-| Port         | `3001`                                |
-| 消息格式     | `Array`                               |
-| 上报自身消息 | 关闭                                  |
-| Token        | 自行生成的非空随机字符串              |
+| 设置 | 值 |
+| --- | --- |
+| 类型 | WebSocket 服务端 |
+| 监听地址 | `0.0.0.0` |
+| 端口 | `3001` |
+| Token | 自行设置一个非空令牌 |
 
-OneBot Token 可以再次使用 `openssl rand -hex 24` 生成。它与 NapCat WebUI 令牌是两个独立配置，应使用不同的值。保存后确认 `ws` 配置已启用。
-
-不要把 Host 填成 `127.0.0.1`：那样只能从 NapCat 容器自身连接。`0.0.0.0` 表示监听容器内的所有 IPv4 接口；没有 `-p 3001:3001` 时，它不会因此发布到宿主机。
+这里的 Token 与 NapCat WebUI 令牌分开设置。
 
 ### InSoulForge 端
 
-进入 InSoulForge「OneBot 配置」：
+进入「OneBot 配置」：
 
-| 字段               | 填写内容                                      |
-|--------------------|-----------------------------------------------|
-| Bot QQ 号          | NapCat 实际登录的 QQ 号，不是你的管理员 QQ 号 |
-| Bot 名称           | 你希望机器人使用的名称                        |
-| 连接方式           | `WebSocket`                                   |
-| WebSocket 服务地址 | `ws://napcat:3001`                            |
-| Access Token       | 与 NapCat 的 OneBot Token 完全相同            |
+| 设置 | 值 |
+| --- | --- |
+| 机器人 QQ 号 | NapCat 实际登录的 QQ 号 |
+| Bot 名称 | 机器人使用的名称 |
+| 连接方式 | WebSocket |
+| WebSocket 服务地址 | `ws://napcat:3001` |
+| Access Token | 与 NapCat WebSocket 服务端的 Token 相同 |
 
-点击「保存配置」。此地址中的 `napcat` 是容器名，由 `bot-net` 网络解析；不能改成 `127.0.0.1`，也不需要使用经常变化的容器 IP。
+保存后，在首页检查 OneBot 连接状态。
 
-返回首页，检查 **OneBot WebSocket 已连接**。这是 InSoulForge 与 NapCat 的连接，不是浏览器与管理后台的连接。首次部署时出现重连日志不代表数据损坏，应先检查地址、Token 和 QQ 登录状态。
+`napcat` 是 Compose 服务名。不要填写 `127.0.0.1`，因为它在 InSoulForge 容器中指向 InSoulForge 自身。
 
-## 9. 填写模型配置与启用会话
+这里使用正向 WebSocket，不需要配置 HTTP 上报或反向 WebSocket。
 
-本节说明首次使用所需配置。部署验证未调用模型 API，也未验证机器人回复、工具调用或记忆提取，不能据此判断某个模型服务是否兼容。
+## 7. 配置模型与会话
 
-### 模型配置
+### 模型
 
-在「LLM配置」中选择角色，填入服务商提供的 API Key、Base URL、Path 和 Model，每个角色分别保存。
+在「模型配置」中为需要使用的角色填写 API Key、Base URL、Path 和 Model，分别保存。
 
-「会话管理」中每个群都有独立的「发送群名片」开关，默认关闭。群内机器人管理员也可发送 `@机器人 /groupcard on` 或 `@机器人 /groupcard off`。
-开启后，发送给模型的群消息在 `sender.card` 中包含群名片（Router/Jev 精简记录使用 `card`）；
-QQ 昵称仍使用 `sender.name`。关闭不删除消息记录中的群名片，空群名片和私聊不添加该字段。
+| 角色 | 用途 |
+| --- | --- |
+| 回复决策 | 群聊回复判断 |
+| Jev | 可选的快速回复判断 |
+| 回复生成 | 生成回复并调用工具 |
+| 备用模型 | 可选的回复备用模型 |
+| 深度思考 | 深度思考工具 |
+| 图片识别 | 图片描述与多模态提问 |
+| 图片生成 | 生图工具 |
+| 记忆维护 | 记忆提取与整理 |
+| 向量化 | 长期记忆向量存储与召回 |
 
-每个群还可独立设置「自动回复」，默认开启。关闭后普通群消息仍记录并进入上下文，但不经过 Jev/Router 模型判断，
-也不会自动回复；`@机器人`、管理命令、定时任务及异步任务完成消息不受影响。管理员可发送
-`@机器人 /autoreply off` 关闭、`@机器人 /autoreply on` 开启，`/status` 查看当前设置。
-此设置不影响私聊，不会取消已经开始生成的回复；禁用或重新启用群聊也不会清除设置。
-
-「会话管理」中每群的「附加提示词」可独立编辑回复设定，默认留空。保存后从下一次回复生效，
-在全局提示词之后追加，不覆盖全局人设，不影响其他群或私聊，也不改变是否触发回复的路由判断。
-清空编辑内容并保存即可移除。此设置仅通过管理后台编辑，不提供群命令。内容上限为 16000 字节（UTF-8）。
-
-| 角色         | 用途                         | 首次配置建议                         |
-|--------------|------------------------------|--------------------------------------|
-| Router       | 判断普通群聊消息是否需要回复 | 配置兼容聊天接口的模型               |
-| Executor     | 生成回复、调用工具           | 配置支持工具调用的聊天模型           |
-| Executor 兜底 | 默认 Executor 请求失败时重试 | 可选，配置支持工具调用的聊天模型 |
-| Memory       | 记忆提取、总结和好感度维护   | 单独填写，不会自动使用 Executor 配置 |
-| Image        | 图片描述                     | 需要识图时配置多模态模型             |
-| Embedding    | 记忆向量化与检索             | 需要向量检索时配置嵌入模型           |
-| Executor思考 | 深度思考工具                 | 按需配置                             |
-| 图片生成     | 生图工具                     | 按需配置对应的生图接口               |
-| Jev          | 快速路由                     | 可选；不配置时使用 Router            |
-
-对于 OpenAI 兼容聊天接口，通常将服务商提供的接口拆成 Base URL 和 Path。例如完整地址为 `https://api.example.com/v1/chat/completions` 时：
+以 OpenAI 兼容聊天接口为例：
 
 ```text
-Base URL: https://api.example.com/v1
-Path: /chat/completions
-Model: 服务商提供的真实模型名称
+完整接口：https://api.example.com/v1/chat/completions
+
+Base URL：https://api.example.com/v1
+Path：/chat/completions
+Model：服务商提供的真实模型名称
 ```
 
-`api.example.com` 仅用于说明地址结构，不是可调用的服务。不要把聊天接口、嵌入接口和图片生成接口混用，也不要把 API Key 填到 OneBot 的 Access Token 中。
+示例域名不是真实服务。聊天、嵌入和生图接口应分别配置。
 
-保存后的全局配置位于宿主机 `/opt/insoulforge/data/config.json`。优先使用后台修改；若直接编辑文件，应停止程序后编辑，再启动，避免文件内容与运行时配置不一致。
+模型请求超时时间和重试次数可以在对应模型配置中调整。
 
-### 管理员与会话
+### 会话
 
-1. 在「访问管理」中添加操作者的 QQ 号为管理员。
-2. 使用管理员 QQ，在目标群里发送 `@机器人 /enable`，或发送 `@机器人 /enable 群号`。
-3. 私聊机器人时可以直接发送 `/enable`，不需要 `@`。
-4. 在「会话管理」中查看已登记的会话，并使用列表的启用/禁用按钮管理状态。
+连接 OneBot 不等于启用了所有会话。
 
-只登录 QQ 和连接 OneBot 并不等于启用了所有群聊。不要为了测试一次性启用所有群。群内管理命令需要真实的 QQ `@`，手动输入机器人的名字不等于提及。
+在「会话管理」中检查已登记的会话，并按需启用。群聊的自动回复、命令解析、群名片发送及跨会话共享等设置按各会话需要配置。
 
-上述操作不会让机器人自动加入 QQ 群；账号必须已在对应群中。模型配置是否可用，需要你在指定测试会话中另外验证。
+如果使用群聊管理命令，先在「访问管理」中添加管理员 QQ，并确认对应群聊开启命令解析。
 
-## 10. 检查部署状态
+私聊不解析管理命令，通过后台管理启用状态。「OneBot 配置」中的「新私聊默认启用」决定首次收到消息的新私聊是否自动启用，不会批量改变已有会话。
 
-查看容器是否仍在运行：
+先选择一个会话验证模型回复、工具和记忆功能，再扩大使用范围。
+
+全局配置位于 `/opt/insoulforge/data/config.json`。优先通过后台修改；如需直接编辑文件，先停止服务，编辑完成后再启动。
+
+## 8. 日常操作
+
+以下命令均在 `/opt/insoulforge` 执行。
+
+查看状态：
 
 ```bash
-sudo docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+sudo docker compose ps
 ```
 
-应看到 `napcat` 和 `insoulforge`，状态为 `Up`。只有容器 ID 输出，并不能证明程序一直正常运行。
-
-检查两个容器是否在同一网络：
+持续查看日志，按 Ctrl+C 退出查看：
 
 ```bash
-sudo docker network inspect bot-net --format '{{range .Containers}}{{.Name}}{{println}}{{end}}'
+sudo docker compose logs -f --tail=100
 ```
 
-结果应包含两个容器名。
-
-检查数据目录挂载是否正确：
+只重启 InSoulForge：
 
 ```bash
-sudo docker inspect insoulforge --format '{{range .Mounts}}{{.Type}} {{.Source}} -> {{.Destination}}{{println}}{{end}}'
+sudo docker compose restart insoulforge
 ```
 
-其中必须包含：
-
-```text
-bind /opt/insoulforge/data -> /app/data
-```
-
-镜像还声明了 `/app/logs` 和 `/app/uploads`，因此会看到 Docker 自动创建的匿名卷。它们不是配置和数据库所在的数据目录，重建时不会自动复用；不要误把它们当成必须保留的主数据卷。
-
-检查后台 HTTP 服务：
+停止全部服务，保留容器和数据：
 
 ```bash
-curl --max-time 10 -sS -o /dev/null -w '%{http_code}\n' http://192.168.42.129:7778/index.html
+sudo docker compose stop
 ```
 
-结果应为 `200`。它只表示页面入口可访问，仍需在浏览器中确认页面能显示并登录。
+重新启动已有容器：
 
-## 11. 备份数据
+```bash
+sudo docker compose start
+```
 
-不要在程序仍然写数据库时直接复制单个数据库文件。先停止相应容器，再备份完整的挂载目录。
+修改 Compose 中的端口、环境变量等部署配置后，使用以下命令应用：
+
+```bash
+sudo docker compose config --quiet
+sudo docker compose up -d
+```
+
+`restart` 不会应用 Compose 文件中的配置变更。
+
+## 9. 备份
+
+先停止相应服务，再备份完整数据目录，避免只复制仍在写入的数据库文件。
 
 创建备份目录：
 
 ```bash
 sudo mkdir -p /opt/insoulforge-backups
-```
-
-限制备份目录的访问权限：
-
-```bash
 sudo chmod 700 /opt/insoulforge-backups
 ```
 
-备份 InSoulForge：
+### InSoulForge
 
 ```bash
-sudo docker stop -t 60 insoulforge
+sudo docker compose stop insoulforge
+
+backup_time=$(date +%Y%m%d-%H%M%S)
+sudo tar -czf "/opt/insoulforge-backups/insoulforge-${backup_time}.tar.gz" \
+  -C /opt/insoulforge data compose.yaml
+
+sudo docker compose start insoulforge
 ```
+
+### NapCat
 
 ```bash
-sudo tar -czf /opt/insoulforge-backups/insoulforge-20261011-1546.tar.gz -C /opt/insoulforge data
+sudo docker compose stop napcat
+
+backup_time=$(date +%Y%m%d-%H%M%S)
+sudo tar -czf "/opt/insoulforge-backups/napcat-${backup_time}.tar.gz" \
+  -C /opt napcat
+
+sudo docker compose start napcat
 ```
+
+确认备份命令成功后再继续操作。备份包含配置、令牌、聊天数据或 QQ 登录数据，应妥善保存。
+
+## 10. 更新
+
+### 只更新 InSoulForge
+
+先按上一节备份数据。固定版本标签需要先修改 Compose 中的 `insoulforge.image`，使用 `latest` 则不需要改标签。
 
 ```bash
-sudo tar -tzf /opt/insoulforge-backups/insoulforge-20261011-1546.tar.gz
+sudo docker compose pull insoulforge
 ```
 
-最后一条应列出 `data/config.json`、`data/insoulforge.db` 和已有的其他数据。文件名中的日期和时间仅为本文实测示例，每次备份应换一个新文件名，不要覆盖以前的备份。
-
-如果只是备份，不更新容器，完成后启动原容器：
+拉取成功后执行：
 
 ```bash
-sudo docker start insoulforge
+sudo docker compose up -d --no-deps insoulforge
+sudo docker compose logs --tail=100 insoulforge
 ```
 
-NapCat 的 QQ 登录数据和配置也应独立备份：
+`--no-deps` 表示这次只更新 InSoulForge，不启动或重建 NapCat。
+
+### 更新全部服务
+
+先备份，再执行：
 
 ```bash
-sudo docker stop -t 60 napcat
+sudo docker compose pull
 ```
+
+拉取成功后执行：
 
 ```bash
-sudo tar -czf /opt/insoulforge-backups/napcat-20261011-1554.tar.gz -C /opt napcat
+sudo docker compose up -d
+sudo docker compose ps
+sudo docker compose logs --tail=100
 ```
 
-然后启动 NapCat：
+更新时不需要手动删除旧容器或重新创建网络。Compose 会根据镜像和配置重建需要更新的服务，固定挂载目录中的数据保留。
 
-```bash
-sudo docker start napcat
-```
+镜像拉取失败时，先解决下载问题，不要删除正在运行的容器。
 
-备份中包含 API Key、OneBot Token、QQ 登录数据和聊天数据，应限制访问，并在另一块磁盘或另一台可信机器上保留副本。同一磁盘上的备份不能防止整盘损坏。
+InSoulForge 重启后需要获取新的后台令牌；NapCat 如果提示登录态失效，在 WebUI 重新扫码。
 
-## 12. 更新容器
+### 数据与日志
 
-### 更新 InSoulForge
+Compose 仅为 InSoulForge 绑定 `/app/data`，文件日志不作为长期数据保留。Docker 收集的标准输出日志已配置轮转。
 
-先下载镜像。默认使用官方地址；官方拉取失败时，改用第 3 节的国内镜像站地址。下载失败时不要停止或删除正在运行的旧容器：
+仓库 Dockerfile 仅声明 `/app/data` 数据卷；这项变更需要发布新镜像后生效。旧镜像可能仍自动创建 `/app/logs`、`/app/uploads` 匿名卷，主配置和数据库仍位于绑定的 `data` 目录。
 
-```bash
-sudo docker pull dreamdonghao/insoulforge:latest
-```
+更新前备份数据。若新版修改了数据库结构，回退镜像时还需要考虑恢复与旧版本匹配的数据备份。
 
-按上一节停止并备份 InSoulForge，确认备份可列出内容后，删除旧容器：
+## 11. 常见问题
 
-```bash
-sudo docker rm insoulforge
-```
+| 现象 | 检查方式 |
+| --- | --- |
+| `docker compose` 不存在 | 确认已安装 Docker Compose 插件 |
+| 镜像拉取失败 | 检查服务器到镜像仓库的网络；InSoulForge 可切换到官方 GHCR 地址 |
+| 容器名被占用 | 检查是否存在同名旧容器，核对原数据后再迁移 |
+| 后台无法访问 | 检查服务器 IP、端口映射、容器状态和网络访问规则 |
+| InSoulForge 登录失效 | 从当前启动日志获取新令牌 |
+| OneBot 一直重连 | 检查 QQ 登录状态、WebSocket 是否启用、监听地址、端口和两端 Token |
+| 修改 WebUI 环境变量没有生效 | 已有 NapCat 配置不会被初始化变量覆盖，在 NapCat 后台修改 |
+| 更新后像全新安装 | 检查 `/opt/insoulforge/data:/app/data` 挂载是否变化 |
+| 修改 Compose 后没有生效 | 使用 `docker compose up -d`，不能只执行 `restart` |
+| 私聊 `/enable` 没有启用会话 | 私聊不解析管理命令，通过后台管理 |
+| OneBot 已连接但不回复 | 检查会话启用状态、群聊自动回复设置、模型配置及运行日志 |
 
-重新执行第 5 节的完整启动命令。必须保留原来的宿主机数据路径、网络、端口绑定和其他自定义参数。换目录不会迁移数据，只会让程序读取另一份数据。
+## 参考
 
-查看新的启动日志并重新登录。本文实际验证了停止、备份、删除和使用同一镜像重建：配置和数据库保留，新容器读取已有数据，后台登录令牌重新生成。这不是两个不同版本之间的兼容性测试。
-
-### 更新 NapCat
-
-先尝试官方镜像；拉取失败时，改用 `docker.1ms.run/mlikiowa/napcat-docker:latest`：
-
-```bash
-sudo docker pull mlikiowa/napcat-docker:latest
-```
-
-按上一节停止并备份 NapCat，然后删除旧容器：
-
-```bash
-sudo docker rm napcat
-```
-
-重新执行第 7 节的启动命令，保留三个数据目录及原 WebUI 令牌。已有 QQ 登录数据时，可以在启动命令中添加：
-
-```text
--e ACCOUNT=你的机器人QQ号
-```
-
-本文重建时实际添加了 `ACCOUNT`，但 QQ 返回「登录态已失效，请重新登录」，因此仍需要在 WebUI 再扫码。保留目录能保留数据，不保证 QQ 永远接受旧登录态。
-
-重新登录后确认 OneBot WebSocket 恢复连接。不要通过删除 QQ 数据目录来处理普通的登录态失效。
-
-本文重建后已重新扫码，并确认带 Token 的 OneBot WebSocket 连接成功；InSoulForge 再次停止、备份和启动后，也从持久化配置恢复了连接。
-
-## 13. 常见问题
-
-| 现象                   | 排查方式                                                                                                      |
-|------------------------|---------------------------------------------------------------------------------------------------------------|
-| `apt` 下载连接超时     | 检查实际软件源和网络；本文的软件源替换步骤仅适用于注明的原始地址                                              |
-| 拉取镜像超时           | 先确认网络和镜像站可用，不是重新安装 InSoulForge；不要在拉取失败后删除旧容器                                  |
-| 容器名称已被占用       | 检查是否已有部署；更新时先停止、备份，再删除旧容器，不要随意换一个名字重复运行                                |
-| 浏览器无法访问后台     | 检查服务器 IP、容器状态和 `-p` 的绑定地址；先用第 10 节的 `curl` 检查                                         |
-| 后台登录失效           | 容器重启会更换令牌，从当前启动日志获取新令牌                                                                  |
-| 自动登录链接返回 404   | 使用普通 `index.html` 地址并手动输入令牌；这是本次 Safari 测试实际遇到的情况                                  |
-| OneBot 一直重连        | 检查 QQ 是否在线、`ws` 配置是否启用、Host 是否为 `0.0.0.0`、两端 Token 是否一致，以及两容器是否都在 `bot-net` |
-| 更新后像全新安装       | 检查挂载源路径是否变化；不要立即填写一份新配置，先找回原数据目录                                              |
-| NapCat 快速登录失败    | 到 WebUI 重新扫码，不要直接删除 `/opt/napcat/qq`                                                              |
-| 能连接 OneBot 但不回复 | 另行检查模型 API、会话启用状态、管理员权限和日志；本教程的部署验证不覆盖这些业务行为                          |
-
-## 验证范围
-
-- 测试机器通过国内镜像站完整下载并部署了两个镜像。
-- 通过代理访问两个 Docker Hub 官方镜像清单成功，摘要与镜像站一致；未通过 Docker 服务完成官方仓库的完整拉取。
-- 已验证后台登录、QQ 扫码、带 Token 的 OneBot 连接、备份和同版本容器重建；未测试模型调用和跨版本升级。
-
-## 官方与镜像站资料
-
-- [Docker Engine 文档](https://docs.docker.com/engine/)
+- [InSoulForge 单服务配置](../compose.yaml)
+- [InSoulForge + NapCat 联合部署配置](compose.napcat.yaml)
+- [Compose 配置说明](DOCKER_COMPOSE.md)
+- [Docker Engine 安装说明](https://docs.docker.com/engine/install/ubuntu/)
+- [Docker Compose 更新部署说明](https://docs.docker.com/compose/how-tos/production/)
 - [NapCat Docker 项目](https://github.com/NapNeko/NapCat-Docker)
-- [毫秒镜像地址使用说明](https://1ms.run/guide)
