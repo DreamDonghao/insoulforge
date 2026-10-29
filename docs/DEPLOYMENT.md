@@ -1,8 +1,17 @@
-# InSoulForge + NapCat Docker Compose 部署
+# InSoulForge 部署教程（Docker Compose）
 
-本文使用 [compose.napcat.yaml](compose.napcat.yaml) 联合部署 InSoulForge 和 NapCat，不需要安装编译器、Node.js，也不使用 `.env` 文件。仓库根目录的 [compose.yaml](../compose.yaml) 仅部署 InSoulForge，适用于已经单独部署 NapCat 的情况，OneBot 地址需按实际网络配置。
+本文是项目部署、迁移、备份和更新的统一教程，全部使用 Docker Compose，不需要安装编译器、Node.js，也不使用 `.env` 文件。本地源码构建与调试见[开发文档](DEVELOPMENT.md)。
 
-InSoulForge 负责对话与管理后台，NapCat 负责登录 QQ、收发消息。两个服务通过 Compose 默认网络通信，InSoulForge 连接 `ws://napcat:3001`。
+InSoulForge 负责对话与管理后台，需配合合法合规的 OneBot 实现收发消息。本文以 NapCat 为例，请自行确认所选实现的合法合规性。NapCat 镜像与初始化参数参照 [NapCat-Docker 官方说明](https://github.com/NapNeko/NapCat-Docker)。
+
+## 部署配置选择
+
+| 场景 | 使用的配置 | 后续步骤 |
+| --- | --- | --- |
+| 首次部署，同时启动 InSoulForge 与 NapCat（本文默认） | 第 2 节的「联合部署配置」 | 按全文操作，两个服务通过 Compose 默认网络互通 |
+| 已有 OneBot 服务，只启动 InSoulForge | 第 2 节的「单服务配置」 | 跳过 NapCat 专属步骤，连接现有服务，见第 6 节 |
+
+两份配置选择一份，保存到部署目录并统一命名为 `compose.yaml`。不要同时启动两份 InSoulForge。全文默认联合部署；单服务部署时不要执行针对 `napcat` 服务的命令。
 
 ## 1. 准备环境
 
@@ -10,7 +19,7 @@ InSoulForge 负责对话与管理后台，NapCat 负责登录 QQ、收发消息�
 
 - 一台能够运行 Docker 的 Linux 服务器。
 - Docker Engine 和 Docker Compose 插件。
-- 用于登录 NapCat 的 QQ 账号。
+- 用于登录 NapCat 的 QQ 账号，或一个已可用的 OneBot 服务。
 - 模型服务的 API Key、接口地址和模型名称。
 
 尚未安装 Docker 时，按照 [Docker 官方 Ubuntu 安装说明](https://docs.docker.com/engine/install/ubuntu/)安装 Docker Engine 和 Compose 插件。其他发行版使用对应的官方安装说明。
@@ -28,7 +37,7 @@ sudo docker compose version
 
 ## 2. 准备 Compose 和数据目录
 
-创建目录：
+联合部署时创建以下目录；单服务部署只需创建 `/opt/insoulforge/data`：
 
 ```bash
 sudo mkdir -p \
@@ -38,19 +47,84 @@ sudo mkdir -p \
   /opt/napcat/plugins
 ```
 
-将仓库中的 `docs/compose.napcat.yaml` 上传或复制到以下位置，并命名为 `compose.yaml`：
-
-```text
-/opt/insoulforge/compose.yaml
-```
-
-进入部署目录：
+进入部署目录并创建配置文件：
 
 ```bash
 cd /opt/insoulforge
+sudo nano compose.yaml
 ```
 
-后续 `docker compose` 命令都在这个目录执行。
+从下面两段配置中选择一段，完整复制到文件中，保存后退出。不要将两段配置拼接。后续 `docker compose` 命令都在 `/opt/insoulforge` 目录执行。
+
+### 联合部署配置
+
+首次部署使用此配置，同时启动 InSoulForge 和 NapCat。首次启动前，将 `WEBUI_TOKEN` 的占位内容替换为自己的管理后台令牌。
+
+```yaml
+services:
+  napcat:
+    image: mlikiowa/napcat-docker:latest
+    container_name: napcat
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      MODE: ws
+      WEBUI_TOKEN: "replace-with-your-own-token"
+    ports:
+      - "0.0.0.0:6099:6099"
+    volumes:
+      - /opt/napcat/qq:/app/.config/QQ
+      - /opt/napcat/config:/app/napcat/config
+      - /opt/napcat/plugins:/app/napcat/plugins
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  insoulforge:
+    image: dreamdonghao/insoulforge:latest
+    container_name: insoulforge
+    restart: unless-stopped
+    stop_grace_period: 60s
+    depends_on:
+      - napcat
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "0.0.0.0:7778:7778"
+    volumes:
+      - /opt/insoulforge/data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+```
+
+### 单服务配置
+
+已有可用的 OneBot 服务时使用此配置，只启动 InSoulForge，连接地址按第 6 节设置。
+
+```yaml
+services:
+  insoulforge:
+    image: dreamdonghao/insoulforge:latest
+    container_name: insoulforge
+    restart: unless-stopped
+    stop_grace_period: 60s
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "0.0.0.0:7778:7778"
+    volumes:
+      - /opt/insoulforge/data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+```
 
 ### 数据目录
 
@@ -83,9 +157,9 @@ sudo nano compose.yaml
 - InSoulForge 停止时最多等待 60 秒，供程序保存消息并关闭数据库。
 - Docker 标准输出日志按每个文件 10 MiB、最多 3 个文件轮转。
 
-`napcat.environment.WEBUI_TOKEN` 已填入生成的后台登录令牌，可以按需修改。它是 NapCat 管理后台的令牌，不是 OneBot Access Token。
+联合部署时，请在首次启动前将 `napcat.environment.WEBUI_TOKEN` 改为自己生成的管理后台令牌。它不是 OneBot Access Token。只部署 InSoulForge 时没有此配置项。
 
-使用预发布版时，将 `insoulforge.image` 改为对应的版本标签。也可以使用官方 GHCR 镜像：
+InSoulForge 镜像支持 amd64 / arm64。使用预发布版或固定版本时，将 `insoulforge.image` 改为对应的版本标签。也可以使用官方 GHCR 镜像的同名标签：
 
 ```text
 ghcr.io/dreamdonghao/insoulforge:latest
@@ -104,7 +178,18 @@ ghcr.io/dreamdonghao/insoulforge:latest
 
 如果只通过服务器本机反向代理或 SSH 转发访问，可以将绑定地址改为 `127.0.0.1`。
 
-OneBot 的 `3001` 端口只供 Compose 网络内的服务通信，不需要映射到宿主机，也不需要手动创建网络。
+联合部署时，OneBot 的 `3001` 端口只供 Compose 网络内的服务通信，不需要映射到宿主机，也不需要手动创建网络。单服务配置仅映射 `7778`，现有 OneBot 服务需能从 InSoulForge 容器访问。
+
+### 从已有容器迁移
+
+如果此前使用单容器命令或其他 Compose 项目部署，先完成以下操作，再启动本教程的 Compose：
+
+1. 记录旧容器的数据挂载、镜像版本、端口、环境变量和网络设置，将新 Compose 调整为相同的数据路径及所需参数。
+2. 停止旧服务后备份完整数据目录；已有 Compose 部署可按第 9 节操作。
+3. 移除即将由新 Compose 接管的旧容器，释放 `insoulforge`、`napcat` 容器名及端口；保留宿主机数据和所需数据卷。已有 OneBot 服务若继续独立运行，使用单服务配置，不要移除该服务。
+4. 按下一节启动 Compose，检查后台中的原配置和会话是否保留。联合部署后将 OneBot 地址调整为第 6 节的服务名地址。
+
+不要同时运行两份 InSoulForge 读取同一个数据库。迁移后，日常操作和更新统一通过新部署目录中的 Compose 执行。
 
 ## 3. 启动服务
 
@@ -138,7 +223,7 @@ Compose 中固定了容器名。如果提示名称已被占用，先确认是否
 
 `depends_on` 只保证启动顺序，不保证 QQ 已登录或 OneBot 已就绪。完成后续配置前，InSoulForge 出现连接失败和自动重连日志是正常现象。
 
-## 4. 登录 NapCat
+## 4. 登录 NapCat（仅联合部署）
 
 在浏览器中打开：
 
@@ -177,11 +262,15 @@ http://服务器IP:7778/index.html
 
 也可以使用日志输出的自动登录链接，将其中的主机地址替换成服务器实际 IP，并保留端口、路径和 `#token=...` 部分。
 
-InSoulForge 每次启动会重新生成后台令牌。重启后需要从新的启动日志获取令牌。
+```text
+http://服务器IP:7778/index.html#token=<日志中的令牌>
+```
+
+自动登录令牌通过 URL 片段传入页面，验证后从地址栏清除。令牌仅保存在运行中的进程内，不写入配置文件或数据库。InSoulForge 每次启动会重新生成后台令牌，并使已有登录会话失效，重启后需要从新的启动日志获取令牌。
 
 ## 6. 配置 OneBot 连接
 
-### NapCat 端
+### 联合部署：NapCat 端
 
 进入「网络配置」，确认启用一个正向 WebSocket 服务端：
 
@@ -194,7 +283,7 @@ InSoulForge 每次启动会重新生成后台令牌。重启后需要从新的�
 
 这里的 Token 与 NapCat WebUI 令牌分开设置。
 
-### InSoulForge 端
+### 联合部署：InSoulForge 端
 
 进入「OneBot 配置」：
 
@@ -211,6 +300,18 @@ InSoulForge 每次启动会重新生成后台令牌。重启后需要从新的�
 `napcat` 是 Compose 服务名。不要填写 `127.0.0.1`，因为它在 InSoulForge 容器中指向 InSoulForge 自身。
 
 这里使用正向 WebSocket，不需要配置 HTTP 上报或反向 WebSocket。
+
+WebSocket 连接失败后 InSoulForge 每 3 秒重试，首次离线立即警告，持续失败每 5 分钟汇总一次，恢复后重置统计。NapCat 未启动时也保持此重连频率。
+
+### 单服务部署：连接已有 OneBot
+
+上面的单服务 Compose 不包含名为 `napcat` 的服务，不能直接照填 `ws://napcat:3001`。优先使用正向 WebSocket，并在后台填写现有 OneBot 的可达地址、Access Token 和机器人 QQ 号：
+
+- OneBot 在其他机器上：填写该机器的地址与实际端口，如 `ws://192.168.1.20:3001`。
+- OneBot 在 Docker 宿主机上：填写容器可达的宿主机地址，并确认 OneBot 监听该网络接口；不要填 `127.0.0.1`。
+- OneBot 在另一个 Compose 项目中：为两个项目配置共同的 external 网络，在两个服务中加入该网络，再通过 OneBot 服务在该网络中的名称和端口连接；各项目自己的默认网络不会自动互通。
+
+若已有服务使用 HTTP，在 InSoulForge 中选择 HTTP，填写容器可达的 OneBot HTTP API 地址；同时将 OneBot 的消息上报地址设为可达的 `http://InSoulForge服务器IP:7778/`。端口按实际映射填写。`7778` 同时承载管理后台和 HTTP 消息上报。
 
 ## 7. 配置模型与会话
 
@@ -405,9 +506,6 @@ Compose 仅为 InSoulForge 绑定 `/app/data`，文件日志不作为长期数�
 
 ## 参考
 
-- [InSoulForge 单服务配置](../compose.yaml)
-- [InSoulForge + NapCat 联合部署配置](compose.napcat.yaml)
-- [Compose 配置说明](DOCKER_COMPOSE.md)
 - [Docker Engine 安装说明](https://docs.docker.com/engine/install/ubuntu/)
 - [Docker Compose 更新部署说明](https://docs.docker.com/compose/how-tos/production/)
 - [NapCat Docker 项目](https://github.com/NapNeko/NapCat-Docker)

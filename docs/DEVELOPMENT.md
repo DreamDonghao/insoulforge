@@ -1,6 +1,6 @@
 # insoulforge 开发文档
 
-面向开发者的构建、架构与贡献指南。使用说明见 [README](../README.md)，编码规范见 [CODING_STYLE.md](./CODING_STYLE.md)。
+面向开发者的本地构建、调试、架构与贡献指南。服务器部署统一使用 Docker Compose，见[部署教程](DEPLOYMENT.md)；使用说明见 [README](../README.md)，编码规范见 [CODING_STYLE.md](./CODING_STYLE.md)。
 
 ## 环境要求
 

@@ -10,6 +10,7 @@ QQ 交流群：1097487360
 
 - **Web 管理后台** - 可视化管理会话、模型、提示词与工具配置
 - **自定义角色** - 通过提示词定制机器人的人设与性格，支持为各群聊设置附加提示词
+- **自动回复开关** - 可为各群聊独立开启或关闭普通消息自动回复，关闭后仍可 @ 机器人；支持通过管理后台或管理员命令切换
 - **Jev 决策与智能回复** - 可选用 Jev 专用结构化决策模型快速判断是否回复，减少高频判断对聊天模型的依赖；低置信度或请求失败时由 Router LLM 兜底，再由 Executor 生成回复与调用工具
 - **智能记忆** - 自动提取群友喜好与重要事件，并根据互动更新好感度；可选配 Embedding 模型，按语义相似度召回长期记忆，减少对完整聊天记录的依赖
 - **图片识别** - 可单独配置视觉模型识别图片与 GIF 动图，媒体哈希缓存避免重复请求
@@ -23,103 +24,12 @@ QQ 交流群：1097487360
 
 ## 🚀 快速开始
 
-全新 Ubuntu 系统可参考[完整 Docker 部署教程](docs/DEPLOYMENT.md)，包含 Docker 安装、NapCat 登录、OneBot 配置、备份和更新步骤。
+统一使用 **Docker Compose** 部署，完整步骤见 **[部署教程](docs/DEPLOYMENT.md)**。
 
-### 前置要求
+教程包含环境准备、Compose 配置选择、后台登录、OneBot 与模型配置，以及迁移、备份、更新和常见问题。
+首次部署可按教程联合启动 InSoulForge 与 NapCat；已有 OneBot 服务时可只部署 InSoulForge。
 
-本机器人需配合 **OneBot** 协议实现使用。可使用 **NapCat** 等 OneBot 实现（本项目仅将其作为示例，不对其合法性、合规性作任何保证；如您认为其不合法合规，请自行更换其他合法合规的实现）。
-
-请确保所选 OneBot 实现合法合规，并启用 HTTP 或正向 WebSocket 服务之一。
-
-InSoulForge 的 HTTP 服务端口为 `7778`，用于访问管理后台；使用 OneBot HTTP 模式时，也通过该端口接收消息上报。使用正向 WebSocket 模式时，InSoulForge 主动连接 OneBot 的 WebSocket 服务，无需配置 HTTP 上报地址。
-
-OneBot WebSocket 连接失败后每 3 秒重试，NapCat 未启动时也保持此频率。首次离线立即警告，持续失败每 5 分钟汇总离线时长、失败次数及最近错误，恢复连接后立即记录并重置统计。底层 Connector 的重复连接拒绝警告同样每 5 分钟最多输出一次，其他警告和错误正常保留。
-
-### 方式一：Docker 部署（推荐）
-
-单独部署 InSoulForge 可使用根目录的 [`compose.yaml`](compose.yaml)；与 NapCat 一起部署使用 [`docs/compose.napcat.yaml`](docs/compose.napcat.yaml)，配置和操作步骤见 [Docker Compose 部署说明](docs/DOCKER_COMPOSE.md)。
-
-镜像已发布至 Docker Hub 和 GitHub Container Registry，支持 **amd64 / arm64** 架构：
-
-Docker Hub （推荐，可配置国内镜像加速）
-
-```bash
-docker pull dreamdonghao/insoulforge:latest
-```
-
-GitHub Container Registry （备用）
-
-```bash
-docker pull ghcr.io/dreamdonghao/insoulforge:latest
-```
-
-创建宿主机数据目录并启动容器：
-
-```bash
-sudo mkdir -p /opt/insoulforge/data
-
-docker run -d --name insoulforge \
-  -p 7778:7778 \
-  -v /opt/insoulforge/data:/app/data \
-  dreamdonghao/insoulforge:latest
-```
-
-> 配置文件、数据库等数据保存在宿主机的 `/opt/insoulforge/data` 目录中，不受执行命令所在目录影响。
-> 首次启动会自动创建 `/opt/insoulforge/data/config.json`，对应容器内的 `/app/data/config.json`。
-> 删除容器不会删除宿主机数据目录。更新前建议备份该目录，不要删除其中的数据。
-
-更新镜像时，停止并删除旧容器，再挂载同一个宿主机数据目录创建新容器：
-
-```bash
-docker pull dreamdonghao/insoulforge:latest
-docker stop insoulforge
-docker rm insoulforge
-docker run -d --name insoulforge \
-  -p 7778:7778 \
-  -v /opt/insoulforge/data:/app/data \
-  dreamdonghao/insoulforge:latest
-```
-
-> 如果旧容器使用了自定义网络、端口或其他启动参数，重建时也要保留这些参数。
-> 已部署的用户，更新时应继续使用原来的数据挂载路径；不要直接改为上述示例路径，否则程序可能读取到一份空数据。
-
-> 如果 napcat 也运行在 Docker 中，注意容器内的 `127.0.0.1` 指向容器自身。启动后让两个容器加入同一个 docker
-> 网络，然后用容器名互访（无需重建容器，connect 直接生效）：
->
-> ```bash
-> docker network create bot-net
-> docker network connect bot-net napcat       # napcat 换成你的 napcat 容器名
-> docker network connect bot-net insoulforge
-> ```
->
-> 使用 HTTP 时，在管理后台将 OneBot 的 HTTP 服务地址填为 `http://napcat:3000`（容器名 + napcat HTTP 端口），
-> 并将 napcat 的上报地址填为 `http://insoulforge:7778/`。使用正向 WebSocket 时，将 WebSocket 地址填为
-> `ws://napcat:3001`；此方式不需要配置 HTTP 上报地址。
-
-服务启动日志会输出本机可用地址的自动登录链接，例如：
-
-```text
-管理后台自动登录链接（重启后失效）: http://127.0.0.1:7778/index.html#token=<token>
-```
-
-直接打开链接即可登录；令牌位于 URL 片段中，不会发送到服务端，验证后会自动从地址栏清除。令牌仅保存在运行中的进程内，不会写入配置文件或数据库；每次重启服务都会生成新的令牌并使已有登录会话失效。在
-Docker 默认桥接网络中，容器无法枚举宿主机局域网地址；可将链接中的主机替换为宿主机 LAN IP 后访问。
-
-### 首次配置
-
-在管理后台完成以下配置：
-
-1. **OneBot 配置** - 填写连接参数
-    - Access Token
-    - Bot QQ 号
-    - HTTP 或 WebSocket 传输方式及其服务地址
-    - Bot 名称
-
-2. **LLM 配置** - 配置模型 API
-    - Router、Executor、Executor 思考和 Image 使用兼容 OpenAI 的聊天接口；Embedding 使用向量接口
-    - 可选配置 Jev 决策接口，用于群聊优先路由
-
-3. **启用群聊** - 添加要启用的 QQ 群或用户
+本项目需配合合法合规的 OneBot 协议实现使用。NapCat 仅作为教程示例，请自行确认所选实现的合法合规性。
 
 ## 📖 使用指南
 
