@@ -7,6 +7,7 @@ import {computed, inject, nextTick, onMounted, onUnmounted, reactive, ref, type 
 import EnabledSwitch from '../../components/EnabledSwitch.vue'
 import ChatMessageView from './ChatMessageView.vue'
 import {useAdminWebSocket} from '../../composables/useAdminWebSocket'
+import {useCoalescedRefresh} from '../../composables/useCoalescedRefresh'
 import {isPrivateSession, sessionKey, sessionLabel} from '../../utils/session'
 import type {
   ApiResponse,
@@ -24,7 +25,8 @@ const wsConnected = inject<Ref<boolean>>('wsConnected') as Ref<boolean>
 
 // 会话列表
 const groups: Ref<(Group & { enabled?: boolean })[]> = ref([])
-const loading: Ref<boolean> = ref(false)
+// 保存请求期间收到的绝对计数，防止稍后返回的列表快照覆盖实时更新。
+const messageCounts = new Map<string, number>()
 const showAddGroup = ref(false)
 const newGroupId = ref('')
 const addingGroup = ref(false)
@@ -99,29 +101,59 @@ const groupMemory: Ref<string> = ref('')
 const memoryLoading: Ref<boolean> = ref(false)
 const memorySaving: Ref<boolean> = ref(false)
 
-// 加载群列表
-const loadGroups = async (): Promise<void> => {
-  loading.value = true
+// 压缩聊天摘要只读展示，与可编辑的会话外号分开。
+type ConversationSummary = {start_time: string; end_time: string; summary: string}
+const summarySession = ref<{id: string; name: string} | null>(null)
+const summaries = ref<ConversationSummary[]>([])
+const summariesLoading = ref(false)
+const summariesError = ref('')
+const closeSummaries = (): void => { summarySession.value = null }
+const viewSummaries = async (id: string, name: string): Promise<void> => {
+  summarySession.value = {id, name}
+  const session = summarySession.value
+  summaries.value = []
+  summariesError.value = ''
+  summariesLoading.value = true
   try {
-    const resp = await fetch('/admin/api/groups')
+    const resp = await fetch(`/admin/api/memory/${id}`)
+    const data = await resp.json()
+    if (!resp.ok) throw new Error(data.error || '加载聊天摘要失败')
+    if (!disposed && summarySession.value === session)
+      summaries.value = data.conversationSummaries ?? []
+  } catch (error) {
+    if (!disposed && summarySession.value === session)
+      summariesError.value = error instanceof Error ? error.message : '加载聊天摘要失败'
+  } finally {
+    if (!disposed && summarySession.value === session) summariesLoading.value = false
+  }
+}
+
+// 加载群列表
+const {refresh: loadGroups, loading} = useCoalescedRefresh(async signal => {
+  try {
+    const resp = await fetch('/admin/api/groups', {signal})
+    if (signal.aborted) return
     if (!resp.ok) {
       showToast!('加载失败: ' + resp.status, true)
       groups.value = []
       return
     }
     const data = await resp.json()
+    if (signal.aborted) return
     if (Array.isArray(data)) {
-      groups.value = data
+      groups.value = data.map((group: Group) => ({
+        ...group,
+        messageCount: Math.max(group.messageCount || 0, messageCounts.get(sessionKey(group)) || 0)
+      }))
     } else {
       groups.value = []
     }
   } catch {
+    if (signal.aborted) return
     showToast!('网络错误，请检查后端服务', true)
     groups.value = []
-  } finally {
-    loading.value = false
   }
-}
+})
 
 // 切换启用状态
 const groupSettings = {
@@ -535,7 +567,7 @@ const savePrompt = async (): Promise<void> => {
 
 // 弹窗打开时锁定页面滚动，滚轮只作用于弹窗内容
 const anyModalOpen = computed(() =>
-    !!(memoryGroupId.value || ltmGroupId.value || tasksGroupId.value || promptGroup.value))
+    !!(memoryGroupId.value || summarySession.value || ltmGroupId.value || tasksGroupId.value || promptGroup.value))
 watch(anyModalOpen, (open) => {
   document.body.style.overflow = open ? 'hidden' : ''
 })
@@ -544,12 +576,21 @@ const messageKey = (message: DisplayChatMessage): string | number => message.id 
 
 const {send} = useAdminWebSocket(event => {
   const data = JSON.parse(event.data)
+  if (data.type === 'session_stats_updated') {
+    const {groupId, messageCount} = data.data ?? {}
+    if (typeof groupId !== 'string' || !Number.isSafeInteger(messageCount) || messageCount < 0) return
+    const count = Math.max(messageCounts.get(groupId) || 0, messageCount)
+    messageCounts.set(groupId, count)
+    const group = groups.value.find(item => sessionKey(item) === groupId)
+    if (group) group.messageCount = Math.max(group.messageCount || 0, count)
+  }
   if (data.type === 'new_message' && data.groupId === selectedGroup.value) {
     chatRecords.value.push({...data.data, clientKey: `realtime-${++nextRealtimeMessageKey}`})
     nextTick(scrollToBottom)
   }
 }, {
   onConnected(socket) {
+    void loadGroups()
     if (selectedGroup.value) socket.send(JSON.stringify({action: 'subscribe', groupId: selectedGroup.value}))
   },
   onDisconnected(socket) {
@@ -558,7 +599,9 @@ const {send} = useAdminWebSocket(event => {
   }
 })
 
-onMounted(loadGroups)
+onMounted(() => {
+  if (!wsConnected.value) void loadGroups()
+})
 
 onUnmounted(() => {
   disposed = true
@@ -680,6 +723,9 @@ onUnmounted(() => {
                 <td class="session-actions">
                   <button class="btn btn-secondary btn-sm"
                           @click.stop="viewMemory(sessionKey(group), sessionLabel(group))">会话外号
+                  </button>
+                  <button class="btn btn-secondary btn-sm" style="margin-left: 6px;"
+                          @click.stop="viewSummaries(sessionKey(group), sessionLabel(group))">聊天摘要
                   </button>
                   <button class="btn btn-secondary btn-sm" style="margin-left: 6px;"
                           @click.stop="viewLongTermMemory(sessionKey(group), sessionLabel(group))">长期记忆
@@ -841,7 +887,31 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 短期记忆弹窗 -->
+    <!-- 压缩聊天摘要：按覆盖时间从早到晚展示，不混入原始消息。 -->
+    <div v-if="summarySession" class="modal-overlay" @click.self="closeSummaries">
+      <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="conversation-summary-title">
+        <div class="modal-header">
+          <h2 id="conversation-summary-title">{{ summarySession.name }} - 聊天摘要</h2>
+          <button class="btn btn-secondary btn-sm" @click="closeSummaries">关闭</button>
+        </div>
+        <div class="modal-body">
+          <p v-if="summariesLoading" class="memory-loading">加载中...</p>
+          <div v-else-if="summariesError" class="memory-loading">
+            <p role="alert">{{ summariesError }}</p>
+            <button class="btn btn-secondary btn-sm" @click="viewSummaries(summarySession.id, summarySession.name)">重试</button>
+          </div>
+          <p v-else-if="summaries.length === 0" class="memory-loading">暂无聊天摘要，消息触发总结后会显示在这里。</p>
+          <ol v-else class="summary-list">
+            <li v-for="(item, index) in summaries" :key="index" class="summary-item">
+              <div class="summary-time">{{ item.start_time }} — {{ item.end_time }}</div>
+              <p class="summary-text">{{ item.summary }}</p>
+            </li>
+          </ol>
+        </div>
+      </div>
+    </div>
+
+    <!-- 会话外号弹窗 -->
     <div v-if="memoryGroupId" class="modal-overlay" @click.self="closeMemory">
       <div class="modal-content">
         <div class="modal-header">
@@ -911,6 +981,30 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.summary-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.summary-item + .summary-item {
+  border-top: 1px solid var(--border);
+  margin-top: 20px;
+  padding-top: 20px;
+}
+
+.summary-time {
+  color: var(--text-light);
+  font-size: 13px;
+}
+
+.summary-text {
+  margin: 10px 0 0;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .chat-list-header {
   flex-wrap: wrap;
   gap: 24px 40px;

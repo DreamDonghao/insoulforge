@@ -2,6 +2,7 @@
 /// @brief 统一运行日志入口 - 实现
 
 #include <algorithm>
+#include <cstdio>
 #include <filesystem>
 
 #include <fmt/chrono.h>
@@ -10,10 +11,12 @@
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
+#include <trantor/utils/Logger.h>
 
 #include <admin/logging/LogWebSocketManager.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/logging/LogBuffer.hpp>
+#include <infrastructure/logging/ConnectionRefusedLogFilter.hpp>
 #include <infrastructure/logging/Logger.hpp>
 
 namespace insoulforge {
@@ -22,6 +25,11 @@ namespace insoulforge {
         constexpr std::string_view kLogFile = "logs/bot.log";
         constexpr size_t kLogFileMaxSize = 10 * 1024 * 1024;
         constexpr size_t kLogFileMaxCount = 5;
+
+        auto connectionRefusedLogFilter() -> ConnectionRefusedLogFilter & {
+            static ConnectionRefusedLogFilter filter;
+            return filter;
+        }
 
         [[nodiscard]] auto toSpdlogLevel(const Logger::Level level) -> spdlog::level::level_enum {
             switch (level) {
@@ -98,6 +106,12 @@ namespace insoulforge {
             spdlog::set_default_logger(logger);
 
             LogBuffer::instance().loadFromDirectory(kLogDir.data());
+            resetConnectionRefusedWarnings();
+            // Trantor 默认直接写 stdout，不经过我们的 Logger；只限频同类连接拒绝警告。
+            trantor::Logger::setOutputFunction([](const char *message, const uint64_t length) {
+                if (connectionRefusedLogFilter().shouldWrite(std::string_view(message, static_cast<size_t>(length))))
+                    std::fwrite(message, 1, static_cast<size_t>(length), stdout);
+            }, [] { std::fflush(stdout); });
             info(0, "Logger", fmt::format("日志系统初始化完成 | file={}", sinks.size() > 1));
             return {};
         } catch (const spdlog::spdlog_ex &error) {
@@ -174,5 +188,12 @@ namespace insoulforge {
         LogWebSocketManager::instance().pushLog(stored);
     }
 
-    void Logger::shutdown() { spdlog::shutdown(); }
+    void Logger::resetConnectionRefusedWarnings() { connectionRefusedLogFilter().reset(); }
+
+    void Logger::shutdown() {
+        trantor::Logger::setOutputFunction([](const char *message, const uint64_t length) {
+            std::fwrite(message, 1, static_cast<size_t>(length), stdout);
+        }, [] { std::fflush(stdout); });
+        spdlog::shutdown();
+    }
 } // namespace insoulforge

@@ -769,6 +769,7 @@ auto AdminController::getSessionMemory(HttpRequestPtr req, std::function<void(co
     json resp;
     resp["groupId"] = gid;
     resp["memory"] = memory;
+    resp["conversationSummaries"] = MemoryStore::conversationSummaries(memory);
     callback(jsonResponse(resp));
     co_return;
 }

@@ -38,6 +38,9 @@ namespace insoulforge {
         void recordMessageProcessingStats(const u64 sessionId) {
             try {
                 SessionConfigManager::incrementMessageCount(sessionId);
+                WebSocketManager::instance().broadcastEvent("session_stats_updated",
+                  {{"groupId", std::to_string(sessionId)},
+                    {"messageCount", SessionConfigManager::getConfig(sessionId).allMesCount}});
             } catch (const std::exception &error) {
                 Logger::error(sessionId, "Workflow", fmt::format("会话统计更新失败: {}", error.what()));
             } catch (...) {

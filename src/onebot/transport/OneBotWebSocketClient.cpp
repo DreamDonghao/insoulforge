@@ -53,6 +53,7 @@ namespace insoulforge {
             std::scoped_lock lock(m_mutex);
             ++m_generation;
             m_running = false;
+            m_reconnectLog.reset();
             client = std::move(m_client);
             m_connection.reset();
             callbacks = takePendingCallbacksLocked();
@@ -61,6 +62,7 @@ namespace insoulforge {
             client->stop();
         }
         failRequests(callbacks);
+        Logger::resetConnectionRefusedWarnings();
     }
 
     void OneBotWebSocketClient::reconfigure() {
@@ -106,38 +108,58 @@ namespace insoulforge {
         request->setPath(path);
 
         client->setMessageHandler(
-          [this](std::string &&message, const drogon::WebSocketClientPtr &,
-            const drogon::WebSocketMessageType &type) -> void { handleMessage(message, type); });
+          [this, generation](std::string &&message, const drogon::WebSocketClientPtr &source,
+            const drogon::WebSocketMessageType &type) -> void {
+              {
+                  std::scoped_lock lock(m_mutex);
+                  if (!m_running || generation != m_generation || m_client != source) return;
+              }
+              handleMessage(message, type);
+          });
         client->setConnectionClosedHandler(
           [this](const drogon::WebSocketClientPtr &closedClient) -> void { handleConnectionClosed(closedClient); });
 
+        bool current = false;
         {
             std::scoped_lock lock(m_mutex);
-            if (!m_running || generation != m_generation) {
-                client->stop();
-                return;
+            if (m_running && generation == m_generation) {
+                m_client = client;
+                current = true;
             }
-            m_client = client;
+        }
+        if (!current) {
+            client->stop();
+            return;
         }
 
         client->connectToServer(request,
           [this, generation](const drogon::ReqResult result, const drogon::HttpResponsePtr &,
             const drogon::WebSocketClientPtr &connectedClient) -> void {
               if (result != drogon::ReqResult::Ok) {
-                  Logger::warn(
-                    0, "OneBot", fmt::format("OneBot WebSocket 连接失败: result={}", static_cast<i32>(result)));
-                  handleConnectionClosed(connectedClient);
+                  handleConnectionClosed(connectedClient, result);
                   return;
               }
+              std::optional<ReconnectLogState::Report> recovered;
+              bool accepted = false;
               {
                   std::scoped_lock lock(m_mutex);
-                  if (!m_running || generation != m_generation || m_client != connectedClient) {
-                      connectedClient->stop();
-                      return;
+                  if (m_running && generation == m_generation && m_client == connectedClient) {
+                      m_connection = connectedClient->getConnection();
+                      recovered = m_reconnectLog.recover();
+                      accepted = true;
                   }
-                  m_connection = connectedClient->getConnection();
               }
-              Logger::info(0, "OneBot", fmt::format("OneBot WebSocket 已连接: {}", Config::instance().qqWebSocketHost));
+              if (!accepted) {
+                  connectedClient->stop();
+                  return;
+              }
+              Logger::resetConnectionRefusedWarnings();
+              if (recovered) {
+                  Logger::info(0, "OneBot", fmt::format("OneBot WebSocket 已恢复连接，离线 {} 秒，失败尝试 {} 次",
+                    recovered->offlineSeconds, recovered->failedAttempts));
+              } else {
+                  Logger::info(0, "OneBot", fmt::format("OneBot WebSocket 已连接: {}", Config::instance().qqWebSocketHost));
+              }
           });
     }
 
@@ -206,13 +228,15 @@ namespace insoulforge {
         }
     }
 
-    void OneBotWebSocketClient::handleConnectionClosed(const drogon::WebSocketClientPtr &client) {
+    void OneBotWebSocketClient::handleConnectionClosed(const drogon::WebSocketClientPtr &client,
+      const std::optional<drogon::ReqResult> failure) {
         u64 generation = 0;
         bool shouldReconnect = false;
+        std::optional<ReconnectLogState::Report> report;
         std::vector<ResponseCallback> callbacks;
         {
             std::scoped_lock lock(m_mutex);
-            if (m_client != client) {
+            if (!m_running || m_client != client) {
                 return;
             }
             m_client.reset();
@@ -221,11 +245,23 @@ namespace insoulforge {
             if (m_running && Config::instance().oneBotTransport == "websocket") {
                 generation = m_generation;
                 shouldReconnect = true;
+                report = m_reconnectLog.record(failure ? std::optional{static_cast<i32>(*failure)} : std::nullopt);
             }
         }
+        // 统一由本类安排 3 秒后的重连，防止 Drogon 客户端的自动重试形成第二条重连链。
+        client->stop();
         failRequests(callbacks);
         if (shouldReconnect) {
-            Logger::warn(0, "OneBot", fmt::format("OneBot WebSocket 已断开，将在 {} 秒后重连", kReconnectDelaySeconds));
+            if (report) {
+                const auto error = report->lastError ? fmt::format("result={}", *report->lastError) : "连接已断开";
+                if (report->first) {
+                    Logger::warn(0, "OneBot", fmt::format("OneBot WebSocket 连接不可用: {}，每 {} 秒重试，持续失败每 5 分钟汇总",
+                      error, kReconnectDelaySeconds));
+                } else {
+                    Logger::warn(0, "OneBot", fmt::format("OneBot WebSocket 仍未连接，已离线 {} 秒，失败尝试 {} 次，最近错误: {}，继续每 {} 秒重试",
+                      report->offlineSeconds, report->failedAttempts, error, kReconnectDelaySeconds));
+                }
+            }
             scheduleReconnect(generation);
         }
     }

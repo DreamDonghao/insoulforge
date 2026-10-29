@@ -1715,6 +1715,17 @@ namespace {
         const auto displayed = getStr(json::parse(response->body()), "memory");
         check(displayed.find('\n') != std::string::npos && json::parse(displayed) == *normalized,
           "existing editor receives formatted JSON", kTestName);
+        check(json::parse(response->body())["conversationSummaries"] == json::array(),
+          "sessions without summaries return an empty list", kTestName);
+        auto withSummaries = *normalized;
+        withSummaries["conversation_summaries"] = json::array({
+          {{"start_time", "2026-10-29 10:00:00"}, {"end_time", "2026-10-29 11:00:00"}, {"summary", "讨论部署"}}});
+        save(dumpJson(withSummaries));
+        drogon::sync_wait(controller.getSessionMemory(drogon::HttpRequest::newHttpRequest(),
+          [&](const auto &value) { response = value; }, "100"));
+        check(json::parse(response->body())["conversationSummaries"] == withSummaries["conversation_summaries"],
+          "summary viewer receives stored summaries with their time ranges", kTestName);
+        save(dumpJson(input));
         for (const auto &bad: {std::string{"{"}, std::string{R"({"aliases":"invalid"})"}}) {
             save(bad);
             check(response->getStatusCode() == drogon::k400BadRequest &&

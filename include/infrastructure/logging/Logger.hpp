@@ -46,6 +46,9 @@ namespace insoulforge {
         /// @brief 获取当前运行时日志等级
         static auto level() -> std::string;
 
+        /// @brief 连接恢复或主动停止时重置底层连接拒绝警告窗口，使下次离线首次警告可见。
+        static void resetConnectionRefusedWarnings();
+
         /// @brief 刷新并关闭日志系统，应在程序退出前调用
         static void shutdown();
 

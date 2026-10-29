@@ -326,6 +326,78 @@ test('usage HTTP errors keep their existing message and allow the queued refresh
 
 const groupComponent = () => loadModule(resolve(root, 'src/features/conversation/GroupManager.vue')).default
 
+test('conversation summaries handle empty data, failures and stale responses after switching sessions', async () => {
+  const requests = []
+  globalThis.fetch = path => path === '/admin/api/groups' ? Promise.resolve(response([]))
+    : new Promise(resolve => requests.push({path, resolve}))
+  const view = mount(groupComponent())
+  await flush()
+  const first = view.state.viewSummaries('123', 'Group')
+  await flush()
+  assert.equal(document.body.style.overflow, 'hidden')
+  view.state.closeSummaries()
+  const second = view.state.viewSummaries('9223372036854775931', 'Private')
+  assert.equal(requests[1].path, '/admin/api/memory/9223372036854775931')
+  requests[0].resolve(response({conversationSummaries: [{summary: 'old'}]}))
+  await first
+  assert.deepEqual(view.state.summaries, [])
+  assert.equal(view.state.summariesLoading, true)
+  const entries = [{start_time: '2026-10-29 10:00', end_time: '2026-10-29 11:00', summary: '讨论部署'}]
+  requests[1].resolve(response({conversationSummaries: entries}))
+  await second
+  assert.deepEqual(view.state.summaries, entries)
+  const failed = view.state.viewSummaries('123', 'Group')
+  requests[2].resolve({ok: false, json: async () => ({error: '读取失败'})})
+  await failed
+  assert.equal(view.state.summariesError, '读取失败')
+  const retry = view.state.viewSummaries('123', 'Group')
+  requests[3].resolve(response({conversationSummaries: []}))
+  await retry
+  assert.deepEqual(view.state.summaries, [])
+  assert.equal(view.state.summariesError, '')
+  view.state.closeSummaries()
+  await flush()
+  assert.equal(document.body.style.overflow, '')
+})
+
+test('group counts use absolute statistics, preserve chat subscriptions and catch up on reconnect', async () => {
+  let count = 5
+  globalThis.fetch = async path => response(path === '/admin/api/groups'
+    ? [{groupIdStr: '123', groupId: 123, groupName: 'Test', messageCount: count}] : [])
+  const view = mount(groupComponent())
+  await flush()
+  assert.equal(view.state.groups[0].messageCount, 5)
+  socket.emit({type: 'session_stats_updated', data: {groupId: '123', messageCount: 6}})
+  socket.emit({type: 'session_stats_updated', data: {groupId: '123', messageCount: 6}})
+  socket.emit({type: 'session_stats_updated', data: {groupId: '123', messageCount: 4}})
+  assert.equal(view.state.groups[0].messageCount, 6)
+  await view.state.selectGroup('123', 'Test')
+  socket.emit({type: 'session_stats_updated', data: {groupId: '123', messageCount: 7}})
+  assert.equal(view.state.groups[0].messageCount, 7)
+  assert.equal(view.state.chatRecords.length, 0)
+  socket.emit({type: 'new_message', groupId: '123', data: {role: 'assistant', content: 'reply'}})
+  assert.equal(view.state.groups[0].messageCount, 7)
+  assert.equal(view.state.chatRecords.length, 1)
+  connected.value = false
+  count = 10
+  socket = new Socket()
+  connected.value = true
+  await flush()
+  assert.equal(view.state.groups[0].messageCount, 10)
+  assert.deepEqual(socket.sent, [{action: 'subscribe', groupId: '123'}])
+})
+
+test('group list snapshot cannot overwrite statistics received while loading', async () => {
+  let complete
+  globalThis.fetch = () => new Promise(resolve => { complete = resolve })
+  const view = mount(groupComponent())
+  socket.emit({type: 'session_stats_updated', data: {groupId: '123', messageCount: 12}})
+  complete(response([{groupIdStr: '123', groupId: 123, messageCount: 9}]))
+  await flush()
+  assert.equal(view.state.groups[0].messageCount, 12)
+  assert.equal(view.state.loading, false)
+})
+
 test('repeated group page visits do not retain old message handlers', async () => {
   for (let i = 0; i < 3; i++) {
     const view = mount(groupComponent())

@@ -111,3 +111,20 @@ else()
 endif()
 add_test(NAME model_requests COMMAND insoulforge_model_request_tests)
 set_tests_properties(model_requests PROPERTIES TIMEOUT 60)
+
+add_executable(insoulforge_onebot_reconnect_tests EXCLUDE_FROM_ALL
+        OneBotReconnectTests.cpp
+        $<TARGET_OBJECTS:${PROJECT_NAME}_backend>)
+target_compile_features(insoulforge_onebot_reconnect_tests PRIVATE cxx_std_23)
+target_include_directories(insoulforge_onebot_reconnect_tests PRIVATE
+        ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(insoulforge_onebot_reconnect_tests PRIVATE
+        Drogon::Drogon spdlog::spdlog_header_only fmt::fmt-header-only
+        SQLite3_lib OpenSSL::Crypto PNG::PNG ${GIFLIB_LIBRARY} ${LUA_LIBRARIES})
+if(nlohmann_json_FOUND)
+    target_link_libraries(insoulforge_onebot_reconnect_tests PRIVATE nlohmann_json::nlohmann_json)
+else()
+    target_include_directories(insoulforge_onebot_reconnect_tests PRIVATE ${NLOHMANN_JSON_INCLUDE_DIR})
+endif()
+add_test(NAME onebot_reconnect COMMAND insoulforge_onebot_reconnect_tests)
+set_tests_properties(onebot_reconnect PROPERTIES TIMEOUT 30)

@@ -15,6 +15,7 @@
 
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <onebot/transport/ReconnectLogState.hpp>
 
 namespace insoulforge {
     /// @brief 管理到 OneBot 实现的唯一 WebSocket 连接
@@ -27,6 +28,7 @@ namespace insoulforge {
         /// @brief 按当前配置建立 WebSocket 连接
         /// @details 仅当 oneBotTransport 为 websocket 时生效；重复启动不建立额外连接。
         /// 连接在事件循环中异步建立，失败或断开后等待 3 秒再重连；地址无效时不重试。
+        /// 首次离线立即警告，持续失败每 5 分钟汇总，恢复时记录离线时长与失败次数。
         void start();
 
         /// @brief 停止连接、取消重连并使等待中的动作请求失败
@@ -90,8 +92,9 @@ namespace insoulforge {
         /// 其他非文本消息及无效 JSON 不进入业务处理。
         void handleMessage(const std::string &message, drogon::WebSocketMessageType type);
 
-        /// @brief 清理当前连接并使待处理请求失败，需要时安排重连；忽略旧客户端的关闭通知。
-        void handleConnectionClosed(const drogon::WebSocketClientPtr &client);
+        /// @brief 幂等清理当前连接、停止客户端自身重试并安排下一次连接；重复失败日志每五分钟汇总。
+        void handleConnectionClosed(const drogon::WebSocketClientPtr &client,
+          std::optional<drogon::ReqResult> failure = std::nullopt);
 
         /// @brief 移除 echo 对应的请求，在释放锁后调用其完成回调。
         /// @details 已完成或未知的 echo 会被忽略，避免迟到响应或超时回调重复完成请求。
@@ -115,6 +118,7 @@ namespace insoulforge {
         bool m_running = false; ///< 是否允许建立连接和重连，不等同于当前已连接。
         u64 m_generation = 0; ///< 启动或停止时递增，使旧连接操作和延迟重连失效。
         u64 m_nextEcho = 0; ///< 动作请求编号，重连时不重置，避免迟到响应匹配新请求。
+        ReconnectLogState m_reconnectLog; ///< 仅影响日志；重连间隔始终为 3 秒。
         drogon::WebSocketClientPtr m_client;
         drogon::WebSocketConnectionPtr m_connection;
         std::unordered_map<std::string, ResponseCallback> m_pendingRequests; ///< 按 echo 等待响应的请求回调。

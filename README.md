@@ -33,6 +33,8 @@ QQ 交流群：1097487360
 
 InSoulForge 的 HTTP 服务端口为 `7778`，用于访问管理后台；使用 OneBot HTTP 模式时，也通过该端口接收消息上报。使用正向 WebSocket 模式时，InSoulForge 主动连接 OneBot 的 WebSocket 服务，无需配置 HTTP 上报地址。
 
+OneBot WebSocket 连接失败后每 3 秒重试，NapCat 未启动时也保持此频率。首次离线立即警告，持续失败每 5 分钟汇总离线时长、失败次数及最近错误，恢复连接后立即记录并重置统计。底层 Connector 的重复连接拒绝警告同样每 5 分钟最多输出一次，其他警告和错误正常保留。
+
 ### 方式一：Docker 部署（推荐）
 
 单独部署 InSoulForge 可使用根目录的 [`compose.yaml`](compose.yaml)；与 NapCat 一起部署使用 [`docs/compose.napcat.yaml`](docs/compose.napcat.yaml)，配置和操作步骤见 [Docker Compose 部署说明](docs/DOCKER_COMPOSE.md)。
