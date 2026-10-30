@@ -2,7 +2,9 @@
 /// @brief 离线日志限频、底层警告过滤与真实 WebSocket 重连回归测试。
 #include <atomic>
 #include <cerrno>
+#include <filesystem>
 #include <iostream>
+#include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <vector>
@@ -12,11 +14,13 @@
 #include <drogon/WebSocketController.h>
 #include <trantor/net/EventLoopThread.h>
 
+#include <admin/http/AdminController.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/ConnectionRefusedLogFilter.hpp>
 #include <infrastructure/logging/LogBuffer.hpp>
 #include <onebot/transport/OneBotWebSocketClient.hpp>
 #include <onebot/transport/ReconnectLogState.hpp>
+#include <workflow/session/QQNameDirectory.hpp>
 
 namespace {
     using namespace insoulforge;
@@ -29,6 +33,7 @@ namespace {
 
     std::atomic<bool> ready{false};
     std::atomic<int> attempts{0};
+    std::atomic<bool> delayedRequestReceived{false};
     std::mutex fixtureMutex;
     std::vector<Clock::time_point> attemptTimes;
 
@@ -92,7 +97,62 @@ namespace {
         return entries;
     }
 
-    auto testConnection(int &exitCode) -> drogon::Task<> {
+    auto saveQQConfig(const json &qq) -> drogon::Task<> {
+        const AdminController controller;
+        const auto request = drogon::HttpRequest::newHttpRequest();
+        request->setBody(qq.dump());
+        drogon::HttpResponsePtr response;
+        co_await controller.saveQQConfig(request, [&](const auto &value) { response = value; });
+        require(response && response->getStatusCode() == drogon::k200OK, "QQ configuration save failed");
+    }
+
+    auto testConfigReload(OneBotWebSocketClient &client, const std::string &hostname) -> drogon::Task<> {
+        auto qq = Config::instance().getQQConfig();
+        qq["qqWebSocketHost"] = "ws://" + hostname + ":" +
+          std::to_string(drogon::app().getListeners().front().toPort()) + "/reconnect-fixture";
+        int previousAttempts = attempts.load();
+        co_await saveQQConfig(qq);
+        co_await waitFor([&] { return attempts.load() > previousAttempts && client.isConnected(); },
+          "changing WebSocket address must reconnect");
+        // DNS 定时器可能暂时持有解析器，立即重连会掩盖错误线程析构的问题。
+        co_await drogon::sleepCoro(trantor::EventLoop::getEventLoopOfCurrentThread(), 4.0);
+
+        struct PendingAction { bool finished = false; std::optional<json> response; };
+        const auto action = std::make_shared<PendingAction>();
+        drogon::async_run([&client, action]() -> drogon::Task<> {
+            action->response = co_await client.callApi("delayed_reply", json::object(), 2.0);
+            action->finished = true;
+        });
+        co_await waitFor([] { return delayedRequestReceived.load(); }, "pending action was not received");
+        previousAttempts = attempts.load();
+        qq["botName"] = "改名后的机器人";
+        qq["defaultPrivateEnabled"] = true;
+        co_await saveQQConfig(qq);
+        co_await saveQQConfig(qq);
+        require(client.isConnected() && attempts.load() == previousAttempts &&
+                  QQNameDirectory::getName(123) == "改名后的机器人(我)",
+          "identity-only and unchanged saves must preserve the connection");
+        co_await waitFor([&] { return action->finished; }, "pending action did not finish after renaming");
+        require(action->response.has_value(), "renaming must not interrupt an in-flight action");
+
+        qq["accessToken"] = "fixture-token";
+        co_await saveQQConfig(qq);
+        co_await waitFor([&] { return attempts.load() > previousAttempts && client.isConnected(); },
+          "changing token must safely destroy the old domain client and reconnect");
+        require((co_await client.callApi("get_version", json::object(), 1.0)).has_value(),
+          "API calls must work after reloading domain connection settings");
+
+        qq["oneBotTransport"] = "http";
+        co_await saveQQConfig(qq);
+        require(!client.isConnected(), "switching to HTTP must stop WebSocket");
+        qq["oneBotTransport"] = "websocket";
+        previousAttempts = attempts.load();
+        co_await saveQQConfig(qq);
+        co_await waitFor([&] { return attempts.load() > previousAttempts && client.isConnected(); },
+          "switching back to WebSocket must reconnect");
+    }
+
+    auto testConnection(int &exitCode, const std::string &hostname) -> drogon::Task<> {
         auto &client = OneBotWebSocketClient::instance();
         try {
             client.start();
@@ -127,6 +187,7 @@ namespace {
             co_await waitFor([&client] { return client.isConnected(); }, "timed out waiting for reconfigured connection");
             require(LogBuffer::instance().query({.keyword = "已恢复连接", .limit = 100}).entries.size() == 1,
               "reconfigure clears the previous offline state");
+            co_await testConfigReload(client, hostname);
             exitCode = 0;
             std::cout << "OneBot reconnect tests passed\n";
         } catch (const std::exception &error) {
@@ -173,12 +234,24 @@ public:
             connection->forceClose();
             return;
         }
+        if (request["action"] == "delayed_reply") {
+            delayedRequestReceived = true;
+            trantor::EventLoop::getEventLoopOfCurrentThread()->runAfter(0.2, [connection, request] {
+                connection->send(insoulforge::json{{"status", "ok"}, {"echo", request["echo"]}}.dump());
+            });
+            return;
+        }
         connection->send(insoulforge::json{{"status", "ok"}, {"retcode", 0}, {"echo", request["echo"]}}.dump());
     }
 };
 
-auto main() -> int {
+auto main(const int argc, char **argv) -> int {
+    // 默认仅使用本机域名；可传入指向 127.0.0.1 的 DNS 域名，验证实际 c-ares 套接字析构。
+    const std::string hostname = argc > 1 ? argv[1] : "localhost";
+    const auto configPath = std::filesystem::temp_directory_path() /
+      ("insoulforge-onebot-reconnect-" + std::to_string(Clock::now().time_since_epoch().count()) + ".json");
     try {
+        require(Config::instance().initialize(configPath.string()).has_value(), "fixture configuration failed");
         testLogState();
         testTrantorFilter();
     } catch (const std::exception &error) {
@@ -193,14 +266,21 @@ auto main() -> int {
     int exitCode = 1;
     drogon::app().registerBeginningAdvice([&] {
         auto &config = insoulforge::Config::instance();
-        config.oneBotTransport = "websocket";
-        config.qqWebSocketHost = "ws://127.0.0.1:" +
+        auto qq = config.getQQConfig();
+        qq["selfQQNumber"] = 123;
+        qq["oneBotTransport"] = "websocket";
+        qq["qqWebSocketHost"] = "ws://127.0.0.1:" +
           std::to_string(drogon::app().getListeners().front().toPort()) + "/reconnect-fixture";
+        require(config.saveQQConfig(qq).has_value(), "fixture connection configuration failed");
         worker.getLoop()->queueInLoop([&] {
-            drogon::async_run([&]() -> drogon::Task<> { co_await testConnection(exitCode); worker.getLoop()->quit(); });
+            drogon::async_run([&]() -> drogon::Task<> {
+                co_await testConnection(exitCode, hostname);
+                worker.getLoop()->quit();
+            });
         });
     });
     drogon::app().run();
     worker.wait();
+    std::filesystem::remove(configPath);
     return exitCode;
 }

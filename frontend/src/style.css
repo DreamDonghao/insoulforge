@@ -664,6 +664,11 @@ a {
     border-top: 1px solid var(--border);
 }
 
+/* 页头已提供分隔线，紧随其后的首个内容区无需重复绘制。 */
+.page-header + .card {
+    border-top: 0;
+}
+
 .card-header {
     display: flex;
     align-items: center;

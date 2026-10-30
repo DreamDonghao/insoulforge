@@ -1075,6 +1075,7 @@ auto AdminController::saveQQConfig(HttpRequestPtr req, std::function<void(const 
         co_return;
     }
 
+    const auto previousConfig = Config::instance().getQQConfig();
     if (auto result = Config::instance().saveQQConfig(*body); !result) {
         Logger::error(0, "Config", result.error().message);
         callback(AdminResponse::configErrorResponse(result.error()));
@@ -1084,7 +1085,14 @@ auto AdminController::saveQQConfig(HttpRequestPtr req, std::function<void(const 
 
     // 更新机器人自己的自定义昵称
     QQNameDirectory::setCustomName(config.selfQQNumber, config.botName + "(我)");
-    OneBotWebSocketClient::instance().reconfigure();
+    const auto savedConfig = config.getQQConfig();
+    // 名称和私聊默认状态不影响连接，不应中断正在等待的 OneBot 动作。
+    if (previousConfig["oneBotTransport"] != savedConfig["oneBotTransport"] ||
+        (savedConfig["oneBotTransport"] == "websocket" &&
+          (previousConfig["qqWebSocketHost"] != savedConfig["qqWebSocketHost"] ||
+            previousConfig["accessToken"] != savedConfig["accessToken"]))) {
+        OneBotWebSocketClient::instance().reconfigure();
+    }
 
     callback(jsonResponse(AdminResponse::okJson("QQ Bot 配置已保存")));
     co_return;

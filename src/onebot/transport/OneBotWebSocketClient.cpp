@@ -59,7 +59,10 @@ namespace insoulforge {
             callbacks = takePendingCallbacksLocked();
         }
         if (client) {
-            client->stop();
+            // 域名连接持有 DNS 解析器，停止和最终析构都必须回到所属事件循环。
+            // 转移所有权，避免循环执行完回调后，最后一份引用仍在调用线程释放。
+            auto *loop = client->getLoop();
+            loop->runInLoop([client = std::move(client)] { client->stop(); });
         }
         failRequests(callbacks);
         Logger::resetConnectionRefusedWarnings();

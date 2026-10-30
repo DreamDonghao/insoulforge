@@ -248,7 +248,6 @@ onMounted(() => void Promise.all([loadAdmins(), loadBlacklist()]))
   grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-template-rows: auto auto;
   gap: 0;
-  border-top: 1px solid var(--border);
 }
 
 .access-grid section {
