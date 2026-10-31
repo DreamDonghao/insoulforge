@@ -39,7 +39,7 @@ const showAddSession = ref(false)
 const newSessionType = ref<'group' | 'private'>('group')
 const newSessionId = ref('')
 const addingSession = ref(false)
-const newSessionIdLabel = computed(() => newSessionType.value === 'private' ? 'QQ 号' : '群号')
+const newSessionIdLabel = computed(() => newSessionType.value === 'private' ? '用户 ID' : '群号')
 const sessionForm = useFormValidation(() => ({
   'new-session-id': identifierError(newSessionId.value, newSessionIdLabel.value, false, SESSION_ID_MAX)
 }))
@@ -760,7 +760,7 @@ onUnmounted(() => {
           <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
             <label for="session-search" class="form-label">搜索会话</label>
             <input id="session-search" v-model="searchKeyword" aria-label="搜索会话" class="form-input"
-                   placeholder="搜索名称、群号或 QQ 号" type="search" style="width: 240px; max-width: 100%;">
+                   placeholder="搜索名称、群号或用户 ID" type="search" style="width: 240px; max-width: 100%;">
             <div class="filter-tabs">
               <button :class="{ active: typeFilter === 'all' }" class="filter-tab"
                       @click="typeFilter = 'all'">全部
@@ -788,7 +788,7 @@ onUnmounted(() => {
           <template v-else-if="!groupsError && filteredGroups.length === 0">
             <div class="empty-state">
               <div class="empty-icon" aria-hidden="true"><NavIcon name="admins"/></div>
-              <p>{{ groups.length ? '没有符合筛选条件的会话' : '暂无会话，可点击“添加会话”输入群号或 QQ 号' }}</p>
+              <p>{{ groups.length ? '没有符合筛选条件的会话' : '暂无会话，可点击“添加会话”输入群号或用户 ID' }}</p>
             </div>
           </template>
           <template v-else-if="filteredGroups.length > 0">
@@ -797,7 +797,7 @@ onUnmounted(() => {
               <tr>
                 <th style="width: 132px;">启用会话</th>
                 <th>会话</th>
-                <th style="width: 120px;">群号/QQ号</th>
+                <th style="width: 120px;">群号/用户 ID</th>
                 <th style="width: 70px;">消息</th>
                 <th style="width: 90px;">发送群名片</th>
                 <th style="width: 90px;">自动回复</th>
@@ -820,7 +820,7 @@ onUnmounted(() => {
                   <strong v-else-if="group.groupName">{{ group.groupName }}</strong>
                   <span v-else style="color: var(--text-light)">群 {{ group.groupId }}</span>
                 </td>
-                <td><code :title="isPrivateSession(group) ? `QQ ${group.userId}` : ''">{{
+                <td><code :title="isPrivateSession(group) ? `用户 ID ${group.userId}` : ''">{{
                     isPrivateSession(group) ? group.userId : group.groupId
                   }}</code></td>
                 <td>{{ group.messageCount || 0 }}</td>
@@ -952,7 +952,7 @@ onUnmounted(() => {
           <label for="new-session-id" class="form-label">{{ newSessionIdLabel }}</label>
           <input v-bind="sessionForm.fieldAttrs('new-session-id', 'new-session-id-hint')" v-model="newSessionId" :disabled="addingSession" class="form-input"
                  inputmode="numeric" autocomplete="off"
-                 :placeholder="newSessionType === 'private' ? '输入对方的 QQ 号' : '输入机器人已加入的群号'" required>
+                 :placeholder="newSessionType === 'private' ? '输入对方的用户 ID' : '输入机器人已加入的群号'" required>
           <FieldError field="new-session-id" :message="sessionForm.errors.value['new-session-id']"/>
           <p id="new-session-id-hint" class="form-hint">{{ newSessionType === 'private'
               ? '无需已有聊天记录，添加后立即启用该私聊；对方后续发来的消息将按私聊处理。'
@@ -1078,7 +1078,7 @@ onUnmounted(() => {
               v-if="!memoryError && !memoryLoading" id="session-aliases"
               v-model="groupMemory"
               class="memory-editor"
-              placeholder='{"aliases": [{"qq": "123456", "names": ["外号"]}]}'
+              placeholder='{"aliases": [{"user_id": "123456", "names": ["外号"]}]}'
           ></textarea>
         </div>
         <div class="modal-footer">

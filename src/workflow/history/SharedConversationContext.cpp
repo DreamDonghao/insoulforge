@@ -32,7 +32,7 @@ namespace insoulforge::SharedConversationContext {
                 }
             } else if (value.is_object()) {
                 for (auto &[key, child]: value.items()) {
-                    if (key != "type" && key != "id" && key != "qq" && key != "recognition_status" && key != "kind") {
+                    if (key != "type" && key != "id" && key != "user_id" && key != "recognition_status" && key != "kind") {
                         limitText(child, remaining, truncated);
                     }
                 }
@@ -86,7 +86,7 @@ namespace insoulforge::SharedConversationContext {
             json session;
             if (SessionId::isPrivate(sessionId)) {
                 session = {
-                  {"type", "private"}, {"qq", std::to_string(SessionId::privateUserId(sessionId))}, {"name", name}};
+                  {"type", "private"}, {"user_id", std::to_string(SessionId::privateUserId(sessionId))}, {"name", name}};
             } else {
                 session = {{"type", "group"}, {"group_id", sessionId}, {"group_name", name}};
             }

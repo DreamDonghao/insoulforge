@@ -196,7 +196,7 @@ namespace {
         personFixture.cancelRequest = control.get();
         const auto cancelled = co_await LlmClient::requestMaintenance(
           json::array({{{"role", "system"}, {"content", "fixture"}},
-            {{"role", "user"}, {"content", R"({"qq":"88004","profile":[],"relationship":[],"recent_interactions":[],"pending_entries":[]})"}}}), 0, "memory", std::nullopt, control);
+            {{"role", "user"}, {"content", R"({"user_id":"88004","profile":[],"relationship":[],"recent_interactions":[],"pending_entries":[]})"}}}), 0, "memory", std::nullopt, control);
         const auto requestCount = personFixture.requests.load();
         const auto alreadyCancelled = co_await LlmClient::requestMaintenance(
           json::array(), 0, "memory", std::nullopt, control);
@@ -215,9 +215,9 @@ namespace {
         std::atomic<i32> peak{0};
         std::mutex mutex;
         std::unordered_map<u64, i32> requests;
-        auto count(const u64 qq) -> i32 {
+        auto count(const u64 user_id) -> i32 {
             std::lock_guard lock(mutex);
-            return requests[qq];
+            return requests[user_id];
         }
     } nameFixture;
 
@@ -254,7 +254,7 @@ namespace {
     };
 
     auto sessionMemory(const bool legacy = false) -> json {
-        json result = {{"aliases", {{{"qq", "11"}, {"names", {"阿梨"}}}}}};
+        json result = {{"aliases", {{{"user_id", "11"}, {"names", {"阿梨"}}}}}};
         if (legacy)
             result["legacy_entries"] = {"原记忆"};
         return result;
@@ -276,8 +276,8 @@ namespace {
         auto &database = Database::instance();
         config.oneBotTransport = "http";
         config.qqHttpHost = endpoint;
-        for (u64 qq = 91000; qq < 91012; ++qq)
-            AffinityStore::adjustAffinity(qq, 1);
+        for (u64 user_id = 91000; user_id < 91012; ++user_id)
+            AffinityStore::adjustAffinity(user_id, 1);
         const AdminController controller;
         drogon::HttpResponsePtr response;
         const auto callback = [&](const drogon::HttpResponsePtr &value) { response = value; };
@@ -291,7 +291,7 @@ namespace {
         co_await controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, "22");
         co_await waitFor([&initialPeople] {
             return std::ranges::all_of(initialPeople, [](const json &person) {
-                return !PersonNameResolver::instance().lookup(std::stoull(person["qq"].get<std::string>())).pending;
+                return !PersonNameResolver::instance().lookup(std::stoull(person["user_id"].get<std::string>())).pending;
             });
         });
         require(nameFixture.peak == 4 && nameFixture.count(22) == 1 &&
@@ -308,8 +308,8 @@ namespace {
         require(json::parse(response->body())["name"] == "自定义昵称" && nameRequests.load() == queried,
           "custom nickname was overwritten or queried unnecessarily");
         MemoryMaintenanceStore::apply(database, 100, {.affinity = {{991, 1}, {992, 2}}});
-        for (const auto *qq: {"991", "992"}) {
-            co_await controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, qq);
+        for (const auto *user_id: {"991", "992"}) {
+            co_await controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, user_id);
             const auto person = json::parse(response->body());
             require(person["name"] == "未知" && person.contains("affinity") && person.contains("pending_entries"),
               "failed or empty nickname hid person data");
@@ -364,7 +364,7 @@ namespace {
             MessageList list(100, database, config);
             for (i32 index = 0; index < 3; ++index) {
                 std::ignore = list.append({{"message_id", std::to_string(index)},
-                  {"sender", {{"qq", index == 0 ? "11" : "22"}, {"name", "Alice"}}},
+                  {"sender", {{"user_id", index == 0 ? "11" : "22"}, {"name", "Alice"}}},
                   {"segments", {{{"type", "text"}, {"text", "我喜欢编程"}}}}});
             }
             const auto original = list.fullSnapshot();
@@ -384,7 +384,7 @@ namespace {
                 require(batch.has_value() && !list.createSummaryBatch(), "maintenance reservation failed");
                 auto context = batch->contextMessages;
                 context.push_back(
-                  {{"sender", {{"qq", "33"}}}, {"segments", {{{"type", "text"}, {"text", "context only"}}}}});
+                  {{"sender", {{"user_id", "33"}}}, {"segments", {{{"type", "text"}, {"text", "context only"}}}}});
                 const auto before = requests.load();
                 const bool completed =
                   co_await MemoryMaintenanceCoordinator::process(database, 100, batch->messages, std::move(context));
@@ -422,7 +422,7 @@ namespace {
             const auto profiles = PersonMemoryStore::getForSenders(original);
             require(list.fullSnapshot().size() == 1 &&
                       storedSessionMemory(100) == sessionMemory(true) &&
-                      AffinityStore::getAffinityMap()[22] == 3 && profiles.size() == 1 && profiles[0]["qq"] == "11" &&
+                      AffinityStore::getAffinityMap()[22] == 3 && profiles.size() == 1 && profiles[0]["user_id"] == "11" &&
                       profiles[0]["pending_entries"].size() == 1 && profiles[0]["profile"].empty() &&
                       profiles[0]["recent_interactions"].empty(),
               "success failed to atomically save independent people and preserve old reconciliation");
@@ -494,7 +494,7 @@ namespace {
             auto many = json::array({nullptr, "invalid"});
             for (i32 index = 0; index < 305; ++index) {
                 many.push_back({{"message_id", std::to_string(index)},
-                  {"sender", {{"qq", "11"}, {"name", "Alice"}, {"card", "群名片"}}},
+                  {"sender", {{"user_id", "11"}, {"name", "Alice"}, {"card", "群名片"}}},
                   {"segments", {{{"type", "text"}, {"text", "引号\"与换行\n"}}}},
                   {"assets", {{"images", {{{"source", {{"url", "https://example.com/private.png"}}}}}}}},
                   {"memories", {"stale-recalled-memory"}},
@@ -538,7 +538,7 @@ namespace {
             auto chat = json::array({"legacy text"});
             for (i32 index = 0; index < 13; ++index) {
                 const json record = {{"time", "2026-10-20 12:00:00"},
-                  {"sender", {{"qq", index == 0 ? "99" : (index % 2 ? "11" : "22")}}},
+                  {"sender", {{"user_id", index == 0 ? "99" : (index % 2 ? "11" : "22")}}},
                   {"memories", {{{"content", "legacy recalled fact"}, {"similarity", 0.8}}}},
                   {"segments", {{{"type", "text"}, {"text", std::string(501, 'x')}},
                                  {{"type", "image"}, {"image_index", 0}}}},
@@ -710,17 +710,17 @@ auto main() -> int {
           ++personFixture.requests;
           const auto body = json::parse(request->body());
           const auto profile = json::parse(body["messages"][1]["content"].get<std::string>());
-          const auto qq = profile["qq"].get<std::string>();
+          const auto user_id = profile["user_id"].get<std::string>();
           if (!profile.contains("relationship") || profile.contains("stable_memory"))
               throw std::runtime_error("consolidation receives obsolete person schema");
-          if (qq == "88001" && personFixture.injectNew.exchange(false)) {
+          if (user_id == "88001" && personFixture.injectNew.exchange(false)) {
               MemoryMaintenanceStore::apply(Database::instance(), 200, {.personEntries = {{88001, "请求期间新增"}}});
           }
           if (personFixture.editRelationship.exchange(false)) {
-              const auto original = PersonMemoryStore::getPerson(parseUInt64(qq));
+              const auto original = PersonMemoryStore::getPerson(parseUInt64(user_id));
               auto edited = original;
               edited["relationship"] = {"人工修改关系"};
-              PersonMemoryStore::updatePerson(parseUInt64(qq), original, edited);
+              PersonMemoryStore::updatePerson(parseUInt64(user_id), original, edited);
           }
           if (auto *service = personFixture.stopService.exchange(nullptr)) {
               service->stop();
@@ -732,12 +732,12 @@ auto main() -> int {
           }
           auto response = drogon::HttpResponse::newHttpResponse();
           response->setContentTypeCode(drogon::CT_APPLICATION_JSON);
-          if (qq == "88003" && personFixture.fail) {
+          if (user_id == "88003" && personFixture.fail) {
               response->setStatusCode(drogon::k400BadRequest);
               response->setBody("{}");
           } else {
               const auto content = personFixture.omitRelationship.exchange(false) ? R"({"profile":[],"recent_interactions":[]})" :
-                qq == "88002" && personFixture.fail ? R"({"profile":"invalid"})" :
+                user_id == "88002" && personFixture.fail ? R"({"profile":"invalid"})" :
                 R"({"profile":["整理后的人物档案"],"relationship":["相处随意"],"recent_interactions":["待跟进的近期事项"]})";
               response->setBody(json{{"choices", {{{"message", {{"content", content}}}}}},
                 {"usage", {{"prompt_tokens", 10}, {"completion_tokens", 5}, {"total_tokens", 15}}}}.dump());
@@ -751,18 +751,18 @@ auto main() -> int {
       [&nameRequests](const drogon::HttpRequestPtr &request,
         std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
           ++nameRequests;
-          const auto qq = json::parse(request->body())["user_id"].get<u64>();
+          const auto user_id = json::parse(request->body())["user_id"].get<u64>();
           {
               std::lock_guard lock(nameFixture.mutex);
-              ++nameFixture.requests[qq];
+              ++nameFixture.requests[user_id];
           }
           const auto active = ++nameFixture.active;
           nameFixture.peak.store(std::max(nameFixture.peak.load(), active));
           auto response = drogon::HttpResponse::newHttpResponse();
           response->setContentTypeCode(drogon::CT_APPLICATION_JSON);
-          response->setBody(qq == 991 ? json{{"status", "failed"}, {"retcode", 1}}.dump() :
-            json{{"status", "ok"}, {"data", {{"nickname", qq == 992 ? "" : "Fixture " + std::to_string(qq)}}}}.dump());
-          drogon::app().getLoop()->runAfter(qq == 995 ? 5.5 : 0.1,
+          response->setBody(user_id == 991 ? json{{"status", "failed"}, {"retcode", 1}}.dump() :
+            json{{"status", "ok"}, {"data", {{"nickname", user_id == 992 ? "" : "Fixture " + std::to_string(user_id)}}}}.dump());
+          drogon::app().getLoop()->runAfter(user_id == 995 ? 5.5 : 0.1,
             [callback = std::move(callback), response] {
                 --nameFixture.active;
                 callback(response);
@@ -808,7 +808,7 @@ auto main() -> int {
                 example.is_object() && example.size() == (config.affinityEnabled ? 3 : 2) &&
                 atOrNull(example, "conversation_summary").is_string() &&
                 atOrNull(example, "memories").is_array() &&
-                example["memories"][0]["qq"].is_string() &&
+                example["memories"][0]["user_id"].is_string() &&
                 example["memories"][0]["entries"].is_array() &&
                 prompt.contains("只返回一个合法的 JSON 对象") &&
                 prompt.contains(config.affinityEnabled ? "以上三个字段都必须提供" : "以上两个字段都必须提供") &&
@@ -859,7 +859,7 @@ auto main() -> int {
               if (current == Mode::Success)
                   aliases = sessionMemory()["aliases"];
               if (current == Mode::AliasCorrection)
-                  aliases = {{{"qq", "11"}, {"names", {"摄影佬"}}}};
+                  aliases = {{{"user_id", "11"}, {"names", {"摄影佬"}}}};
               auto entries = json::array();
               if (prompt.find("向量服务未配置") == std::string::npos) {
                   for (const auto *key: {"pending_entries", "legacy_entries", "recalled_memories"})
@@ -892,19 +892,19 @@ auto main() -> int {
               if (current != Mode::Empty && current != Mode::Projection && current != Mode::AffinityOnly &&
                   current != Mode::EventOnly && current != Mode::EventRetired &&
                   current != Mode::LegacyForget) {
-                  extracted["memories"].push_back({{"qq", "11"}, {"entries", {"喜欢编程"}}});
+                  extracted["memories"].push_back({{"user_id", "11"}, {"entries", {"喜欢编程"}}});
               }
               if (current != Mode::Empty && current != Mode::Projection && current != Mode::MemoryOnly &&
                   current != Mode::DuplicateMemory && current != Mode::EventOnly && current != Mode::AliasCorrection &&
                   current != Mode::EventRetired && current != Mode::LegacyForget && current != Mode::LegacyInjection) {
-                  extracted["affinity_changes"].push_back({{"qq", "22"}, {"delta", 2}});
+                  extracted["affinity_changes"].push_back({{"user_id", "22"}, {"delta", 2}});
               }
               if (current == Mode::AliasCorrection)
                   extracted["memories"][0]["entries"] = {"以后只叫我摄影佬"};
               if (current == Mode::InvalidQq)
-                  extracted["memories"][0]["qq"] = "self";
+                  extracted["memories"][0]["user_id"] = "self";
               if (current == Mode::ContextOnlyQq)
-                  extracted["memories"][0]["qq"] = "33";
+                  extracted["memories"][0]["user_id"] = "33";
               if (current == Mode::MalformedDelta)
                   extracted["affinity_changes"][0]["delta"] = "2";
               if (current == Mode::DuplicateAffinity)
@@ -939,14 +939,14 @@ auto main() -> int {
           const auto state = json::parse(messages.back()["content"].get<std::string>());
           bool valid = keys == expected && messages.back()["role"] == "system" && state.size() == 1 &&
                        state["execution_state"]["current_round"] == (isPrivate ? executorRequests : 1) &&
-                       context["person_memories"].size() == 1 && context["person_memories"][0]["qq"] == "11" &&
+                       context["person_memories"].size() == 1 && context["person_memories"][0]["user_id"] == "11" &&
                        context["person_memories"][0]["pending_entries"].size() == 3 &&
                        context["shared_conversations"].empty();
           valid = valid && (isPrivate ? context["conversation_summaries"].size() == 1 &&
               context["conversation_summaries"][0]["summary"] == "讨论了部署方式，等待后续验证。"
               : !context["conversation_summaries"].empty());
           valid = valid && context["session_memory"] == sessionMemory() &&
-              (isPrivate ? context["current_session"]["qq"] == 22 :
+              (isPrivate ? context["current_session"]["user_id"] == 22 :
                 context["current_session"]["group_id"] == 100) &&
               context["earlier_messages"].size() == 2 && context["earlier_messages"][0] == "legacy text" &&
               context["earlier_messages"][1]["segments"][0]["text"] == std::string(500, 'x') + "…" &&
@@ -962,7 +962,7 @@ auto main() -> int {
                       record["segments"][1]["description"] == "fixture image";
                   if (!Config::instance().affinityEnabled)
                       valid = valid && !record["sender"].contains("affinity");
-                  else if (record["sender"]["qq"] == "22")
+                  else if (record["sender"]["user_id"] == "22")
                       valid = valid && record["sender"]["affinity"] == 5;
               }
           }

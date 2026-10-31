@@ -357,7 +357,7 @@ onUnmounted(() => {
               <span class="kv-value">{{ qqConfig?.botName || '—' }}</span>
             </div>
             <div class="kv-row">
-              <span class="kv-label">QQ 号</span>
+              <span class="kv-label">用户 ID</span>
               <code class="kv-code">{{ qqConfig?.selfQQNumber && qqConfig.selfQQNumber !== '0' ? qqConfig.selfQQNumber : '—' }}</code>
             </div>
             <div class="kv-row">

@@ -15,7 +15,7 @@ namespace insoulforge::TaskStore {
     struct ScheduledTask {
         i64 id = 0;
         std::string sessionType; ///< "group" | "private"
-        u64 targetId = 0; ///< 群号或私聊用户QQ号
+        u64 targetId = 0; ///< 群号或私聊用户用户 ID
         i64 remindTime = 0; ///< 提醒时间（unix 秒，用户请求的原始时间）
         std::string content; ///< 触发时的提醒内容
         bool isDaily = false; ///< 每日重复任务：触发后自动推进到次日同一时刻，取消前一直有效

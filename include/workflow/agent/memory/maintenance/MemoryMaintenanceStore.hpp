@@ -20,7 +20,7 @@ namespace insoulforge {
     };
 
     struct PersonMemoryEntry {
-        u64 qq;
+        u64 userId;
         std::string content;
     };
 

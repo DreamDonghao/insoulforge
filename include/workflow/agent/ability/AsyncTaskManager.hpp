@@ -37,7 +37,7 @@ namespace insoulforge {
         static auto instance() -> AsyncTaskManager &;
 
         /// @brief 以会话为单位原子检查并启动任务；其他会话不受影响
-        /// @param sessionId 统一会话 ID，群号或带私聊标志的用户 QQ 号
+        /// @param sessionId 统一会话 ID，群号或带私聊标志的用户 用户 ID
         /// @param description 写入上下文的任务描述，不会单独发送给用户
         /// @param handler 后台处理器；返回可由 MessageService 发送的文本或 CQ 码
         /// @return Started 返回新编号；Busy 返回现有编号；Stopping 拒绝启动且编号为空

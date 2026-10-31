@@ -160,7 +160,7 @@ namespace insoulforge {
           R"(CREATE TABLE IF NOT EXISTS memory_config (id INTEGER PRIMARY KEY CHECK (id = 1), window_trigger_count INTEGER DEFAULT 100, window_keep_count INTEGER DEFAULT 50, memory_extract_max_tokens INTEGER DEFAULT 4000, router_window_trigger_count INTEGER DEFAULT 20, router_window_keep_count INTEGER DEFAULT 10, short_term_memory_max INTEGER DEFAULT 15, memory_migrate_count INTEGER DEFAULT 5))",
           R"(CREATE TABLE IF NOT EXISTS qq_config (id INTEGER PRIMARY KEY CHECK (id = 1), access_token TEXT, self_qq_number INTEGER, qq_http_host TEXT, bot_name TEXT DEFAULT '小喵'))"};
 
-        /// @brief v3 新增表：group_affinity（每个会话独立维护 QQ 号 → 好感度映射，[-100, 100]）
+        /// @brief v3 新增表：group_affinity（每个会话独立维护 用户 ID → 好感度映射，[-100, 100]）
         constexpr std::array v3Tables = {
           R"(CREATE TABLE IF NOT EXISTS group_affinity (
         group_id INTEGER NOT NULL,
@@ -277,6 +277,75 @@ namespace insoulforge {
             execSQL(db, "UPDATE person_memories SET profile='[]', relationship='[]', recent_interactions='[]'");
         }
 
+        // 只转换身份对象，不改动正文、图片元数据或自定义工具参数。
+        void renameLegacyUserId(json &identity) {
+            if (!identity.is_object() || !identity.contains("qq"))
+                return;
+            if (!identity.contains("user_id"))
+                identity["user_id"] = identity["qq"];
+            identity.erase("qq");
+        }
+
+        void migrateV24ToV25(sqlite3 *db) {
+            for (const auto *table: {"admins", "blacklisted_users", "person_affinity", "person_memories",
+                   "person_memory_entries"}) {
+                if (columnExists(db, table, "qq_number"))
+                    execSQL(db, fmt::format("ALTER TABLE {} RENAME COLUMN qq_number TO user_id", table));
+            }
+            execSQL(db, "DROP INDEX IF EXISTS idx_person_memory_entries_qq");
+            execSQL(db, "CREATE INDEX IF NOT EXISTS idx_person_memory_entries_user_id "
+                        "ON person_memory_entries(user_id, id)");
+
+            // 保留记录 ID 和所有非身份内容，包括 CQ 码。
+            if (tableExists(db, "chat_records")) {
+                const Statement records(db, "SELECT id, content FROM chat_records");
+                const Statement updateRecord(db, "UPDATE chat_records SET content = ? WHERE id = ?");
+                while (records.step()) {
+                    json record;
+                    if (!tryParseJson(records.getText(1), record) || !record.is_object())
+                        continue;
+                    auto original = record;
+                    if (record.contains("sender"))
+                        renameLegacyUserId(record["sender"]);
+                    if (record.contains("segments") && record["segments"].is_array()) {
+                        for (auto &segment: record["segments"]) {
+                            if (!segment.is_object())
+                                continue;
+                            renameLegacyUserId(segment);
+                            for (const auto *key: {"target", "operator"})
+                                if (segment.contains(key))
+                                    renameLegacyUserId(segment[key]);
+                        }
+                    }
+                    if (record == original)
+                        continue;
+                    updateRecord.bind(1, dumpJson(record));
+                    updateRecord.bind(2, records.getInt64(0));
+                    updateRecord.execOrThrow();
+                    updateRecord.reset();
+                }
+            }
+            if (tableExists(db, "short_term_memory")) {
+                const Statement memories(db, "SELECT group_id, memory_content FROM short_term_memory");
+                const Statement updateMemory(db, "UPDATE short_term_memory SET memory_content = ? WHERE group_id = ?");
+                while (memories.step()) {
+                    json memory;
+                    if (!tryParseJson(memories.getText(1), memory) || !memory.is_object() ||
+                        !memory.contains("aliases") || !memory["aliases"].is_array())
+                        continue;
+                    auto original = memory;
+                    for (auto &alias: memory["aliases"])
+                        renameLegacyUserId(alias);
+                    if (memory == original)
+                        continue;
+                    updateMemory.bind(1, dumpJson(memory));
+                    updateMemory.bind(2, memories.getInt64(0));
+                    updateMemory.execOrThrow();
+                    updateMemory.reset();
+                }
+            }
+        }
+
         void createFreshSchema(sqlite3 *db) {
             execAll(db, v2Tables);
             execAll(db, v21Tables);
@@ -287,6 +356,7 @@ namespace insoulforge {
             execAll(db, v11Tables);
             execAll(db, indexes);
             execSQL(db, "DROP TABLE IF EXISTS custom_tools");
+            migrateV24ToV25(db);
             setUserVersion(db, SchemaMigrator::kLatestVersion);
         }
 
@@ -615,6 +685,7 @@ namespace insoulforge {
               &migrateV21ToV22, // 人物记忆每日整理执行状态
               &migrateV22ToV23, // 人物档案与机器人关系，完整保留旧记忆
               &migrateV23ToV24, // 旧分类全部移入待整理条目，按新规则重新归类
+              &migrateV24ToV25, // 用户身份统一为 user_id，保留已有记录与记忆
             };
 
             for (i32 v = version; v < kLatestVersion; ++v) {

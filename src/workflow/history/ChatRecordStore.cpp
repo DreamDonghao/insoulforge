@@ -21,7 +21,7 @@ namespace insoulforge::ChatRecordStore {
             const Statement insert(handle, "INSERT INTO chat_records (group_id, role, content) VALUES (?, ?, ?)");
             for (const auto &message: messages) {
                 insert.bind(1, sessionId);
-                insert.bind(2, getStr(atOrNull(message, "sender"), "qq") == "self" ? "assistant" : "user");
+                insert.bind(2, getStr(atOrNull(message, "sender"), "user_id") == "self" ? "assistant" : "user");
                 insert.bind(3, dumpJson(message));
                 insert.execOrThrow();
                 insert.reset();

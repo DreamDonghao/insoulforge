@@ -1,5 +1,5 @@
 /// @file BlacklistStore.hpp
-/// @brief 全局 QQ 黑名单持久化接口
+/// @brief 全局用户黑名单持久化接口
 
 #pragma once
 
@@ -17,6 +17,6 @@ namespace insoulforge::BlacklistStore {
     /// @brief 将 QQ 移出全局黑名单；不存在时保持不变。
     void remove(u64 qqNumber);
 
-    /// @brief 获取全部黑名单 QQ 号。
+    /// @brief 获取全部黑名单 用户 ID。
     [[nodiscard]] auto getAll() -> std::vector<u64>;
 } // namespace insoulforge::BlacklistStore

@@ -34,7 +34,7 @@ namespace insoulforge {
           const u64 sessionId, const std::string &taskId, const std::string_view phase, const std::string &text) {
             json message;
             message["time"] = currentDateTime();
-            message["sender"] = {{"name", "系统异步任务"}, {"qq", std::to_string(SessionId::kSystemAccountId)}};
+            message["sender"] = {{"name", "系统异步任务"}, {"user_id", std::to_string(SessionId::kSystemAccountId)}};
             message["message_id"] = fmt::format("async-task:{}:{}", taskId, phase);
             message["segments"] = {{{"type", "text"}, {"text", text}}};
             OneBotEventWorkflow::instance().appendSystemStatusMessage(sessionId, std::move(message));

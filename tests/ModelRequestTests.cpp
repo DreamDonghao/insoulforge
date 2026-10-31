@@ -177,7 +177,7 @@ namespace {
             json records = json::array();
             for (int index = 0; index < size; ++index) {
                 records.push_back({{"message_id", std::to_string(index)},
-                  {"sender", {{"qq", index == 12 ? "self" : "11"}}},
+                  {"sender", {{"user_id", index == 12 ? "self" : "11"}}},
                   {"segments", json::array({{{"type", "text"}, {"text", "test"}}})}});
             }
             const auto decision = co_await MessageRouter::route(100, std::to_string(size - 1), records);
@@ -206,7 +206,7 @@ namespace {
         config.routerWindowKeepCount = 10;
         json records = json::array();
         for (int index = 0; index < 25; ++index)
-            records.push_back({{"message_id", std::to_string(index)}, {"sender", {{"qq", "11"}}},
+            records.push_back({{"message_id", std::to_string(index)}, {"sender", {{"user_id", "11"}}},
               {"segments", json::array({{{"type", "text"}, {"text", "test"}}})}});
         (void) co_await MessageRouter::route(100, "24", records);
         {

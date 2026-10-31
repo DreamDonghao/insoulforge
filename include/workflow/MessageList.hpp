@@ -26,7 +26,7 @@ namespace insoulforge {
     class MessageList {
     public:
         /// @brief 从数据库恢复一个统一会话的最近完整消息
-        /// @param sessionId 群号或带私聊标志位的用户 QQ 号
+        /// @param sessionId 群号或带私聊标志位的用户 用户 ID
         /// @param database 已成功初始化的数据库，供恢复和持久化使用。
         /// @param config 消息窗口与总结参数；两个依赖必须覆盖消息列表的生命周期。
         MessageList(u64 sessionId, const Database &database, const Config &config);

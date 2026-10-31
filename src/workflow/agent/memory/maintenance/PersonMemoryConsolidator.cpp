@@ -27,7 +27,7 @@ namespace insoulforge {
 
         constexpr auto kPrompt = R"(# 人物记忆整理器
 
-审核并整理同一个 QQ 的全部人物记忆。
+审核并整理同一个用户 ID 的全部人物记忆。
 输入包含已有的人物档案、关系、近期互动，以及待整理条目，不包含原始聊天。
 已有记忆是历史整理结果，也可能分类错误、重复、冗长或包含过度推断；待整理条目是新增材料。
 先审核全部旧内容，再合并新材料、纠正分类、去重和精简，最后返回整理后的完整记忆。
@@ -168,7 +168,7 @@ namespace insoulforge {
     }
 
     auto PersonMemoryConsolidator::consolidatePerson(
-      const u64 qq, std::shared_ptr<LlmClient::MaintenanceRequestControl> control, const bool includeExisting)
+      const u64 userId, std::shared_ptr<LlmClient::MaintenanceRequestControl> control, const bool includeExisting)
       -> drogon::Task<Result> {
         try {
             std::optional<PersonMemoryStore::PendingSnapshot> snapshot;
@@ -176,7 +176,7 @@ namespace insoulforge {
                 std::lock_guard lock(m_mutex);
                 if (control->isCancelled())
                     co_return Result::Stopped;
-                snapshot = PersonMemoryStore::pendingSnapshot(qq, includeExisting);
+                snapshot = PersonMemoryStore::pendingSnapshot(userId, includeExisting);
             }
             if (!snapshot)
                 co_return Result::NoMemory;
@@ -193,7 +193,7 @@ namespace insoulforge {
               config.personInteractionMaxChars.load(std::memory_order_relaxed));
             const std::string prompt = std::string(kPrompt) + limits + "\n\n## 机器人身份\n\n机器人名称：" +
                                        json(Config::instance().botName).dump() +
-                                       "。\n消息中的 `qq=self` 表示机器人自己。\n"
+                                       "。\n消息中的 `user_id=self` 表示机器人自己。\n"
                                        "聊天中有人提到这个名称时，结合上下文判断是不是在说机器人，不要只看名字。";
             const json messages = json::array(
               {{{"role", "system"}, {"content", prompt}}, {{"role", "user"}, {"content", snapshot->profile.dump()}}});
@@ -206,16 +206,16 @@ namespace insoulforge {
             json profile;
             if (!result || !tryExtractJsonObject(*result, payload) || !tryParseJson(payload, profile) ||
                 !validProfile(profile)) {
-                Logger::warn(0, "Memory", fmt::format("人物整理失败，保留原记忆与待整理条目: qq={}", qq));
+                Logger::warn(0, "Memory", fmt::format("人物整理失败，保留原记忆与待整理条目: userId={}", userId));
                 co_return Result::Failed;
             }
             PersonMemoryStore::applyConsolidation(*snapshot, profile);
             co_return Result::Updated;
         } catch (const PersonMemoryStore::ConsolidationConflict &error) {
-            Logger::warn(0, "Memory", fmt::format("人物整理未提交: qq={}, {}", qq, error.what()));
+            Logger::warn(0, "Memory", fmt::format("人物整理未提交: userId={}, {}", userId, error.what()));
             co_return Result::Conflict;
         } catch (const std::exception &error) {
-            Logger::error(0, "Memory", fmt::format("人物整理异常: qq={}, {}", qq, error.what()));
+            Logger::error(0, "Memory", fmt::format("人物整理异常: userId={}, {}", userId, error.what()));
             co_return Result::Failed;
         }
     }
@@ -225,7 +225,7 @@ namespace insoulforge {
         service.m_busy = false;
     }
 
-    auto PersonMemoryConsolidator::runPerson(const u64 qq) -> drogon::Task<Result> {
+    auto PersonMemoryConsolidator::runPerson(const u64 userId) -> drogon::Task<Result> {
         std::shared_ptr<LlmClient::MaintenanceRequestControl> control;
         {
             std::lock_guard lock(m_mutex);
@@ -237,7 +237,7 @@ namespace insoulforge {
             control = m_requestControl;
         }
         BusyGuard guard{*this};
-        co_return co_await consolidatePerson(qq, control, true);
+        co_return co_await consolidatePerson(userId, control, true);
     }
 
     auto PersonMemoryConsolidator::runDue(const std::time_t now) -> drogon::Task<> {
@@ -268,10 +268,10 @@ namespace insoulforge {
             Logger::info(
               0, "Memory", fmt::format("人物每日整理开始: date={}, people={}", state.runningDay, people.size()));
             size_t completed = 0;
-            for (const auto qq: people) {
+            for (const auto userId: people) {
                 if (control->isCancelled())
                     co_return;
-                if (co_await consolidatePerson(qq, control) == Result::Updated)
+                if (co_await consolidatePerson(userId, control) == Result::Updated)
                     ++completed;
             }
             {

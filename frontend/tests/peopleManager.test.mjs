@@ -15,7 +15,7 @@ const template = compileTemplate({source: descriptor.template.content, filename:
   id: 'people-test', compilerOptions: {mode: 'function'}})
 assert.deepEqual(template.errors, [])
 const render = new Function('Vue', template.code)(vue)
-const person = () => ({qq: '42', name: '测试人物', affinity: 7, profile: ['喜欢飞钓'],
+const person = () => ({user_id: '42', name: '测试人物', affinity: 7, profile: ['喜欢飞钓'],
   relationship: ['经常闲聊'], recent_interactions: [], pending_entries: [], name_pending: false})
 
 function page(post, settings = {affinityEnabled: true}) {
@@ -92,8 +92,8 @@ test('manual consolidation errors preserve displayed memory and show the backend
 test('disabled affinity hides scores and sorting, edits only memory and orders numerically by QQ', async () => {
   const view = page(async () => ({status: 200, body: {success: true}}), {affinityEnabled: false})
   try {
-    view.state.people = [{...person(), qq: '42', affinity: 100}, {...person(), qq: '2', affinity: -100}]
-    assert.deepEqual(view.state.sortedPeople.map(person => person.qq), ['2', '42'])
+    view.state.people = [{...person(), user_id: '42', affinity: 100}, {...person(), user_id: '2', affinity: -100}]
+    assert.deepEqual(view.state.sortedPeople.map(person => person.user_id), ['2', '42'])
     const html = await view.html()
     assert.equal(html.includes('全局好感度'), false)
     assert.equal(html.includes('好感度：'), false)

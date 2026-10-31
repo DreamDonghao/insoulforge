@@ -107,12 +107,12 @@ namespace insoulforge::MessageRouter {
                     return "@全体";
                 }
                 const std::string name = getStr(target, "name");
-                return fmt::format("@{}", name.empty() ? getStr(target, "qq") : name);
+                return fmt::format("@{}", name.empty() ? getStr(target, "user_id") : name);
             }
             if (type == "poke") {
                 const json &target = atOrNull(segment, "target");
                 const std::string name = getStr(target, "name");
-                return fmt::format("[戳一戳:{}]", name.empty() ? getStr(target, "qq") : name);
+                return fmt::format("[戳一戳:{}]", name.empty() ? getStr(target, "user_id") : name);
             }
             if (type == "member_event") {
                 return fmt::format("[群事件:{}]", getStr(segment, "action"));
@@ -140,7 +140,7 @@ namespace insoulforge::MessageRouter {
             } else if (const std::string name = getStr(atOrNull(projected, "sender"), "name"); !name.empty()) {
                 record["sender"] = name;
             } else {
-                record["sender"] = getStr(atOrNull(projected, "sender"), "qq");
+                record["sender"] = getStr(atOrNull(projected, "sender"), "user_id");
             }
             if (const auto card = getStr(atOrNull(projected, "sender"), "card"); !card.empty())
                 record["card"] = card;

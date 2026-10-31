@@ -9,15 +9,15 @@
 #include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge::SessionId {
-    /// @brief 系统定时任务使用的虚拟发送者 QQ 号
+    /// @brief 系统定时任务使用的虚拟发送者 用户 ID
     /// @details 该号码不对应真实 QQ 账号，用于让路由与后处理可靠识别系统生成的消息。
     inline constexpr u64 kSystemAccountId = 10'000'000'000ULL;
 
-    /// @brief 私聊会话标志位，私聊会话 ID = 用户 QQ 号 | 此标志位
+    /// @brief 私聊会话标志位，私聊会话 ID = 用户 用户 ID | 此标志位
     inline constexpr u64 kPrivateSessionFlag = 1ULL << 63;
 
     /// @brief 构造私聊会话 ID
-    /// @param userId 私聊对象的 QQ 号
+    /// @param userId 私聊对象的用户 ID
     /// @return 带私聊标志位的统一会话 ID
     [[nodiscard]] constexpr auto fromPrivateUser(const u64 userId) -> u64 { return userId | kPrivateSessionFlag; }
 
@@ -26,12 +26,12 @@ namespace insoulforge::SessionId {
         return (sessionId & kPrivateSessionFlag) != 0;
     }
 
-    /// @brief 从私聊会话 ID 提取目标用户 QQ 号
+    /// @brief 从私聊会话 ID 提取目标用户 用户 ID
     [[nodiscard]] constexpr auto privateUserId(const u64 sessionId) -> u64 { return sessionId & ~kPrivateSessionFlag; }
 
     /// @brief 将统一会话 ID 转换为存储层使用的会话类型与目标 ID
     /// @param sessionId 群聊 ID 或带私聊标志位的私聊 ID
-    /// @return {"group"|"private", 群号或 QQ 号}
+    /// @return {"group"|"private", 群号或用户 ID}
     [[nodiscard]] inline auto toStorageTarget(const u64 sessionId) -> std::pair<std::string, u64> {
         return {
           isPrivate(sessionId) ? "private" : "group", isPrivate(sessionId) ? privateUserId(sessionId) : sessionId};

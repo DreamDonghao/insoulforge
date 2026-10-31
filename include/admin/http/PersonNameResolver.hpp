@@ -21,7 +21,7 @@ namespace insoulforge {
         };
         static auto instance() -> PersonNameResolver &;
         /// @brief 立即返回缓存值，缺失时排队；now 用于失败冷却判断。
-        [[nodiscard]] auto lookup(u64 qq, Clock::time_point now = Clock::now()) -> Name;
+        [[nodiscard]] auto lookup(u64 userId, Clock::time_point now = Clock::now()) -> Name;
         void stop();
 
     private:
@@ -30,7 +30,7 @@ namespace insoulforge {
             Clock::time_point retryAfter{};
         };
         void pump();
-        auto query(u64 qq) -> drogon::Task<>;
+        auto query(u64 userId) -> drogon::Task<>;
         std::mutex m_mutex;
         std::deque<u64> m_queue;
         std::unordered_map<u64, State> m_states;

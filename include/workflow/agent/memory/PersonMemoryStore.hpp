@@ -16,12 +16,12 @@ namespace insoulforge::PersonMemoryStore {
     /// @brief 按最近聊天的真实发送者去重、批量读取档案，排除机器人、系统和没有记忆的人。
     [[nodiscard]] auto getForSenders(const json &recentConversation) -> json;
     [[nodiscard]] auto listPeople() -> json;
-    [[nodiscard]] auto getPerson(u64 qq) -> json;
-    auto updatePerson(u64 qq, const json &expected, const json &replacement) -> bool;
-    auto deletePerson(u64 qq, const json &expected) -> bool;
+    [[nodiscard]] auto getPerson(u64 userId) -> json;
+    auto updatePerson(u64 userId, const json &expected, const json &replacement) -> bool;
+    auto deletePerson(u64 userId, const json &expected) -> bool;
 
     struct PendingSnapshot {
-        u64 qq = 0;
+        u64 userId = 0;
         i64 lastEntryId = 0;
         json profile;
     };
@@ -31,7 +31,7 @@ namespace insoulforge::PersonMemoryStore {
     };
     [[nodiscard]] auto pendingPeople() -> std::vector<u64>;
     /// @brief 手动整理可包含没有待整理条目的现有档案；空档案不请求模型。
-    [[nodiscard]] auto pendingSnapshot(u64 qq, bool includeExisting = false) -> std::optional<PendingSnapshot>;
+    [[nodiscard]] auto pendingSnapshot(u64 userId, bool includeExisting = false) -> std::optional<PendingSnapshot>;
     void applyConsolidation(const PendingSnapshot &snapshot, const json &profile);
     [[nodiscard]] auto dailyState() -> DailyState;
     void saveDailyState(const DailyState &state);

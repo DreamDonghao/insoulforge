@@ -90,11 +90,11 @@ namespace insoulforge::MessageRecord {
                 mention["target"] = target;
                 return mention;
             }
-            if (const std::string qq = getStr(segment, "qq"); qq == "0") {
+            if (const std::string userId = getStr(segment, "user_id"); userId == "0") {
                 mention["target"] = {{"kind", "all"}};
             } else {
                 json target;
-                target["qq"] = qq;
+                target["user_id"] = userId;
                 if (const std::string name = getStr(segment, "name"); !name.empty() && name != "未知") {
                     target["name"] = name;
                 }
@@ -144,7 +144,7 @@ namespace insoulforge::MessageRecord {
                 if (const json &target = atOrNull(segment, "target"); target.is_object()) {
                     poke["target"] = target;
                 } else {
-                    poke["target"] = {{"qq", getStr(segment, "target_id")}, {"name", getStr(segment, "target_name")}};
+                    poke["target"] = {{"user_id", getStr(segment, "target_id")}, {"name", getStr(segment, "target_name")}};
                 }
                 poke["direction"] = getStr(segment, "direction", "inbound");
                 result.push_back(std::move(poke));
@@ -166,7 +166,7 @@ namespace insoulforge::MessageRecord {
                     event["reason"] = reason;
                 }
                 if (const u64 operatorId = getUInt(segment, "operator_id"); operatorId > 0) {
-                    event["operator"] = {{"qq", std::to_string(operatorId)}};
+                    event["operator"] = {{"user_id", std::to_string(operatorId)}};
                 }
                 result.push_back(std::move(event));
                 return;
@@ -199,12 +199,12 @@ namespace insoulforge::MessageRecord {
                 return it != params.end() ? it->second : "";
             };
             if (type == "at") {
-                const std::string qq = param("qq");
-                if (qq == "all" || qq == "0") {
+                const std::string userId = param("qq");
+                if (userId == "all" || userId == "0") {
                     segments.push_back({{"type", "at"}, {"target", {{"kind", "all"}}}});
                 } else {
-                    json target{{"qq", qq}};
-                    if (const std::string name = QQNameDirectory::getName(parseUInt64(qq)); name != "未知") {
+                    json target{{"user_id", userId}};
+                    if (const std::string name = QQNameDirectory::getName(parseUInt64(userId)); name != "未知") {
                         target["name"] = name;
                     }
                     segments.push_back({{"type", "at"}, {"target", std::move(target)}});
@@ -230,7 +230,7 @@ namespace insoulforge::MessageRecord {
 
         json record;
         record["time"] = currentDateTime();
-        record["sender"] = {{"name", std::move(senderName)}, {"qq", "self"}};
+        record["sender"] = {{"name", std::move(senderName)}, {"user_id", "self"}};
         if (messageId) {
             record["message_id"] = std::to_string(*messageId);
         }
@@ -259,7 +259,7 @@ namespace insoulforge::MessageRecord {
 
     auto createAssistantExecutionRecord(
       std::string senderName, json toolHistory, std::string status, std::string reason) -> json {
-        json record{{"time", currentDateTime()}, {"sender", {{"name", std::move(senderName)}, {"qq", "self"}}},
+        json record{{"time", currentDateTime()}, {"sender", {{"name", std::move(senderName)}, {"user_id", "self"}}},
           {"record_type", "tool_execution"}, {"execution_status", std::move(status)}, {"segments", json::array()},
           {"tool_history", std::move(toolHistory)}};
         if (!reason.empty()) {
@@ -290,14 +290,14 @@ namespace insoulforge::MessageRecord {
     auto mentions(const json &record, const u64 qqNumber) -> bool {
         return std::ranges::any_of(atOrNull(record, "segments"), [qqNumber](const json &segment) -> bool {
             return getStr(segment, "type") == "at" &&
-                   getUInt(atOrNull(segment, "target"), "qq", getUInt(segment, "qq")) == qqNumber;
+                   getUInt(atOrNull(segment, "target"), "user_id", getUInt(segment, "user_id")) == qqNumber;
         });
     }
 
-    auto isAssistant(const json &record) -> bool { return getStr(atOrNull(record, "sender"), "qq") == "self"; }
+    auto isAssistant(const json &record) -> bool { return getStr(atOrNull(record, "sender"), "user_id") == "self"; }
 
     auto isSystem(const json &record) -> bool {
-        return getStr(atOrNull(record, "sender"), "qq") == std::to_string(SessionId::kSystemAccountId);
+        return getStr(atOrNull(record, "sender"), "user_id") == std::to_string(SessionId::kSystemAccountId);
     }
 
     auto projectForAgent(const json &record, const bool includeToolHistory, const bool includeGroupCard) -> json {

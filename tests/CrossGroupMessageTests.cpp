@@ -380,7 +380,7 @@ namespace {
         for (int index = 0; index < 250; ++index) longText += "测";
         for (int index = 0; index < 25; ++index) {
             json record = {{"time", "2020-01-01 00:00:00"},
-                {"sender", {{"qq", "11"}, {"name", "Alice"}, {"card", "hidden card"}}},
+                {"sender", {{"user_id", "11"}, {"name", "Alice"}, {"card", "hidden card"}}},
                 {"message_id", std::to_string(1000 + index)}, {"reply_to", "999"},
                 {"memories", {"hidden memory"}}, {"tool_history", {{{"name", "hidden"}}}},
                 {"segments", {{{"type", "text"}, {"text", index == 0 ? longText : std::to_string(index)}}}}};
@@ -395,7 +395,7 @@ namespace {
         const auto rawRecords = *workflow.getSessionMessages(400);
         auto excluded = rawRecords[1];
         excluded["message_id"] = "2001";
-        excluded["sender"]["qq"] = std::to_string(SessionId::kSystemAccountId);
+        excluded["sender"]["user_id"] = std::to_string(SessionId::kSystemAccountId);
         workflow.appendSystemStatusMessage(400, excluded);
         excluded = rawRecords[1];
         excluded["message_id"] = "2002";

@@ -56,28 +56,28 @@ test('700+ people retain search and numeric ordering while searches reuse cached
   const view = setup('conversation/PeopleManager')
   try {
     const people = Array.from({length: 700}, (_, i) => ({
-      qq: String(9007199254740000n + BigInt(699 - i) * 2n), name: `Person ${i}`,
+      user_id: String(9007199254740000n + BigInt(699 - i) * 2n), name: `Person ${i}`,
       affinity: i % 11 - 5, name_pending: false, pending_count: 0, updated_at: ''
     }))
-    people.push(...['10', '2'].map(qq => ({...people[0], qq})))
-    const originalOrder = people.map(person => person.qq)
+    people.push(...['10', '2'].map(user_id => ({...people[0], user_id})))
+    const originalOrder = people.map(person => person.user_id)
     view.state.people = people
     const expected = () => people.filter(person =>
-      `${person.qq} ${person.name}`.toLowerCase().includes(view.state.search.trim().toLowerCase()))
+      `${person.user_id} ${person.name}`.toLowerCase().includes(view.state.search.trim().toLowerCase()))
       .sort((a, b) => (view.state.ascending ? a.affinity - b.affinity : b.affinity - a.affinity) ||
-        (BigInt(a.qq) < BigInt(b.qq) ? -1 : BigInt(a.qq) > BigInt(b.qq) ? 1 : 0))
-      .map(person => person.qq)
+        (BigInt(a.user_id) < BigInt(b.user_id) ? -1 : BigInt(a.user_id) > BigInt(b.user_id) ? 1 : 0))
+      .map(person => person.user_id)
     for (const ascending of [false, true]) {
       view.state.ascending = ascending
       for (const search of ['', 'person 2', '  PERSON 12  ', '900719925474', 'none']) {
         view.state.search = search
-        assert.deepEqual(view.state.filtered.map(person => person.qq), expected())
+        assert.deepEqual(view.state.filtered.map(person => person.user_id), expected())
       }
     }
     assert.equal(view.runs('sortedPeople'), 2)
     assert.equal(view.runs('indexedPeople'), 1)
     assert.equal(view.conversions(), people.length)
-    assert.deepEqual(people.map(person => person.qq), originalOrder)
+    assert.deepEqual(people.map(person => person.user_id), originalOrder)
 
     const person = view.state.people[0]
     person.name = 'Renamed'
@@ -91,14 +91,14 @@ test('700+ people retain search and numeric ordering while searches reuse cached
     assert.equal(view.runs('sortedPeople'), 3)
     assert.equal(view.conversions(), people.length)
 
-    person.qq = '9007199254740993'
-    assert.deepEqual(view.state.filtered.map(person => person.qq), expected())
+    person.user_id = '9007199254740993'
+    assert.deepEqual(view.state.filtered.map(person => person.user_id), expected())
     assert.equal(view.runs('indexedPeople'), 2)
     assert.equal(view.conversions(), people.length * 2)
     view.state.people = []
     assert.deepEqual(view.state.filtered, [])
-    view.state.people = [{...people[0], qq: '7'}]
-    assert.equal(view.state.filtered[0].qq, '7')
+    view.state.people = [{...people[0], user_id: '7'}]
+    assert.equal(view.state.filtered[0].user_id, '7')
   } finally { view.dispose() }
 })
 

@@ -1,5 +1,5 @@
 /// @file BlacklistStore.cpp
-/// @brief 全局 QQ 黑名单持久化实现
+/// @brief 全局用户黑名单持久化实现
 
 #include <fmt/format.h>
 
@@ -13,7 +13,7 @@ namespace insoulforge::BlacklistStore {
     auto contains(const u64 qqNumber) -> bool {
         const auto &database = Database::instance();
         std::shared_lock lock(database.mutex());
-        const Statement statement(database.handle(), "SELECT 1 FROM blacklisted_users WHERE qq_number = ?");
+        const Statement statement(database.handle(), "SELECT 1 FROM blacklisted_users WHERE user_id = ?");
         statement.bind(1, qqNumber);
         return statement.step();
     }
@@ -21,7 +21,7 @@ namespace insoulforge::BlacklistStore {
     void add(const u64 qqNumber) {
         const auto &database = Database::instance();
         std::unique_lock lock(database.mutex());
-        const Statement statement(database.handle(), "INSERT OR IGNORE INTO blacklisted_users (qq_number) VALUES (?)");
+        const Statement statement(database.handle(), "INSERT OR IGNORE INTO blacklisted_users (user_id) VALUES (?)");
         statement.bind(1, qqNumber);
         statement.exec();
         Logger::info(0, "Blacklist", fmt::format("已添加: {}", qqNumber));
@@ -30,7 +30,7 @@ namespace insoulforge::BlacklistStore {
     void remove(const u64 qqNumber) {
         const auto &database = Database::instance();
         std::unique_lock lock(database.mutex());
-        const Statement statement(database.handle(), "DELETE FROM blacklisted_users WHERE qq_number = ?");
+        const Statement statement(database.handle(), "DELETE FROM blacklisted_users WHERE user_id = ?");
         statement.bind(1, qqNumber);
         statement.exec();
         Logger::info(0, "Blacklist", fmt::format("已移除: {}", qqNumber));
@@ -40,7 +40,7 @@ namespace insoulforge::BlacklistStore {
         const auto &database = Database::instance();
         std::shared_lock lock(database.mutex());
         std::vector<u64> users;
-        const Statement statement(database.handle(), "SELECT qq_number FROM blacklisted_users ORDER BY qq_number");
+        const Statement statement(database.handle(), "SELECT user_id FROM blacklisted_users ORDER BY user_id");
         while (statement.step()) {
             users.push_back(statement.getInt64(0));
         }

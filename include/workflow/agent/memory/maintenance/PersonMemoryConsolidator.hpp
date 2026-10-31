@@ -25,7 +25,7 @@ namespace insoulforge {
         auto runDue(std::time_t now) -> drogon::Task<>;
         enum class Result { Updated, NoMemory, Busy, Stopped, Failed, Conflict };
         /// @brief 立即整理一个人物，与每日整理互斥，不改变每日执行标记。
-        auto runPerson(u64 qq) -> drogon::Task<Result>;
+        auto runPerson(u64 userId) -> drogon::Task<Result>;
 
     private:
         struct BusyGuard {
@@ -33,7 +33,7 @@ namespace insoulforge {
             ~BusyGuard();
         };
         void poll();
-        auto consolidatePerson(u64 qq, std::shared_ptr<LlmClient::MaintenanceRequestControl> control,
+        auto consolidatePerson(u64 userId, std::shared_ptr<LlmClient::MaintenanceRequestControl> control,
           bool includeExisting = false) -> drogon::Task<Result>;
         std::mutex m_mutex;
         bool m_busy = false;

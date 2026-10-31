@@ -88,7 +88,7 @@ for (const [page, load, dataKey, errorKey, url] of [
   test(`${page}/${load}: failures preserve previous data; only a valid response clears the error`, async () => {
     const state = mount(page)
     await flush()
-    const original = [{qq: '42', groupId: '42', name: 'example'}]
+    const original = [{user_id: '42', groupId: '42', name: 'example'}]
     state[dataKey] = original
     const snapshot = JSON.stringify(state[dataKey])
     const previousFetch = globalThis.fetch

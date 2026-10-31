@@ -343,7 +343,7 @@ test('manual session creation preserves identifiers, supports private chats and 
   view.state.newSessionId = 'invalid'
   await view.state.addSession()
   assert.equal(submitted.length, 0)
-  assert.match(view.state.sessionForm.errors.value['new-session-id'], /QQ/)
+  assert.match(view.state.sessionForm.errors.value['new-session-id'], /用户 ID/)
 
   view.state.newSessionId = ' 9007199254740993 '
   const first = view.state.addSession()

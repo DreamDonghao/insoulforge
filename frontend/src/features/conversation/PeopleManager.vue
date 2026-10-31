@@ -5,7 +5,7 @@ import {ArrowDownWideNarrow, ArrowUpNarrowWide, Pencil, Trash2} from '@lucide/vu
 import {privateSessionUserId} from '../../utils/session'
 
 interface PersonIdentity {
-  qq: string
+  user_id: string
   name: string
   name_pending: boolean
   affinity?: number
@@ -47,20 +47,20 @@ let nameTimer: ReturnType<typeof setTimeout> | undefined
 let disposed = false
 let summaryController: AbortController | undefined
 let detailController: AbortController | undefined
-const indexedPeople = computed(() => people.value.map(person => ({person, qq: BigInt(person.qq)})))
+const indexedPeople = computed(() => people.value.map(person => ({person, user_id: BigInt(person.user_id)})))
 const sortedPeople = computed(() => {
   const direction = ascending.value ? 1 : -1
   return [...indexedPeople.value]
     .sort((a, b) => (affinityEnabled.value ? direction * ((a.person.affinity ?? 0) - (b.person.affinity ?? 0)) : 0) ||
-      (a.qq < b.qq ? -1 : a.qq > b.qq ? 1 : 0))
+      (a.user_id < b.user_id ? -1 : a.user_id > b.user_id ? 1 : 0))
     .map(({person}) => person)
 })
 const filtered = computed(() => {
   const query = search.value.trim().toLowerCase()
-  return sortedPeople.value.filter(person => `${person.qq} ${person.name}`.toLowerCase().includes(query))
+  return sortedPeople.value.filter(person => `${person.user_id} ${person.name}`.toLowerCase().includes(query))
 })
 const detailName = computed(() => {
-  const person = people.value.find(person => person.qq === selected.value)
+  const person = people.value.find(person => person.user_id === selected.value)
   return person?.name && person.name !== '未知' ? person.name : detail.value?.name || '未知'
 })
 const memorySections = computed(() => detail.value ? [
@@ -101,19 +101,19 @@ async function fetchPeopleJson(path: string, signal: AbortSignal, options: Reque
   return data
 }
 
-async function selectPerson(qq: string) {
+async function selectPerson(user_id: string) {
   if (saving.value || consolidating.value || !confirmDiscard(isDirty())) return
   editing.value = false
   editError.value = ''
   consolidationMessage.value = ''
   detailController?.abort()
   const controller = detailController = new AbortController()
-  selected.value = qq
+  selected.value = user_id
   detail.value = null
   detailLoading.value = true
   detailError.value = ''
   try {
-    const data = await fetchPeopleJson(`/admin/api/people/${encodeURIComponent(qq)}`, controller.signal)
+    const data = await fetchPeopleJson(`/admin/api/people/${encodeURIComponent(user_id)}`, controller.signal)
     if (!disposed && !controller.signal.aborted) {
       affinityEnabled.value = typeof data.affinity === 'number'
       detail.value = data
@@ -142,12 +142,12 @@ async function loadPeople(refreshDetail = true) {
     const changed = affinityEnabled.value !== (config.affinityEnabled ?? true)
     affinityEnabled.value = config.affinityEnabled ?? true
     people.value = data
-    const qq = data.some((person: PersonSummary) => person.qq === selected.value) ? selected.value : filtered.value[0]?.qq
-    if (!qq) {
+    const user_id = data.some((person: PersonSummary) => person.user_id === selected.value) ? selected.value : filtered.value[0]?.user_id
+    if (!user_id) {
       selected.value = ''
       detail.value = null
     } else if (refreshDetail || changed) {
-      await selectPerson(qq)
+      await selectPerson(user_id)
     }
   } catch (cause) {
     if (!disposed && !controller.signal.aborted)
@@ -212,8 +212,8 @@ async function savePerson() {
 }
 async function deletePerson() {
   if (!detail.value || saving.value || consolidating.value || !window.confirm(`删除 ${detailName.value}（${selected.value}）的全部人物记忆和好感度？聊天记录不受影响，后续聊天可重新建立档案。`)) return
-  const index = filtered.value.findIndex(person => person.qq === selected.value)
-  const next = filtered.value[index + 1]?.qq || filtered.value[index - 1]?.qq || ''
+  const index = filtered.value.findIndex(person => person.user_id === selected.value)
+  const next = filtered.value[index + 1]?.user_id || filtered.value[index - 1]?.user_id || ''
   saving.value = true
   editError.value = ''
   try {
@@ -260,7 +260,7 @@ onUnmounted(() => {
     <div class="page-header"><h1 class="page-title">人物信息</h1><p class="page-subtitle">{{ affinityEnabled ? '人物记忆与全局好感度' : '人物记忆' }}</p></div>
     <div class="people-toolbar">
       <label for="people-search" class="form-label">搜索人物</label>
-      <input id="people-search" v-model="search" class="form-input" placeholder="搜索昵称或 QQ 号" aria-label="搜索人物">
+      <input id="people-search" v-model="search" class="form-input" placeholder="搜索昵称或用户 ID" aria-label="搜索人物">
       <span>{{ filtered.length }} / {{ people.length }} 人</span>
       <button v-if="affinityEnabled" class="btn btn-secondary icon-button" :title="ascending ? '好感度：从低到高' : '好感度：从高到低'" :aria-label="ascending ? '好感度：从低到高' : '好感度：从高到低'" @click="ascending = !ascending"><ArrowUpNarrowWide v-if="ascending" :size="18"/><ArrowDownWideNarrow v-else :size="18"/></button>
       <button class="btn btn-secondary" :disabled="loading || editing || saving || consolidating" @click="loadPeople()">刷新</button>
@@ -271,11 +271,11 @@ onUnmounted(() => {
     <div v-else class="people-layout">
       <aside class="people-list" aria-label="人物列表">
         <p v-if="!filtered.length" class="empty">没有匹配的人物</p>
-        <button v-for="person in filtered" :key="person.qq" class="person-row"
-                :class="{selected: selected === person.qq}" :aria-pressed="selected === person.qq"
+        <button v-for="person in filtered" :key="person.user_id" class="person-row"
+                :class="{selected: selected === person.user_id}" :aria-pressed="selected === person.user_id"
                 :disabled="consolidating || saving"
-                @click="selectPerson(person.qq)">
-          <span class="person-identity"><strong>{{ person.name || '未知' }}</strong><small>{{ person.qq }} · {{ person.pending_count }} 条待整理</small></span>
+                @click="selectPerson(person.user_id)">
+          <span class="person-identity"><strong>{{ person.name || '未知' }}</strong><small>{{ person.user_id }} · {{ person.pending_count }} 条待整理</small></span>
           <span v-if="affinityEnabled" :class="scoreClass(person.affinity)">{{ (person.affinity ?? 0) > 0 ? '+' : '' }}{{ person.affinity }}</span>
         </button>
       </aside>
@@ -293,7 +293,7 @@ onUnmounted(() => {
           <form v-if="editing" class="person-editor" @submit.prevent="savePerson">
             <fieldset :disabled="saving">
               <header class="person-heading editor-heading">
-                <div><h2>{{ detailName }}</h2><span>QQ {{ selected }}</span></div>
+                <div><h2>{{ detailName }}</h2><span>用户 ID {{ selected }}</span></div>
               </header>
               <label for="person-json" class="form-label">人物数据 JSON</label>
               <textarea id="person-json" ref="jsonEditor" :aria-invalid="jsonInvalid || undefined" :aria-describedby="editError ? 'person-json-error' : undefined" v-model="draftText" class="form-input person-json" aria-label="人物数据 JSON" spellcheck="false"/>
@@ -302,7 +302,7 @@ onUnmounted(() => {
           </form>
           <template v-else>
           <header class="person-heading">
-            <div><h2>{{ detailName }}</h2><span>QQ {{ detail.qq }}</span></div>
+            <div><h2>{{ detailName }}</h2><span>用户 ID {{ detail.user_id }}</span></div>
             <div v-if="affinityEnabled" class="score"><span>全局好感度</span><strong :class="scoreClass(detail.affinity)">{{ (detail.affinity ?? 0) > 0 ? '+' : '' }}{{ detail.affinity }}</strong></div>
           </header>
           <section v-for="section in memorySections" :key="section.key" class="memory-section">

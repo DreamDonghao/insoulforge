@@ -137,7 +137,7 @@ auto main() -> int {
             return EXIT_FAILURE;
         }
 
-        // 将自己的 QQ 号映射为带“(我)”标记的名称，便于区分机器人与同名群友。
+        // 将自己的 用户 ID映射为带“(我)”标记的名称，便于区分机器人与同名群友。
         QQNameDirectory::setCustomName(config.selfQQNumber, config.botName + "(我)");
 
         // 配置为 WebSocket 时建立正向连接；使用 HTTP 时不建立连接。

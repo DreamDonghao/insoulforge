@@ -74,14 +74,14 @@ namespace insoulforge {
 
         ADD_METHOD_TO(AdminController::addAdmin, "/admin/api/admin", drogon::Post);
 
-        ADD_METHOD_TO(AdminController::removeAdmin, "/admin/api/admin/{qq}", drogon::Delete);
+        ADD_METHOD_TO(AdminController::removeAdmin, "/admin/api/admin/{userId}", drogon::Delete);
 
         // 黑名单
         ADD_METHOD_TO(AdminController::getBlacklist, "/admin/api/blacklist", drogon::Get);
 
         ADD_METHOD_TO(AdminController::addBlacklistEntry, "/admin/api/blacklist", drogon::Post);
 
-        ADD_METHOD_TO(AdminController::removeBlacklistEntry, "/admin/api/blacklist/{qq}", drogon::Delete);
+        ADD_METHOD_TO(AdminController::removeBlacklistEntry, "/admin/api/blacklist/{userId}", drogon::Delete);
 
         // 启用群
         ADD_METHOD_TO(AdminController::getGroups, "/admin/api/groups", drogon::Get);
@@ -125,10 +125,10 @@ namespace insoulforge {
         // 好感度
         ADD_METHOD_TO(AdminController::getSessionAffinity, "/admin/api/affinity/{sessionId}", drogon::Get);
         ADD_METHOD_TO(AdminController::getPeople, "/admin/api/people", drogon::Get);
-        ADD_METHOD_TO(AdminController::getPerson, "/admin/api/people/{qq}", drogon::Get);
-        ADD_METHOD_TO(AdminController::consolidatePerson, "/admin/api/people/{qq}/consolidate", drogon::Post);
-        ADD_METHOD_TO(AdminController::updatePerson, "/admin/api/people/{qq}", drogon::Put);
-        ADD_METHOD_TO(AdminController::deletePerson, "/admin/api/people/{qq}", drogon::Delete);
+        ADD_METHOD_TO(AdminController::getPerson, "/admin/api/people/{userId}", drogon::Get);
+        ADD_METHOD_TO(AdminController::consolidatePerson, "/admin/api/people/{userId}/consolidate", drogon::Post);
+        ADD_METHOD_TO(AdminController::updatePerson, "/admin/api/people/{userId}", drogon::Put);
+        ADD_METHOD_TO(AdminController::deletePerson, "/admin/api/people/{userId}", drogon::Delete);
 
         // 定时任务
         ADD_METHOD_TO(AdminController::getScheduledTasks, "/admin/api/scheduled-tasks/{sessionId}", drogon::Get);
@@ -305,7 +305,7 @@ namespace insoulforge {
           -> drogon::Task<>;
 
         /// @brief 添加管理员
-        /// @param req HTTP 请求，body 包含 qq
+        /// @param req HTTP 请求，body 包含 user_id
         /// @param callback HTTP 响应回调
         auto addAdmin(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const
           -> drogon::Task<>;
@@ -313,26 +313,26 @@ namespace insoulforge {
         /// @brief 删除管理员
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
-        /// @param qq 管理员 QQ 号
+        /// @param userId 管理员 用户 ID
         auto removeAdmin(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback,
-          const std::string &qq) const -> drogon::Task<>;
+          const std::string &userId) const -> drogon::Task<>;
 
-        /// @brief 获取全局 QQ 黑名单。
+        /// @brief 获取全局用户黑名单。
         auto getBlacklist(drogon::HttpRequestPtr req,
           std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
-        /// @brief 添加全局 QQ 黑名单项。
-        /// @param req HTTP 请求，body 包含 qq。
+        /// @brief 添加全局用户黑名单项。
+        /// @param req HTTP 请求，body 包含 user_id。
         /// @param callback HTTP 响应回调
         auto addBlacklistEntry(drogon::HttpRequestPtr req,
           std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
-        /// @brief 移除全局 QQ 黑名单项。
+        /// @brief 移除全局用户黑名单项。
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
-        /// @param qq 要移除的 QQ 号。
+        /// @param userId 要移除的用户 ID。
         auto removeBlacklistEntry(drogon::HttpRequestPtr req,
-          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &qq) const -> drogon::Task<>;
+          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &userId) const -> drogon::Task<>;
 
         // ============== 会话启用状态 ==============
 
@@ -466,13 +466,13 @@ namespace insoulforge {
         auto getPeople(drogon::HttpRequestPtr req,
           std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
         auto getPerson(drogon::HttpRequestPtr req,
-          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &qq) const -> drogon::Task<>;
+          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &userId) const -> drogon::Task<>;
         auto updatePerson(drogon::HttpRequestPtr req,
-          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &qq) const -> drogon::Task<>;
+          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &userId) const -> drogon::Task<>;
         auto consolidatePerson(drogon::HttpRequestPtr req,
-          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &qq) const -> drogon::Task<>;
+          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &userId) const -> drogon::Task<>;
         auto deletePerson(drogon::HttpRequestPtr req,
-          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &qq) const -> drogon::Task<>;
+          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &userId) const -> drogon::Task<>;
 
         // ============== 定时任务 ==============
 

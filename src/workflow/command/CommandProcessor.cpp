@@ -46,7 +46,7 @@ namespace insoulforge::CommandProcessor {
 
     auto execute(const json &message) -> drogon::Task<std::string> {
         const u64 sessionId = getUInt(message, "session_id");
-        const u64 senderQQ = getUInt(atOrNull(message, "sender"), "qq");
+        const u64 senderQQ = getUInt(atOrNull(message, "sender"), "user_id");
         const bool hasPermission = AdminStore::isAdmin(senderQQ);
 
         std::istringstream input(commandText(message));
@@ -64,11 +64,11 @@ namespace insoulforge::CommandProcessor {
                       "/autoreply on|off - 开启或关闭本群普通消息自动回复\n"
                       "【管理员】\n"
                       "/admins - 查看管理员列表\n"
-                      "/addadmin <QQ号> - 添加管理员\n"
-                      "/deladmin <QQ号> - 移除管理员\n"
+                      "/addadmin <用户 ID> - 添加管理员\n"
+                      "/deladmin <用户 ID> - 移除管理员\n"
                       "/blacklist - 查看黑名单\n"
-                      "/addblacklist <QQ号> - 添加黑名单\n"
-                      "/delblacklist <QQ号> - 移除黑名单\n"
+                      "/addblacklist <用户 ID> - 添加黑名单\n"
+                      "/delblacklist <用户 ID> - 移除黑名单\n"
                       "/clearimagecache - 清除全部图片识别缓存\n"
                       "【表情管理】\n"
                       "/delemoji <名称> - 删除表情包\n"
@@ -91,8 +91,8 @@ namespace insoulforge::CommandProcessor {
                 co_return "暂无管理员";
             }
             std::string response = "管理员列表:\n";
-            for (const u64 qq: admins) {
-                response += fmt::format("- {}\n", qq);
+            for (const u64 userId: admins) {
+                response += fmt::format("- {}\n", userId);
             }
             co_return response;
         }
@@ -166,24 +166,24 @@ namespace insoulforge::CommandProcessor {
         if (command == "/addadmin" || command == "/添加管理员") {
             std::string argument;
             if (!(input >> argument)) {
-                co_return "用法: /addadmin <QQ号>";
+                co_return "用法: /addadmin <用户 ID>";
             }
-            if (const auto qq = tryParseUInt64(argument)) {
-                AdminStore::addAdmin(*qq);
-                co_return fmt::format("已添加管理员: {}", *qq);
+            if (const auto userId = tryParseUInt64(argument)) {
+                AdminStore::addAdmin(*userId);
+                co_return fmt::format("已添加管理员: {}", *userId);
             }
-            co_return "无效的QQ号格式";
+            co_return "无效的用户 ID格式";
         }
         if (command == "/deladmin" || command == "/移除管理员") {
             std::string argument;
             if (!(input >> argument)) {
-                co_return "用法: /deladmin <QQ号>";
+                co_return "用法: /deladmin <用户 ID>";
             }
-            if (const auto qq = tryParseUInt64(argument)) {
-                AdminStore::removeAdmin(*qq);
-                co_return fmt::format("已移除管理员: {}", *qq);
+            if (const auto userId = tryParseUInt64(argument)) {
+                AdminStore::removeAdmin(*userId);
+                co_return fmt::format("已移除管理员: {}", *userId);
             }
-            co_return "无效的QQ号格式";
+            co_return "无效的用户 ID格式";
         }
         if (command == "/blacklist" || command == "/黑名单") {
             const auto users = BlacklistStore::getAll();
@@ -191,32 +191,32 @@ namespace insoulforge::CommandProcessor {
                 co_return "黑名单为空";
             }
             std::string response = "黑名单:\n";
-            for (const u64 qq: users) {
-                response += fmt::format("- {}\n", qq);
+            for (const u64 userId: users) {
+                response += fmt::format("- {}\n", userId);
             }
             co_return response;
         }
         if (command == "/addblacklist" || command == "/添加黑名单") {
             std::string argument;
             if (!(input >> argument)) {
-                co_return "用法: /addblacklist <QQ号>";
+                co_return "用法: /addblacklist <用户 ID>";
             }
-            if (const auto qq = tryParseUInt64(argument); qq && *qq != 0) {
-                BlacklistStore::add(*qq);
-                co_return fmt::format("已添加黑名单: {}", *qq);
+            if (const auto userId = tryParseUInt64(argument); userId && *userId != 0) {
+                BlacklistStore::add(*userId);
+                co_return fmt::format("已添加黑名单: {}", *userId);
             }
-            co_return "无效的QQ号格式";
+            co_return "无效的用户 ID格式";
         }
         if (command == "/delblacklist" || command == "/移除黑名单") {
             std::string argument;
             if (!(input >> argument)) {
-                co_return "用法: /delblacklist <QQ号>";
+                co_return "用法: /delblacklist <用户 ID>";
             }
-            if (const auto qq = tryParseUInt64(argument); qq && *qq != 0) {
-                BlacklistStore::remove(*qq);
-                co_return fmt::format("已移除黑名单: {}", *qq);
+            if (const auto userId = tryParseUInt64(argument); userId && *userId != 0) {
+                BlacklistStore::remove(*userId);
+                co_return fmt::format("已移除黑名单: {}", *userId);
             }
-            co_return "无效的QQ号格式";
+            co_return "无效的用户 ID格式";
         }
         if (command == "/clearimagecache" || command == "/清除图片缓存") {
             co_return fmt::format("已清除 {} 条图片识别缓存", ImageDescriptionStore::clearAll());

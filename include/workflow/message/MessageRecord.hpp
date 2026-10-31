@@ -52,10 +52,10 @@ namespace insoulforge::MessageRecord {
     /// @param type 段类型，例如 `at`、`face` 或 `poke`
     [[nodiscard]] auto hasSegmentType(const json &record, std::string_view type) -> bool;
 
-    /// @brief 判断记录是否 @ 指定 QQ 号
-    /// @details 同时兼容新结构 `target.qq` 与旧结构 `qq`。
+    /// @brief 判断记录是否 @ 指定用户 ID
+    /// @details 同时兼容新结构 `target.user_id` 与旧结构 `user_id`。
     /// @param record 统一聊天记录
-    /// @param qqNumber 目标 QQ 号
+    /// @param qqNumber 目标用户 ID
     [[nodiscard]] auto mentions(const json &record, u64 qqNumber) -> bool;
 
     /// @brief 判断记录是否由机器人发送

@@ -361,7 +361,7 @@ namespace insoulforge {
     auto Config::saveQQConfig(const json &value) -> std::expected<void, ConfigError> {
         std::scoped_lock lock(m_updateMutex);
         auto normalized = value;
-        // 管理界面以十进制字符串提交 QQ 号，存储与运行时继续使用 u64。
+        // 管理界面以十进制字符串提交 用户 ID，存储与运行时继续使用 u64。
         if (normalized.is_object() && normalized.contains("selfQQNumber") && normalized["selfQQNumber"].is_string()) {
             const auto number = tryParseUInt64(normalized["selfQQNumber"].get<std::string>());
             if (!number) {

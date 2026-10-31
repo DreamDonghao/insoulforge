@@ -43,9 +43,9 @@ namespace insoulforge {
           -> drogon::Task<std::optional<MemoryMaintenanceResult>> {
             std::unordered_set<u64> participants;
             for (const auto &record: records) {
-                if (const auto qq = parseUInt64(getStr(atOrNull(record, "sender"), "qq"));
-                  qq > 0 && qq != SessionId::kSystemAccountId)
-                    participants.insert(qq);
+                if (const auto userId = parseUInt64(getStr(atOrNull(record, "sender"), "user_id"));
+                  userId > 0 && userId != SessionId::kSystemAccountId)
+                    participants.insert(userId);
             }
             const bool affinityEnabled = Config::instance().affinityEnabled.load(std::memory_order_relaxed);
             std::string prompt = std::string(R"(# 人物记忆提取器
@@ -56,7 +56,7 @@ namespace insoulforge {
 
 机器人名称：)") + json(Config::instance().botName).dump() +
                                  R"(。
-消息中的 `qq=self` 表示机器人自己。
+消息中的 `user_id=self` 表示机器人自己。
 聊天中有人提到这个名称时，结合上下文判断是不是在说机器人，不要只看名字。
 
 ## 记忆提取
@@ -83,7 +83,7 @@ namespace insoulforge {
 ### 信息属于谁
 
 - 按信息实际描述的人归属记忆，不要把别人说的事记到发送者身上。
-- 只允许记录“待提取消息”中实际发言的用户，使用消息中的真实 QQ，不虚构 QQ。
+- 只允许记录“待提取消息”中实际发言的用户，使用消息中的真实用户 ID，不虚构用户 ID。
 - 无法确定说的是谁，就不记录。
 - 不为机器人自己或系统账号建立人物记忆。
 
@@ -138,10 +138,10 @@ namespace insoulforge {
 
 `memories` 中每项包含：
 
-- `qq`：用户真实 QQ 号，使用字符串。
+- `user_id`：用户真实用户 ID，使用字符串。
 - `entries`：非空字符串数组，每条记忆最多 {} 字。
 
-同一个 QQ 最多出现一次，多条记忆合并到该用户的 `entries` 中，去掉重复内容。
+同一个用户 ID 最多出现一次，多条记忆合并到该用户的 `entries` 中，去掉重复内容。
 没有值得记录的内容时，不输出该用户，不使用空字符串占位。
 )", entryMaxChars);
             if (affinityEnabled)
@@ -150,15 +150,15 @@ namespace insoulforge {
 
 `affinity_changes` 中每项包含：
 
-- `qq`：用户真实 QQ 号，使用字符串。
+- `user_id`：用户真实用户 ID，使用字符串。
 - `delta`：-5 到 5 的非零整数。
 
-同一个 QQ 最多出现一次，综合本批表现给出最终变化值。
+同一个用户 ID 最多出现一次，综合本批表现给出最终变化值。
 没有明显变化时，不输出该用户。
 人物记忆与好感度变化涉及的人可以不同，不要为了填充记忆而编造内容。
 )";
             json example = {{"conversation_summary", "大家讨论了周六钓鱼的安排，地点尚未确定。"},
-              {"memories", {{{"qq", "123456"}, {"entries", {"喜欢飞钓"}}}}}};
+              {"memories", {{{"user_id", "123456"}, {"entries", {"喜欢飞钓"}}}}}};
             if (affinityEnabled)
                 example["affinity_changes"] = json::array();
             prompt += "\n### 完整示例\n\n" + example.dump(2) +
@@ -190,17 +190,17 @@ namespace insoulforge {
             result.conversationSummary = trim(summary.get<std::string>());
             std::set<std::pair<u64, std::string>> seenEntries;
             for (const json &value: values) {
-                const auto qq = parseUInt64(getStr(value, "qq"));
-                if (!value.is_object() || !participants.contains(qq) || !atOrNull(value, "entries").is_array()) {
-                    Logger::warn(sessionId, "Memory", "人物记忆格式或 QQ 归属无效，本批次不提交");
+                const auto userId = parseUInt64(getStr(value, "user_id"));
+                if (!value.is_object() || !participants.contains(userId) || !atOrNull(value, "entries").is_array()) {
+                    Logger::warn(sessionId, "Memory", "人物记忆格式或用户 ID 归属无效，本批次不提交");
                     co_return std::nullopt;
                 }
                 for (const auto &entry: value["entries"]) {
                     if (!entry.is_string())
                         co_return std::nullopt;
                     if (auto content = trim(entry.get<std::string>());
-                      !content.empty() && seenEntries.emplace(qq, content).second) {
-                        result.personEntries.push_back({.qq = qq, .content = std::move(content)});
+                      !content.empty() && seenEntries.emplace(userId, content).second) {
+                        result.personEntries.push_back({.userId = userId, .content = std::move(content)});
                     }
                 }
             }
@@ -208,15 +208,15 @@ namespace insoulforge {
                 co_return result;
             std::unordered_set<u64> seenAffinity;
             for (const auto &value: affinity) {
-                const auto qq = parseUInt64(getStr(value, "qq"));
+                const auto userId = parseUInt64(getStr(value, "user_id"));
                 const auto &delta = atOrNull(value, "delta");
-                if (!value.is_object() || !participants.contains(qq) || !delta.is_number_integer() ||
-                    !seenAffinity.insert(qq).second) {
-                    Logger::warn(sessionId, "Memory", "好感度格式、QQ 归属或重复项无效，本批次不提交");
+                if (!value.is_object() || !participants.contains(userId) || !delta.is_number_integer() ||
+                    !seenAffinity.insert(userId).second) {
+                    Logger::warn(sessionId, "Memory", "好感度格式、用户 ID 归属或重复项无效，本批次不提交");
                     co_return std::nullopt;
                 }
                 if (const auto bounded = static_cast<i32>(std::clamp(jsonToDouble(delta), -5.0, 5.0)); bounded != 0)
-                    result.affinity.emplace_back(qq, bounded);
+                    result.affinity.emplace_back(userId, bounded);
             }
             co_return result;
         }
@@ -271,10 +271,10 @@ namespace insoulforge {
 
 ## 外号：aliases
 
-- 按真实 QQ 保存称呼，输出完整外号列表，合并重复内容。
+- 按真实用户 ID 保存称呼，输出完整外号列表，合并重复内容。
 - 保留已有称呼，有明确纠正时才更新，不把一次性调侃当成固定外号。
 - 只采用条目中明确表达的称呼约定，昵称、群名片、@ 名称本身不作为外号。
-- 无法确定 QQ 的历史称呼，不猜测归属，可保留为长期记忆原文。
+- 无法确定用户 ID 的历史称呼，不猜测归属，可保留为长期记忆原文。
 
 ## 长期记忆：longTerm
 
@@ -283,7 +283,7 @@ namespace insoulforge {
 - 合并重复内容，有冲突时以新提取的信息为准。
 - 每条只记一件事，写明所属人物或本会话背景，简短、完整、客观。
 - 外号已存入 aliases 时不必再重复存成长期记忆，相关的其他有效信息仍需保留。
-- 历史待迁移内容是旧资料，不能当成刚发生的事；保留有效信息，不因来源旧或无法关联 QQ 就全部丢弃。
+- 历史待迁移内容是旧资料，不能当成刚发生的事；保留有效信息，不因来源旧或无法关联用户 ID 就全部丢弃。
 - 长期记忆只保留有持续价值的事实、关系、约定和后续事项，不记流水账，不重复保存会话聊天摘要。
 
 ## 信息来源
@@ -300,8 +300,8 @@ aliases 和 longTerm 必须都是数组。longTerm 的每一项是非空字符�
 
 ```json
 {
-  "aliases": [{"qq": "123456", "names": ["老王"]}],
-  "longTerm": ["QQ 123456 喜欢 Python"]
+  "aliases": [{"user_id": "123456", "names": ["老王"]}],
+  "longTerm": ["用户 123456 喜欢 Python"]
 }
 ```)";
             if (!longTermEnabled)
@@ -372,8 +372,8 @@ aliases 和 longTerm 必须都是数组。longTerm 的每一项是非空字符�
         }
 
         std::vector<std::string> newMemories;
-        for (const auto &[qq, content]: extracted->personEntries) {
-            newMemories.push_back(std::to_string(qq) + ": " + content);
+        for (const auto &[userId, content]: extracted->personEntries) {
+            newMemories.push_back(std::to_string(userId) + ": " + content);
         }
 
         const auto currentMemory = MemoryStore::getShortTermMemory(sessionId);

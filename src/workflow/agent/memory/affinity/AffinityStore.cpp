@@ -14,7 +14,7 @@ namespace insoulforge::AffinityStore {
             return {};
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
-        const Statement stmt(db.handle(), "SELECT qq_number, affinity FROM person_affinity");
+        const Statement stmt(db.handle(), "SELECT user_id, affinity FROM person_affinity");
         std::unordered_map<u64, i32> affinityMap;
         while (stmt.step()) {
             affinityMap.emplace(static_cast<u64>(stmt.getInt64(0)), stmt.getInt(1));
@@ -29,8 +29,8 @@ namespace insoulforge::AffinityStore {
         std::unique_lock lock(db.mutex());
         // max/min 标量函数在 SQL 层夹紧，并发叠加也不会越界
         const Statement stmt(db.handle(),
-          "INSERT INTO person_affinity (qq_number, affinity) VALUES (?, max(min(?, 100), -100)) "
-          "ON CONFLICT(qq_number) DO UPDATE SET affinity = max(min(affinity + ?, 100), -100)");
+          "INSERT INTO person_affinity (user_id, affinity) VALUES (?, max(min(?, 100), -100)) "
+          "ON CONFLICT(user_id) DO UPDATE SET affinity = max(min(affinity + ?, 100), -100)");
         stmt.bind(1, qqNumber);
         stmt.bind(2, delta);
         stmt.bind(3, delta);

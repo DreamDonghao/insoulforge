@@ -84,11 +84,11 @@ export interface Emoji {
 }
 
 export interface Admin {
-    qq: string
+    user_id: string
 }
 
 export interface BlacklistEntry {
-    qq: string
+    user_id: string
 }
 
 export interface Group {
@@ -114,8 +114,8 @@ export interface ChatMessage {
 }
 
 export interface AffinityEntry {
-    /** QQ 号字符串（大数安全） */
-    qq: string
+    /** 用户 ID 字符串（大数安全） */
+    user_id: string
     /** 昵称（运行时映射缺失且 OneBot 查询失败时缺省） */
     name?: string
     affinity: number

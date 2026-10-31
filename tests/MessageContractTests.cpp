@@ -205,7 +205,7 @@ namespace {
         const auto selfRecord = insoulforge::OneBotEventNormalizer::normalize(selfEvent);
         check(selfRecord.has_value(), "bot echo is supported", kTestName);
         if (selfRecord) {
-            check((*selfRecord)["sender"]["qq"] == "self", "bot echo is marked as self", kTestName);
+            check((*selfRecord)["sender"]["user_id"] == "self", "bot echo is marked as self", kTestName);
         }
 
         const auto unsupported = insoulforge::OneBotEventNormalizer::normalize({{"post_type", "meta_event"}});
@@ -219,10 +219,10 @@ namespace {
             {"sub_type", "poke"}, {"time", 1'788'800'000}, {"self_id", 42}, {"user_id", 11}, {"target_id", 42}});
         check(poke.has_value(), "poke notice is supported", kTestName);
         if (poke) {
-            check((*poke)["sender"]["qq"] == "11", "poke actor becomes sender", kTestName);
+            check((*poke)["sender"]["user_id"] == "11", "poke actor becomes sender", kTestName);
             check((*poke)["session_id"] == (1ULL << 63 | 11ULL), "private poke has private session ID", kTestName);
             check((*poke)["segments"][0]["type"] == "poke", "poke has semantic segment", kTestName);
-            check((*poke)["segments"][0]["target"]["qq"] == "42", "poke target is retained", kTestName);
+            check((*poke)["segments"][0]["target"]["user_id"] == "42", "poke target is retained", kTestName);
             check((*poke)["segments"][0]["direction"] == "inbound", "poke direction is normalized", kTestName);
         }
 
@@ -234,7 +234,7 @@ namespace {
             check((*membership)["segments"][0]["type"] == "member_event", "membership has semantic segment", kTestName);
             check((*membership)["segments"][0]["action"] == "leave", "leave action is normalized", kTestName);
             check((*membership)["segments"][0]["reason"] == "kick", "membership reason is retained", kTestName);
-            check((*membership)["segments"][0]["operator"]["qq"] == "12", "membership operator is retained", kTestName);
+            check((*membership)["segments"][0]["operator"]["user_id"] == "12", "membership operator is retained", kTestName);
         }
     }
 
@@ -247,7 +247,7 @@ namespace {
         config.selfQQNumber = 42;
 
         const insoulforge::json groupCommand = {{"session_id", 100},
-          {"segments", {{{"type", "at"}, {"target", {{"qq", "42"}}}}, {{"type", "text"}, {"text", " /status"}}}}};
+          {"segments", {{{"type", "at"}, {"target", {{"user_id", "42"}}}}, {{"type", "text"}, {"text", " /status"}}}}};
         check(insoulforge::CommandProcessor::isCommand(groupCommand), "bot mention enables group command", kTestName);
 
         const insoulforge::json groupMessage = {
@@ -387,14 +387,14 @@ namespace {
     void testMessageRecordSemanticQueries() {
         constexpr std::string_view kTestName = "message record semantic queries";
         const insoulforge::json modernMention = {
-          {"sender", {{"qq", "self"}}},
+          {"sender", {{"user_id", "self"}}},
           {"segments", insoulforge::json::array(
-                         {{{"type", "at"}, {"target", {{"qq", "42"}}}}, {{"type", "text"}, {"text", "hello"}}})},
+                         {{{"type", "at"}, {"target", {{"user_id", "42"}}}}, {{"type", "text"}, {"text", "hello"}}})},
         };
         const insoulforge::json legacyMention = {
-          {"sender", {{"qq", std::to_string(insoulforge::SessionId::kSystemAccountId)}}},
+          {"sender", {{"user_id", std::to_string(insoulforge::SessionId::kSystemAccountId)}}},
           {"text", "legacy text"},
-          {"segments", insoulforge::json::array({{{"type", "at"}, {"qq", "42"}}})},
+          {"segments", insoulforge::json::array({{{"type", "at"}, {"user_id", "42"}}})},
         };
 
         check(insoulforge::MessageRecord::extractText(modernMention) == "hello", "extracts ordered text segments",
@@ -421,9 +421,9 @@ namespace {
         config.selfQQNumber = 42;
 
         const insoulforge::json mentionSnapshot =
-          insoulforge::json::array({{{"message_id", "mention"}, {"sender", {{"qq", "11"}}},
+          insoulforge::json::array({{{"message_id", "mention"}, {"sender", {{"user_id", "11"}}},
             {"segments", insoulforge::json::array(
-                           {{{"type", "at"}, {"target", {{"qq", "42"}}}}, {{"type", "text"}, {"text", "在吗"}}})}}});
+                           {{{"type", "at"}, {"target", {{"user_id", "42"}}}}, {{"type", "text"}, {"text", "在吗"}}})}}});
         const auto mention = drogon::sync_wait(insoulforge::MessageRouter::route(100, "mention", mentionSnapshot));
         check(mention.shouldReply, "bot mention replies without LLM", kTestName);
         check(mention.isPriority, "bot mention is priority", kTestName);
@@ -431,7 +431,7 @@ namespace {
 
         auto assistantAfterMention = mentionSnapshot;
         assistantAfterMention.push_back(
-          {{"message_id", "assistant"}, {"sender", {{"qq", "self"}}}, {"segments", insoulforge::json::array()}});
+          {{"message_id", "assistant"}, {"sender", {{"user_id", "self"}}}, {"segments", insoulforge::json::array()}});
         const auto queuedMention =
           drogon::sync_wait(insoulforge::MessageRouter::route(100, "mention", assistantAfterMention));
         check(queuedMention.shouldReply, "queued bot mention replies despite trailing assistant message", kTestName);
@@ -472,14 +472,14 @@ namespace {
         config.router = {};
 
         const insoulforge::json plainSnapshot =
-          insoulforge::json::array({{{"message_id", "plain"}, {"sender", {{"qq", "11"}}},
+          insoulforge::json::array({{{"message_id", "plain"}, {"sender", {{"user_id", "11"}}},
             {"segments", insoulforge::json::array({{{"type", "text"}, {"text", "今天天气的大家都在干什么"}}})}}});
         const auto fallback = drogon::sync_wait(insoulforge::MessageRouter::route(100, "plain", plainSnapshot));
         check(fallback.shouldReply, "unconfigured jev falls back to existing fail-open path", kTestName);
         check(fallback.reason == "Router 请求失败", "fallback reason is unchanged", kTestName);
 
         const insoulforge::json shortSnapshot = insoulforge::json::array({{{"message_id", "short"},
-          {"sender", {{"qq", "11"}}}, {"segments", insoulforge::json::array({{{"type", "text"}, {"text", "嗯"}}})}}});
+          {"sender", {{"user_id", "11"}}}, {"segments", insoulforge::json::array({{{"type", "text"}, {"text", "嗯"}}})}}});
         const auto shortMessage = drogon::sync_wait(insoulforge::MessageRouter::route(100, "short", shortSnapshot));
         check(shortMessage.shouldReply && shortMessage.reason == "Router 请求失败",
           "single-character message reaches the same routing fallback as ordinary text", kTestName);
@@ -586,7 +586,7 @@ namespace {
         constexpr std::string_view kTestName = "message record projection";
         const insoulforge::json record = {
           {"time", "2026-09-07 17:22:05"},
-          {"sender", {{"name", "Alice"}, {"qq", "11"}}},
+          {"sender", {{"name", "Alice"}, {"user_id", "11"}}},
           {"message_id", "7"},
           {"reply_to", "6"},
           {"segments", {{{"type", "text"}, {"text", "看这张图"}}, {{"type", "image"}, {"image_index", 0}}}},
@@ -650,6 +650,33 @@ namespace {
         check(!record.dump().contains("base64://"), "record excludes image transport data", kTestName);
     }
 
+    void restoreLegacyIdentityColumns(sqlite3 *db) {
+        bool legacy = false;
+        {
+            const insoulforge::Statement version(db, "PRAGMA user_version");
+            legacy = version.step() && version.getInt64(0) < 25;
+        }
+        if (legacy) {
+            for (const auto *table: {"admins", "blacklisted_users", "person_affinity", "person_memories",
+                   "person_memory_entries"}) {
+                bool needsRename = false;
+                {
+                    const insoulforge::Statement column(db,
+                      fmt::format("SELECT name FROM pragma_table_info('{}') WHERE name='user_id'", table));
+                    needsRename = column.step();
+                }
+                if (needsRename)
+                    insoulforge::Statement(db,
+                      fmt::format("ALTER TABLE {} RENAME COLUMN user_id TO qq_number", table)).execOrThrow();
+            }
+        }
+    }
+
+    void migrateTestSchema(sqlite3 *db) {
+        restoreLegacyIdentityColumns(db);
+        insoulforge::SchemaMigrator::migrate(db);
+    }
+
     void testSchemaMigration() {
         constexpr std::string_view kTestName = "schema migration";
         sqlite3 *db = nullptr;
@@ -671,7 +698,7 @@ namespace {
         sqlite3_exec(db,
           "INSERT INTO custom_tools (id, name, description, executor_type) VALUES (7, 'old_tool', 'old', 'python')",
           nullptr, nullptr, nullptr);
-        insoulforge::SchemaMigrator::migrate(db);
+        migrateTestSchema(db);
         sqlite3_stmt *stmt = nullptr;
         const i32 prepareResult =
           sqlite3_prepare_v2(db, "SELECT sampled_frame_count FROM image_description_cache LIMIT 1", -1, &stmt, nullptr);
@@ -688,7 +715,7 @@ namespace {
         check(sqlite3_prepare_v2(db, "SELECT * FROM custom_tools", -1, &stmt, nullptr) != SQLITE_OK,
           "migration removes legacy tool storage", kTestName);
         sqlite3_finalize(stmt);
-        insoulforge::SchemaMigrator::migrate(db);
+        migrateTestSchema(db);
         check(sqlite3_prepare_v2(db, "SELECT value FROM settings WHERE key='custom_tool_python'", -1, &stmt, nullptr) ==
                   SQLITE_OK &&
                 sqlite3_step(stmt) == SQLITE_DONE,
@@ -699,7 +726,7 @@ namespace {
           "upgrade preserves unrelated settings", kTestName);
         sqlite3_finalize(stmt);
         sqlite3_exec(db, "CREATE TABLE custom_tools(id INTEGER); PRAGMA user_version=12", nullptr, nullptr, nullptr);
-        insoulforge::SchemaMigrator::migrate(db);
+        migrateTestSchema(db);
         check(sqlite3_prepare_v2(db, "SELECT * FROM custom_tools", -1, &stmt, nullptr) != SQLITE_OK,
           "v12 upgrade removes legacy table", kTestName);
         sqlite3_finalize(stmt);
@@ -707,39 +734,39 @@ namespace {
                 "ALTER TABLE person_memories RENAME COLUMN profile TO stable_memory;"
                 "ALTER TABLE person_memories DROP COLUMN relationship;"
                 "INSERT INTO person_memories VALUES(42, '[\"旧偏好\"]', '[\"旧互动\"]');"
-                "INSERT INTO person_memory_entries(qq_number,source_session,content) VALUES(42,100,'新材料');"
+                "INSERT INTO person_memory_entries(user_id,source_session,content) VALUES(42,100,'新材料');"
                 "INSERT INTO person_affinity VALUES(42,7);"
                 "INSERT INTO person_memory_daily_state VALUES(1,'2026-10-23','');"
                 "PRAGMA user_version=22", nullptr, nullptr, nullptr) == SQLITE_OK,
           "creates populated v22 person fixture", kTestName);
-        insoulforge::SchemaMigrator::migrate(db);
-        insoulforge::SchemaMigrator::migrate(db);
+        migrateTestSchema(db);
+        migrateTestSchema(db);
         {
             const insoulforge::Statement person(db,
               "SELECT p.profile,p.relationship,p.recent_interactions,e.content,a.affinity,s.completed_day "
-              "FROM person_memories p JOIN person_memory_entries e USING(qq_number) "
-              "JOIN person_affinity a USING(qq_number) JOIN person_memory_daily_state s ON s.id=1 WHERE p.qq_number=42");
+              "FROM person_memories p JOIN person_memory_entries e USING(user_id) "
+              "JOIN person_affinity a USING(user_id) JOIN person_memory_daily_state s ON s.id=1 WHERE p.user_id=42");
             check(person.step() && person.getText(0) == "[]" && person.getText(1) == "[]" &&
                     person.getText(2) == "[]" && person.getText(3) == "新材料" &&
                     person.getInt(4) == 7 && person.getText(5) == "2026-10-23",
               "v22 upgrade clears old categories and preserves existing entries, affinity and checkpoint", kTestName);
             const insoulforge::Statement migrated(db,
               "SELECT COUNT(*), SUM(source_session=0 AND content IN ('旧偏好','旧互动')) "
-              "FROM person_memory_entries WHERE qq_number=42");
+              "FROM person_memory_entries WHERE user_id=42");
             check(migrated.step() && migrated.getInt(0) == 3 && migrated.getInt(1) == 2,
               "old memory text moves to pending once without duplication", kTestName);
         }
         check(sqlite3_exec(db,
                 "INSERT INTO person_memories VALUES(43,'[\"档案原文\"]','[\"互动原文\"]','[\"关系原文\"]');"
-                "INSERT INTO person_memories(qq_number) VALUES(44);"
-                "INSERT INTO person_memory_entries(qq_number,source_session,content,created_at) "
+                "INSERT INTO person_memories(user_id) VALUES(44);"
+                "INSERT INTO person_memory_entries(user_id,source_session,content,created_at) "
                 "VALUES(43,200,'已有条目','2026-10-20 01:02:03');"
                 "CREATE TRIGGER reject_history_migration BEFORE INSERT ON person_memory_entries "
                 "WHEN NEW.content='关系原文' BEGIN SELECT RAISE(ABORT,'test'); END;"
                 "PRAGMA user_version=23", nullptr, nullptr, nullptr) == SQLITE_OK,
           "creates populated v23 migration failure fixture", kTestName);
         bool migrationFailed = false;
-        try { insoulforge::SchemaMigrator::migrate(db); }
+        try { migrateTestSchema(db); }
         catch (const insoulforge::DbError &) { migrationFailed = true; }
         {
             const insoulforge::Statement original(db,
@@ -752,16 +779,16 @@ namespace {
               "migration insert failure rolls back all enqueues and preserves old categories", kTestName);
         }
         sqlite3_exec(db, "DROP TRIGGER reject_history_migration", nullptr, nullptr, nullptr);
-        insoulforge::SchemaMigrator::migrate(db);
-        insoulforge::SchemaMigrator::migrate(db);
+        migrateTestSchema(db);
+        migrateTestSchema(db);
         {
             const insoulforge::Statement migrated(db,
               "SELECT COUNT(*), SUM(source_session=0 AND content IN ('档案原文','关系原文','互动原文')),"
               "SUM(source_session=200 AND content='已有条目' AND created_at='2026-10-20 01:02:03') "
-              "FROM person_memory_entries WHERE qq_number=43");
+              "FROM person_memory_entries WHERE user_id=43");
             check(migrated.step() && migrated.getInt(0) == 4 && migrated.getInt(1) == 3 && migrated.getInt(2) == 1,
               "v23 upgrade moves all categories once and preserves existing pending metadata", kTestName);
-            const insoulforge::Statement empty(db, "SELECT COUNT(*) FROM person_memory_entries WHERE qq_number=44");
+            const insoulforge::Statement empty(db, "SELECT COUNT(*) FROM person_memory_entries WHERE user_id=44");
             check(empty.step() && empty.getInt(0) == 0, "empty old categories create no pending entries", kTestName);
         }
         sqlite3_close(db);
@@ -1359,7 +1386,7 @@ namespace {
         insoulforge::MemoryMaintenanceStore::apply(
           database, 100, {.shortTerm = "近期状态", .longTerm = {longTerm},
             .personEntries = {{11, "喜欢 C++"}}, .affinity = {{11, 3}}});
-        const auto personSenders = insoulforge::json::array({{{"sender", {{"qq", "11"}}}}});
+        const auto personSenders = insoulforge::json::array({{{"sender", {{"user_id", "11"}}}}});
         const auto initialProfiles = insoulforge::PersonMemoryStore::getForSenders(personSenders);
         const auto resultsPreserved = [&]() -> bool {
             return insoulforge::MemoryStore::getShortTermMemory(100) == "近期状态" &&
@@ -1410,7 +1437,7 @@ namespace {
                 "PRAGMA user_version = 17",
                 nullptr, nullptr, nullptr) == SQLITE_OK,
           "creates v17 queues", kTestName);
-        insoulforge::SchemaMigrator::migrate(database.handle());
+        migrateTestSchema(database.handle());
         check(noTaskTables() && resultsPreserved(), "upgrade removes old tasks but preserves results", kTestName);
         insoulforge::MemoryMaintenanceStore::apply(database, 200, {.longTerm = {longTerm}});
         const auto oldEntries = insoulforge::LongTermMemoryStore::listMemories(200, 1, 0);
@@ -1432,6 +1459,62 @@ namespace {
         database.close();
     }
 
+    void testUserIdMigration() {
+        constexpr std::string_view kTestName = "user identity migration";
+        using namespace insoulforge;
+        auto &db = Database::instance();
+        check(db.initialize(":memory:").has_value(), "initializes fixture", kTestName);
+        const auto record = json::parse(R"({
+          "sender": {"qq": "9007199254740993", "name": "Alice"},
+          "segments": [
+            {"type": "at", "target": {"qq": "42"}},
+            {"type": "member_event", "operator": {"qq": "43"}},
+            {"type": "text", "text": "qq [CQ:at,qq=42]"}
+          ],
+          "tool_history": [{"arguments": {"qq": "custom tool parameter"}}]
+        })");
+        ChatRecordStore::addChatRecord(100, "user", dumpJson(record));
+        MemoryStore::updateShortTermMemory(100,
+          R"({"aliases":[{"qq":"9007199254740993","names":["老王"]}],"conversation_summaries":[]})");
+        AdminStore::addAdmin(9007199254740993ULL);
+        AffinityStore::adjustAffinity(42, 7);
+        check(sqlite3_exec(db.handle(), "PRAGMA user_version=24", nullptr, nullptr, nullptr) == SQLITE_OK,
+          "marks legacy version", kTestName);
+        restoreLegacyIdentityColumns(db.handle());
+        check(sqlite3_exec(db.handle(),
+                "CREATE TRIGGER reject_identity_migration BEFORE UPDATE ON chat_records "
+                "BEGIN SELECT RAISE(ABORT,'test'); END", nullptr, nullptr, nullptr) == SQLITE_OK,
+          "installs migration failure fixture", kTestName);
+        bool failed = false;
+        try { SchemaMigrator::migrate(db.handle()); }
+        catch (const DbError &) { failed = true; }
+        {
+            const Statement score(db.handle(), "SELECT affinity FROM person_affinity WHERE qq_number=42");
+            check(failed && score.step() && score.getInt(0) == 7 &&
+                    json::parse(ChatRecordStore::getChatRecords(100, 1)[0]["content"].get<std::string>()) == record,
+              "failed conversion rolls back both schema and records", kTestName);
+        }
+        check(sqlite3_exec(db.handle(), "DROP TRIGGER reject_identity_migration", nullptr, nullptr, nullptr) == SQLITE_OK,
+          "removes failure fixture", kTestName);
+        SchemaMigrator::migrate(db.handle());
+        const auto migrated = json::parse(ChatRecordStore::getChatRecords(100, 1)[0]["content"].get<std::string>());
+        check(migrated["sender"]["user_id"] == "9007199254740993" && !migrated["sender"].contains("qq") &&
+                migrated["segments"][0]["target"]["user_id"] == "42" &&
+                migrated["segments"][1]["operator"]["user_id"] == "43",
+          "migrates sender, target and operator without losing integer precision", kTestName);
+        check(migrated["segments"][2]["text"] == record["segments"][2]["text"] &&
+                migrated["tool_history"] == record["tool_history"],
+          "does not rewrite text, CQ codes or custom tool arguments", kTestName);
+        check(MemoryStore::projectShortTermMemory(MemoryStore::getShortTermMemory(100))["aliases"][0]["user_id"] ==
+                "9007199254740993" && AdminStore::isAdmin(9007199254740993ULL) &&
+                AffinityStore::getAffinityMap().at(42) == 7,
+          "preserves aliases, administrators and affinity", kTestName);
+        SchemaMigrator::migrate(db.handle());
+        check(json::parse(ChatRecordStore::getChatRecords(100, 1)[0]["content"].get<std::string>()) == migrated,
+          "repeated migration is idempotent", kTestName);
+        db.close();
+    }
+
     void testGlobalPersonMemory() {
         constexpr std::string_view kTestName = "global person memory";
         using namespace insoulforge;
@@ -1446,21 +1529,21 @@ namespace {
                 "INSERT INTO group_affinity VALUES(100,11,10),(200,11,11),(100,22,-3),(200,22,-4),(100,33,120);"
                 "PRAGMA user_version = 20", nullptr, nullptr, nullptr) == SQLITE_OK,
           "creates old per-session scores", kTestName);
-        SchemaMigrator::migrate(db.handle());
+        migrateTestSchema(db.handle());
         const auto scores = AffinityStore::getAffinityMap();
         check(scores.at(11) == 11 && scores.at(22) == -4 && scores.at(33) == 100,
           "migration averages existing rows, rounds halves away from zero and clamps", kTestName);
         AffinityStore::adjustAffinity(11, 2);
-        SchemaMigrator::migrate(db.handle());
+        migrateTestSchema(db.handle());
         check(AffinityStore::getAffinityMap().at(11) == 13, "migration does not reapply old scores", kTestName);
         const auto privateId = SessionId::fromPrivateUser(11);
         MemoryMaintenanceStore::apply(db, 100, {.personEntries = {{11, "喜欢摄影"}, {22, "喜欢编程"}}});
         MemoryMaintenanceStore::apply(db, privateId, {.personEntries = {{11, "准备比赛"}}, .affinity = {{11, -1}}});
-        const auto senders = json::array({{{"sender", {{"qq", "11"}}}}, {{"sender", {{"qq", "11"}}}},
-          {{"sender", {{"qq", "self"}}}}, {{"sender", {{"qq", std::to_string(SessionId::kSystemAccountId)}}}},
-          {{"sender", {{"qq", "33"}}}}, {{"segments", {{{"type", "at"}, {"target", {{"qq", "22"}}}}}}}});
+        const auto senders = json::array({{{"sender", {{"user_id", "11"}}}}, {{"sender", {{"user_id", "11"}}}},
+          {{"sender", {{"user_id", "self"}}}}, {{"sender", {{"user_id", std::to_string(SessionId::kSystemAccountId)}}}},
+          {{"sender", {{"user_id", "33"}}}}, {{"segments", {{{"type", "at"}, {"target", {{"user_id", "22"}}}}}}}});
         const auto profiles = PersonMemoryStore::getForSenders(senders);
-        check(profiles.size() == 1 && profiles[0]["qq"] == "11" && profiles[0]["pending_entries"].size() == 2 &&
+        check(profiles.size() == 1 && profiles[0]["user_id"] == "11" && profiles[0]["pending_entries"].size() == 2 &&
                 profiles[0]["pending_entries"][1]["source_session"] == std::to_string(privateId) &&
                 AffinityStore::getAffinityMap().at(11) == 12,
           "deduplicates recent senders, excludes mentions and missing profiles, shares private entries globally", kTestName);
@@ -1487,12 +1570,12 @@ namespace {
         const AdminController controller;
         auto response = drogon::HttpResponsePtr{};
         const auto callback = [&](const drogon::HttpResponsePtr &value) { response = value; };
-        for (const u64 qq: {11, 22, 33, 44})
-            QQNameDirectory::recordName(qq, "Known " + std::to_string(qq));
+        for (const u64 user_id: {11, 22, 33, 44})
+            QQNameDirectory::recordName(user_id, "Known " + std::to_string(user_id));
         drogon::sync_wait(controller.getPeople(drogon::HttpRequest::newHttpRequest(), callback));
         check(json::parse(response->body()).size() == 4, "people API returns all profiles", kTestName);
         drogon::sync_wait(controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, "11"));
-        check(json::parse(response->body())["qq"] == "11", "person API returns string identity", kTestName);
+        check(json::parse(response->body())["user_id"] == "11", "person API returns string identity", kTestName);
         drogon::sync_wait(controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, "invalid"));
         check(json::parse(response->body()).contains("error"), "person API rejects invalid identities", kTestName);
         std::thread first([] { for (int index = 0; index < 50; ++index) AffinityStore::adjustAffinity(77, 1); });
@@ -1541,9 +1624,9 @@ namespace {
         check(db.initialize(":memory:").has_value(), "initializes database", kTestName);
         check(sqlite3_exec(db.handle(), "DROP TABLE person_memory_daily_state; PRAGMA user_version = 21",
                 nullptr, nullptr, nullptr) == SQLITE_OK, "creates v21 upgrade fixture", kTestName);
-        SchemaMigrator::migrate(db.handle());
+        migrateTestSchema(db.handle());
         PersonMemoryStore::saveDailyState({"2026-10-19", "2026-10-20"});
-        SchemaMigrator::migrate(db.handle());
+        migrateTestSchema(db.handle());
         const auto state = PersonMemoryStore::dailyState();
         check(state.completedDay == "2026-10-19" && state.runningDay == "2026-10-20",
           "v22 migration and repeated migration preserve daily checkpoint", kTestName);
@@ -1631,7 +1714,7 @@ namespace {
         check(conflict && PersonMemoryStore::getPerson(33)["relationship"] == edited["relationship"],
           "manual consolidation checks relationship even without pending entries", kTestName);
         const auto context = PersonMemoryStore::getForSenders(
-          json::array({{{"sender", {{"qq", "33"}}}}}));
+          json::array({{{"sender", {{"user_id", "33"}}}}}));
         check(context.size() == 1 && context[0]["relationship"] == edited["relationship"] &&
                 !context[0].contains("stable_memory"), "context exposes new profile and relationship fields", kTestName);
         const AdminController controller;
@@ -1696,8 +1779,8 @@ namespace {
         using namespace insoulforge;
         auto &db = Database::instance();
         check(db.initialize(":memory:").has_value(), "initializes database", kTestName);
-        const json input = {{"aliases", {{{"qq", "11"}, {"names", {" 老王 ", "老王"}}},
-          {{"qq", "11"}, {"names", {"摄影佬"}}}}}, {"recent_events", {" 联机待定 ", "联机待定"}}};
+        const json input = {{"aliases", {{{"user_id", "11"}, {"names", {" 老王 ", "老王"}}},
+          {{"user_id", "11"}, {"names", {"摄影佬"}}}}}, {"recent_events", {" 联机待定 ", "联机待定"}}};
         const auto normalized = MemoryStore::normalizeSessionMemory(input);
         check(normalized && (*normalized)["aliases"].size() == 1 &&
                 (*normalized)["aliases"][0]["names"] == json::array({"老王", "摄影佬"}) &&
@@ -1718,7 +1801,7 @@ namespace {
         check(!MemoryStore::normalizeSessionMemory(legacyInput), "rejects malformed legacy entries", kTestName);
         for (const auto &invalid: json::array({nullptr, json::array(),
                json{{"aliases", json::array()}, {"recent_events", "wrong"}},
-               json{{"aliases", {{{"qq", "self"}, {"names", {"bot"}}}}}, {"recent_events", json::array()}},
+               json{{"aliases", {{{"user_id", "self"}, {"names", {"bot"}}}}}, {"recent_events", json::array()}},
                json{{"aliases", json::array()}, {"recent_events", {42}}}})) {
             check(!MemoryStore::normalizeSessionMemory(invalid), "rejects malformed structure", kTestName);
         }
@@ -1760,7 +1843,7 @@ namespace {
               "invalid manual JSON preserves saved memory", kTestName);
         }
         check(MemoryStore::getShortTermMemory(200).empty() && PersonMemoryStore::getForSenders(
-                json::array({{{"sender", {{"qq", "11"}}}}})).empty() && AffinityStore::getAffinityMap().empty(),
+                json::array({{{"sender", {{"user_id", "11"}}}}})).empty() && AffinityStore::getAffinityMap().empty(),
           "session editing does not modify other sessions or global state", kTestName);
         db.close();
     }
@@ -2131,7 +2214,7 @@ namespace {
         insoulforge::SessionStore::enableSession(100);
         check(
           insoulforge::SessionStore::getSessionConfig(100).sendGroupCard, "enable cycle preserves setting", kTestName);
-        auto command = insoulforge::json{{"session_id", 100}, {"sender", {{"qq", "11"}}},
+        auto command = insoulforge::json{{"session_id", 100}, {"sender", {{"user_id", "11"}}},
           {"segments", insoulforge::json::array({{{"type", "text"}, {"text", "/groupcard off"}}})}};
         drogon::sync_wait(insoulforge::CommandProcessor::execute(command));
         check(
@@ -2154,7 +2237,7 @@ namespace {
           "restores old schema", kTestName);
         check(sqlite3_exec(db.handle(), "PRAGMA user_version = 14", nullptr, nullptr, nullptr) == SQLITE_OK,
           "sets old schema version", kTestName);
-        insoulforge::SchemaMigrator::migrate(db.handle());
+        migrateTestSchema(db.handle());
         check(!insoulforge::SessionStore::getSessionConfig(100).sendGroupCard &&
                 insoulforge::SessionStore::getSessionConfig(100).allMesCount == 2,
           "migration defaults off and preserves statistics", kTestName);
@@ -2187,7 +2270,7 @@ namespace {
         const auto originalRouter = config.router;
         config.selfQQNumber = 42;
         config.router = {};
-        auto message = insoulforge::json{{"message_id", "auto-test"}, {"sender", {{"qq", "11"}}},
+        auto message = insoulforge::json{{"message_id", "auto-test"}, {"sender", {{"user_id", "11"}}},
           {"segments", insoulforge::json::array({{{"type", "text"}, {"text", "ordinary group message"}}})}};
         const auto route = [&]() {
             return drogon::sync_wait(
@@ -2195,15 +2278,15 @@ namespace {
         };
         check(route().action == insoulforge::RouterDecision::Action::SKIP, "normal messages skip without model request",
           kTestName);
-        message["segments"].push_back({{"type", "at"}, {"target", {{"qq", "99"}}}});
+        message["segments"].push_back({{"type", "at"}, {"target", {{"user_id", "99"}}}});
         check(route().action == insoulforge::RouterDecision::Action::SKIP, "mentioning another user still skips",
           kTestName);
-        message["segments"].back()["target"]["qq"] = "42";
+        message["segments"].back()["target"]["user_id"] = "42";
         check(route().action == insoulforge::RouterDecision::Action::REPLY, "bot mention still replies", kTestName);
         message["segments"].erase(1);
-        message["sender"]["qq"] = std::to_string(insoulforge::SessionId::kSystemAccountId);
+        message["sender"]["user_id"] = std::to_string(insoulforge::SessionId::kSystemAccountId);
         check(route().action == insoulforge::RouterDecision::Action::REPLY, "system tasks still reply", kTestName);
-        message["sender"]["qq"] = "11";
+        message["sender"]["user_id"] = "11";
         const auto privateId = insoulforge::SessionId::fromPrivateUser(11);
         insoulforge::SessionStore::setAutoReply(privateId, false);
         check(drogon::sync_wait(
@@ -2213,7 +2296,7 @@ namespace {
         config.selfQQNumber = originalSelf;
         config.router = originalRouter;
 
-        auto command = insoulforge::json{{"session_id", 100}, {"sender", {{"qq", "11"}}},
+        auto command = insoulforge::json{{"session_id", 100}, {"sender", {{"user_id", "11"}}},
           {"segments", insoulforge::json::array({{{"type", "text"}, {"text", "/autoreply on"}}})}};
         drogon::sync_wait(insoulforge::CommandProcessor::execute(command));
         check(
@@ -2261,6 +2344,7 @@ namespace {
         check(sqlite3_exec(db.handle(), "ALTER TABLE group_config DROP COLUMN auto_reply; PRAGMA user_version = 15",
                 nullptr, nullptr, nullptr) == SQLITE_OK,
           "restores v15 schema", kTestName);
+        restoreLegacyIdentityColumns(db.handle());
         db.close();
         check(db.initialize(path.string()).has_value() && insoulforge::SessionStore::getSessionConfig(100).autoReply &&
                 insoulforge::SessionStore::getSessionConfig(100).sendGroupCard &&
@@ -2325,6 +2409,7 @@ namespace {
           sqlite3_exec(db.handle(), "ALTER TABLE group_config DROP COLUMN command_enabled; PRAGMA user_version = 18",
             nullptr, nullptr, nullptr) == SQLITE_OK,
           "restores v18 schema", kTestName);
+        restoreLegacyIdentityColumns(db.handle());
         db.close();
         check(db.initialize(path.string()).has_value(), "upgrades v18 schema", kTestName);
         saved = insoulforge::SessionStore::getSessionConfig(100);
@@ -2393,7 +2478,7 @@ namespace {
 
         insoulforge::MessageList list(100, db, insoulforge::Config::instance());
         const auto message = [](const std::string &time, const std::string &text) {
-            return json{{"time", time}, {"sender", {{"name", "test"}, {"qq", "11"}}},
+            return json{{"time", time}, {"sender", {{"name", "test"}, {"user_id", "11"}}},
               {"message_id", "123"}, {"reply_to", {{"message_id", "122"}}},
               {"segments", json::array({{{"type", "text"}, {"text", text}}})}};
         };
@@ -2446,7 +2531,7 @@ namespace {
         check(cut && (*cut)["truncated"] == true &&
                 (*cut)["segments"][0]["text"] == std::string(199, 'a') + "😀",
           "truncation preserves four-byte Unicode characters", kTestName);
-        exact["sender"]["qq"] = std::to_string(insoulforge::SessionId::kSystemAccountId);
+        exact["sender"]["user_id"] = std::to_string(insoulforge::SessionId::kSystemAccountId);
         check(!insoulforge::SharedConversationContext::projectMessage(exact),
           "internal system messages are not shared", kTestName);
         db.close();
@@ -2457,6 +2542,7 @@ namespace {
                 "ALTER TABLE group_config DROP COLUMN cross_session_sharing; PRAGMA user_version = 19",
                 nullptr, nullptr, nullptr) == SQLITE_OK,
           "restores v19 schema", kTestName);
+        restoreLegacyIdentityColumns(db.handle());
         db.close();
         check(db.initialize(path.string()).has_value(), "migrates v19", kTestName);
         config = insoulforge::SessionStore::getSessionConfig(100);
@@ -2535,6 +2621,7 @@ namespace {
           sqlite3_exec(db.handle(), "ALTER TABLE group_config DROP COLUMN additional_prompt; PRAGMA user_version = 16",
             nullptr, nullptr, nullptr) == SQLITE_OK,
           "restores v16 schema", kTestName);
+        restoreLegacyIdentityColumns(db.handle());
         db.close();
         check(db.initialize(path.string()).has_value() &&
                 insoulforge::SessionStore::getSessionConfig(100).additionalPrompt.empty() &&
@@ -2759,7 +2846,7 @@ namespace {
         check(insoulforge::MessageRecord::projectForAgent(sent, true)["tool_history"] == history &&
                 insoulforge::MessageRecord::extractText(sent) == "最终回复",
           "sent messages carry history without changing outgoing text", kTestName);
-        sent["sender"]["qq"] = "11";
+        sent["sender"]["user_id"] = "11";
         check(!insoulforge::MessageRecord::projectForAgent(sent, true).contains("tool_history"),
           "user records cannot claim assistant tool history", kTestName);
 
@@ -2913,7 +3000,7 @@ namespace {
         using insoulforge::json;
         static_assert(std::is_same_v<decltype(std::declval<const ChatRecordManager &>().getRecords()), const json &>);
         auto messages = json::array({"legacy text",
-          {{"message_id", "1"}, {"sender", {{"qq", "11"}}},
+          {{"message_id", "1"}, {"sender", {{"user_id", "11"}}},
             {"segments", {{{"type", "text"}, {"text", "original"}}}}}});
         const auto expected = messages;
         const ChatRecordManager copied(100, messages);
@@ -2933,8 +3020,8 @@ namespace {
         constexpr std::string_view kTestName = "atomic message snapshot replacement";
         auto &database = insoulforge::Database::instance();
         check(database.initialize(":memory:").has_value(), "initializes database", kTestName);
-        const auto makeMessage = [](const char *id, const char *qq) -> insoulforge::json {
-            return {{"message_id", id}, {"sender", {{"qq", qq}}},
+        const auto makeMessage = [](const char *id, const char *user_id) -> insoulforge::json {
+            return {{"message_id", id}, {"sender", {{"user_id", user_id}}},
               {"segments", {{{"type", "text"}, {"text", id}}}}};
         };
         const auto oldMessages = insoulforge::json::array({makeMessage("old", "11")});
@@ -3003,7 +3090,7 @@ namespace {
         const auto makeMessage = [](const i32 id) -> insoulforge::json {
             insoulforge::json message;
             message["message_id"] = std::to_string(id);
-            message["sender"] = {{"qq", "11"}, {"name", "Alice"}};
+            message["sender"] = {{"user_id", "11"}, {"name", "Alice"}};
             message["segments"] = {{{"type", "text"}, {"text", "message " + std::to_string(id)}}};
             message["assets"]["images"] = {{{"source", {{"url", "https://example.com/image.jpg"}}}}};
             return message;
@@ -3135,7 +3222,7 @@ namespace {
         });
         check(shared.size() == 2 && sharedGroup != shared.end() && sharedPrivate != shared.end() &&
                 (*sharedGroup)["session"]["group_id"] == 556 && (*sharedGroup)["messages"].size() == 1 &&
-                (*sharedPrivate)["session"]["qq"] == "42",
+                (*sharedPrivate)["session"]["user_id"] == "42",
           "context groups live group and private messages with explicit source identity", kTestName);
         insoulforge::SessionStore::setCrossSessionSharing(555, false);
         check(insoulforge::SharedConversationContext::build(555, 10).empty() && shared.size() == 2,
@@ -3210,6 +3297,7 @@ auto main() -> int {
     testQzoneToolValidation();
     testBuiltinToolConfig();
     testMemoryMaintenanceStore();
+    testUserIdMigration();
     testGlobalPersonMemory();
     testPersonConsolidationStore();
     testSessionShortTermMemory();

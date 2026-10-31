@@ -45,10 +45,10 @@ const text = computed(() => {
         return getString(item.text)
       case 'at': {
         const target = getRecord(item.target)
-        if (getString(target?.kind) === 'all' || getString(item.qq) === '0') return '@全体成员'
+        if (getString(target?.kind) === 'all' || getString(item.user_id) === '0') return '@全体成员'
         const name = getString(target?.name) || getString(item.name)
-        const qq = getString(target?.qq) || getString(item.qq)
-        return name ? `@${name}` : qq ? `@${qq}` : '@成员'
+        const user_id = getString(target?.user_id) || getString(item.user_id)
+        return name ? `@${name}` : user_id ? `@${user_id}` : '@成员'
       }
       case 'image': {
         const description = imageDescription(value, item)

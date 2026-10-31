@@ -99,18 +99,18 @@ test('QQ validation rejects invalid notation and overflow without a request, the
   for (const value of ['', '1e9', '-42', '123.5', '18446744073709551616']) {
     state.newAdminQQ = value
     await state.addAdmin()
-    assert.ok(state.adminForm.errors.value['admin-qq'])
+    assert.ok(state.adminForm.errors.value['admin-user-id'])
   }
   assert.equal(submitted.length, 0)
-  assert.equal(focused.at(-1), 'admin-qq')
+  assert.equal(focused.at(-1), 'admin-user-id')
   state.newAdminQQ = ' 9007199254740993 '
   await state.addAdmin()
-  assert.equal(submitted[0].body.qq, '9007199254740993')
+  assert.equal(submitted[0].body.user_id, '9007199254740993')
   await state.removeAdmin('9007199254740993')
   assert.ok(submitted.at(-1).url.endsWith('/9007199254740993'))
   state.newBlacklistQQ = '18446744073709551615'
   await state.addBlacklistEntry()
-  assert.equal(submitted.at(-1).body.qq, '18446744073709551615')
+  assert.equal(submitted.at(-1).body.user_id, '18446744073709551615')
 })
 
 test('OneBot validates only the selected transport and saves the exact QQ string', async () => {

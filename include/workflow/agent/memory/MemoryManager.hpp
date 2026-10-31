@@ -21,6 +21,6 @@ namespace insoulforge {
         [[nodiscard]] auto getMemory() const -> std::string;
 
     private:
-        u64 m_sessionId; ///< 群号或带私聊标志位的用户 QQ 号
+        u64 m_sessionId; ///< 群号或带私聊标志位的用户 用户 ID
     };
 } // namespace insoulforge

@@ -256,7 +256,7 @@ namespace insoulforge {
         if (!normalizedMessage || MessageRecord::isAssistant(*normalizedMessage) || !m_dependencies->agent.isReady()) {
             return;
         }
-        if (BlacklistStore::contains(getUInt(atOrNull(*normalizedMessage, "sender"), "qq"))) {
+        if (BlacklistStore::contains(getUInt(atOrNull(*normalizedMessage, "sender"), "user_id"))) {
             return;
         }
         const auto sessionId = MessageRecord::getSessionId(*normalizedMessage);
