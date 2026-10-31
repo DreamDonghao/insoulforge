@@ -2,7 +2,7 @@
 
 export interface QQConfig {
     accessToken: string
-    selfQQNumber: number
+    selfQQNumber: string
     oneBotTransport: 'http' | 'websocket'
     qqHttpHost: string
     qqWebSocketHost: string
@@ -84,11 +84,11 @@ export interface Emoji {
 }
 
 export interface Admin {
-    qq: number
+    qq: string
 }
 
 export interface BlacklistEntry {
-    qq: number
+    qq: string
 }
 
 export interface Group {

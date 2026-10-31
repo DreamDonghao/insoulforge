@@ -3,11 +3,11 @@
  * @file UsageStats.vue
  * @brief 展示模型用量概览、角色分布、每日趋势和调用明细
  */
-import {computed, inject, onMounted, ref, type Ref} from 'vue'
+import {computed, onMounted, ref, type Ref} from 'vue'
+import RequestError from '../../components/RequestError.vue'
+import {requestError} from '../../utils/api'
 import {useAdminWebSocket} from '../../composables/useAdminWebSocket'
 import {useCoalescedRefresh} from '../../composables/useCoalescedRefresh'
-
-const showToast = inject<(msg: string, isError?: boolean) => void>('showToast')
 
 interface RoleUsage {
   role: string
@@ -35,6 +35,8 @@ interface RecentCall {
   cached: number
 }
 
+const loaded = ref(false)
+const loadError = ref('')
 const days: Ref<number> = ref(30)
 
 const totalCalls: Ref<number> = ref(0)
@@ -163,11 +165,13 @@ const {refresh: loadUsage, loading} = useCoalescedRefresh(async signal => {
     const resp = await fetch(`/admin/api/usage?days=${days.value}`, {signal})
     if (signal.aborted) return
     if (!resp.ok) {
-      showToast!('加载失败: ' + resp.status, true)
-      return
+      throw new Error(`HTTP ${resp.status}`)
     }
     const data = await resp.json()
     if (signal.aborted) return
+    if (!data || !Array.isArray(data.by_role) || !Array.isArray(data.by_day)) throw new Error('用量数据无效')
+    loaded.value = true
+    loadError.value = ''
     totalCalls.value = data.total_calls || 0
     totalTokens.value = data.total_tokens || 0
     byRole.value = data.by_role || []
@@ -175,8 +179,10 @@ const {refresh: loadUsage, loading} = useCoalescedRefresh(async signal => {
     recent.value = data.recent || []
     todayStats.value = data.today || {calls: 0, prompt: 0, completion: 0, total: 0, cached: 0}
     todayByRole.value = data.today_by_role || []
-  } catch {
-    if (!signal.aborted) showToast!('网络错误，请检查后端服务', true)
+  } catch (cause) {
+    if (!signal.aborted) {
+      loadError.value = requestError(cause, '用量加载失败')
+    }
   }
 })
 
@@ -198,6 +204,10 @@ onMounted(loadUsage)
       <p class="page-subtitle">LLM 调用量、Token 消耗与缓存命中情况</p>
     </div>
 
+    <RequestError :message="loadError" :busy="loading" :stale="loaded" @retry="loadUsage"/>
+    <p v-if="loading" role="status">{{ loaded ? '正在刷新用量…' : '正在加载用量…' }}</p>
+    <button v-if="!loaded && !loading && !loadError" class="btn btn-secondary" @click="loadUsage">加载用量</button>
+    <template v-if="loaded">
     <!-- ====== 概览卡片 ====== -->
     <div class="overview-grid">
       <!-- 今日调用 -->
@@ -238,7 +248,7 @@ onMounted(loadUsage)
         <h3 class="card-title">角色用量</h3>
         <div class="card-header-right">
           <span class="card-subtitle">今日 vs 近 {{ days }} 天</span>
-          <button :disabled="loading" class="btn btn-success btn-sm" @click="loadUsage">
+          <button :disabled="loading" class="btn btn-secondary btn-sm" @click="loadUsage">
             {{ loading ? '加载中...' : '刷新' }}
           </button>
         </div>
@@ -350,6 +360,7 @@ onMounted(loadUsage)
       </div>
       <div v-else class="empty-state"><p>暂无数据</p></div>
     </div>
+    </template>
   </div>
 </template>
 
@@ -519,7 +530,6 @@ onMounted(loadUsage)
   border-radius: 0;
   min-width: 2px;
   transition: width 0.3s ease;
-  opacity: 0.7;
 }
 
 .trend-bar-today {
@@ -570,4 +580,5 @@ onMounted(loadUsage)
   .overview-card { border: 0; padding: 16px 0; }
   .overview-card + .overview-card { border-top: 1px solid var(--border); }
 }
+@media (prefers-reduced-motion: reduce) { .trend-bar { transition: none; } }
 </style>

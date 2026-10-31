@@ -355,7 +355,7 @@ auto AdminController::getAdmins(HttpRequestPtr req, std::function<void(const Htt
     json result(json::array());
     for (const u64 qq: admins) {
         json admin;
-        admin["qq"] = qq;
+        admin["qq"] = std::to_string(qq);
         result.push_back(admin);
     }
     callback(jsonResponse(result));
@@ -370,7 +370,11 @@ auto AdminController::addAdmin(HttpRequestPtr req, std::function<void(const Http
         co_return;
     }
 
-    const u64 qq = jsonToUInt64((*body)["qq"]);
+    const auto qq = jsonToUInt64((*body)["qq"]);
+    if (qq == 0) {
+        callback(jsonResponse(AdminResponse::errorJson("缺少有效的 qq 字段")));
+        co_return;
+    }
     AdminStore::addAdmin(qq);
 
     callback(jsonResponse(AdminResponse::okJson("管理员已添加")));
@@ -390,7 +394,7 @@ auto AdminController::getBlacklist(HttpRequestPtr req, std::function<void(const 
   -> Task<> {
     json result = json::array();
     for (const u64 qq: BlacklistStore::getAll()) {
-        result.push_back({{"qq", qq}});
+        result.push_back({{"qq", std::to_string(qq)}});
     }
     callback(jsonResponse(result));
     co_return;
@@ -1061,7 +1065,8 @@ auto AdminController::saveMemoryConfig(HttpRequestPtr req, std::function<void(co
 
 auto AdminController::getQQConfig(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
   -> Task<> {
-    const auto config = Config::instance().getQQConfig();
+    auto config = Config::instance().getQQConfig();
+    config["selfQQNumber"] = std::to_string(config["selfQQNumber"].get<u64>());
     callback(jsonResponse(config));
     co_return;
 }

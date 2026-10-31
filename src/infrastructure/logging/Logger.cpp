@@ -16,6 +16,7 @@
 #include <admin/logging/LogWebSocketManager.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/logging/LogBuffer.hpp>
+#include <infrastructure/logging/LogRedaction.hpp>
 #include <infrastructure/logging/ConnectionRefusedLogFilter.hpp>
 #include <infrastructure/logging/Logger.hpp>
 
@@ -164,6 +165,8 @@ namespace insoulforge {
         if (!spdlog::default_logger()->should_log(spdlogLevel)) {
             return;
         }
+        // 在进入任何日志 sink 之前脱敏，避免凭据落盘或被后台订阅者读取。
+        content = redactAdminLogCredentials(std::move(content));
         std::string sourceName(source);
         if (sourceName.size() >= 2 && sourceName.front() == '[' && sourceName.back() == ']') {
             sourceName = sourceName.substr(1, sourceName.size() - 2);

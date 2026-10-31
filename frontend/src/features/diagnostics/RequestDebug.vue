@@ -4,6 +4,8 @@
  * @brief 请求调试 - 查看最近 HTTP 请求与响应（图片数据会被省略）
  */
 import {computed, inject, onMounted, onUnmounted, ref, shallowRef} from 'vue'
+import RequestError from '../../components/RequestError.vue'
+import {requestJson, requestError} from '../../utils/api'
 import type {HttpTraceEntry, HttpTraceListResult} from '../../vite-env.d'
 import {privateSessionUserId} from '../../utils/session'
 
@@ -12,10 +14,16 @@ const showToast = inject<(msg: string, isError?: boolean) => void>('showToast')
 const entries = shallowRef<HttpTraceEntry[]>([])
 const total = ref(0)
 const loading = ref(false)
+const loadError = ref('')
+const loaded = ref(false)
 const keyword = ref('')
 const autoRefresh = ref(true)
 const expandNestedJson = ref(true)
 const selected = shallowRef<HttpTraceEntry | null>(null)
+const clearing = ref(false)
+let disposed = false
+let controller: AbortController | undefined
+let loadVersion = 0
 let timer: number | undefined
 
 const sessionLabel = (groupId: string | null | undefined): string => {
@@ -143,11 +151,15 @@ const downloadTrace = async (id: number): Promise<void> => {
 }
 
 const load = async (): Promise<void> => {
-  if (loading.value) return
+  if (loading.value || clearing.value || disposed) return
+  const version = ++loadVersion
+  controller = new AbortController()
+  const signal = controller.signal
   loading.value = true
   try {
-    const resp = await fetch('/admin/api/http-traces?limit=100')
-    const data: HttpTraceListResult = await resp.json()
+    const data = await requestJson<HttpTraceListResult>('/admin/api/http-traces?limit=100', {signal})
+    if (disposed || version !== loadVersion) return
+    if (!Array.isArray(data.entries)) throw new Error('请求记录数据无效')
     const previous = new Map(entries.value.map(entry => [entry.id, entry]))
     entries.value = (data.entries || []).map(entry => {
       const old = previous.get(entry.id)
@@ -155,26 +167,39 @@ const load = async (): Promise<void> => {
           old[key as keyof HttpTraceEntry] === entry[key as keyof HttpTraceEntry]) ? old : entry
     })
     total.value = data.total || 0
+    loadError.value = ''
+    loaded.value = true
     // 保持选中项跟随最新数据
     if (selected.value) {
       selected.value = entries.value.find(e => e.id === selected.value!.id) ?? selected.value
     }
-  } catch {
-    showToast?.('请求记录加载失败', true)
+  } catch (cause) {
+    if (!disposed && version === loadVersion) loadError.value = requestError(cause, '请求记录加载失败')
   } finally {
-    loading.value = false
+    if (version === loadVersion) loading.value = false
   }
 }
 
 const clearAll = async (): Promise<void> => {
-  if (!window.confirm('确定清空所有请求记录？')) return
+  if (clearing.value || !window.confirm('确定清空所有请求记录？')) return
+  clearing.value = true
+  ++loadVersion
+  controller?.abort()
+  loading.value = false
   try {
-    await fetch('/admin/api/http-traces', {method: 'DELETE'})
+    const response = await fetch('/admin/api/http-traces', {method: 'DELETE'})
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    if (disposed) return
     selected.value = null
+    entries.value = []
+    total.value = 0
+    clearing.value = false
     await load()
     showToast?.('已清空')
   } catch {
-    showToast?.('清空失败', true)
+    if (!disposed) showToast?.('清空失败', true)
+  } finally {
+    clearing.value = false
   }
 }
 
@@ -185,7 +210,7 @@ onMounted(() => {
   }, 5000)
 })
 
-onUnmounted(() => window.clearInterval(timer))
+onUnmounted(() => { disposed = true; ++loadVersion; controller?.abort(); window.clearInterval(timer) })
 </script>
 
 <template>
@@ -198,7 +223,8 @@ onUnmounted(() => window.clearInterval(timer))
     </div>
 
     <div class="card toolbar">
-      <input v-model="keyword" class="form-input search" placeholder="筛选 URL / 标签 / 会话 ID">
+      <label for="request-filter" class="form-label">筛选请求记录</label>
+      <input id="request-filter" v-model="keyword" class="form-input search" placeholder="筛选 URL / 标签 / 会话 ID">
       <label class="auto-refresh">
         <input v-model="autoRefresh" type="checkbox"> 自动刷新(5s)
       </label>
@@ -206,33 +232,37 @@ onUnmounted(() => window.clearInterval(timer))
         <input v-model="expandNestedJson" type="checkbox"> 展开嵌套 JSON
       </label>
       <button :disabled="loading" class="btn btn-secondary" type="button" @click="load">刷新</button>
-      <button class="btn btn-danger" type="button" @click="clearAll">清空</button>
+      <button :disabled="clearing" class="btn btn-danger" type="button" @click="clearAll">{{ clearing ? '清空中…' : '清空' }}</button>
     </div>
 
     <div class="layout">
       <div class="card trace-list-card">
-        <div v-if="filtered.length === 0" class="empty">暂无请求记录</div>
-        <div
+        <RequestError :message="loadError" :busy="loading" :stale="loaded" @retry="load"/>
+        <p v-if="loading && !loaded" role="status">加载中…</p>
+        <div v-else-if="!loadError && filtered.length === 0" class="empty">暂无请求记录</div>
+        <button
             v-for="e in filtered"
             :key="e.id"
             :class="{ active: selected?.id === e.id }"
+            type="button"
+            :aria-pressed="selected?.id === e.id"
             class="trace-item"
             @click="selected = e"
         >
-          <div class="row1">
+          <span class="row1">
             <span class="tid">#{{ e.id }}</span>
             <span class="time">{{ e.timestamp }}</span>
             <span :class="['chip', statusClass(e.status)]">{{ statusText(e.status) }}</span>
-          </div>
-          <div class="row2">
+          </span>
+          <span class="row2">
             <span class="tag">{{ e.tag }}</span>
             <span class="method">{{ e.method }}</span>
             <span :title="shortUrl(e.url)" class="url">{{ shortUrl(e.url) }}</span>
-          </div>
-          <div class="row3">{{ sessionLabel(e.groupId) }} · 请求 {{ sizeOf(e.requestBody) }} / 响应
+          </span>
+          <span class="row3">{{ sessionLabel(e.groupId) }} · 请求 {{ sizeOf(e.requestBody) }} / 响应
             {{ sizeOf(e.responseBody) }} 字符
-          </div>
-        </div>
+          </span>
+        </button>
       </div>
 
       <div class="card detail-card">
@@ -341,11 +371,23 @@ onUnmounted(() => window.clearInterval(timer))
 }
 
 .trace-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
   flex-shrink: 0;
   padding: 14px 16px;
   border-radius: 0;
   cursor: pointer;
   border-bottom: 1px solid var(--border);
+}
+
+.trace-item:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
 }
 
 .trace-item:hover {
@@ -408,7 +450,7 @@ onUnmounted(() => window.clearInterval(timer))
 
 .tag {
   background: var(--primary-soft);
-  color: var(--primary-strong);
+  color: var(--primary);
   padding: 1px 8px;
   border-radius: 0;
   font-size: 12px;
@@ -432,6 +474,7 @@ onUnmounted(() => window.clearInterval(timer))
 }
 
 .row3 {
+  display: block;
   margin-top: 4px;
   font-size: 12px;
   color: var(--text-light);

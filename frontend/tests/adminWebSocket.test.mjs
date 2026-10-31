@@ -83,7 +83,7 @@ beforeEach(() => {
     }
   }
   globalThis.WebSocket = Socket
-  globalThis.window = {setInterval: () => 1, clearInterval() {}}
+  globalThis.window = {setInterval: () => 1, clearInterval() {}, addEventListener() {}, removeEventListener() {}, confirm: () => true}
   globalThis.document = {body: {style: {overflow: ''}}}
   globalThis.fetch = async path => {
     calls.push(path)
@@ -121,7 +121,7 @@ function controlUsageRequests() {
     return new Promise((resolve, reject) => requests.push({
       path, signal: options.signal,
       respond(value) { active--; resolve(value) },
-      complete(data) { this.respond(response(data)) },
+      complete(data) { this.respond(response({by_role: [], by_day: [], ...data})) },
       fail(error = new Error('network failed')) { active--; reject(error) }
     }))
   }
@@ -309,13 +309,14 @@ for (const page of ['overview/Dashboard', 'llm/UsageStats']) {
   })
 }
 
-test('usage HTTP errors keep their existing message and allow the queued refresh', async () => {
+test('usage HTTP errors show actionable feedback and allow the queued refresh', async () => {
   const {requests} = controlUsageRequests()
   const view = mount(loadModule(resolve(root, 'src/features/llm/UsageStats.vue')).default)
   const completion = view.state.loadUsage()
   requests[0].respond({ok: false, status: 503})
   await flush()
-  assert.deepEqual(toasts, [['加载失败: 503', true]])
+  assert.match(view.state.loadError, /用量加载失败.*503/)
+  assert.deepEqual(toasts, [])
   assert.equal(requests.length, 2)
   assert.equal(view.state.loading, true)
   requests[1].complete({today: {calls: 1}})
@@ -326,6 +327,53 @@ test('usage HTTP errors keep their existing message and allow the queued refresh
 
 const groupComponent = () => loadModule(resolve(root, 'src/features/conversation/GroupManager.vue')).default
 
+test('manual session creation preserves identifiers, supports private chats and keeps failed drafts', async () => {
+  const submitted = []
+  let pending
+  globalThis.fetch = async (path, options) => {
+    if (path === '/admin/api/groups') return response([])
+    submitted.push(JSON.parse(options.body))
+    return new Promise(resolve => { pending = resolve })
+  }
+  const view = mount(groupComponent())
+  await flush()
+  view.state.typeFilter = 'private'
+  view.state.openAddSession()
+  assert.equal(view.state.newSessionType, 'private')
+  view.state.newSessionId = 'invalid'
+  await view.state.addSession()
+  assert.equal(submitted.length, 0)
+  assert.match(view.state.sessionForm.errors.value['new-session-id'], /QQ/)
+
+  view.state.newSessionId = ' 9007199254740993 '
+  const first = view.state.addSession()
+  await view.state.addSession()
+  view.state.closeAddSession()
+  assert.equal(view.state.showAddSession, true)
+  assert.deepEqual(submitted, [{sessionType: 'private', userId: '9007199254740993'}])
+  pending({ok: false, json: async () => ({error: '添加失败'})})
+  await first
+  assert.equal(view.state.newSessionId, ' 9007199254740993 ')
+  assert.equal(view.state.addingSession, false)
+
+  const retry = view.state.addSession()
+  pending(response({success: true}))
+  await retry
+  assert.equal(view.state.showAddSession, false)
+  assert.equal(view.state.searchKeyword, '9007199254740993')
+  assert.equal(view.state.typeFilter, 'private')
+
+  view.state.typeFilter = 'group'
+  view.state.openAddSession()
+  assert.equal(view.state.newSessionType, 'group')
+  view.state.newSessionId = '123456'
+  const group = view.state.addSession()
+  pending(response({success: true}))
+  await group
+  assert.deepEqual(submitted.at(-1), {groupId: '123456'})
+  assert.equal(view.state.typeFilter, 'group')
+})
+
 test('conversation summaries handle empty data, failures and stale responses after switching sessions', async () => {
   const requests = []
   globalThis.fetch = path => path === '/admin/api/groups' ? Promise.resolve(response([]))
@@ -334,7 +382,6 @@ test('conversation summaries handle empty data, failures and stale responses aft
   await flush()
   const first = view.state.viewSummaries('123', 'Group')
   await flush()
-  assert.equal(document.body.style.overflow, 'hidden')
   view.state.closeSummaries()
   const second = view.state.viewSummaries('9223372036854775931', 'Private')
   assert.equal(requests[1].path, '/admin/api/memory/9223372036854775931')
@@ -357,7 +404,6 @@ test('conversation summaries handle empty data, failures and stale responses aft
   assert.equal(view.state.summariesError, '')
   view.state.closeSummaries()
   await flush()
-  assert.equal(document.body.style.overflow, '')
 })
 
 test('group counts use absolute statistics, preserve chat subscriptions and catch up on reconnect', async () => {

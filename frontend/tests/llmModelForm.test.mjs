@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import {readFileSync} from 'node:fs'
+import {resolve, dirname} from 'node:path'
+import {fileURLToPath} from 'node:url'
 import {test} from 'node:test'
 import {compileScript, compileTemplate, parse} from 'vue/compiler-sfc'
 import {renderToString} from 'vue/server-renderer'
@@ -16,15 +18,27 @@ const template = compileTemplate({source: descriptor.template.content, filename:
 assert.deepEqual(template.errors, [])
 const render = new Function('Vue', template.code)(vue)
 
+function loadDependency(name, base = fileURLToPath(new URL('../src/features/llm', import.meta.url))) {
+  if (name === 'vue') return {...vue, inject: () => () => {}, onMounted() {}, onBeforeUnmount() {}}
+  if (name.endsWith('.vue')) return {default: {render: () => null}}
+  const path = resolve(base, `${name}.ts`), module = {exports: {}}
+  const code = ts.transpileModule(readFileSync(path, 'utf8'), {
+    compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020}
+  }).outputText
+  new Function('require', 'module', 'exports', code)(child => loadDependency(child, dirname(path)), module, module.exports)
+  return module.exports
+}
+
 function form(name = 'imageGeneration', overrides = {}) {
   const requests = [], events = []
   const module = {exports: {}}
-  new Function('require', 'module', 'exports', 'fetch', outputText)(() => ({...vue, inject: () => () => {}}),
+  new Function('require', 'module', 'exports', 'fetch', outputText)(name => loadDependency(name),
     module, module.exports, async (url, options) => {
       requests.push({url, body: JSON.parse(options.body)})
       return {ok: true, json: async () => ({success: true})}
     })
   const props = vue.reactive({name, initialConfig: {
+    maxTokens: 1024, temperature: 0.7, topP: 1, timeoutSeconds: 90, maxRetries: 3, minConfidence: 0.6,
     apiKey: 'fixture', baseUrl: 'https://proxy.example.com/v1', path: '/images/generations',
     model: 'gpt-image-2.5-sunburst', apiType: 'openai', editPath: '/images/edits', ...overrides
   }})

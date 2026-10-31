@@ -108,6 +108,7 @@ cd frontend && npm run type-check
 - HTTP 服务监听 **7778** 端口，管理后台：`http://localhost:7778/index.html`
 - 数据目录 `data/` 与日志 `logs/bot.log` 在工作目录下生成；首次启动会自动创建全局配置文件 `data/config.json`
 - 控制台输入 `exit` 优雅退出
+- 控制台输入 `login-token` 再次输出当前后台登录令牌和链接，仅输出到服务终端，不写入应用日志
 
 注意：CMake 缓存位于 `cmake-build-*`，部署产物固定输出到仓库根目录的 `build/insoulforge/`。配置文件、数据库、日志和上传目录相对进程工作目录创建：
 从仓库根目录运行时使用根目录的 `data/`、`logs/`、`uploads/`；在 `build/insoulforge/` 中运行时则使用该目录下的同名目录。
@@ -552,6 +553,16 @@ Schema 中写清楚触发条件与边界。需要调整同类别展示位置时�
 
 新增后台接口时无需在 Controller 中重复校验 Cookie，但必须使用受保护的 `/admin/api/` 路径。若确实需要公开接口，应在
 `AdminAccessToken::checkRequestAccess` 的认证白名单中显式声明，并审查其是否会泄露配置或运行数据。
+
+### 管理表单与标识符
+
+前端表单交互遵循 [UI／UX 规范](UI_UX_GUIDELINES.md)。立即保存的启用状态使用开关；随表单提交的布尔选项使用复选框，并说明保存后生效。表单通过字段级校验展示错误、关联说明并聚焦首个错误字段；数值范围与联动约束应在发起请求前检查。
+
+共享 `SlidingTabs` 通过 `idPrefix` 和 `panel` 插槽建立标签与内容面板的可访问性关联。方向键、Home、End 只移动焦点，Enter／空格确认切换；涉及未保存内容的页面继续在 `update:modelValue` 处理函数中确认后更新选中值。会话类型选择采用原生 radio 分段控件。
+
+工具配置中的新增／编辑使用页面视图，返回时保留列表筛选并恢复入口焦点。保存失败保留草稿；保存或测试执行中阻止离开与重复请求，成功后返回自定义工具列表并刷新数据。
+
+管理接口的 QQ 号使用十进制字符串传输：`GET /admin/api/admins` 和 `GET /admin/api/blacklist` 的 `qq`、`GET /admin/api/qq-config` 的 `selfQQNumber` 均为字符串。对应写入接口兼容既有整数值与字符串，存储和运行时仍使用 `u64`，前端不得通过 `Number` 转换标识符。Bot QQ 号允许 `0` 表示未配置，管理员、黑名单和会话标识符必须为正数；会话标识符还需小于私聊标志位 `2^63`。
 
 ### 添加前端页面
 

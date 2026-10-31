@@ -6,6 +6,9 @@
 import {inject, reactive, ref, type Ref, onMounted} from 'vue'
 import type {LLMConfig} from '../../vite-env'
 
+import {confirmDiscard} from '../../composables/useUnsavedChanges'
+import RequestError from '../../components/RequestError.vue'
+import {requestJson, requestError} from '../../utils/api'
 import LLMModelForm from './LLMModelForm.vue'
 import SlidingTabs from '../../components/SlidingTabs.vue'
 
@@ -38,16 +41,33 @@ const llmUsages: Record<string, string> = {
   embedding: '用途：长期记忆向量化（记忆写入与检索时计算文本向量）'
 }
 const selectedLLM: Ref<string> = ref('router')
-const llmConfigs = reactive<Record<string, LLMConfig>>({})
-onMounted(async () => {
-  try {
-    const resp = await fetch('/admin/api/llm-configs')
-    if (!resp.ok) throw new Error('加载失败')
-    Object.assign(llmConfigs, await resp.json())
-  } catch {
-    showToast?.('模型配置加载失败', true)
+const modelForms = ref<InstanceType<typeof LLMModelForm>[]>([])
+const selectModel = (name: string): void => {
+  if (name === selectedLLM.value) return
+  if (modelForms.value.some(form => form.saving)) {
+    showToast?.('正在保存，请等待完成后再切换', true)
+    return
   }
-})
+  if (confirmDiscard(modelForms.value.some(form => form.dirty))) selectedLLM.value = name
+}
+const llmConfigs = reactive<Record<string, LLMConfig>>({})
+const loading = ref(false)
+const loadError = ref('')
+const loadConfigs = async (): Promise<void> => {
+  if (loading.value) return
+  loading.value = true
+  try {
+    const data = await requestJson<Record<string, LLMConfig>>('/admin/api/llm-configs')
+    if (!data || Array.isArray(data) || typeof data !== 'object' || !data.router) throw new Error('模型配置数据无效')
+    Object.assign(llmConfigs, data)
+    loadError.value = ''
+  } catch (cause) {
+    loadError.value = requestError(cause, '模型配置加载失败')
+  } finally {
+    loading.value = false
+  }
+}
+onMounted(loadConfigs)
 
 const updateConfig = (name: string, config: LLMConfig): void => {
   llmConfigs[name] = config
@@ -61,21 +81,26 @@ const updateConfig = (name: string, config: LLMConfig): void => {
       <p class="page-subtitle">配置各功能使用的模型与请求参数</p>
     </div>
 
-    <SlidingTabs v-model="selectedLLM" :items="modelTabs" label="模型功能"/>
+    <RequestError :message="loadError" :busy="loading" @retry="loadConfigs"/>
+    <p v-if="loading" role="status">加载中…</p>
+    <SlidingTabs v-if="!loadError && !loading" :model-value="selectedLLM" @update:model-value="selectModel" :items="modelTabs" label="模型功能" id-prefix="model-config">
+      <template #panel>
+        <div :key="selectedLLM" class="model-panel">
+          <p class="form-hint">{{ llmUsages[selectedLLM] }}</p>
 
-    <div :key="selectedLLM" class="model-panel">
-      <p class="form-hint">{{ llmUsages[selectedLLM] }}</p>
-
-      <template v-for="name in (selectedLLM === 'executor' ? ['executor', 'executorFallback'] : [selectedLLM])" :key="name">
-        <LLMModelForm
-            v-if="llmConfigs[name]"
-            :name="name"
-            :initial-config="llmConfigs[name]"
-            :title="selectedLLM === 'executor' ? (name === 'executor' ? '默认模型' : '备用模型（可选）') : undefined"
-            @saved="updateConfig"
-        />
+          <template v-for="name in (selectedLLM === 'executor' ? ['executor', 'executorFallback'] : [selectedLLM])" :key="name">
+            <LLMModelForm
+                v-if="llmConfigs[name]"
+                ref="modelForms"
+                :name="name"
+                :initial-config="llmConfigs[name]"
+                :title="selectedLLM === 'executor' ? (name === 'executor' ? '默认模型' : '备用模型（可选）') : undefined"
+                @saved="updateConfig"
+            />
+          </template>
+        </div>
       </template>
-    </div>
+    </SlidingTabs>
   </div>
 </template>
 

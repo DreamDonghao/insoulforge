@@ -4,6 +4,7 @@
  * @brief 主应用组件 - 管理后台入口
  */
 import {defineAsyncComponent, computed, onMounted, onUnmounted, provide, reactive, ref, type Ref, watch} from 'vue'
+import {confirmDiscard, type LeaveGuard} from './composables/useUnsavedChanges'
 import {useToast} from './composables/useToast'
 import type {QQConfig as QQConfigType} from './vite-env.d'
 
@@ -53,6 +54,18 @@ const dailyNavItems: NavItem[] = [
   {key: 'usage', label: '用量统计', icon: 'memory'}
 ]
 
+const leaveGuards = new Set<LeaveGuard>()
+provide('leaveGuards', leaveGuards)
+const canLeave = (): boolean => {
+  if ([...leaveGuards].some(guard => guard.busy())) {
+    showToast('正在保存，请等待完成后再离开', true)
+    return false
+  }
+  return confirmDiscard([...leaveGuards].some(guard => guard.dirty()))
+}
+const changeView = (view: string): void => {
+  if (view !== currentView.value && canLeave()) currentView.value = view
+}
 const currentView: Ref<string> = ref('dashboard')
 const sidebarNav = ref<HTMLElement | null>(null)
 const navIndicator = reactive({top: 0, height: 0})
@@ -113,12 +126,12 @@ const themeToggleLabel = computed<string>(() => {
 initTheme()
 
 // 全局 Toast
-const {toast, toastError, showToast} = useToast()
+const {notifications, toastTarget, showToast, dismissToast} = useToast()
 
 // OneBot 配置
 const qqConfig = reactive<QQConfigType>({
   accessToken: '',
-  selfQQNumber: 0,
+  selfQQNumber: '0',
   oneBotTransport: 'http',
   qqHttpHost: '',
   qqWebSocketHost: '',
@@ -128,7 +141,7 @@ const qqConfig = reactive<QQConfigType>({
 
 // Bot 头像（QQ 公开头像 CDN，失败时回退为线条图标）
 const avatarUrl = computed<string>(() => {
-  return qqConfig.selfQQNumber > 0
+  return !!qqConfig.selfQQNumber && qqConfig.selfQQNumber !== '0'
       ? `https://q1.qlogo.cn/g?b=qq&nk=${qqConfig.selfQQNumber}&s=100`
       : ''
 })
@@ -154,7 +167,7 @@ const loadQQConfig = async (): Promise<void> => {
   const resp = await fetch('/admin/api/qq-config')
   const data = await resp.json()
   if (data.accessToken !== undefined) {
-    Object.assign(qqConfig, data)
+    Object.assign(qqConfig, data, {selfQQNumber: String(data.selfQQNumber ?? '0')})
   }
 }
 
@@ -237,6 +250,7 @@ const loginFromUrlFragment = async (): Promise<void> => {
 }
 
 const logout = async (): Promise<void> => {
+  if (!canLeave()) return
   await fetch('/admin/api/auth/logout', {method: 'POST'})
   authenticated.value = false
   disconnectWebSocket()
@@ -355,7 +369,7 @@ onUnmounted(disconnectWebSocket)
               :aria-label="item.label"
               :class="{ active: currentView === item.key }"
               class="nav-item"
-              @click="currentView = item.key"
+              @click="changeView(item.key)"
           >
             <NavIcon :name="item.icon"/>
             {{ item.label }}
@@ -373,7 +387,7 @@ onUnmounted(disconnectWebSocket)
               :aria-label="item.label"
               :class="{ active: currentView === item.key }"
               class="nav-item"
-              @click="currentView = item.key"
+              @click="changeView(item.key)"
           >
             <NavIcon :name="item.icon"/>
             {{ item.label }}
@@ -389,7 +403,7 @@ onUnmounted(disconnectWebSocket)
               title="关于"
               aria-label="关于"
               class="nav-item"
-              @click="currentView = 'about'"
+              @click="changeView('about')"
           >
             <NavIcon name="info"/>
             关于
@@ -454,7 +468,15 @@ onUnmounted(disconnectWebSocket)
   </div>
 
   <!-- Toast 提示 -->
-  <div v-if="toast" :class="{ error: toastError }" class="toast">{{ toast }}</div>
+  <Teleport :to="toastTarget ?? 'body'">
+    <div v-if="notifications.length" class="toast-stack" aria-label="操作通知">
+      <div v-for="notification in notifications" :key="notification.id" class="toast"
+           :class="{error: notification.error}">
+        <span :role="notification.error ? 'alert' : 'status'" aria-atomic="true">{{ notification.message }}</span>
+        <button type="button" class="toast-dismiss" aria-label="关闭此提示" @click="dismissToast(notification.id)">×</button>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style>
@@ -581,9 +603,8 @@ onUnmounted(disconnectWebSocket)
   width: 100%;
   height: 42px;
   padding: 0 42px 0 12px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--control-border);
   border-radius: 0;
-  outline: none;
   background: var(--input-bg);
   color: var(--text-primary);
 }
@@ -640,7 +661,7 @@ onUnmounted(disconnectWebSocket)
   width: 100%;
   height: 42px;
   margin-top: 22px;
-  background: var(--primary);
+  background: var(--primary-strong);
   color: var(--on-primary);
   font-weight: 600;
   transition: background-color 0.15s ease, transform 0.15s ease;

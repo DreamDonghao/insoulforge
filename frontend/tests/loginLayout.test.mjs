@@ -20,9 +20,10 @@ function page() {
     authenticationChecked: false, authenticated: false, theme: 'light',
     get themeToggleLabel() { return this.theme === 'dark' ? '切换为浅色模式' : '切换为深色模式' },
     accessToken: '', loginError: '', loginSubmitting: false, showAccessToken: false,
-    toast: '', toastError: false, currentView: 'dashboard', dailyNavItems: [], systemNavItems: [],
+    notifications: [], toastTarget: null, dismissToast() {}, currentView: 'dashboard', dailyNavItems: [], systemNavItems: [],
     sidebarNav: null, navIndicator: {height: 0, top: 0}, avatarUrl: '', avatarFailed: false,
     qqConfig: {botName: 'Bot'}, resetPageScroll() {},
+    changeView: view => { state.currentView = view },
     login: () => { submits++ }, logout: () => { state.authenticated = false },
     toggleTheme: () => { state.theme = state.theme === 'dark' ? 'light' : 'dark' }
   })

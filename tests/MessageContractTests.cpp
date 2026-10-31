@@ -7,7 +7,9 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -18,6 +20,10 @@
 
 #include <drogon/utils/coroutine.h>
 #include <openssl/evp.h>
+#include <spdlog/sinks/ostream_sink.h>
+#include <spdlog/spdlog.h>
+#include <infrastructure/logging/Logger.hpp>
+#include <infrastructure/logging/LogBuffer.hpp>
 
 #include <admin/access/AdminAccessToken.hpp>
 #include <workflow/access/AdminStore.hpp>
@@ -76,6 +82,27 @@ namespace {
             std::cerr << "[FAIL] " << testName << ": " << expression << '\n';
             ++failures;
         }
+    }
+
+    void testLogCredentialRedaction() {
+        constexpr std::string_view kTestName = "log credential redaction before sinks and publication";
+        std::ostringstream output;
+        const auto sink = std::make_shared<spdlog::sinks::ostream_sink_mt>(output);
+        const auto previous = spdlog::default_logger();
+        struct RestoreLogger {
+            std::shared_ptr<spdlog::logger> previous;
+            ~RestoreLogger() { spdlog::set_default_logger(previous); }
+        } restore{previous};
+        spdlog::set_default_logger(std::make_shared<spdlog::logger>("privacy-test", sink));
+        const std::string secret = "fixture-logger-admin-secret";
+        insoulforge::Logger::info(0, "Admin", "管理后台访问令牌（重启后失效）: " + secret);
+        insoulforge::Logger::info(0, "Admin", "http://127.0.0.1:7778/index.html#token=" + secret);
+        insoulforge::Logger::info(0, "PrivacyFixture", "ordinary log remains visible");
+        check(output.str().find(secret) == std::string::npos, "log sinks never receive raw credentials", kTestName);
+        check(output.str().find("ordinary log remains visible") != std::string::npos,
+          "ordinary output is preserved", kTestName);
+        check(insoulforge::LogBuffer::instance().query({.keyword = secret}).entries.empty(),
+          "published logs cannot contain or match the credential", kTestName);
     }
 
     void testOneBotMessageFormatter() {
@@ -2031,15 +2058,25 @@ namespace {
         const auto path = directory / "config.json";
         auto &config = insoulforge::Config::instance();
         check(config.initialize(path.string()).has_value(), "initializes storage and runtime together", kTestName);
-        check(config.saveQQConfig({{"botName", "facade-bot"}, {"selfQQNumber", 3457355246ULL},
-                  {"defaultPrivateEnabled", true}}).has_value() &&
+        check(config
+                  .saveQQConfig(
+                    {{"botName", "facade-bot"}, {"selfQQNumber", 3457355246ULL}, {"defaultPrivateEnabled", true}})
+                  .has_value() &&
                 config.botName == "facade-bot" && config.selfQQNumber == 3457355246ULL &&
                 config.defaultPrivateEnabled.load() && config.getQQConfig()["defaultPrivateEnabled"] == true,
           "saving immediately applies typed QQ configuration", kTestName);
+        auto stringQQ = config.getQQConfig();
+        stringQQ["selfQQNumber"] = "9007199254740993";
+        check(config.saveQQConfig(stringQQ).has_value() && config.selfQQNumber == 9007199254740993ULL &&
+                config.getQQConfig()["selfQQNumber"] == 9007199254740993ULL,
+          "decimal QQ strings retain precision in storage and runtime", kTestName);
+        stringQQ["selfQQNumber"] = 3457355246ULL;
+        check(config.saveQQConfig(stringQQ).has_value(), "numeric QQ configuration remains compatible", kTestName);
         const auto oldQQ = config.getQQConfig();
         for (const auto &invalid:
-          insoulforge::json::array({{{"selfQQNumber", -1}}, {{"selfQQNumber", 123.5}}, {{"botName", 23}},
-            {{"defaultPrivateEnabled", "true"}}, {{"defaultPrivateEnabled", 1}}})) {
+          insoulforge::json::array({{{"selfQQNumber", -1}}, {{"selfQQNumber", 123.5}}, {{"selfQQNumber", ""}},
+            {{"selfQQNumber", "12x"}}, {{"selfQQNumber", "-1"}}, {{"selfQQNumber", "18446744073709551616"}},
+            {{"botName", 23}}, {{"defaultPrivateEnabled", "true"}}, {{"defaultPrivateEnabled", 1}}})) {
             const auto result = config.saveQQConfig(invalid);
             check(!result && result.error().type == insoulforge::ConfigErrorType::InvalidArgument &&
                     config.getQQConfig() == oldQQ && config.botName == "facade-bot",
@@ -3141,6 +3178,7 @@ namespace {
 } // namespace
 
 auto main() -> int {
+    testLogCredentialRedaction();
     testAdminRequestAccess();
     testConfigInitialization();
     testOneBotMessageFormatter();

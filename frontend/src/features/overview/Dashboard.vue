@@ -3,16 +3,45 @@
  * @file Dashboard.vue
  * @brief 展示机器人状态、OneBot 连接、模型配置与近期用量
  */
-import {computed, inject, onMounted, onUnmounted, ref, type Ref} from 'vue'
+import {computed, inject, onMounted, onUnmounted, reactive, ref, type Ref} from 'vue'
 import type {LLMConfig, QQConfig} from '../../vite-env'
 import {useToast} from '../../composables/useToast'
 import {useAdminWebSocket} from '../../composables/useAdminWebSocket'
 import {useCoalescedRefresh} from '../../composables/useCoalescedRefresh'
+import RequestError from '../../components/RequestError.vue'
+import {requestJson, requestError} from '../../utils/api'
 import ProcessMemory from './ProcessMemory.vue'
 
 const qqConfig = inject<QQConfig>('qqConfig')
 const {showToast} = useToast()
 
+const dataKeys = ['botStatus', 'oneBotStatus', 'models', 'system', 'groups', 'admins', 'emojis', 'tools', 'usage'] as const
+type DataKey = typeof dataKeys[number]
+const dataState = reactive(Object.fromEntries(dataKeys.map(key => [key, {loaded: false, loading: false, error: ''}])) as Record<DataKey, {loaded: boolean; loading: boolean; error: string}>)
+const dataRequests = new Map<DataKey, AbortController>()
+let disposed = false
+async function loadData(key: DataKey, update: (signal: AbortSignal) => Promise<void>): Promise<void> {
+  if (disposed || dataState[key].loading) return
+  const controller = new AbortController()
+  dataRequests.set(key, controller)
+  dataState[key].loading = true
+  try {
+    await update(controller.signal)
+    if (disposed || controller.signal.aborted) return
+    dataState[key].loaded = true
+    dataState[key].error = ''
+  } catch (cause) {
+    if (!disposed && !controller.signal.aborted) dataState[key].error = requestError(cause, '数据加载失败')
+  } finally {
+    dataRequests.delete(key)
+    if (!disposed) dataState[key].loading = false
+  }
+}
+async function readData<T>(url: string, signal: AbortSignal): Promise<T> {
+  const data = await requestJson<T>(url, {signal})
+  if (disposed || signal.aborted) throw new DOMException('Aborted', 'AbortError')
+  return data
+}
 const botRunning = ref(true)
 const botStatusSaving = ref(false)
 
@@ -30,35 +59,19 @@ const oneBotStatus: Ref<OneBotStatus> = ref({
   websocketConnected: false
 })
 
-const loadBotStatus = async (): Promise<void> => {
-  try {
-    const resp = await fetch('/admin/api/bot-status')
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-    const data = await resp.json()
-    botRunning.value = data.running === true
-  } catch {
-    showToast('加载机器人状态失败', true)
-  }
-}
-
-const loadOneBotStatus = async (): Promise<void> => {
-  try {
-    const resp = await fetch('/admin/api/onebot-status')
-    if (!resp.ok) return
-    const data: Partial<OneBotStatus> = await resp.json()
-    if ((data.transport === 'http' || data.transport === 'websocket') && typeof data.address === 'string') {
-      oneBotStatus.value = {
-        transport: data.transport,
-        address: data.address,
-        configured: data.configured === true,
-        websocketConnected: data.websocketConnected === true
-      }
-    }
-  } catch { /* keep the last known OneBot status */
-  }
-}
+const loadBotStatus = (): Promise<void> => loadData('botStatus', async signal => {
+  const data = await readData<{running: boolean}>('/admin/api/bot-status', signal)
+  if (typeof data.running !== 'boolean') throw new Error('机器人状态数据无效')
+  botRunning.value = data.running
+})
+const loadOneBotStatus = (): Promise<void> => loadData('oneBotStatus', async signal => {
+  const data = await readData<OneBotStatus>('/admin/api/onebot-status', signal)
+  if ((data.transport !== 'http' && data.transport !== 'websocket') || typeof data.address !== 'string') throw new Error('OneBot 状态数据无效')
+  oneBotStatus.value = data
+})
 
 const toggleBotStatus = async (): Promise<void> => {
+  if (botStatusSaving.value || !dataState.botStatus.loaded) return
   if (!botRunning.value && !window.confirm('确定打开机器人吗？')) return
   if (botRunning.value && !window.confirm('暂停后机器人将不再处理新的群消息，确定暂停吗？')) return
 
@@ -190,82 +203,69 @@ const maxDayTotal = computed(() => {
 // ---- 数据加载 ----
 
 const loadLLMModels = async (): Promise<void> => {
-  try {
-    const resp = await fetch('/admin/api/llm-configs')
-    const data = await resp.json()
-    llmModels.value = {}
-    for (const [name, cfg] of Object.entries(data)) {
-      const c = cfg as LLMConfig
-      if (c.model) llmModels.value[name] = c.model
-    }
-  } catch { /* ignore */
-  } finally {
-    llmLoading.value = false
-  }
+  await loadData('models', async signal => {
+    const data = await readData<Record<string, LLMConfig>>('/admin/api/llm-configs', signal)
+    if (!data || Array.isArray(data) || typeof data !== 'object') throw new Error('模型配置数据无效')
+    llmModels.value = Object.fromEntries(Object.entries(data).filter(([, cfg]) => typeof cfg?.model === 'string').map(([name, cfg]) => [name, cfg.model]))
+  })
+  llmLoading.value = false
 }
-
-const loadSystemInfo = async (): Promise<void> => {
-  try {
-    const resp = await fetch('/admin/api/system-info')
-    const data = await resp.json()
-    startTimeEpoch.value = data.startTime || 0
-    baseUptime.value = data.uptimeSeconds || 0
-    loadMoment = Date.now()
-  } catch { /* ignore */
-  }
-}
-
+const loadSystemInfo = (): Promise<void> => loadData('system', async signal => {
+  const data = await readData<{startTime: number; uptimeSeconds: number}>('/admin/api/system-info', signal)
+  if (typeof data.startTime !== 'number' || typeof data.uptimeSeconds !== 'number') throw new Error('运行时间数据无效')
+  startTimeEpoch.value = data.startTime
+  baseUptime.value = data.uptimeSeconds
+  loadMoment = Date.now()
+})
 const {refresh: loadUsage} = useCoalescedRefresh(async signal => {
+  dataState.usage.loading = true
   try {
-    const resp = await fetch('/admin/api/usage?days=7', {signal})
-    const data = await resp.json()
-    if (signal.aborted) return
+    const data = await readData<{today: UsageItem; today_by_role: UsageItem[]; by_day: DayUsage[]}>('/admin/api/usage?days=7', signal)
+    if (!data || !Array.isArray(data.by_day)) throw new Error('用量数据无效')
     todayStats.value = data.today || {calls: 0, prompt: 0, completion: 0, total: 0, cached: 0}
     todayByRole.value = data.today_by_role || []
-    byDay.value = data.by_day || []
-  } catch { /* ignore */
+    byDay.value = data.by_day
+    dataState.usage.loaded = true
+    dataState.usage.error = ''
+  } catch (cause) {
+    if (!disposed && !signal.aborted) dataState.usage.error = requestError(cause, '用量加载失败')
+  } finally {
+    if (!disposed) dataState.usage.loading = false
   }
 })
-
-const loadGroups = async (): Promise<void> => {
-  try {
-    const resp = await fetch('/admin/api/groups')
-    const data = await resp.json()
-    if (Array.isArray(data)) {
-      groupCount.value = data.length
-      enabledCount.value = data.filter((g: any) => g.enabled).length
-      totalMessages.value = data.reduce((sum: number, g: any) => sum + (g.messageCount || 0), 0)
-    }
-  } catch { /* ignore */
-  }
-}
-
-const loadAdmins = async (): Promise<void> => {
-  try {
-    const resp = await fetch('/admin/api/admins')
-    const data = await resp.json()
-    adminCount.value = Array.isArray(data) ? data.length : 0
-  } catch { /* ignore */
-  }
-}
-
-const loadEmojis = async (): Promise<void> => {
-  try {
-    const resp = await fetch('/admin/api/emojis')
-    const data = await resp.json()
-    emojiCount.value = Array.isArray(data) ? data.length : 0
-  } catch { /* ignore */
-  }
-}
-
-const loadTools = async (): Promise<void> => {
-  try {
-    const resp = await fetch('/admin/api/custom-tools')
-    const data = await resp.json()
-    toolCount.value = Array.isArray(data) ? data.length : 0
-  } catch { /* ignore */
-  }
-}
+const loadGroups = (): Promise<void> => loadData('groups', async signal => {
+  const data = await readData<{enabled: boolean; messageCount: number}[]>('/admin/api/groups', signal)
+  if (!Array.isArray(data)) throw new Error('会话数据无效')
+  groupCount.value = data.length
+  enabledCount.value = data.filter(g => g.enabled).length
+  totalMessages.value = data.reduce((sum, g) => sum + (g.messageCount || 0), 0)
+})
+const loadAdmins = (): Promise<void> => loadData('admins', async signal => {
+  const data = await readData<unknown[]>('/admin/api/admins', signal)
+  if (!Array.isArray(data)) throw new Error('管理员数据无效')
+  adminCount.value = data.length
+})
+const loadEmojis = (): Promise<void> => loadData('emojis', async signal => {
+  const data = await readData<unknown[]>('/admin/api/emojis', signal)
+  if (!Array.isArray(data)) throw new Error('表情数据无效')
+  emojiCount.value = data.length
+})
+const loadTools = (): Promise<void> => loadData('tools', async signal => {
+  const data = await readData<unknown[]>('/admin/api/custom-tools', signal)
+  if (!Array.isArray(data)) throw new Error('工具数据无效')
+  toolCount.value = data.length
+})
+const dataSections: {key: DataKey; label: string; retry: () => Promise<void>}[] = [
+  {key: 'botStatus', label: '机器人状态', retry: loadBotStatus},
+  {key: 'oneBotStatus', label: 'OneBot 状态', retry: loadOneBotStatus},
+  {key: 'models', label: '模型配置', retry: loadLLMModels},
+  {key: 'system', label: '运行时间', retry: loadSystemInfo},
+  {key: 'groups', label: '会话和消息', retry: loadGroups},
+  {key: 'admins', label: '管理员', retry: loadAdmins},
+  {key: 'emojis', label: '表情', retry: loadEmojis},
+  {key: 'tools', label: '工具', retry: loadTools},
+  {key: 'usage', label: '近期用量', retry: loadUsage}
+]
 
 useAdminWebSocket(event => {
   try {
@@ -293,6 +293,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  disposed = true
+  for (const controller of dataRequests.values()) controller.abort()
   if (uptimeTimer) clearInterval(uptimeTimer)
   if (oneBotStatusTimer) clearInterval(oneBotStatusTimer)
 })
@@ -305,14 +307,19 @@ onUnmounted(() => {
       <p class="page-subtitle">{{ qqConfig?.botName || 'InSoulForge' }} 运行概况</p>
     </div>
 
+    <div v-for="section in dataSections" :key="section.key">
+      <RequestError :message="dataState[section.key].error ? section.label + '：' + dataState[section.key].error : ''"
+                    :busy="dataState[section.key].loading" :stale="dataState[section.key].loaded" @retry="section.retry"/>
+    </div>
+    <p v-if="dataKeys.some(key => dataState[key].loading)" role="status">正在更新运行概况…</p>
     <!-- 状态条 -->
     <div class="dash-status-bar">
       <div class="status-item bot-control-item">
-        <span :class="botRunning ? 'dot-green' : 'dot-gray'" class="status-dot"></span>
-        <span>{{ botRunning ? '机器人运行中' : '机器人已暂停' }}</span>
+        <span :class="dataState.botStatus.loaded && botRunning ? 'dot-green' : 'dot-gray'" class="status-dot"></span>
+        <span>{{ !dataState.botStatus.loaded ? '机器人状态待获取' : botRunning ? '机器人运行中' : '机器人已暂停' }}</span>
         <button
             :class="botRunning ? 'btn-warning' : 'btn-success'"
-            :disabled="botStatusSaving"
+            :disabled="botStatusSaving || !dataState.botStatus.loaded"
             class="btn btn-sm bot-toggle"
             type="button"
             @click="toggleBotStatus"
@@ -324,7 +331,7 @@ onUnmounted(() => {
         <span
             :class="oneBotConnectionReady ? 'dot-green' : oneBotStatus.transport === 'websocket' ? 'dot-red' : 'dot-gray'"
             class="status-dot"></span>
-        <span>{{ oneBotConnectionText }}</span>
+        <span>{{ dataState.oneBotStatus.loaded ? oneBotConnectionText : 'OneBot 状态待获取' }}</span>
       </div>
     </div>
 
@@ -337,7 +344,7 @@ onUnmounted(() => {
         <!-- 运行时间 -->
         <section class="overview-section" aria-label="运行时间">
           <h2 class="section-title">运行时间</h2>
-          <div class="runtime-value">{{ uptimeText }}</div>
+          <div class="runtime-value">{{ dataState.system.loaded ? uptimeText : '—' }}</div>
           <div class="runtime-sub">启动于 {{ fmtDateTime(startTimeEpoch) }}</div>
         </section>
 
@@ -351,16 +358,16 @@ onUnmounted(() => {
             </div>
             <div class="kv-row">
               <span class="kv-label">QQ 号</span>
-              <code class="kv-code">{{ qqConfig?.selfQQNumber || '—' }}</code>
+              <code class="kv-code">{{ qqConfig?.selfQQNumber && qqConfig.selfQQNumber !== '0' ? qqConfig.selfQQNumber : '—' }}</code>
             </div>
             <div class="kv-row">
               <span class="kv-label">传输方式</span>
-              <span class="kv-value">{{ transportLabel }}</span>
+              <span class="kv-value">{{ dataState.oneBotStatus.loaded ? transportLabel : '—' }}</span>
             </div>
             <div class="kv-row">
               <span class="kv-label">连接状态</span>
               <span :class="oneBotConnectionReady ? 'connection-ready' : 'connection-offline'" class="connection-state">
-                {{ oneBotConnectionReady ? '已连接' : oneBotStatus.transport === 'http' ? '未配置' : '未连接' }}
+                {{ !dataState.oneBotStatus.loaded ? '状态待获取' : oneBotConnectionReady ? '已连接' : oneBotStatus.transport === 'http' ? '未配置' : '未连接' }}
               </span>
             </div>
             <div class="kv-row">
@@ -375,23 +382,23 @@ onUnmounted(() => {
           <h2 class="section-title">资源</h2>
           <div class="resource-grid">
             <div class="resource-tile">
-              <div class="resource-value">{{ enabledCount }}<span class="resource-total">/{{ groupCount }}</span></div>
+              <div class="resource-value">{{ dataState.groups.loaded ? enabledCount : '—' }}<span class="resource-total">/{{ dataState.groups.loaded ? groupCount : '—' }}</span></div>
               <div class="resource-label">会话（启用/总）</div>
             </div>
             <div class="resource-tile">
-              <div class="resource-value">{{ fmtNum(totalMessages) }}</div>
+              <div class="resource-value">{{ dataState.groups.loaded ? fmtNum(totalMessages) : '—' }}</div>
               <div class="resource-label">消息</div>
             </div>
             <div class="resource-tile">
-              <div class="resource-value">{{ adminCount }}</div>
+              <div class="resource-value">{{ dataState.admins.loaded ? adminCount : '—' }}</div>
               <div class="resource-label">管理员</div>
             </div>
             <div class="resource-tile">
-              <div class="resource-value">{{ emojiCount }}</div>
+              <div class="resource-value">{{ dataState.emojis.loaded ? emojiCount : '—' }}</div>
               <div class="resource-label">表情</div>
             </div>
             <div class="resource-tile">
-              <div class="resource-value">{{ toolCount }}</div>
+              <div class="resource-value">{{ dataState.tools.loaded ? toolCount : '—' }}</div>
               <div class="resource-label">工具</div>
             </div>
           </div>
@@ -407,6 +414,7 @@ onUnmounted(() => {
             <template v-if="llmLoading">
               <span class="section-muted">加载中...</span>
             </template>
+            <template v-else-if="!dataState.models.loaded"><span class="section-muted">模型数据待获取</span></template>
             <template v-else-if="llmOrder.every(n => !llmModels[n])">
               <span class="section-muted">未配置</span>
             </template>
@@ -426,7 +434,7 @@ onUnmounted(() => {
             <span class="section-sub">今日</span>
           </div>
 
-          <div class="usage-kpis">
+          <div v-if="dataState.usage.loaded" class="usage-kpis">
             <div class="usage-kpi">
               <div class="kpi-label">调用</div>
               <div class="kpi-value">{{ fmtNum(todayStats.calls) }} <span class="kpi-unit">次</span></div>
@@ -441,7 +449,7 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <div class="usage-chart">
+          <div v-if="dataState.usage.loaded" class="usage-chart">
             <div v-for="d in byDay" :key="d.day" :title="`${d.day}: ${fmtNum(d.total)} Token`" class="usage-col">
               <div class="usage-bar-track">
                 <div :style="{ height: (d.total / maxDayTotal) * 100 + '%' }" class="usage-bar"></div>

@@ -360,10 +360,19 @@ namespace insoulforge {
 
     auto Config::saveQQConfig(const json &value) -> std::expected<void, ConfigError> {
         std::scoped_lock lock(m_updateMutex);
-        if (auto result = validateFields(value); !result) {
+        auto normalized = value;
+        // 管理界面以十进制字符串提交 QQ 号，存储与运行时继续使用 u64。
+        if (normalized.is_object() && normalized.contains("selfQQNumber") && normalized["selfQQNumber"].is_string()) {
+            const auto number = tryParseUInt64(normalized["selfQQNumber"].get<std::string>());
+            if (!number) {
+                return std::unexpected(ConfigError{
+                  .type = ConfigErrorType::InvalidArgument, .message = "selfQQNumber 必须是 u64 范围内的非负整数"});
+            }
+            normalized["selfQQNumber"] = *number;
+        }
+        if (auto result = validateFields(normalized); !result) {
             return result;
         }
-        json normalized = value;
         const auto transport = getStr(value, "oneBotTransport", "http");
         normalized["oneBotTransport"] = transport == "websocket" ? "websocket" : "http";
         Config next;

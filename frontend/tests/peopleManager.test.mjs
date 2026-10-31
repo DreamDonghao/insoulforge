@@ -21,6 +21,7 @@ const person = () => ({qq: '42', name: '测试人物', affinity: 7, profile: ['�
 function page(post, settings = {affinityEnabled: true}) {
   const requests = [], module = {exports: {}}
   const require = name => name === 'vue' ? {...vue, onMounted() {}, onUnmounted() {}} :
+    name.includes('useUnsavedChanges') ? {useUnsavedChanges() {}, confirmDiscard: () => true} :
     name.includes('session') ? {privateSessionUserId: () => null} :
       Object.fromEntries(['ArrowDownWideNarrow', 'ArrowUpNarrowWide', 'Pencil', 'Trash2'].map(key => [key, () => null]))
   new Function('require', 'module', 'exports', 'fetch', outputText)(require, module, module.exports,
@@ -121,5 +122,32 @@ test('a configuration change during editing discards the old editor without subm
     await view.state.loadPeople()
     assert.equal(view.state.affinityEnabled, true)
     assert.equal(view.state.detail.affinity, 7)
+  } finally { view.dispose() }
+})
+
+test('invalid JSON identifies and focuses its editor, retains the draft and clears validation after correction', async () => {
+  const view = page(async () => ({status: 200, body: {success: true}}))
+  let focused = 0
+  view.state.jsonEditor = {focus() { focused++ }}
+  try {
+    view.state.beginEdit()
+    await vue.nextTick()
+    assert.equal(focused, 1)
+    const validDraft = view.state.draftText
+    view.state.draftText = '{invalid'
+    await view.state.savePerson()
+    await vue.nextTick()
+    assert.equal(focused, 2)
+    assert.equal(view.requests.length, 0)
+    assert.equal(view.state.draftText, '{invalid')
+    assert.equal(view.state.editing, true)
+    assert.equal(view.state.jsonInvalid, true)
+    const html = await view.html()
+    assert.match(html, /id="person-json-error"[^>]*role="alert"/)
+    assert.match(html, /<textarea[^>]*id="person-json"[^>]*aria-invalid="true"[^>]*aria-describedby="person-json-error"/)
+    view.state.draftText = validDraft
+    await view.state.savePerson()
+    assert.equal(view.state.jsonInvalid, false)
+    assert.equal(view.state.editing, false)
   } finally { view.dispose() }
 })

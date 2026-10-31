@@ -2,7 +2,7 @@
 import {computed, ref, watch} from 'vue'
 import type {ChatMessage} from '../../vite-env'
 
-const props = defineProps<{message: ChatMessage; botName: string}>()
+const props = defineProps<{message: ChatMessage; botName: string; deleting?: boolean}>()
 const emit = defineEmits<{edit: []; delete: []}>()
 const expanded = ref(false)
 
@@ -94,8 +94,13 @@ const toggleJson = (event: Event): void => {
       <span v-if="message.role === 'assistant'" class="msg-bot-label">机器人</span>
     </div>
     <div v-if="message.id !== undefined" class="msg-actions">
-      <button class="action-btn" title="编辑" @click="emit('edit')">✏️</button>
-      <button class="action-btn delete" title="删除" @click="emit('delete')">🗑️</button>
+      <button class="action-btn" title="编辑" aria-label="编辑消息" @click="emit('edit')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6Z M14 5l5 5"/></svg>
+      </button>
+      <button class="action-btn delete" :disabled="deleting" :title="deleting ? '删除中…' : '删除'" :aria-label="deleting ? '删除中…' : '删除消息'" @click="emit('delete')">
+        <span v-if="deleting">删除中…</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 6h18 M9 6V3h6v3 M5 6l1 15h12l1-15 M10 10v7 M14 10v7"/></svg>
+      </button>
     </div>
   </div>
   <div class="msg-content">{{ text }}</div>
@@ -152,7 +157,10 @@ const toggleJson = (event: Event): void => {
   cursor: pointer;
   font-size: 14px;
   padding: 2px 4px;
-  opacity: 0.6;
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .action-btn:hover {
@@ -161,7 +169,7 @@ const toggleJson = (event: Event): void => {
 
 .action-btn.delete:hover {
   opacity: 1;
-  filter: brightness(0) saturate(100%) invert(27%) sepia(94%) saturate(6514%) hue-rotate(355deg) brightness(93%) contrast(127%);
+  color: var(--danger);
 }
 
 .msg-content {

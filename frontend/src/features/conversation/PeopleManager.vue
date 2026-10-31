@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import {computed, onMounted, onUnmounted, ref} from 'vue'
+import {computed, nextTick, onMounted, onUnmounted, ref} from 'vue'
+import {confirmDiscard, useUnsavedChanges} from '../../composables/useUnsavedChanges'
 import {ArrowDownWideNarrow, ArrowUpNarrowWide, Pencil, Trash2} from '@lucide/vue'
 import {privateSessionUserId} from '../../utils/session'
 
@@ -33,9 +34,15 @@ const affinityEnabled = ref(true)
 const editing = ref(false)
 const draftText = ref('')
 const saving = ref(false)
+const savedDraft = ref('')
+const isDirty = (): boolean => editing.value && draftText.value !== savedDraft.value
 const consolidating = ref(false)
 const consolidationMessage = ref('')
+useUnsavedChanges(isDirty, () => saving.value || consolidating.value)
 const editError = ref('')
+const jsonInvalid = ref(false)
+const jsonEditor = ref<HTMLTextAreaElement | null>(null)
+const focusJsonEditor = (): void => { void nextTick(() => jsonEditor.value?.focus()) }
 let nameTimer: ReturnType<typeof setTimeout> | undefined
 let disposed = false
 let summaryController: AbortController | undefined
@@ -95,7 +102,7 @@ async function fetchPeopleJson(path: string, signal: AbortSignal, options: Reque
 }
 
 async function selectPerson(qq: string) {
-  if (saving.value || consolidating.value || (editing.value && !window.confirm('放弃未保存的修改？'))) return
+  if (saving.value || consolidating.value || !confirmDiscard(isDirty())) return
   editing.value = false
   editError.value = ''
   consolidationMessage.value = ''
@@ -152,15 +159,19 @@ async function loadPeople(refreshDetail = true) {
   }
 }
 function beginEdit() {
+  jsonInvalid.value = false
   if (!detail.value || consolidating.value) return
   clearTimeout(nameTimer)
   editing.value = true
   const {affinity, profile, relationship, recent_interactions, pending_entries} = detail.value
   draftText.value = JSON.stringify({...(affinityEnabled.value ? {affinity} : {}), profile, relationship, recent_interactions,
     pending_entries: pending_entries.map(({id, content}) => ({id, content}))}, null, 2)
+  savedDraft.value = draftText.value
   editError.value = ''
+  focusJsonEditor()
 }
 function cancelEdit() {
+  if (saving.value || !confirmDiscard(isDirty())) return
   editing.value = false
   editError.value = ''
   void loadPeople(false)
@@ -168,10 +179,13 @@ function cancelEdit() {
 async function savePerson() {
   if (!editing.value || !detail.value || saving.value) return
   let value
+  jsonInvalid.value = false
   try {
     value = JSON.parse(draftText.value)
   } catch {
     editError.value = 'JSON 格式不正确，请检查后保存'
+    jsonInvalid.value = true
+    focusJsonEditor()
     return
   }
   saving.value = true
@@ -192,6 +206,7 @@ async function savePerson() {
   } catch (cause) {
     editError.value = cause instanceof Error ? cause.message : '保存失败'
   } finally { saving.value = false }
+  if (editing.value && editError.value && !disposed) focusJsonEditor()
   if (!editing.value && !disposed) await loadPeople()
   if (configurationChanged && !disposed) editError.value = '好感度设置已变化，已重新读取人物信息，请重新编辑'
 }
@@ -244,7 +259,8 @@ onUnmounted(() => {
   <div class="people-page">
     <div class="page-header"><h1 class="page-title">人物信息</h1><p class="page-subtitle">{{ affinityEnabled ? '人物记忆与全局好感度' : '人物记忆' }}</p></div>
     <div class="people-toolbar">
-      <input v-model="search" class="form-input" placeholder="搜索昵称或 QQ 号" aria-label="搜索人物">
+      <label for="people-search" class="form-label">搜索人物</label>
+      <input id="people-search" v-model="search" class="form-input" placeholder="搜索昵称或 QQ 号" aria-label="搜索人物">
       <span>{{ filtered.length }} / {{ people.length }} 人</span>
       <button v-if="affinityEnabled" class="btn btn-secondary icon-button" :title="ascending ? '好感度：从低到高' : '好感度：从高到低'" :aria-label="ascending ? '好感度：从低到高' : '好感度：从高到低'" @click="ascending = !ascending"><ArrowUpNarrowWide v-if="ascending" :size="18"/><ArrowDownWideNarrow v-else :size="18"/></button>
       <button class="btn btn-secondary" :disabled="loading || editing || saving || consolidating" @click="loadPeople()">刷新</button>
@@ -273,13 +289,14 @@ onUnmounted(() => {
             <button class="btn btn-danger icon-button" title="删除人物" aria-label="删除人物" :disabled="saving || consolidating" @click="deletePerson"><Trash2 :size="16"/></button>
           </div>
           <p v-if="consolidationMessage" role="status">{{ consolidationMessage }}</p>
-          <p v-if="editError" role="alert">{{ editError }}</p>
+          <p v-if="editError" id="person-json-error" role="alert">{{ editError }}</p>
           <form v-if="editing" class="person-editor" @submit.prevent="savePerson">
             <fieldset :disabled="saving">
               <header class="person-heading editor-heading">
                 <div><h2>{{ detailName }}</h2><span>QQ {{ selected }}</span></div>
               </header>
-              <textarea v-model="draftText" class="form-input person-json" aria-label="人物数据 JSON" spellcheck="false"/>
+              <label for="person-json" class="form-label">人物数据 JSON</label>
+              <textarea id="person-json" ref="jsonEditor" :aria-invalid="jsonInvalid || undefined" :aria-describedby="editError ? 'person-json-error' : undefined" v-model="draftText" class="form-input person-json" aria-label="人物数据 JSON" spellcheck="false"/>
               <footer class="person-actions editor-footer"><button type="button" class="btn btn-secondary" @click="cancelEdit">取消</button><button class="btn btn-primary" type="submit">{{ saving ? '保存中...' : '保存' }}</button></footer>
             </fieldset>
           </form>

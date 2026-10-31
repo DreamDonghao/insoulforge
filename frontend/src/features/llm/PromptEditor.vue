@@ -4,7 +4,10 @@
  * @brief 提示词编辑组件
  */
 import {computed, inject, onMounted, onUnmounted, reactive, ref, type Ref, watch} from 'vue'
+import {confirmDiscard, useUnsavedChanges} from '../../composables/useUnsavedChanges'
 import {Marked} from 'marked'
+import RequestError from '../../components/RequestError.vue'
+import {requestJson, requestError} from '../../utils/api'
 import SlidingTabs from '../../components/SlidingTabs.vue'
 import type {ApiResponse} from '../../vite-env.d'
 
@@ -42,6 +45,7 @@ const previewHtml = computed(() => editorMode.value === 'edit' ? '' : promptMark
 const saving: Ref<boolean> = ref(false)
 const imageUrl = ref('')
 const imageLoading = ref(true)
+const imageError = ref('')
 const imageSaving = ref(false)
 const imageInput = ref<HTMLInputElement | null>(null)
 
@@ -62,6 +66,7 @@ const readImageApiResult = async (response: Response): Promise<ApiResponse> => {
 const loadCharacterImage = async (): Promise<boolean> => {
   imageLoading.value = true
   try {
+    imageError.value = ''
     const response = await fetch('/admin/api/character-image', {cache: 'no-store'})
     if (response.status === 404 && response.headers.get('content-type')?.includes('application/json')) {
       revokeImageUrl()
@@ -80,7 +85,7 @@ const loadCharacterImage = async (): Promise<boolean> => {
     imageUrl.value = url
     return true
   } catch (error) {
-    showToast!(error instanceof Error ? error.message : '读取角色形象图失败', true)
+    imageError.value = requestError(error, '读取角色形象图失败')
     return false
   } finally {
     imageLoading.value = false
@@ -131,30 +136,55 @@ const deleteCharacterImage = async (): Promise<void> => {
 onMounted(() => { void loadCharacterImage() })
 onUnmounted(revokeImageUrl)
 
-watch(selectedPrompt, async (key: string) => {
-  if (key === 'character-image') return
-  if (Object.keys(prompts).length === 0) {
-    const resp = await fetch('/admin/api/prompts')
-    Object.assign(prompts, await resp.json())
-  }
+const promptLoading = ref(true)
+const promptDirty = computed(() => selectedPrompt.value !== 'character-image' &&
+    !promptLoading.value && promptContent.value !== (prompts[selectedPrompt.value] || ''))
+useUnsavedChanges(() => promptDirty.value, () => saving.value || imageSaving.value)
+const selectPrompt = (key: string): void => {
+  if (key === selectedPrompt.value) return
+  if (!confirmDiscard(promptDirty.value)) return
+  selectedPrompt.value = key
   promptContent.value = prompts[key] || ''
-}, {immediate: true})
+}
+const promptLoadError = ref('')
+const promptsLoaded = ref(false)
+const loadPrompts = async (): Promise<void> => {
+  promptLoading.value = true
+  try {
+    const data = await requestJson<Record<string, string>>('/admin/api/prompts')
+    if (!data || Array.isArray(data) || typeof data !== 'object' || typeof data.executor_system !== 'string' || Object.values(data).some(value => typeof value !== 'string')) throw new Error('提示词数据无效')
+    Object.assign(prompts, data)
+    promptContent.value = prompts[selectedPrompt.value] || ''
+    promptsLoaded.value = true
+    promptLoadError.value = ''
+  } catch (cause) {
+    promptLoadError.value = requestError(cause, '提示词加载失败')
+  } finally {
+    promptLoading.value = false
+  }
+}
+onMounted(loadPrompts)
 
 const savePrompt = async (): Promise<void> => {
+  if (saving.value || promptLoading.value || !promptsLoaded.value) return
+  const key = selectedPrompt.value
+  const content = promptContent.value
   saving.value = true
   try {
     const resp = await fetch('/admin/api/prompt', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({key: selectedPrompt.value, content: promptContent.value})
+      body: JSON.stringify({key, content})
     })
     const data: ApiResponse = await resp.json()
-    if (data.success) {
+    if (resp.ok && data.success) {
       showToast!('提示词已保存')
-      prompts[selectedPrompt.value] = promptContent.value
+      prompts[key] = content
     } else {
       showToast!(data.error || '保存失败', true)
     }
+  } catch {
+    showToast?.('保存失败，请检查网络连接', true)
   } finally {
     saving.value = false
   }
@@ -168,47 +198,55 @@ const savePrompt = async (): Promise<void> => {
       <p class="page-subtitle">编辑Agent的系统提示词</p>
     </div>
 
-    <SlidingTabs v-model="selectedPrompt" :items="promptList" :item-min-width="116" label="提示词类型"/>
+    <SlidingTabs :model-value="selectedPrompt" @update:model-value="selectPrompt" :items="promptList" :item-min-width="116" label="提示词类型" id-prefix="prompt-type">
+      <template #panel>
 
-    <section v-if="selectedPrompt === 'character-image'" class="character-section">
-      <div class="character-heading">
-        <div>
-          <h2>角色形象参考图</h2>
-          <p class="form-hint">绘制自身形象时作为参考图；支持 PNG、JPEG、WebP，最大 8 MiB。</p>
-        </div>
-        <div class="character-actions">
-          <input ref="imageInput" accept="image/png,image/jpeg,image/webp" class="character-file-input" type="file"
-                 @change="uploadCharacterImage">
-          <button :disabled="imageSaving" class="btn btn-primary" type="button" @click="imageInput?.click()">
-            {{ imageSaving ? '处理中...' : imageUrl ? '替换图片' : '上传图片' }}
-          </button>
-          <button v-if="imageUrl" :disabled="imageSaving" class="btn btn-danger" type="button"
-                  @click="deleteCharacterImage">删除</button>
-        </div>
-      </div>
-      <div v-if="imageLoading" class="character-empty">加载中...</div>
-      <img v-else-if="imageUrl" :src="imageUrl" alt="当前角色形象参考图" class="character-preview">
-      <div v-else class="character-empty">尚未上传角色形象图</div>
-    </section>
-
-    <section v-else class="prompt-editor">
-        <div class="editor-toolbar">
-          <div class="editor-modes" role="group" aria-label="提示词显示模式">
-            <button v-for="mode in editorModes"
-                    :key="mode.key" type="button" :aria-pressed="editorMode === mode.key"
-                    :class="{active: editorMode === mode.key}" @click="editorMode = mode.key">{{ mode.label }}</button>
+        <section v-if="selectedPrompt === 'character-image'" class="character-section">
+          <div class="character-heading">
+            <div>
+              <h2>角色形象参考图</h2>
+              <p class="form-hint">绘制自身形象时作为参考图；支持 PNG、JPEG、WebP，最大 8 MiB。</p>
+            </div>
+            <div class="character-actions">
+              <label for="character-image-file" class="sr-only">角色形象图文件</label>
+              <input id="character-image-file" ref="imageInput" accept="image/png,image/jpeg,image/webp" class="character-file-input" type="file"
+                     @change="uploadCharacterImage">
+              <button :disabled="imageSaving" class="btn btn-primary" type="button" @click="imageInput?.click()">
+                {{ imageSaving ? '处理中...' : imageUrl ? '替换图片' : '上传图片' }}
+              </button>
+              <button v-if="imageUrl" :disabled="imageSaving" class="btn btn-danger" type="button"
+                      @click="deleteCharacterImage">删除</button>
+            </div>
           </div>
-        </div>
-        <div class="editor-panes" :class="{'is-split': editorMode === 'split'}">
-          <textarea v-show="editorMode !== 'preview'" v-model="promptContent" aria-label="提示词内容" class="form-input" placeholder="输入提示词内容..."></textarea>
-          <div v-if="editorMode !== 'edit'" class="markdown-preview" aria-label="Markdown 预览" v-html="previewHtml"></div>
-        </div>
-        <div class="prompt-actions">
-          <button :disabled="saving" class="btn btn-primary" @click="savePrompt">
-            {{ saving ? '保存中...' : '保存提示词' }}
-          </button>
-        </div>
-    </section>
+          <RequestError :message="imageError" :busy="imageLoading" :stale="!!imageUrl" @retry="loadCharacterImage"/>
+          <div v-if="imageLoading" class="character-empty">加载中...</div>
+          <img v-else-if="imageUrl" :src="imageUrl" alt="当前角色形象参考图" class="character-preview">
+          <div v-else-if="!imageError" class="character-empty">尚未上传角色形象图</div>
+        </section>
+
+        <section v-else class="prompt-editor">
+            <RequestError :message="promptLoadError" :busy="promptLoading" @retry="loadPrompts"/>
+            <p v-if="promptLoading" role="status">加载中…</p>
+            <div class="editor-toolbar">
+              <div class="editor-modes" role="group" aria-label="提示词显示模式">
+                <button v-for="mode in editorModes"
+                        :key="mode.key" type="button" :aria-pressed="editorMode === mode.key"
+                        :class="{active: editorMode === mode.key}" @click="editorMode = mode.key">{{ mode.label }}</button>
+              </div>
+            </div>
+            <label v-if="editorMode !== 'preview'" for="prompt-content" class="form-label">提示词内容</label>
+            <div class="editor-panes" :class="{'is-split': editorMode === 'split'}">
+              <textarea id="prompt-content" v-show="editorMode !== 'preview'" v-model="promptContent" :disabled="promptLoading || !promptsLoaded" aria-label="提示词内容" class="form-input" placeholder="输入提示词内容..."></textarea>
+              <div v-if="editorMode !== 'edit'" class="markdown-preview" aria-label="Markdown 预览" v-html="previewHtml"></div>
+            </div>
+            <div class="prompt-actions">
+              <button :disabled="saving || promptLoading || !promptsLoaded" class="btn btn-primary" @click="savePrompt">
+                {{ saving ? '保存中...' : '保存提示词' }}
+              </button>
+            </div>
+        </section>
+      </template>
+    </SlidingTabs>
   </div>
 </template>
 

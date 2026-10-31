@@ -4,9 +4,15 @@
  * @brief 自定义工具管理组件
  */
 import {computed, inject, nextTick, onMounted, reactive, ref, type Ref} from 'vue'
+import {confirmDiscard, useUnsavedChanges} from '../../composables/useUnsavedChanges'
 import {marked} from 'marked'
 import type {ApiResponse} from '../../vite-env'
+import RequestError from '../../components/RequestError.vue'
+import {requestJson, requestError} from '../../utils/api'
+import FieldError from '../../components/FieldError.vue'
+import {useFormValidation} from '../../composables/useFormValidation'
 import SlidingTabs from '../../components/SlidingTabs.vue'
+import ModalDialog from '../../components/ModalDialog.vue'
 import EnabledSwitch from '../../components/EnabledSwitch.vue'
 
 const showToast = inject<(msg: string, isError?: boolean) => void>('showToast')
@@ -113,7 +119,31 @@ const saveBuiltin = async (): Promise<void> => {
 }
 const loading: Ref<boolean> = ref(false)
 const saving: Ref<boolean> = ref(false)
-const showDialog: Ref<boolean> = ref(false)
+const showEditor: Ref<boolean> = ref(false)
+const editorForm = ref<HTMLFormElement | null>(null)
+let editorTrigger: HTMLElement | null = null
+let editorTriggerId = ''
+let listScrollY = 0
+const beginEditing = (): void => {
+  editorTrigger = document.activeElement as HTMLElement | null
+  editorTriggerId = editorTrigger?.id ?? ''
+  listScrollY = window.scrollY ?? 0
+  activeTab.value = 'custom'
+  showEditor.value = true
+  void nextTick(() => {
+    window.scrollTo?.({top: 0, behavior: 'instant'})
+    document.getElementById?.('tool-editor-title')?.focus()
+  })
+}
+const finishEditing = (): void => {
+  showEditor.value = false
+  void nextTick(() => {
+    const target = editorTrigger?.isConnected ? editorTrigger : document.getElementById?.(editorTriggerId)
+    if (target) target.focus({preventScroll: true})
+    else document.getElementById?.('tools-page-title')?.focus({preventScroll: true})
+    window.scrollTo?.({top: listScrollY, behavior: 'instant'})
+  })
+}
 const isEdit: Ref<boolean> = ref(false)
 const testing: Ref<boolean> = ref(false)
 const testResult: Ref<string> = ref('')
@@ -148,14 +178,65 @@ const createDefaultTool = (): CustomTool => ({
   enabled: true
 })
 const editTool = reactive<CustomTool>(createDefaultTool())
+const savedTool = ref('')
+const builtinDirty = (): boolean => {
+  const tool = editingBuiltin.value
+  const original = builtinTools.value.find(item => item.name === tool?.name)
+  return !!tool && !!original && (tool.description !== original.description || tool.customDescription !== original.customDescription)
+}
+const closeBuiltin = (): void => {
+  if (!builtinSaving.value && confirmDiscard(builtinDirty())) editingBuiltin.value = null
+}
+const closeImport = (): void => {
+  if (!importing.value && confirmDiscard(importJson.value.trim() !== '')) showImportDialog.value = false
+}
+useUnsavedChanges(() => (showEditor.value && JSON.stringify(editTool) !== savedTool.value) ||
+    builtinDirty() || (showImportDialog.value && importJson.value.trim() !== ''),
+    () => saving.value || testing.value || builtinSaving.value || importing.value)
+
+
+const {errors, fieldAttrs, validateForm, resetValidation} = useFormValidation(() => {
+  const result: Record<string, string> = {
+    'tool-name': editTool.name.trim() ? '' : '请填写工具名称',
+    'tool-description': editTool.description.trim() ? '' : '请填写工具描述',
+    'tool-script': editTool.scriptContent.trim() ? '' : '请填写 Lua 脚本'
+  }
+  try {
+    const schema: unknown = JSON.parse(editTool.parameters)
+    if (!schema || typeof schema !== 'object' || Array.isArray(schema)) throw new Error()
+  } catch { result['tool-parameters'] = '参数定义必须是有效的 JSON 对象' }
+  return result
+})
+
+const importForm = useFormValidation(() => {
+  try {
+    const value: unknown = JSON.parse(importJson.value)
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error()
+    return {'tool-import-json': ''}
+  } catch { return {'tool-import-json': '请上传或粘贴有效的工具 JSON 对象'} }
+})
 
 const testArgs: Ref<string> = ref('{}')
+const testForm = useFormValidation(() => {
+  try {
+    JSON.parse(testArgs.value)
+    return {'tool-test-args': ''}
+  } catch { return {'tool-test-args': '测试参数必须是有效的 JSON'} }
+})
 
+const toolsError = ref('')
+const toolsLoaded = ref(false)
 const loadTools = async (): Promise<void> => {
+  if (loading.value) return
   loading.value = true
   try {
-    const resp = await fetch('/admin/api/custom-tools')
-    tools.value = await resp.json()
+    const data = await requestJson<CustomTool[]>('/admin/api/custom-tools')
+    if (!Array.isArray(data)) throw new Error('工具列表数据无效')
+    tools.value = data
+    toolsLoaded.value = true
+    toolsError.value = ''
+  } catch (cause) {
+    toolsError.value = requestError(cause, '自定义工具加载失败')
   } finally {
     loading.value = false
   }
@@ -169,7 +250,7 @@ const autoResize = (event: Event): void => {
 
 const resizeAllTextareas = (): void => {
   nextTick(() => {
-    document.querySelectorAll('.auto-height').forEach((el) => {
+    editorForm.value?.querySelectorAll('.auto-height').forEach((el) => {
       const textarea = el as HTMLTextAreaElement
       textarea.style.height = 'auto'
       textarea.style.height = textarea.scrollHeight + 'px'
@@ -177,49 +258,41 @@ const resizeAllTextareas = (): void => {
   })
 }
 
-const openAddDialog = (): void => {
+const openAddEditor = (): void => {
   isEdit.value = false
   Object.assign(editTool, createDefaultTool())
   testResult.value = ''
   testArgs.value = '{}'
-  showDialog.value = true
+  testForm.resetValidation()
+  resetValidation()
+  savedTool.value = JSON.stringify(editTool)
+  beginEditing()
   resizeAllTextareas()
 }
 
-const openEditDialog = (tool: CustomTool): void => {
+const openEditEditor = (tool: CustomTool): void => {
   isEdit.value = true
   Object.assign(editTool, tool)
   testResult.value = ''
   testArgs.value = '{}'
-  showDialog.value = true
+  testForm.resetValidation()
+  resetValidation()
+  savedTool.value = JSON.stringify(editTool)
+  beginEditing()
   resizeAllTextareas()
 }
 
-const closeDialog = (): void => {
-  showDialog.value = false
+const closeEditor = (): void => {
+  if (saving.value || testing.value) {
+    showToast?.('保存或测试执行中，请稍后返回', true)
+    return
+  }
+  if (confirmDiscard(JSON.stringify(editTool) !== savedTool.value)) finishEditing()
 }
 
 const saveTool = async (): Promise<void> => {
-  if (!editTool.name) {
-    showToast!('请填写工具名称', true)
-    return
-  }
-  if (!editTool.description) {
-    showToast!('请填写工具描述', true)
-    return
-  }
-  if (!editTool.scriptContent) {
-    showToast!('请填写脚本内容', true)
-    return
-  }
-
-  try {
-    JSON.parse(editTool.parameters)
-  } catch {
-    showToast!('参数定义 JSON 格式错误', true)
-    return
-  }
-
+  if (saving.value || testing.value || !validateForm()) return
+  const snapshot = JSON.stringify(editTool)
   saving.value = true
   try {
     const url = isEdit.value
@@ -230,29 +303,41 @@ const saveTool = async (): Promise<void> => {
     const resp = await fetch(url, {
       method,
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(editTool)
+      body: snapshot
     })
     const data: ApiResponse = await resp.json()
-    if (data.success) {
+    if (resp.ok && data.success) {
       showToast!(isEdit.value ? '工具已更新' : '工具已添加')
-      closeDialog()
+      savedTool.value = snapshot
+      if (JSON.stringify(editTool) === snapshot) finishEditing()
       loadTools()
     } else {
       showToast!(data.error || '操作失败', true)
     }
+  } catch (cause) {
+    showToast!(requestError(cause, '保存工具失败'), true)
   } finally {
     saving.value = false
   }
 }
 
 const deleteTool = async (id: number): Promise<void> => {
-  if (!confirm('确定删除此工具？')) return
+  const key = `custom:${id}`
+  if (pendingTools.has(key) || !window.confirm('确定删除此工具？')) return
+  pendingTools.add(key)
+  try {
 
-  const resp = await fetch(`/admin/api/custom-tool/${id}`, {method: 'DELETE'})
-  const data: ApiResponse = await resp.json()
-  if (data.success) {
-    showToast!('工具已删除')
-    loadTools()
+    const resp = await fetch(`/admin/api/custom-tool/${id}`, {method: 'DELETE'})
+    const data: ApiResponse = await resp.json()
+    if (!resp.ok || !data.success) throw new Error(data.error || '操作未完成')
+    if (data.success) {
+      showToast!('工具已删除')
+      loadTools()
+    }
+  } catch (cause) {
+    showToast!(requestError(cause, '删除工具失败'), true)
+  } finally {
+    pendingTools.delete(key)
   }
 }
 
@@ -274,31 +359,42 @@ const toggleTool = async (tool: CustomTool): Promise<void> => {
 }
 
 const reloadTools = async (): Promise<void> => {
-  const resp = await fetch('/admin/api/custom-tools/reload', {method: 'POST'})
-  const data: ApiResponse = await resp.json()
-  if (data.success) {
-    showToast!('工具已重新加载')
+  try {
+    const resp = await fetch('/admin/api/custom-tools/reload', {method: 'POST'})
+    const data: ApiResponse = await resp.json()
+    if (!resp.ok || !data.success) throw new Error(data.error || '操作未完成')
+    if (data.success) {
+      showToast!('工具已重新加载')
+    }
+  } catch (cause) {
+    showToast!(requestError(cause, '重新加载工具失败'), true)
   }
 }
 
 const exportTool = async (id: number, name: string): Promise<void> => {
-  const resp = await fetch(`/admin/api/custom-tool/${id}/export`)
-  const data = await resp.json()
-  if (data.success === false) {
-    showToast!(data.error || '导出失败', true)
-    return
+  try {
+    const resp = await fetch(`/admin/api/custom-tool/${id}/export`)
+    const data = await resp.json()
+    if (!resp.ok) throw new Error(data.error || '操作未完成')
+    if (data.success === false) {
+      showToast!(data.error || '导出失败', true)
+      return
+    }
+    // 创建下载文件
+    const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'})
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${name}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (cause) {
+    showToast!(requestError(cause, '导出工具失败'), true)
   }
-  // 创建下载文件
-  const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'})
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `${name}.json`
-  a.click()
-  URL.revokeObjectURL(url)
 }
 
 const openImportDialog = (): void => {
+  importForm.resetValidation()
   importJson.value = ''
   showImportDialog.value = true
 }
@@ -317,13 +413,10 @@ const handleFileUpload = (event: Event): void => {
 }
 
 const importTool = async (): Promise<void> => {
-  if (!importJson.value.trim()) {
-    showToast!('请输入或上传工具 JSON', true)
-    return
-  }
-
+  if (!importForm.validateForm()) return
+  const toolData: unknown = JSON.parse(importJson.value)
+  if (importing.value) return
   try {
-    const toolData = JSON.parse(importJson.value)
     importing.value = true
     const resp = await fetch('/admin/api/custom-tool/import', {
       method: 'POST',
@@ -331,15 +424,15 @@ const importTool = async (): Promise<void> => {
       body: JSON.stringify(toolData)
     })
     const data: ApiResponse = await resp.json()
-    if (data.success) {
+    if (resp.ok && data.success) {
       showToast!('工具已导入')
       showImportDialog.value = false
       loadTools()
     } else {
       showToast!(data.error || '导入失败', true)
     }
-  } catch {
-    showToast!('JSON 格式错误', true)
+  } catch (cause) {
+    showToast!(requestError(cause, '导入工具失败'), true)
   } finally {
     importing.value = false
   }
@@ -356,16 +449,11 @@ const showReadme = (tool: CustomTool): void => {
 }
 
 const testCurrentTool = async (): Promise<void> => {
+  if (testing.value || saving.value || !testForm.validateForm()) return
   testing.value = true
   testResult.value = ''
   try {
-    let testArgsJson
-    try {
-      testArgsJson = JSON.parse(testArgs.value)
-    } catch {
-      showToast!('测试参数 JSON 格式错误', true)
-      return
-    }
+    const testArgsJson: unknown = JSON.parse(testArgs.value)
 
     const resp = await fetch('/admin/api/custom-tool/test', {
       method: 'POST',
@@ -377,11 +465,13 @@ const testCurrentTool = async (): Promise<void> => {
       })
     })
     const data = await resp.json()
-    if (data.success) {
+    if (resp.ok && data.success) {
       testResult.value = data.result
     } else {
       testResult.value = '错误: ' + (data.error || '测试失败')
     }
+  } catch (cause) {
+    showToast!(requestError(cause, '工具测试失败'), true)
   } finally {
     testing.value = false
   }
@@ -396,112 +486,212 @@ onMounted(() => {
 
 <template>
   <div>
-    <div class="page-header">
-      <h1 class="page-title">工具配置</h1>
-      <p class="page-subtitle">管理内置工具与自定义工具</p>
-    </div>
+    <template v-if="!showEditor">
+      <div class="page-header">
+        <h1 id="tools-page-title" class="page-title" tabindex="-1">工具配置</h1>
+        <p class="page-subtitle">管理内置工具与自定义工具</p>
+      </div>
 
-    <SlidingTabs v-model="activeTab" :items="toolTabs" label="工具类型" />
-    <section v-if="activeTab === 'builtin'" class="builtin-tools">
-      <div class="tools-toolbar">
-        <input v-model="builtinFilter" class="form-input tools-search" type="search" placeholder="搜索名称或描述"
-               aria-label="搜索内置工具">
-        <span class="tools-count">{{ enabledBuiltinCount }} / {{ builtinTools.length }} 已启用</span>
-      </div>
-      <p v-if="builtinLoading" class="empty-state">加载中...</p>
-      <div v-else-if="builtinError" class="empty-state">
-        <p>{{ builtinError }}</p><button class="btn btn-secondary" @click="loadBuiltins">重试</button>
-      </div>
-      <template v-else>
-        <section v-for="group in builtinGroups" :key="group.category" class="builtin-group">
-          <h3>{{ group.category }}工具 <span>{{ group.tools.length }}</span></h3>
-          <div v-for="tool in group.tools" :key="tool.name"
-               class="builtin-row">
-            <EnabledSwitch :model-value="tool.enabled" :disabled="pendingTools.has(`builtin:${tool.name}`)"
-                               :label="`启用工具 ${tool.name}`" @update:model-value="toggleBuiltin(tool, $event)" />
-            <div class="tool-identity"><code>{{ tool.name }}</code>
-              <span v-if="tool.customDescription" class="tool-kind">已修改描述</span>
+      <SlidingTabs v-model="activeTab" :items="toolTabs" label="工具类型" id-prefix="tool-type">
+        <template #panel>
+          <section v-if="activeTab === 'builtin'" class="builtin-tools">
+            <div class="tools-toolbar">
+              <label for="builtin-tool-search" class="form-label">搜索内置工具</label>
+              <input id="builtin-tool-search" v-model="builtinFilter" class="form-input tools-search" type="search" placeholder="搜索名称或描述"
+                     aria-label="搜索内置工具">
+              <span class="tools-count">{{ enabledBuiltinCount }} / {{ builtinTools.length }} 已启用</span>
             </div>
-            <p class="tool-description">{{ tool.description || '—' }}</p>
-            <div class="tool-controls">
-              <button class="btn btn-secondary btn-sm" :disabled="pendingTools.has(`builtin:${tool.name}`)"
-                      @click="editingBuiltin = {...tool}">编辑描述</button>
+            <p v-if="builtinLoading" class="empty-state">加载中...</p>
+            <div v-else-if="builtinError" class="empty-state">
+              <p>{{ builtinError }}</p><button class="btn btn-secondary" @click="loadBuiltins">重试</button>
+            </div>
+            <template v-else>
+              <section v-for="group in builtinGroups" :key="group.category" class="builtin-group">
+                <h3>{{ group.category }}工具 <span>{{ group.tools.length }}</span></h3>
+                <div v-for="tool in group.tools" :key="tool.name"
+                     class="builtin-row">
+                  <EnabledSwitch :model-value="tool.enabled" :disabled="pendingTools.has(`builtin:${tool.name}`)"
+                                     :label="`启用工具 ${tool.name}`" @update:model-value="toggleBuiltin(tool, $event)" />
+                  <div class="tool-identity"><code>{{ tool.name }}</code>
+                    <span v-if="tool.customDescription" class="tool-kind">已修改描述</span>
+                  </div>
+                  <p class="tool-description">{{ tool.description || '—' }}</p>
+                  <div class="tool-controls">
+                    <button class="btn btn-secondary btn-sm" :disabled="pendingTools.has(`builtin:${tool.name}`)"
+                            @click="editingBuiltin = {...tool}">编辑描述</button>
+                  </div>
+                </div>
+              </section>
+              <p v-if="!visibleBuiltins.length" class="empty-state">暂无匹配的内置工具</p>
+            </template>
+          </section>
+          <section v-if="activeTab === 'custom'" class="custom-tools">
+            <div class="tools-toolbar">
+              <label for="custom-tool-search" class="form-label">搜索自定义工具</label>
+              <input id="custom-tool-search" v-model="customFilter" class="form-input tools-search" type="search" placeholder="搜索名称或描述"
+                     aria-label="搜索自定义工具">
+              <span class="tools-count">{{ enabledCustomCount }} / {{ tools.length }} 已启用</span>
+              <div class="tool-actions">
+                <button class="btn btn-secondary btn-sm" @click="openImportDialog">导入</button>
+                <button class="btn btn-secondary btn-sm" @click="reloadTools">重新加载</button>
+                <button class="btn btn-primary btn-sm" id="add-custom-tool" @click="openAddEditor">添加工具</button>
+              </div>
+            </div>
+            <RequestError :message="toolsError" :busy="loading" :stale="toolsLoaded" @retry="loadTools"/>
+            <p v-if="loading && !toolsLoaded" class="empty-state" role="status">加载中...</p>
+            <p v-if="loading && toolsLoaded" role="status">刷新中…</p>
+            <section v-if="toolsLoaded" class="builtin-group">
+              <h3>Lua 工具 <span>{{ visibleCustomTools.length }}</span></h3>
+              <div v-for="tool in visibleCustomTools" :key="tool.id" class="builtin-row">
+                <EnabledSwitch :model-value="tool.enabled" :disabled="pendingTools.has(`custom:${tool.id}`)"
+                                   :label="`启用工具 ${tool.name}`" @update:model-value="toggleTool(tool)" />
+                <div class="tool-identity"><code>{{ tool.name }}</code><span class="tool-kind">Lua</span></div>
+                <p class="tool-description">{{ tool.description || '—' }}</p>
+                <div class="tool-controls">
+                  <div class="tool-actions">
+                    <button class="btn btn-secondary btn-sm" @click="showReadme(tool)">说明</button>
+                    <button class="btn btn-secondary btn-sm" @click="exportTool(tool.id, tool.name)">导出</button>
+                    <button class="btn btn-secondary btn-sm" :disabled="pendingTools.has(`custom:${tool.id}`)"
+                            :id="`edit-custom-tool-${tool.id}`" @click="openEditEditor(tool)">编辑</button>
+                    <button class="btn btn-danger btn-sm" :disabled="pendingTools.has(`custom:${tool.id}`)"
+                            @click="deleteTool(tool.id)">{{ pendingTools.has(`custom:${tool.id}`) ? '处理中…' : '删除' }}</button>
+                  </div>
+                </div>
+              </div>
+              <p v-if="!visibleCustomTools.length" class="empty-state">{{ tools.length ? '暂无匹配的工具' : '暂无自定义工具' }}</p>
+            </section>
+          </section>
+
+        </template>
+      </SlidingTabs>
+
+    </template>
+
+    <!-- 独立的工具编辑视图，长表单使用页面滚动。 -->
+    <section v-if="showEditor" class="tool-editor-page" aria-labelledby="tool-editor-title">
+      <form ref="editorForm" class="tool-editor-form" novalidate @submit.prevent="saveTool">
+        <div class="page-header tool-editor-heading">
+          <div>
+            <h1 id="tool-editor-title" class="page-title" tabindex="-1">{{ isEdit ? '编辑工具' : '添加工具' }}</h1>
+            <p class="page-subtitle">{{ isEdit ? editTool.name : '填写工具信息、Lua 脚本和参数，并可在保存前执行测试。' }}</p>
+          </div>
+          <button type="button" class="btn btn-secondary" :disabled="saving || testing" @click="closeEditor">返回工具列表</button>
+        </div>
+
+        <div class="tool-editor-body">
+          <h2 class="editor-section-title">基本信息</h2>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="tool-name">工具名称 *</label>
+              <input v-bind="fieldAttrs('tool-name')" v-model="editTool.name" :disabled="isEdit" class="form-input"
+                     placeholder="如: search_web, calculate">
+            <FieldError field="tool-name" :message="errors['tool-name']"/>
             </div>
           </div>
-        </section>
-        <p v-if="!visibleBuiltins.length" class="empty-state">暂无匹配的内置工具</p>
-      </template>
-    </section>
-    <section v-if="activeTab === 'custom'" class="custom-tools">
-      <div class="tools-toolbar">
-        <input v-model="customFilter" class="form-input tools-search" type="search" placeholder="搜索名称或描述"
-               aria-label="搜索自定义工具">
-        <span class="tools-count">{{ enabledCustomCount }} / {{ tools.length }} 已启用</span>
-        <div class="tool-actions">
-          <button class="btn btn-secondary btn-sm" @click="openImportDialog">导入</button>
-          <button class="btn btn-secondary btn-sm" @click="reloadTools">重新加载</button>
-          <button class="btn btn-primary btn-sm" @click="openAddDialog">添加工具</button>
-        </div>
-      </div>
-      <p v-if="loading" class="empty-state">加载中...</p>
-      <section v-else class="builtin-group">
-        <h3>Lua 工具 <span>{{ visibleCustomTools.length }}</span></h3>
-        <div v-for="tool in visibleCustomTools" :key="tool.id" class="builtin-row">
-          <EnabledSwitch :model-value="tool.enabled" :disabled="pendingTools.has(`custom:${tool.id}`)"
-                             :label="`启用工具 ${tool.name}`" @update:model-value="toggleTool(tool)" />
-          <div class="tool-identity"><code>{{ tool.name }}</code><span class="tool-kind">Lua</span></div>
-          <p class="tool-description">{{ tool.description || '—' }}</p>
-          <div class="tool-controls">
-            <div class="tool-actions">
-              <button class="btn btn-secondary btn-sm" @click="showReadme(tool)">说明</button>
-              <button class="btn btn-secondary btn-sm" @click="exportTool(tool.id, tool.name)">导出</button>
-              <button class="btn btn-secondary btn-sm" :disabled="pendingTools.has(`custom:${tool.id}`)"
-                      @click="openEditDialog(tool)">编辑</button>
-              <button class="btn btn-danger btn-sm" :disabled="pendingTools.has(`custom:${tool.id}`)"
-                      @click="deleteTool(tool.id)">删除</button>
+
+          <div class="form-group">
+            <label class="form-label" for="tool-description">工具描述 *</label>
+            <input v-bind="fieldAttrs('tool-description')" v-model="editTool.description" class="form-input" placeholder="描述工具功能，供 LLM 理解何时调用">
+            <FieldError field="tool-description" :message="errors['tool-description']"/>
+          </div>
+
+          <h2 class="editor-section-title">参数与脚本</h2>
+          <div class="form-group">
+            <label class="form-label" for="tool-parameters">参数定义 (JSON Schema)</label>
+            <textarea v-bind="fieldAttrs('tool-parameters')" v-model="editTool.parameters" class="form-input code-input auto-height"
+                      @input="autoResize"></textarea>
+            <FieldError field="tool-parameters" :message="errors['tool-parameters']"/>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="tool-script">Lua 脚本</label>
+            <textarea v-bind="fieldAttrs('tool-script')" v-model="editTool.scriptContent" class="form-input code-input auto-height" spellcheck="false"
+                      @input="autoResize"></textarea>
+            <FieldError field="tool-script" :message="errors['tool-script']"/>
+            <small class="form-hint">定义 run(args, ctx)；bot.send_message 可等待发送结果，bot.start_task 启动可选的 background 入口。测试不会真正发送。</small>
+          </div>
+
+          <!-- README 文档 -->
+          <div class="form-group">
+            <label class="form-label" for="tool-readme">说明文档 (Markdown)</label>
+            <textarea v-bind="fieldAttrs('tool-readme')" v-model="editTool.readme" class="form-input auto-height" placeholder="作者、用法、联系方式等信息..."
+                      style="min-height: 80px;" @input="autoResize"></textarea>
+            <FieldError field="tool-readme" :message="errors['tool-readme']"/>
+            <small class="form-hint">可选填写作者、使用示例、联系方式等，便于分享和查阅</small>
+          </div>
+
+          <!-- 测试区域 -->
+          <div class="test-section">
+            <div class="test-header">
+              <span class="test-title">测试工具</span>
+              <button type="button" :disabled="testing || saving" class="btn btn-secondary btn-sm" @click="testCurrentTool">
+                {{ testing ? '执行中...' : '执行测试' }}
+              </button>
+            </div>
+            <div class="test-content">
+              <div class="test-input">
+                <label for="tool-test-args">输入参数 (JSON)</label>
+                <textarea v-bind="testForm.fieldAttrs('tool-test-args')" v-model="testArgs" class="form-input code-input auto-height" @input="autoResize"></textarea>
+            <FieldError field="tool-test-args" :message="testForm.errors.value['tool-test-args']"/>
+              </div>
+              <div class="test-output">
+                <span>输出结果</span>
+                <pre class="result-box">{{ testResult || '点击执行测试查看结果...' }}</pre>
+              </div>
             </div>
           </div>
+
+          <div class="form-group checkbox-group">
+            <label class="form-checkbox"><input v-model="editTool.enabled" :disabled="saving" type="checkbox">启用此工具（保存后生效）</label>
+          </div>
         </div>
-        <p v-if="!visibleCustomTools.length" class="empty-state">{{ tools.length ? '暂无匹配的工具' : '暂无自定义工具' }}</p>
-      </section>
+
+        <div class="tool-editor-footer">
+          <button type="button" :disabled="saving || testing" class="btn btn-secondary" @click="closeEditor">取消</button>
+          <button type="submit" :disabled="saving || testing" class="btn btn-primary">
+            {{ saving ? '保存中...' : '保存' }}
+          </button>
+        </div>
+      </form>
     </section>
 
-    <div v-if="editingBuiltin" class="dialog-overlay">
-      <form class="dialog builtin-description-dialog" role="dialog" aria-modal="true"
-            aria-labelledby="builtin-dialog-title" @submit.prevent="saveBuiltin">
+
+    <ModalDialog v-if="editingBuiltin" class="dialog-overlay" labelledby="builtin-dialog-title" @close="closeBuiltin">
+      <form class="dialog builtin-description-dialog" @submit.prevent="saveBuiltin">
         <div class="dialog-header">
           <h3 id="builtin-dialog-title">{{ editingBuiltin.name }}</h3>
-          <button type="button" class="dialog-close" :disabled="builtinSaving" @click="editingBuiltin = null">×</button>
+          <button type="button" class="dialog-close" aria-label="关闭对话框" :disabled="builtinSaving" @click="closeBuiltin">×</button>
         </div>
         <div class="dialog-body">
           <label class="form-label" for="builtin-description">工具描述</label>
-          <textarea id="builtin-description" v-model="editingBuiltin.description" class="form-input"
+          <textarea id="builtin-description" v-model="editingBuiltin.description" :disabled="builtinSaving" class="form-input"
                     rows="7" @input="editingBuiltin.customDescription = true"></textarea>
         </div>
         <div class="dialog-footer">
           <button type="button" class="btn btn-secondary" :disabled="builtinSaving"
                   @click="editingBuiltin.description = editingBuiltin.defaultDescription; editingBuiltin.customDescription = false">恢复默认描述</button>
-          <button type="button" class="btn btn-secondary" :disabled="builtinSaving" @click="editingBuiltin = null">取消</button>
+          <button type="button" class="btn btn-secondary" :disabled="builtinSaving" @click="closeBuiltin">取消</button>
           <button type="submit" class="btn btn-primary" :disabled="builtinSaving">{{ builtinSaving ? '保存中...' : '保存' }}</button>
         </div>
       </form>
-    </div>
+    </ModalDialog>
     <!-- 导入对话框 -->
-    <div v-if="showImportDialog" class="dialog-overlay">
+    <ModalDialog v-if="showImportDialog" class="dialog-overlay" labelledby="import-dialog-title" @close="closeImport">
       <div class="dialog" style="width: 600px;">
         <div class="dialog-header">
-          <h3>导入工具</h3>
-          <button class="dialog-close" @click="showImportDialog = false">×</button>
+          <h3 id="import-dialog-title">导入工具</h3>
+          <button class="dialog-close" aria-label="关闭对话框" @click="closeImport">×</button>
         </div>
         <div class="dialog-body">
           <div class="form-group">
-            <label class="form-label">上传 JSON 文件</label>
-            <input accept=".json" class="form-input" type="file" @change="handleFileUpload">
+            <label class="form-label" for="tool-import-file">上传 JSON 文件</label>
+            <input id="tool-import-file" accept=".json" class="form-input" type="file" @change="handleFileUpload">
           </div>
           <div class="form-group">
-            <label class="form-label">或粘贴 JSON 内容</label>
-            <textarea v-model="importJson" class="form-input code-input" placeholder="粘贴工具 JSON 内容..."
+            <label class="form-label" for="tool-import-json">或粘贴 JSON 内容</label>
+            <textarea v-bind="importForm.fieldAttrs('tool-import-json')" v-model="importJson" class="form-input code-input" placeholder="粘贴工具 JSON 内容..."
                       spellcheck="false" style="min-height: 200px;"></textarea>
+            <FieldError field="tool-import-json" :message="importForm.errors.value['tool-import-json']"/>
           </div>
           <div class="import-example">
             <strong>JSON 格式示例：</strong>
@@ -515,109 +705,45 @@ onMounted(() => {
           </div>
         </div>
         <div class="dialog-footer">
-          <button class="btn btn-secondary" @click="showImportDialog = false">取消</button>
+          <button class="btn btn-secondary" @click="closeImport">取消</button>
           <button :disabled="importing" class="btn btn-success" @click="importTool">
             {{ importing ? '导入中...' : '导入' }}
           </button>
         </div>
       </div>
-    </div>
-
-    <!-- 添加/编辑对话框 -->
-    <div v-if="showDialog" class="dialog-overlay">
-      <div style="width: 900px" class="dialog">
-        <div class="dialog-header">
-          <h3>{{ isEdit ? '编辑工具' : '添加工具' }}</h3>
-          <button class="dialog-close" @click="closeDialog">×</button>
-        </div>
-
-        <div class="dialog-body">
-          <!-- 基本信息 -->
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label">工具名称 *</label>
-              <input v-model="editTool.name" :disabled="isEdit" class="form-input"
-                     placeholder="如: search_web, calculate">
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">工具描述 *</label>
-            <input v-model="editTool.description" class="form-input" placeholder="描述工具功能，供 LLM 理解何时调用">
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">参数定义 (JSON Schema)</label>
-            <textarea v-model="editTool.parameters" class="form-input code-input auto-height"
-                      @input="autoResize"></textarea>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">Lua 脚本</label>
-            <textarea v-model="editTool.scriptContent" class="form-input code-input auto-height" spellcheck="false"
-                      @input="autoResize"></textarea>
-            <small class="form-hint">定义 run(args, ctx)；bot.send_message 可等待发送结果，bot.start_task 启动可选的 background 入口。测试不会真正发送。</small>
-          </div>
-
-          <!-- README 文档 -->
-          <div class="form-group">
-            <label class="form-label">说明文档 (Markdown)</label>
-            <textarea v-model="editTool.readme" class="form-input auto-height" placeholder="作者、用法、联系方式等信息..."
-                      style="min-height: 80px;" @input="autoResize"></textarea>
-            <small class="form-hint">可选填写作者、使用示例、联系方式等，便于分享和查阅</small>
-          </div>
-
-          <!-- 测试区域 -->
-          <div class="test-section">
-            <div class="test-header">
-              <span class="test-title">测试工具</span>
-              <button :disabled="testing" class="btn btn-primary btn-sm" @click="testCurrentTool">
-                {{ testing ? '执行中...' : '执行测试' }}
-              </button>
-            </div>
-            <div class="test-content">
-              <div class="test-input">
-                <label>输入参数 (JSON)</label>
-                <textarea v-model="testArgs" class="form-input code-input auto-height" @input="autoResize"></textarea>
-              </div>
-              <div class="test-output">
-                <label>输出结果</label>
-                <pre class="result-box">{{ testResult || '点击执行测试查看结果...' }}</pre>
-              </div>
-            </div>
-          </div>
-
-          <div class="form-group checkbox-group">
-            <EnabledSwitch v-model="editTool.enabled" :disabled="saving" label="启用此工具" />
-          </div>
-        </div>
-
-        <div class="dialog-footer">
-          <button class="btn btn-secondary" @click="closeDialog">取消</button>
-          <button :disabled="saving" class="btn btn-success" @click="saveTool">
-            {{ saving ? '保存中...' : '保存' }}
-          </button>
-        </div>
-      </div>
-    </div>
+    </ModalDialog>
 
     <!-- README 详情对话框 -->
-    <div v-if="showReadmeDialog" class="dialog-overlay">
+    <ModalDialog v-if="showReadmeDialog" class="dialog-overlay" labelledby="readme-dialog-title" @close="showReadmeDialog = false">
       <div class="dialog" style="width: 700px; max-height: 80vh;">
         <div class="dialog-header">
-          <h3>{{ currentToolName }}</h3>
-          <button class="dialog-close" @click="showReadmeDialog = false">×</button>
+          <h3 id="readme-dialog-title" tabindex="-1" data-modal-initial-focus>{{ currentToolName }}</h3>
+          <button class="dialog-close" aria-label="关闭对话框" @click="showReadmeDialog = false">×</button>
         </div>
         <div class="dialog-body readme-content" v-html="currentReadme"></div>
         <div class="dialog-footer">
           <button class="btn btn-secondary" @click="showReadmeDialog = false">关闭</button>
         </div>
       </div>
-    </div>
+    </ModalDialog>
   </div>
 </template>
 
 <style scoped>
+.tool-editor-page { max-width: 1200px; min-width: 0; }
+.tool-editor-form { min-width: 0; }
+.tool-editor-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.tool-editor-heading .page-subtitle { overflow-wrap: anywhere; }
+.editor-section-title { font-size: 16px; margin: 24px 0 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+.editor-section-title:first-child { margin-top: 0; }
+.tool-editor-footer { display: flex; justify-content: flex-end; gap: 12px; flex-wrap: wrap; padding: 20px 0; border-top: 1px solid var(--border); }
+.tool-editor-page .auto-height { min-height: 120px; }
+.tool-editor-page .test-input, .tool-editor-page .test-output { min-width: 0; }
+.tool-editor-page .test-content { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 760px) {
+  .tool-editor-page .test-content { grid-template-columns: 1fr; }
+}
+
 .tools-toolbar {
   display: flex;
   align-items: center;
@@ -1005,7 +1131,7 @@ onMounted(() => {
 }
 
 .test-input label,
-.test-output label {
+.test-output > span {
   display: block;
   font-size: 12px;
   color: var(--text-secondary);

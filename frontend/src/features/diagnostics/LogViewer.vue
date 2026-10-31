@@ -4,6 +4,8 @@
  * @brief 按会话、等级和关键词查询日志，并接收实时日志
  */
 import {computed, inject, nextTick, onMounted, onUnmounted, ref} from 'vue'
+import RequestError from '../../components/RequestError.vue'
+import {requestError} from '../../utils/api'
 import type {Group, LogEntry, LogQueryResult} from '../../vite-env.d'
 import {privateSessionUserId, sessionKey, sessionLabel} from '../../utils/session'
 
@@ -12,7 +14,14 @@ const showToast = inject<(msg: string, isError?: boolean) => void>('showToast')
 const groups = ref<Group[]>([])
 const entries = ref<LogEntry[]>([])
 const loading = ref(false)
+const loadError = ref('')
+const loaded = ref(false)
+const retryAppend = ref(false)
+const groupsError = ref('')
+const groupsLoading = ref(false)
 const followLatest = ref(true)
+const connectionState = ref<'connecting' | 'connected' | 'reconnecting'>('connecting')
+const connectionLabel = computed(() => ({connecting: '正在连接实时日志…', connected: '实时日志已连接', reconnecting: '实时日志已断开，正在重连；数据可能过期'}[connectionState.value]))
 const hasMore = ref(false)
 const nextBeforeId = ref(0)
 const currentLevel = ref('info')
@@ -21,12 +30,24 @@ const groupId = ref<'all' | 'system' | string>('all')
 const level = ref<'all' | string>('all')
 const keyword = ref('')
 const limit = ref(200)
+const activeFilters = ref({groupId: 'all', level: 'all', keyword: ''})
+let replacingSnapshot = false
+let liveDuringSnapshot: LogEntry[] = []
+const matchesFilters = (entry: LogEntry): boolean => {
+  const filter = activeFilters.value
+  return (filter.groupId === 'all' || entry.sessionId === (filter.groupId === 'system' ? '0' : filter.groupId)) &&
+      (filter.level === 'all' || entry.level === filter.level) &&
+      (!filter.keyword || entry.source.includes(filter.keyword) || entry.content.includes(filter.keyword))
+}
 const logListEl = ref<HTMLElement | null>(null)
 let logWs: WebSocket | null = null
 let reconnectTimer: number | undefined
 let scrollFrame: number | undefined
 let forceScroll = false
 let disposed = false
+let logRequest = 0
+let logController: AbortController | undefined
+let groupsController: AbortController | undefined
 
 const scrollToBottom = async (force = false): Promise<void> => {
   forceScroll ||= force
@@ -68,9 +89,7 @@ const subscribe = (): void => {
   if (!logWs || logWs.readyState !== WebSocket.OPEN) return
   logWs.send(JSON.stringify({
     action: 'subscribe',
-    groupId: groupId.value,
-    level: level.value,
-    keyword: keyword.value.trim()
+    ...activeFilters.value
   }))
 }
 
@@ -79,10 +98,17 @@ const connectWebSocket = (): void => {
   if (logWs && logWs.readyState <= WebSocket.OPEN) return
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
   logWs = new WebSocket(`${protocol}//${location.host}/admin/logs/ws`)
-  logWs.onopen = subscribe
+  logWs.onopen = () => {
+    connectionState.value = 'connected'
+    subscribe()
+    // 重连后补查断线期间的日志。
+    if (loaded.value) void refresh()
+  }
   logWs.onmessage = handleWsMessage
+  logWs.onerror = () => { connectionState.value = 'reconnecting' }
   logWs.onclose = () => {
     logWs = null
+    connectionState.value = 'reconnecting'
     reconnectTimer = window.setTimeout(connectWebSocket, 3000)
   }
 }
@@ -91,6 +117,9 @@ const disconnectWebSocket = (): void => {
   if (reconnectTimer) window.clearTimeout(reconnectTimer)
   reconnectTimer = undefined
   if (logWs) {
+    logWs.onopen = null
+    logWs.onmessage = null
+    logWs.onerror = null
     logWs.onclose = null
     logWs.close()
     logWs = null
@@ -98,23 +127,31 @@ const disconnectWebSocket = (): void => {
 }
 
 const loadGroups = async (): Promise<void> => {
+  if (disposed || groupsLoading.value) return
+  groupsController = new AbortController()
+  groupsLoading.value = true
   try {
-    const resp = await fetch('/admin/api/groups')
+    const resp = await fetch('/admin/api/groups', {signal: groupsController.signal})
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     const data = await resp.json()
-    if (Array.isArray(data)) {
-      groups.value = data
-    }
-  } catch {
-    showToast?.('群列表加载失败', true)
+    if (disposed) return
+    if (!Array.isArray(data)) throw new Error('会话列表数据无效')
+    groups.value = data
+    groupsError.value = ''
+  } catch (cause) {
+    if (!disposed) groupsError.value = requestError(cause, '日志范围加载失败')
+  } finally {
+    if (!disposed) groupsLoading.value = false
   }
 }
 
 const buildQuery = (beforeId?: number): string => {
   const params = new URLSearchParams()
   params.set('limit', String(limit.value))
-  if (groupId.value !== 'all') params.set('groupId', groupId.value)
-  if (level.value !== 'all') params.set('level', level.value)
-  if (keyword.value.trim()) params.set('keyword', keyword.value.trim())
+  const filter = activeFilters.value
+  if (filter.groupId !== 'all') params.set('groupId', filter.groupId)
+  if (filter.level !== 'all') params.set('level', filter.level)
+  if (filter.keyword) params.set('keyword', filter.keyword)
   if (beforeId && beforeId > 0) params.set('beforeId', String(beforeId))
   return params.toString()
 }
@@ -124,7 +161,7 @@ const applySnapshot = (data: LogQueryResult, append = false): void => {
   if (append) {
     entries.value = [...list, ...entries.value]
   } else {
-    entries.value = list
+    entries.value = [...new Map([...list, ...liveDuringSnapshot].map(entry => [entry.id, entry])).values()].sort((a, b) => a.id - b.id)
     void scrollToBottom(true)
   }
   hasMore.value = data.hasMore
@@ -133,25 +170,55 @@ const applySnapshot = (data: LogQueryResult, append = false): void => {
   size.value = data.size || 0
 }
 
-const loadLogs = async (append = false): Promise<void> => {
-  if (loading.value) return
+const loadLogs = async (append = false): Promise<boolean> => {
+  if (disposed || (append && loading.value)) return false
+  if (!append) {
+    const next = {groupId: groupId.value, level: level.value, keyword: keyword.value.trim()}
+    const changed = JSON.stringify(next) !== JSON.stringify(activeFilters.value)
+    activeFilters.value = next
+    if (changed) {
+      entries.value = entries.value.filter(matchesFilters)
+      hasMore.value = false
+      nextBeforeId.value = 0
+    }
+    replacingSnapshot = true
+    liveDuringSnapshot = []
+    subscribe()
+  }
+  const request = ++logRequest
+  logController?.abort()
+  const controller = new AbortController()
+  logController = controller
   loading.value = true
   try {
-    const resp = await fetch(`/admin/api/logs?${buildQuery(append ? nextBeforeId.value : undefined)}`)
+    const resp = await fetch(`/admin/api/logs?${buildQuery(append ? nextBeforeId.value : undefined)}`, {signal: controller.signal})
     if (!resp.ok) {
-      showToast?.(`日志加载失败: ${resp.status}`, true)
-      return
+      throw new Error(`HTTP ${resp.status}`)
     }
     const data: LogQueryResult = await resp.json()
+    if (disposed || request !== logRequest) return false
+    if (!Array.isArray(data.entries)) throw new Error('日志数据无效')
     applySnapshot(data, append)
+    loadError.value = ''
+    loaded.value = true
+    return true
+  } catch (cause) {
+    if (disposed || request !== logRequest || controller.signal.aborted) return false
+    retryAppend.value = append
+    loadError.value = requestError(cause, '日志加载失败')
+    return false
   } finally {
-    loading.value = false
+    if (!disposed && request === logRequest) {
+      replacingSnapshot = false
+      liveDuringSnapshot = []
+      loading.value = false
+      logController = undefined
+    }
   }
 }
 
 const refresh = async (): Promise<void> => {
   await loadLogs(false)
-  subscribe()
 }
 
 const loadOlder = async (): Promise<void> => {
@@ -166,9 +233,12 @@ const resetFilters = async (): Promise<void> => {
 }
 
 const handleWsMessage = (event: MessageEvent<string>): void => {
+  if (disposed) return
   const payload = JSON.parse(event.data) as { type?: string; data?: LogEntry | LogQueryResult }
   if (payload.type === 'log' && payload.data && 'content' in payload.data) {
     const entry = payload.data as LogEntry
+    if (!matchesFilters(entry)) return
+    if (replacingSnapshot) liveDuringSnapshot.push(entry)
     const lastEntry = entries.value.length > 0 ? entries.value[entries.value.length - 1] : undefined
     if (entry.id > (lastEntry?.id || 0)) {
       entries.value.push(entry)
@@ -192,13 +262,15 @@ const toggleFollow = (): void => {
 }
 
 onMounted(async () => {
-  await loadGroups()
+  void loadGroups()
   await loadLogs(false)
   connectWebSocket()
 })
 
 onUnmounted(() => {
   disposed = true
+  logController?.abort()
+  groupsController?.abort()
   disconnectWebSocket()
   if (scrollFrame !== undefined) window.cancelAnimationFrame(scrollFrame)
 })
@@ -211,11 +283,12 @@ onUnmounted(() => {
       <div class="page-subtitle">{{ currentGroupLabel }} · 当前级别 {{ currentLevel }} · {{ size }} 条缓存</div>
     </div>
 
+    <RequestError :message="groupsError" :busy="groupsLoading" :stale="groups.length > 0" @retry="loadGroups"/>
     <div class="card log-toolbar">
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label">日志范围</label>
-          <select v-model="groupId" class="form-input" @change="refresh">
+          <label for="log-scope" class="form-label">日志范围</label>
+          <select id="log-scope" v-model="groupId" class="form-input" @change="refresh">
             <option value="all">全部日志</option>
             <option value="system">系统日志</option>
             <option v-for="g in groups" :key="sessionKey(g)" :value="sessionKey(g)">
@@ -224,8 +297,8 @@ onUnmounted(() => {
           </select>
         </div>
         <div class="form-group">
-          <label class="form-label">日志级别</label>
-          <select v-model="level" class="form-input" @change="refresh">
+          <label for="log-level" class="form-label">日志级别</label>
+          <select id="log-level" v-model="level" class="form-input" @change="refresh">
             <option value="all">全部</option>
             <option value="trace">trace</option>
             <option value="debug">debug</option>
@@ -235,8 +308,8 @@ onUnmounted(() => {
           </select>
         </div>
         <div class="form-group">
-          <label class="form-label">关键字</label>
-          <input v-model="keyword" class="form-input" placeholder="输入关键字后回车" @keyup.enter="refresh">
+          <label for="log-keyword" class="form-label">关键字</label>
+          <input id="log-keyword" v-model="keyword" class="form-input" placeholder="输入关键字后回车" @keyup.enter="refresh">
         </div>
       </div>
       <div class="log-actions">
@@ -250,7 +323,9 @@ onUnmounted(() => {
 
     <div class="card log-list-card">
       <div ref="logListEl" class="log-list" @scroll="onScroll">
-        <div v-if="entries.length === 0" class="log-empty">暂无日志</div>
+        <RequestError :message="loadError" :busy="loading" :stale="loaded" @retry="loadLogs(retryAppend)"/>
+        <p v-if="loading && !loaded" role="status">加载中…</p>
+        <div v-else-if="!loadError && entries.length === 0" class="log-empty">暂无日志</div>
         <div v-for="entry in entries" :key="entry.id" v-memo="[entry, groupLabels]"
              :class="['log-line', levelClass(entry.level)]">
           <span class="log-time">{{ entry.timestamp }}</span>
@@ -265,8 +340,9 @@ onUnmounted(() => {
 
       <div class="log-footer">
         <button v-if="hasMore" class="btn btn-secondary" type="button" @click="loadOlder">加载更早</button>
-        <span v-else class="form-hint">已显示全部可用日志</span>
-        <span class="form-hint">实时跟踪 {{ followLatest ? '开启' : '关闭' }}</span>
+        <span v-else-if="loaded && !loadError" class="form-hint">已显示全部可用日志</span>
+        <span role="status" class="form-hint">{{ connectionLabel }}</span>
+        <span class="form-hint">自动滚动 {{ followLatest ? '开启' : '关闭' }}</span>
       </div>
     </div>
   </div>

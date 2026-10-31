@@ -1,5 +1,10 @@
 <script setup lang="ts">
-import {computed, inject, nextTick, onMounted, onUnmounted, reactive, ref, watch} from 'vue'
+import {computed, inject, onMounted, onUnmounted, reactive, ref} from 'vue'
+import {confirmDiscard, useUnsavedChanges} from '../../composables/useUnsavedChanges'
+import FieldError from '../../components/FieldError.vue'
+import {useFormValidation} from '../../composables/useFormValidation'
+import {numberError} from '../../utils/validation'
+import ModalDialog from '../../components/ModalDialog.vue'
 import NavIcon from '../../components/NavIcon.vue'
 import EnabledSwitch from '../../components/EnabledSwitch.vue'
 
@@ -29,33 +34,42 @@ const statuses = ref<Status[]>([])
 const loading = ref(true)
 const busy = ref(false)
 const error = ref('')
+const needsReload = ref(false)
+class RequestTimeoutError extends Error {}
 const editing = ref<number | null>(null)
 const dialog = ref(false)
-const dialogElement = ref<HTMLFormElement | null>(null)
 const draft = reactive<Server>(emptyServer())
 const headerRows = ref<{name: string; value: string}[]>([])
-const validHeaders = computed(() => {
-  const names = headerRows.value.map(header => header.name.trim().toLowerCase())
-  return names.every(name => /^[!#$%&'*+.^_`|~0-9a-z-]+$/.test(name)) &&
-      new Set(names).size === names.length &&
-      headerRows.value.every(header => !/[\r\n\0]/.test(header.value))
-})
+const savedDraft = ref('')
+const draftSnapshot = (): string => JSON.stringify({draft, headers: headerRows.value})
+const isDirty = (): boolean => dialog.value && draftSnapshot() !== savedDraft.value
+useUnsavedChanges(isDirty, () => busy.value)
+function closeDialog(): void {
+  if (busy.value || !confirmDiscard(isDirty())) return
+  dialog.value = false
+}
 const descriptionBytes = computed(() => new TextEncoder().encode(draft.description).length)
 const statusByName = computed(() => new Map(statuses.value.map(status => [status.name, status])))
-const valid = computed(() => /^[A-Za-z0-9_-]{1,20}$/.test(draft.name.trim()) &&
-    validHeaders.value &&
-    descriptionBytes.value <= 1024 &&
-    validUrl(draft.url.trim()) &&
-    Number.isFinite(draft.timeoutSeconds) && draft.timeoutSeconds >= 1 && draft.timeoutSeconds <= 120 &&
-    !servers.value.some((server, index) => index !== editing.value && server.name === draft.name.trim()))
+const {errors, fieldAttrs, validateForm, resetValidation} = useFormValidation(() => {
+  const result: Record<string, string> = {}
+  if (!/^[A-Za-z0-9_-]{1,20}$/.test(draft.name.trim())) result['mcp-name'] = '名称需为 1～20 个英文字母、数字、下划线或连字符'
+  else if (servers.value.some((server, index) => index !== editing.value && server.name === draft.name.trim())) result['mcp-name'] = '服务名称已存在'
+  if (!validUrl(draft.url.trim())) result['mcp-url'] = '请输入不含账号、密码或片段的 HTTP 或 HTTPS 地址'
+  if (descriptionBytes.value > 1024) result['mcp-description'] = '用途描述不能超过 1024 字节'
+  result['mcp-timeout'] = numberError(draft.timeoutSeconds, 1, 120, false)
+  const names = headerRows.value.map(header => header.name.trim().toLowerCase())
+  headerRows.value.forEach((header, index) => {
+    if (!/^[!#$%&'*+.^_`|~0-9a-z-]+$/.test(names[index]!) || names.indexOf(names[index]!) !== index) result[`mcp-header-${index}-name`] = '请输入合法且不重复的请求头名称'
+    if (/[\r\n\0]/.test(header.value)) result[`mcp-header-${index}-value`] = '请求头值不能包含换行或空字符'
+  })
+  return result
+})
 
 const requests = new Set<AbortController>()
 let active = true
 let reading = false
 let loadVersion = 0
 let timer: ReturnType<typeof setInterval> | undefined
-let previousFocus: HTMLElement | null = null
-let previousOverflow = ''
 
 function emptyServer(): Server {
   return {name: '', description: '', url: '', token: '', headers: {}, enabled: true, timeoutSeconds: 30}
@@ -86,14 +100,24 @@ function errorMessage(cause: unknown): string {
 async function request(url: string, options: RequestInit = {}): Promise<Record<string, unknown>> {
   const controller = new AbortController()
   requests.add(controller)
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  const expired = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => {
+      reject(new RequestTimeoutError('请求超时，操作结果尚未确认。请先重新读取配置，核对结果后再操作'))
+      controller.abort()
+    }, 15000)
+  })
   try {
-    const response = await fetch(url, {...options, cache: 'no-store', signal: controller.signal})
-    const result: unknown = await response.json()
-    if (!result || typeof result !== 'object' || Array.isArray(result)) throw new Error('管理接口返回数据无效')
-    const data = result as Record<string, unknown>
-    if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : `请求失败（HTTP ${response.status}）`)
-    return data
+    return await Promise.race([(async () => {
+      const response = await fetch(url, {...options, cache: 'no-store', signal: controller.signal})
+      const result: unknown = await response.json()
+      if (!result || typeof result !== 'object' || Array.isArray(result)) throw new Error('管理接口返回数据无效')
+      const data = result as Record<string, unknown>
+      if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : `请求失败（HTTP ${response.status}）`)
+      return data
+    })(), expired])
   } finally {
+    clearTimeout(timeout)
     requests.delete(controller)
   }
 }
@@ -131,6 +155,7 @@ async function load(background = false): Promise<void> {
         }
       })
       originalServers.value = data.servers
+      needsReload.value = false
     }
     statuses.value = data.status as Status[]
   } catch (cause) {
@@ -142,46 +167,16 @@ async function load(background = false): Promise<void> {
 }
 
 function open(index: number | null): void {
-  previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  resetValidation()
   editing.value = index
   Object.assign(draft, index === null ? emptyServer() : servers.value[index])
   headerRows.value = Object.entries(draft.headers).map(([name, value]) => ({name, value}))
+  savedDraft.value = draftSnapshot()
   dialog.value = true
 }
 
-function handleDialogKey(event: KeyboardEvent): void {
-  if (event.key === 'Escape' && !busy.value) dialog.value = false
-  if (event.key !== 'Tab') return
-  const controls = dialogElement.value?.querySelectorAll<HTMLElement>('input:not(:disabled), textarea:not(:disabled), button:not(:disabled)')
-  if (!controls?.length) {
-    event.preventDefault()
-    return
-  }
-  const first = controls[0]!
-  const last = controls[controls.length - 1]!
-  if (event.shiftKey && document.activeElement === first) {
-    event.preventDefault()
-    last.focus()
-  } else if (!event.shiftKey && document.activeElement === last) {
-    event.preventDefault()
-    first.focus()
-  }
-}
-
-watch(dialog, async visible => {
-  if (visible) {
-    previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    await nextTick()
-    if (active && dialog.value) dialogElement.value?.querySelector<HTMLInputElement>('input')?.focus()
-  } else {
-    document.body.style.overflow = previousOverflow
-    previousFocus?.focus()
-  }
-})
-
 async function persist(next: Server[]): Promise<boolean> {
-  if (busy.value) return false
+  if (busy.value || needsReload.value) return false
   busy.value = true
   ++loadVersion // 保存之前发出的轮询结果不能覆盖保存后的状态。
   try {
@@ -199,6 +194,7 @@ async function persist(next: Server[]): Promise<boolean> {
     }
     return true
   } catch (cause) {
+    if (cause instanceof RequestTimeoutError) needsReload.value = true
     if (active) toast?.(errorMessage(cause), true)
     return false
   } finally {
@@ -207,7 +203,7 @@ async function persist(next: Server[]): Promise<boolean> {
 }
 
 async function save(): Promise<void> {
-  if (busy.value || !valid.value) return
+  if (busy.value || !validateForm()) return
   const next = servers.value.map(server => ({...server}))
   const value = {...draft, name: draft.name.trim(), url: draft.url.trim(),
     headers: Object.fromEntries(headerRows.value.map(header => [header.name.trim(), header.value]))}
@@ -218,20 +214,20 @@ async function save(): Promise<void> {
 
 async function remove(index: number): Promise<void> {
   const server = servers.value[index]
-  if (!server || busy.value || !window.confirm(`删除 MCP 服务“${server.name}”？`)) return
+  if (!server || busy.value || needsReload.value || !window.confirm(`删除 MCP 服务“${server.name}”？`)) return
   await persist(servers.value.filter((_, position) => position !== index))
 }
 
 async function toggle(index: number, enabled: boolean): Promise<void> {
   const server = servers.value[index]
-  if (!server || busy.value) return
+  if (!server || busy.value || needsReload.value) return
   await persist(servers.value.map((value, position) => ({
     ...value, enabled: position === index ? enabled : value.enabled
   })))
 }
 
 async function refresh(): Promise<void> {
-  if (busy.value) return
+  if (busy.value || needsReload.value) return
   busy.value = true
   ++loadVersion
   try {
@@ -243,6 +239,7 @@ async function refresh(): Promise<void> {
       toast?.(failed ? '部分服务刷新失败，请查看错误信息' : '工具列表已刷新', failed)
     }
   } catch (cause) {
+    if (cause instanceof RequestTimeoutError) needsReload.value = true
     if (active) toast?.(errorMessage(cause), true)
   } finally {
     busy.value = false
@@ -252,7 +249,7 @@ async function refresh(): Promise<void> {
 onMounted(async () => {
   await load()
   if (active) timer = setInterval(() => {
-    if (!document.hidden) void load(true)
+    if (!document.hidden && !busy.value && !needsReload.value) void load(true)
   }, 5000)
 })
 
@@ -260,12 +257,15 @@ onUnmounted(() => {
   active = false
   if (timer) clearInterval(timer)
   for (const controller of requests) controller.abort()
-  if (dialog.value) document.body.style.overflow = previousOverflow
 })
 </script>
 
 <template>
   <div>
+    <div v-if="needsReload && !dialog" role="alert" class="card">
+      <p>上次操作超时，结果尚未确认。请先重新读取配置并核对。</p>
+      <button type="button" class="btn btn-secondary" :disabled="loading" @click="load()">{{ loading ? '读取中…' : '重新读取配置' }}</button>
+    </div>
     <div class="page-header mcp-header">
       <h1 class="page-title">MCP 服务</h1>
       <div class="mcp-actions">
@@ -305,17 +305,21 @@ onUnmounted(() => {
         </details>
       </article>
     </div>
-    <div v-if="dialog" class="mcp-overlay" @click.self="!busy && (dialog = false)">
-      <form ref="dialogElement" class="mcp-dialog" role="dialog" aria-modal="true" aria-labelledby="mcp-title" @submit.prevent="save"
-            @keydown="handleDialogKey">
+    <ModalDialog v-if="dialog" class="mcp-overlay" labelledby="mcp-title" @close="closeDialog">
+      <form class="mcp-dialog" novalidate @submit.prevent="save">
+        <div v-if="needsReload" role="alert">
+          <p>保存超时，草稿已保留。请先重新读取配置并核对保存结果，再决定是否继续保存。</p>
+          <button type="button" class="btn btn-secondary" :disabled="loading" @click="load()">{{ loading ? '读取中…' : '重新读取配置' }}</button>
+          <p v-if="error">{{ error }}</p>
+        </div>
         <h2 id="mcp-title">{{ editing === null ? '添加 MCP 服务' : '编辑 MCP 服务' }}</h2>
         <div class="form-group"><label class="form-label" for="mcp-name">服务名称</label>
-          <input id="mcp-name" v-model="draft.name" class="form-input" maxlength="20" pattern="[A-Za-z0-9_-]{1,20}" required :disabled="busy" autofocus></div>
+          <input v-bind="fieldAttrs('mcp-name')" v-model="draft.name" class="form-input" maxlength="20" pattern="[A-Za-z0-9_-]{1,20}" required :disabled="busy" autofocus><FieldError field="mcp-name" :message="errors['mcp-name']"/></div>
         <div class="form-group"><label class="form-label" for="mcp-url">服务地址</label>
-          <input id="mcp-url" v-model="draft.url" class="form-input" type="url" maxlength="4096" required :disabled="busy" placeholder="https://example.com/mcp"></div>
+          <input v-bind="fieldAttrs('mcp-url')" v-model="draft.url" class="form-input" type="url" maxlength="4096" required :disabled="busy" placeholder="https://example.com/mcp"><FieldError field="mcp-url" :message="errors['mcp-url']"/></div>
         <div class="form-group"><label class="form-label" for="mcp-description">用途描述</label>
-          <textarea id="mcp-description" v-model="draft.description" class="form-input" rows="3" maxlength="1024" :disabled="busy"></textarea>
-          <p class="form-hint" :class="{'mcp-error': descriptionBytes > 1024}">{{ descriptionBytes }} / 1024 字节</p>
+          <textarea v-bind="fieldAttrs('mcp-description')" v-model="draft.description" class="form-input" rows="3" maxlength="1024" :disabled="busy"></textarea><FieldError field="mcp-description" :message="errors['mcp-description']"/>
+          <p class="form-hint" >{{ descriptionBytes }} / 1024 字节</p>
         </div>
         <div class="form-group"><label class="form-label" for="mcp-token">Bearer Token</label>
           <input id="mcp-token" v-model="draft.token" class="form-input" type="password" autocomplete="new-password" :disabled="busy"></div>
@@ -324,19 +328,19 @@ onUnmounted(() => {
             <button class="btn btn-secondary btn-sm" type="button" :disabled="busy" @click="headerRows.push({name: '', value: ''})">添加请求头</button>
           </div>
           <div v-for="(header, index) in headerRows" :key="index" class="mcp-header-row">
-            <input v-model="header.name" class="form-input" :aria-label="`请求头 ${index + 1} 名称`" placeholder="X-API-Key" :disabled="busy" required>
-            <input v-model="header.value" class="form-input" :aria-label="`请求头 ${index + 1} 值`" type="password" autocomplete="new-password" placeholder="值" :disabled="busy">
+            <div><label class="form-label" :for="`mcp-header-${index}-name`">请求头 {{ index + 1 }} 名称</label><input v-bind="fieldAttrs(`mcp-header-${index}-name`)" v-model="header.name" class="form-input" :aria-label="`请求头 ${index + 1} 名称`" placeholder="X-API-Key" :disabled="busy" required><FieldError :field="`mcp-header-${index}-name`" :message="errors[`mcp-header-${index}-name`]"/></div>
+            <div><label class="form-label" :for="`mcp-header-${index}-value`">请求头 {{ index + 1 }} 值</label><input v-bind="fieldAttrs(`mcp-header-${index}-value`)" v-model="header.value" class="form-input" :aria-label="`请求头 ${index + 1} 值`" type="password" autocomplete="new-password" placeholder="值" :disabled="busy"><FieldError :field="`mcp-header-${index}-value`" :message="errors[`mcp-header-${index}-value`]"/></div>
             <button class="btn btn-danger btn-sm" type="button" :disabled="busy" :aria-label="`删除请求头 ${index + 1}`" @click="headerRows.splice(index, 1)">删除</button>
           </div>
-          <p v-if="!validHeaders" class="form-hint mcp-error">请求头名称必须合法且不能重复，值不能包含换行或空字符。</p>
+          <p class="form-hint">请求头名称不能重复，值不能包含换行或空字符。</p>
         </div>
         <div class="form-group"><label class="form-label" for="mcp-timeout">请求超时（秒）</label>
-          <input id="mcp-timeout" v-model.number="draft.timeoutSeconds" class="form-input" type="number" min="1" max="120" required :disabled="busy"></div>
-        <label class="mcp-enabled"><input v-model="draft.enabled" type="checkbox" :disabled="busy">启用服务</label>
-        <div class="mcp-actions mcp-footer"><button class="btn btn-secondary" type="button" :disabled="busy" @click="dialog = false">取消</button>
-          <button class="btn btn-primary" type="submit" :disabled="busy || !valid">{{ busy ? '保存中...' : '保存' }}</button></div>
+          <input v-bind="fieldAttrs('mcp-timeout', 'mcp-timeout-hint')" v-model.number="draft.timeoutSeconds" class="form-input" type="number" min="1" max="120" step="any" required :disabled="busy"><FieldError field="mcp-timeout" :message="errors['mcp-timeout']"/><p id="mcp-timeout-hint" class="form-hint">1～120 秒，允许小数。</p></div>
+        <label class="mcp-enabled"><input v-model="draft.enabled" type="checkbox" :disabled="busy">启用服务（保存后生效）</label>
+        <div class="mcp-actions mcp-footer"><button class="btn btn-secondary" type="button" :disabled="busy" @click="closeDialog">取消</button>
+          <button class="btn btn-primary" type="submit" :disabled="busy || needsReload || loading">{{ busy ? '保存中...' : '保存' }}</button></div>
       </form>
-    </div>
+    </ModalDialog>
   </div>
 </template>
 
@@ -356,7 +360,7 @@ onUnmounted(() => {
 .mcp-error {color: var(--danger)}
 .mcp-tools {grid-column: 2 / -1; min-width: 0}
 .mcp-tools summary {cursor: pointer; color: var(--text-secondary); padding: 8px 0}
-.mcp-tools summary:focus-visible {outline: 2px solid var(--primary-strong); outline-offset: 3px}
+.mcp-tools summary:focus-visible {outline: 2px solid var(--focus-ring); outline-offset: 3px}
 .mcp-tools ul {list-style: none; padding: 0; margin: 0; max-height: 360px; overflow-y: auto}
 .mcp-tools li {display: grid; grid-template-columns: 176px minmax(0, 1fr); gap: 20px;
   align-items: baseline; padding: 12px 0; border-top: 1px solid var(--border); overflow-wrap: anywhere}

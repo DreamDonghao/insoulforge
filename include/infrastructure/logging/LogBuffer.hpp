@@ -51,8 +51,8 @@ namespace insoulforge {
         /// @brief 从滚动日志文件恢复近期日志
         void loadFromDirectory(const std::string &directory);
 
-        /// @brief 追加由 Logger 创建的日志条目
-        /// @return 带内存序列 ID 的最终条目
+        /// @brief 追加由 Logger 创建的日志条目，入库前隐去管理后台启动凭据
+        /// @return 带内存序列 ID 且已脱敏的最终条目，可直接用于实时推送
         [[nodiscard]] auto append(LogEntry entry) -> LogEntry;
 
         /// @brief 按过滤条件和游标获取日志

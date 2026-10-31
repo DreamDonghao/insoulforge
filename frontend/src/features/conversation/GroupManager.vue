@@ -4,6 +4,14 @@
  * @brief 管理群聊和私聊的启用状态、记录、记忆与定时任务
  */
 import {computed, inject, nextTick, onMounted, onUnmounted, reactive, ref, type Ref, watch} from 'vue'
+import {confirmDiscard, useUnsavedChanges} from '../../composables/useUnsavedChanges'
+import FieldError from '../../components/FieldError.vue'
+import {useFormValidation} from '../../composables/useFormValidation'
+import {identifierError, SESSION_ID_MAX} from '../../utils/validation'
+import RequestError from '../../components/RequestError.vue'
+import {requestJson, requestError} from '../../utils/api'
+import NavIcon from '../../components/NavIcon.vue'
+import ModalDialog from '../../components/ModalDialog.vue'
 import EnabledSwitch from '../../components/EnabledSwitch.vue'
 import ChatMessageView from './ChatMessageView.vue'
 import {useAdminWebSocket} from '../../composables/useAdminWebSocket'
@@ -27,40 +35,48 @@ const wsConnected = inject<Ref<boolean>>('wsConnected') as Ref<boolean>
 const groups: Ref<(Group & { enabled?: boolean })[]> = ref([])
 // 保存请求期间收到的绝对计数，防止稍后返回的列表快照覆盖实时更新。
 const messageCounts = new Map<string, number>()
-const showAddGroup = ref(false)
-const newGroupId = ref('')
-const addingGroup = ref(false)
-const closeAddGroup = (): void => {
-  if (addingGroup.value) return
-  showAddGroup.value = false
-  newGroupId.value = ''
+const showAddSession = ref(false)
+const newSessionType = ref<'group' | 'private'>('group')
+const newSessionId = ref('')
+const addingSession = ref(false)
+const newSessionIdLabel = computed(() => newSessionType.value === 'private' ? 'QQ 号' : '群号')
+const sessionForm = useFormValidation(() => ({
+  'new-session-id': identifierError(newSessionId.value, newSessionIdLabel.value, false, SESSION_ID_MAX)
+}))
+const openAddSession = (): void => {
+  newSessionType.value = typeFilter.value === 'private' ? 'private' : 'group'
+  sessionForm.resetValidation()
+  showAddSession.value = true
 }
-const addGroup = async (): Promise<void> => {
-  if (addingGroup.value) return
-  const groupId = newGroupId.value.trim()
+const closeAddSession = (): void => {
+  if (addingSession.value || !confirmDiscard(newSessionId.value.trim() !== '')) return
+  showAddSession.value = false
+  newSessionId.value = ''
+}
+const addSession = async (): Promise<void> => {
+  if (addingSession.value) return
+  const id = newSessionId.value.trim()
+  const type = newSessionType.value
   // 按字符串提交，避免 JavaScript 数值精度丢失；后端继续校验会话 ID。
-  if (!/^[1-9]\d*$/.test(groupId)) {
-    showToast?.('请输入有效群号', true)
-    return
-  }
-  addingGroup.value = true
+  if (!sessionForm.validateForm()) return
+  addingSession.value = true
   try {
     const resp = await fetch('/admin/api/group', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({groupId})
+      body: JSON.stringify(type === 'private' ? {sessionType: 'private', userId: id} : {groupId: id})
     })
     const data: ApiResponse = await resp.json()
     if (!resp.ok || !data.success) throw new Error(data.error || '添加失败')
-    showAddGroup.value = false
-    newGroupId.value = ''
-    searchKeyword.value = groupId
-    typeFilter.value = 'group'
+    showAddSession.value = false
+    newSessionId.value = ''
+    searchKeyword.value = id
+    typeFilter.value = type
     await loadGroups()
-    showToast?.('群聊已添加并启用，可在列表中调整设置')
+    showToast?.(`${type === 'private' ? '私聊' : '群聊'}已添加并启用，可在列表中调整设置`)
   } catch (error) {
     showToast?.(error instanceof Error ? error.message : '添加失败', true)
   } finally {
-    addingGroup.value = false
+    addingSession.value = false
   }
 }
 // 会话筛选
@@ -87,17 +103,24 @@ type DisplayChatMessage = ChatMessage & {
 const chatRecords: Ref<DisplayChatMessage[]> = ref([])
 const chatContainer: Ref<HTMLDivElement | null> = ref(null)
 const chatLoading: Ref<boolean> = ref(false)
+const chatError = ref('')
 let nextRealtimeMessageKey = 0
 let disposed = false
 
 // 编辑状态
 const editingId: Ref<number | null> = ref(null)
 const editContent: Ref<string> = ref('')
+const editSaving = ref(false)
+let editRevision = 0
+const savedEditContent = ref('')
+const messageDirty = (): boolean => editingId.value !== null && editContent.value !== savedEditContent.value
 
 // 记忆弹窗
 const memoryGroupId: Ref<string | null> = ref(null)
 const memoryGroupName: Ref<string> = ref('')
 const groupMemory: Ref<string> = ref('')
+const savedMemory = ref('')
+const memoryError = ref('')
 const memoryLoading: Ref<boolean> = ref(false)
 const memorySaving: Ref<boolean> = ref(false)
 
@@ -128,30 +151,22 @@ const viewSummaries = async (id: string, name: string): Promise<void> => {
   }
 }
 
-// 加载群列表
+// 刷新失败时保留上次快照，错误状态独立于空列表。
+const groupsError = ref('')
+const groupsLoaded = ref(false)
 const {refresh: loadGroups, loading} = useCoalescedRefresh(async signal => {
   try {
-    const resp = await fetch('/admin/api/groups', {signal})
+    const data = await requestJson<Group[]>('/admin/api/groups', {signal})
     if (signal.aborted) return
-    if (!resp.ok) {
-      showToast!('加载失败: ' + resp.status, true)
-      groups.value = []
-      return
-    }
-    const data = await resp.json()
-    if (signal.aborted) return
-    if (Array.isArray(data)) {
-      groups.value = data.map((group: Group) => ({
-        ...group,
-        messageCount: Math.max(group.messageCount || 0, messageCounts.get(sessionKey(group)) || 0)
-      }))
-    } else {
-      groups.value = []
-    }
-  } catch {
-    if (signal.aborted) return
-    showToast!('网络错误，请检查后端服务', true)
-    groups.value = []
+    if (!Array.isArray(data)) throw new Error('会话列表数据无效')
+    groups.value = data.map(group => ({
+      ...group,
+      messageCount: Math.max(group.messageCount || 0, messageCounts.get(sessionKey(group)) || 0)
+    }))
+    groupsLoaded.value = true
+    groupsError.value = ''
+  } catch (cause) {
+    if (!signal.aborted) groupsError.value = requestError(cause, '会话列表加载失败')
   }
 })
 
@@ -188,6 +203,10 @@ const setGroupSetting = async (group: Group, enabled: boolean, setting: GroupSet
   }
 }
 
+const removingGroups = reactive(new Set<string>())
+const deletingRecords = reactive(new Set<number>())
+const clearingSessions = reactive(new Set<string>())
+const refreshingNames = ref(false)
 const savingGroups = reactive(new Set<string>())
 const toggleGroup = async (group: Group, enabled: boolean): Promise<void> => {
   const groupId = sessionKey(group)
@@ -208,41 +227,66 @@ const toggleGroup = async (group: Group, enabled: boolean): Promise<void> => {
 
 // 从管理列表移除会话
 const removeGroup = async (groupId: string): Promise<void> => {
-  if (!confirm('确定要删除该会话吗？聊天记录将保留。')) return
-  const resp = await fetch(`/admin/api/group/${groupId}`, {method: 'DELETE'})
-  const data: ApiResponse = await resp.json()
-  if (data.success) {
-    showToast!('已删除')
-    await loadGroups()
+  if (removingGroups.has(groupId) || !window.confirm('确定要删除该会话吗？聊天记录将保留。')) return
+  removingGroups.add(groupId)
+  try {
+    const resp = await fetch(`/admin/api/group/${groupId}`, {method: 'DELETE'})
+    const data: ApiResponse = await resp.json()
+    if (!resp.ok || !data.success) throw new Error(data.error || '操作未完成')
+    if (data.success) {
+      showToast!('已删除')
+      await loadGroups()
+    }
+  } catch (cause) {
+    showToast!(requestError(cause, '移除会话失败'), true)
+  } finally {
+    removingGroups.delete(groupId)
   }
 }
 
 // 刷新已登记会话的名称
 const refreshAllGroupNames = async (): Promise<void> => {
-  const resp = await fetch('/admin/api/groups/refresh-names', {method: 'POST'})
-  const data = await resp.json()
-  if (data.success) {
-    await loadGroups()
-    showToast!('群名称已刷新')
+  if (refreshingNames.value) return
+  refreshingNames.value = true
+  try {
+    const resp = await fetch('/admin/api/groups/refresh-names', {method: 'POST'})
+    const data = await resp.json()
+    if (!resp.ok || !data.success) throw new Error(data.error || '操作未完成')
+    if (data.success) {
+      await loadGroups()
+      showToast!('群名称已刷新')
+    }
+  } catch (cause) {
+    showToast!(requestError(cause, '刷新会话名称失败'), true)
+  } finally {
+    refreshingNames.value = false
   }
 }
 
 // 选择会话查看聊天记录
 const selectGroup = async (sessionId: string, sessionName: string): Promise<void> => {
+  if (disposed || editSaving.value || !confirmDiscard(messageDirty())) return
+  finishEdit()
+  if (selectedGroup.value !== sessionId) {
+    chatRecords.value = []
+    chatError.value = ''
+  }
   selectedGroup.value = sessionId
   selectedGroupName.value = sessionName
   chatLoading.value = true
-  chatRecords.value = []
 
   try {
-    const resp = await fetch(`/admin/api/chat-records/${sessionId}?limit=200`)
-    const records: ChatMessage[] = await resp.json()
+    const records = await requestJson<ChatMessage[]>(`/admin/api/chat-records/${sessionId}?limit=200`)
+    if (!Array.isArray(records)) throw new Error('聊天记录数据无效')
     if (disposed || selectedGroup.value !== sessionId) return
     chatRecords.value = records.map((record, index) =>
         record.id === undefined ? {...record, clientKey: `snapshot-${index}`} : record)
 
+    chatError.value = ''
     // 订阅 WebSocket（字符串形式传递，后端可正确解析大数）
     send({action: 'subscribe', groupId: sessionId})
+  } catch (cause) {
+    if (!disposed && selectedGroup.value === sessionId) chatError.value = requestError(cause, '聊天记录加载失败')
   } finally {
     if (!disposed && selectedGroup.value === sessionId) chatLoading.value = false
   }
@@ -254,6 +298,8 @@ const selectGroup = async (sessionId: string, sessionName: string): Promise<void
 
 // 返回列表
 const backToList = (): void => {
+  if (editSaving.value || !confirmDiscard(messageDirty())) return
+  finishEdit()
   if (selectedGroup.value) send({action: 'unsubscribe', groupId: selectedGroup.value})
   selectedGroup.value = null
   selectedGroupName.value = ''
@@ -269,88 +315,137 @@ const scrollToBottom = (): void => {
 
 // 开始编辑
 const startEdit = (record: DisplayChatMessage): void => {
-  if (record.id === undefined) return
+  if (record.id === undefined || !confirmDiscard(messageDirty())) return
+  editRevision++
   editingId.value = record.id
   editContent.value = record.content
+  savedEditContent.value = record.content
 }
 
 // 取消编辑
-const cancelEdit = (): void => {
+const finishEdit = (): void => {
+  editRevision++
   editingId.value = null
   editContent.value = ''
 }
 
+const cancelEdit = (): void => {
+  if (editSaving.value || !confirmDiscard(messageDirty())) return
+  finishEdit()
+}
+
 // 保存编辑
 const saveEdit = async (): Promise<void> => {
-  if (!editingId.value || !editContent.value.trim()) return
+  if (editSaving.value || editingId.value === null || !editContent.value.trim()) return
+  const id = editingId.value
+  const content = editContent.value
+  const sessionId = selectedGroup.value
+  const revision = editRevision
+  editSaving.value = true
+  try {
 
-  const resp = await fetch(`/admin/api/chat-record/${editingId.value}`, {
-    method: 'PUT',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({content: editContent.value})
-  })
-  const data: ApiResponse = await resp.json()
-  if (data.success) {
-    const record = chatRecords.value.find(r => r.id === editingId.value)
-    if (record) record.content = editContent.value
-    showToast!('已更新')
-    cancelEdit()
+    const resp = await fetch(`/admin/api/chat-record/${id}`, {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({content})
+    })
+    const data: ApiResponse = await resp.json()
+    if (!resp.ok || !data.success) throw new Error(data.error || '操作未完成')
+    if (data.success) {
+      if (disposed) return
+      const record = selectedGroup.value === sessionId ? chatRecords.value.find(r => r.id === id) : undefined
+      if (record) record.content = content
+      showToast!('已更新')
+      if (selectedGroup.value === sessionId && editRevision === revision) {
+        savedEditContent.value = content
+        if (editContent.value === content) finishEdit()
+      }
+    }
+  } catch (cause) {
+    if (!disposed) showToast!(requestError(cause, '保存记录失败'), true)
+  } finally {
+    editSaving.value = false
   }
 }
 
 // 删除记录
 const deleteRecord = async (recordId: number): Promise<void> => {
-  if (!confirm('确定删除这条记录？')) return
+  if (deletingRecords.has(recordId) || !window.confirm('确定删除这条记录？')) return
+  const sessionId = selectedGroup.value
+  deletingRecords.add(recordId)
+  try {
 
-  const resp = await fetch(`/admin/api/chat-record/${recordId}`, {method: 'DELETE'})
-  const data: ApiResponse = await resp.json()
-  if (data.success) {
-    chatRecords.value = chatRecords.value.filter(r => r.id !== recordId)
-    showToast!('已删除')
+    const resp = await fetch(`/admin/api/chat-record/${recordId}`, {method: 'DELETE'})
+    const data: ApiResponse = await resp.json()
+    if (!resp.ok || !data.success) throw new Error(data.error || '操作未完成')
+    if (data.success) {
+      if (selectedGroup.value === sessionId) chatRecords.value = chatRecords.value.filter(r => r.id !== recordId)
+      showToast!('已删除')
+    }
+  } catch (cause) {
+    showToast!(requestError(cause, '删除记录失败'), true)
+  } finally {
+    deletingRecords.delete(recordId)
   }
 }
 
 // 清空当前会话的聊天记录
 const clearGroupRecords = async (): Promise<void> => {
-  if (!selectedGroup.value) return
-  if (!confirm(
+  const sessionId = selectedGroup.value
+  const sessionName = selectedGroupName.value
+  if (!sessionId || clearingSessions.has(sessionId) || editSaving.value) return
+  if (!window.confirm(
     '确定清空该会话的所有聊天记录？此操作不可恢复！\n' +
     '若当前有记忆总结任务正在执行，清空后收到的新消息也可能在该任务完成时被删除。这不会撤回群内消息。',
   )) return
 
+  finishEdit()
+  clearingSessions.add(sessionId)
   try {
-    const resp = await fetch(`/admin/api/chat-records/${selectedGroup.value}/clear`, {method: 'DELETE'})
+    const resp = await fetch(`/admin/api/chat-records/${sessionId}/clear`, {method: 'DELETE'})
     const data: ApiResponse = await resp.json()
     if (!resp.ok || !data.success) {
       showToast!(data.error || '清空失败', true)
       return
     }
-    chatRecords.value = []
-    showToast!('聊天记录已清空')
+    if (selectedGroup.value === sessionId) await selectGroup(sessionId, sessionName)
+    showToast!(`“${sessionName || sessionId}”的聊天记录已清空`)
     await loadGroups()
   } catch {
     showToast!('清空失败，请检查网络与后端服务', true)
+  } finally {
+    clearingSessions.delete(sessionId)
   }
 }
 
 // 查看记忆
 const viewMemory = async (sessionId: string, sessionName: string): Promise<void> => {
+  if (memoryGroupId.value !== sessionId) {
+    memoryError.value = ''
+    groupMemory.value = ''
+    savedMemory.value = ''
+  }
   memoryGroupId.value = sessionId
   memoryGroupName.value = sessionName
   memoryLoading.value = true
-  groupMemory.value = ''
 
   try {
-    const resp = await fetch(`/admin/api/memory/${sessionId}`)
-    const data = await resp.json()
-    groupMemory.value = data.memory || ''
+    const data = await requestJson<{memory: string}>(`/admin/api/memory/${sessionId}`)
+    if (memoryGroupId.value === sessionId) {
+      groupMemory.value = data.memory || ''
+      savedMemory.value = groupMemory.value
+      memoryError.value = ''
+    }
+  } catch (cause) {
+    if (memoryGroupId.value === sessionId) memoryError.value = requestError(cause, '会话外号加载失败')
   } finally {
-    memoryLoading.value = false
+    if (memoryGroupId.value === sessionId) memoryLoading.value = false
   }
 }
 
 // 关闭记忆弹窗
 const closeMemory = (): void => {
+  if (memorySaving.value || !confirmDiscard(groupMemory.value !== savedMemory.value)) return
   memoryGroupId.value = null
   memoryGroupName.value = ''
   groupMemory.value = ''
@@ -358,20 +453,24 @@ const closeMemory = (): void => {
 
 // 保存记忆
 const saveMemory = async (): Promise<void> => {
-  if (!memoryGroupId.value) return
+  if (!memoryGroupId.value || memorySaving.value || memoryLoading.value || memoryError.value) return
+  const memory = groupMemory.value
   memorySaving.value = true
   try {
     const resp = await fetch(`/admin/api/memory/${memoryGroupId.value}`, {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({memory: groupMemory.value})
+      body: JSON.stringify({memory})
     })
     const data: ApiResponse = await resp.json()
-    if (data.success) {
+    if (resp.ok && data.success) {
+      savedMemory.value = memory
       showToast!('记忆已保存')
     } else {
       showToast!(data.error || '保存失败', true)
     }
+  } catch (cause) {
+    showToast!(requestError(cause, '保存会话外号失败'), true)
   } finally {
     memorySaving.value = false
   }
@@ -382,6 +481,7 @@ const tasksGroupId: Ref<string | null> = ref(null)
 const tasksGroupName: Ref<string> = ref('')
 const tasksList: Ref<ScheduledTask[]> = ref([])
 const tasksLoading: Ref<boolean> = ref(false)
+const tasksError = ref('')
 const cancellingTaskId: Ref<number | null> = ref(null)
 
 const fmtTaskTime = (unixSec: number): string => {
@@ -400,17 +500,24 @@ const fmtTaskRelative = (unixSec: number): string => {
 
 // 查看定时任务
 const viewTasks = async (sessionId: string, sessionName: string): Promise<void> => {
+  if (tasksGroupId.value !== sessionId) {
+    tasksList.value = []
+    tasksError.value = ''
+  }
   tasksGroupId.value = sessionId
   tasksGroupName.value = sessionName
   tasksLoading.value = true
-  tasksList.value = []
 
   try {
-    const resp = await fetch(`/admin/api/scheduled-tasks/${sessionId}`)
-    const data = await resp.json()
-    tasksList.value = Array.isArray(data.tasks) ? data.tasks : []
+    const data = await requestJson<{tasks: ScheduledTask[]}>(`/admin/api/scheduled-tasks/${sessionId}`)
+    if (!Array.isArray(data.tasks)) throw new Error('定时任务数据无效')
+    if (tasksGroupId.value !== sessionId) return
+    tasksList.value = data.tasks
+    tasksError.value = ''
+  } catch (cause) {
+    if (tasksGroupId.value === sessionId) tasksError.value = requestError(cause, '定时任务加载失败')
   } finally {
-    tasksLoading.value = false
+    if (tasksGroupId.value === sessionId) tasksLoading.value = false
   }
 }
 
@@ -430,12 +537,14 @@ const cancelTask = async (task: ScheduledTask): Promise<void> => {
   try {
     const resp = await fetch(`/admin/api/scheduled-task/${task.id}`, {method: 'DELETE'})
     const data: ApiResponse = await resp.json()
-    if (data.success) {
+    if (resp.ok && data.success) {
       tasksList.value = tasksList.value.filter(t => t.id !== task.id)
       showToast!('定时任务已取消')
     } else {
       showToast!(data.error || '取消失败', true)
     }
+  } catch (cause) {
+    showToast!(requestError(cause, '取消任务失败'), true)
   } finally {
     cancellingTaskId.value = null
   }
@@ -449,29 +558,40 @@ const ltmList: Ref<LongTermMemoryEntry[]> = ref([])
 const ltmTotal: Ref<number> = ref(0)
 const ltmPage: Ref<number> = ref(0)
 const ltmLoading: Ref<boolean> = ref(false)
+const ltmError = ref('')
+let ltmRequestVersion = 0
 const ltmDeletingId: Ref<number | null> = ref(null)
 const ltmTotalPages = computed(() => Math.max(1, Math.ceil(ltmTotal.value / LTM_PAGE_SIZE)))
 
-const loadLongTermMemories = async (): Promise<void> => {
-  if (!ltmGroupId.value) return
+const loadLongTermMemories = async (page = ltmPage.value): Promise<void> => {
+  if (!ltmGroupId.value || ltmLoading.value) return
+  const id = ltmGroupId.value
+  const version = ++ltmRequestVersion
   ltmLoading.value = true
   try {
     const params = new URLSearchParams({
       sessionId: ltmGroupId.value,
       limit: String(LTM_PAGE_SIZE),
-      offset: String(ltmPage.value * LTM_PAGE_SIZE)
+      offset: String(page * LTM_PAGE_SIZE)
     })
-    const resp = await fetch(`/admin/api/long-term-memory?${params}`)
-    const data: LongTermMemoryListResult = await resp.json()
+    const data = await requestJson<LongTermMemoryListResult>(`/admin/api/long-term-memory?${params}`)
+    if (ltmGroupId.value !== id || version !== ltmRequestVersion) return
+    if (!Array.isArray(data.items)) throw new Error('长期记忆数据无效')
+    ltmPage.value = page
+    ltmError.value = ''
     ltmList.value = data.items || []
     ltmTotal.value = data.total || 0
+  } catch (cause) {
+    if (ltmGroupId.value === id && version === ltmRequestVersion) ltmError.value = requestError(cause, '长期记忆加载失败')
   } finally {
-    ltmLoading.value = false
+    if (ltmGroupId.value === id && version === ltmRequestVersion) ltmLoading.value = false
   }
 }
 
 // 查看长期记忆
 const viewLongTermMemory = async (sessionId: string, sessionName: string): Promise<void> => {
+  ltmError.value = ''
+  ltmLoading.value = false
   ltmGroupId.value = sessionId
   ltmGroupName.value = sessionName
   ltmPage.value = 0
@@ -482,6 +602,7 @@ const viewLongTermMemory = async (sessionId: string, sessionName: string): Promi
 
 // 关闭长期记忆弹窗
 const closeLongTermMemory = (): void => {
+  ++ltmRequestVersion
   ltmGroupId.value = null
   ltmGroupName.value = ''
   ltmList.value = []
@@ -489,8 +610,7 @@ const closeLongTermMemory = (): void => {
 }
 
 const changeLtmPage = (delta: number): void => {
-  ltmPage.value += delta
-  loadLongTermMemories()
+  void loadLongTermMemories(ltmPage.value + delta)
 }
 
 // 删除长期记忆
@@ -500,12 +620,14 @@ const deleteLongTermMemory = async (id: number): Promise<void> => {
   try {
     const resp = await fetch(`/admin/api/long-term-memory/${id}`, {method: 'DELETE'})
     const data: ApiResponse = await resp.json()
-    if (data.success) {
+    if (resp.ok && data.success) {
       showToast!('长期记忆已删除')
       await loadLongTermMemories()
     } else {
       showToast!(data.error || '删除失败', true)
     }
+  } catch (cause) {
+    showToast!(requestError(cause, '删除长期记忆失败'), true)
   } finally {
     ltmDeletingId.value = null
   }
@@ -513,16 +635,20 @@ const deleteLongTermMemory = async (id: number): Promise<void> => {
 
 const promptGroup = ref<Group | null>(null)
 const promptDraft = ref('')
+const savedPrompt = ref('')
 const promptLoading = ref(false)
 const promptSaving = ref(false)
 const promptError = ref('')
 const promptBytes = computed(() => new TextEncoder().encode(promptDraft.value).length)
+const promptForm = useFormValidation(() => ({'group-prompt': promptBytes.value > 16000 ? '附加提示词不能超过 16000 字节' : ''}))
 let promptRequestVersion = 0
 
 const openPrompt = async (group: Group): Promise<void> => {
+  promptForm.resetValidation()
   const version = ++promptRequestVersion
   promptGroup.value = group
   promptDraft.value = ''
+  savedPrompt.value = ''
   promptError.value = ''
   promptLoading.value = true
   try {
@@ -530,7 +656,10 @@ const openPrompt = async (group: Group): Promise<void> => {
     if (!response.ok) throw new Error(`附加提示词加载失败（HTTP ${response.status}）`)
     const data: {additionalPrompt: string} = await response.json()
     if (typeof data.additionalPrompt !== 'string') throw new Error('附加提示词数据无效')
-    if (version === promptRequestVersion) promptDraft.value = data.additionalPrompt
+    if (version === promptRequestVersion) {
+      promptDraft.value = data.additionalPrompt
+      savedPrompt.value = data.additionalPrompt
+    }
   } catch (error) {
     if (version === promptRequestVersion) promptError.value = error instanceof Error ? error.message : '加载失败'
   } finally {
@@ -539,13 +668,13 @@ const openPrompt = async (group: Group): Promise<void> => {
 }
 
 const closePrompt = (): void => {
-  if (promptSaving.value) return
+  if (promptSaving.value || !confirmDiscard(promptDraft.value !== savedPrompt.value)) return
   ++promptRequestVersion
   promptGroup.value = null
 }
 
 const savePrompt = async (): Promise<void> => {
-  if (!promptGroup.value || promptLoading.value || promptSaving.value || promptError.value || promptBytes.value > 16000) return
+  if (!promptGroup.value || promptLoading.value || promptSaving.value || promptError.value || !promptForm.validateForm()) return
   const id = sessionKey(promptGroup.value)
   const additionalPrompt = promptDraft.value
   promptSaving.value = true
@@ -557,6 +686,7 @@ const savePrompt = async (): Promise<void> => {
     if (!response.ok || !data.success) throw new Error(data.error || '保存失败')
     const group = groups.value.find(item => sessionKey(item) === id)
     if (group) group.hasAdditionalPrompt = additionalPrompt.length > 0
+    savedPrompt.value = additionalPrompt
     showToast?.('群附加提示词已保存')
   } catch (error) {
     showToast?.(error instanceof Error ? error.message : '保存失败', true)
@@ -565,12 +695,12 @@ const savePrompt = async (): Promise<void> => {
   }
 }
 
-// 弹窗打开时锁定页面滚动，滚轮只作用于弹窗内容
-const anyModalOpen = computed(() =>
-    !!(memoryGroupId.value || summarySession.value || ltmGroupId.value || tasksGroupId.value || promptGroup.value))
-watch(anyModalOpen, (open) => {
-  document.body.style.overflow = open ? 'hidden' : ''
-})
+useUnsavedChanges(() =>
+    messageDirty() ||
+    (!!memoryGroupId.value && groupMemory.value !== savedMemory.value) ||
+    (!!promptGroup.value && promptDraft.value !== savedPrompt.value) ||
+    (showAddSession.value && newSessionId.value.trim() !== ''),
+    () => memorySaving.value || promptSaving.value || addingSession.value || editSaving.value)
 
 const messageKey = (message: DisplayChatMessage): string | number => message.id ?? message.clientKey ?? message.content
 
@@ -606,7 +736,6 @@ onMounted(() => {
 onUnmounted(() => {
   disposed = true
   ++promptRequestVersion
-  if (anyModalOpen.value) document.body.style.overflow = ''
 })
 </script>
 
@@ -629,7 +758,8 @@ onUnmounted(() => {
             </div>
           </div>
           <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
-            <input v-model="searchKeyword" aria-label="搜索会话" class="form-input"
+            <label for="session-search" class="form-label">搜索会话</label>
+            <input id="session-search" v-model="searchKeyword" aria-label="搜索会话" class="form-input"
                    placeholder="搜索名称、群号或 QQ 号" type="search" style="width: 240px; max-width: 100%;">
             <div class="filter-tabs">
               <button :class="{ active: typeFilter === 'all' }" class="filter-tab"
@@ -643,23 +773,25 @@ onUnmounted(() => {
               </button>
             </div>
             <span style="color: var(--text-secondary); font-size: 13px;">共 {{ filteredGroups.length }} 个会话</span>
-            <button class="btn btn-secondary btn-sm" @click="refreshAllGroupNames">刷新会话名称</button>
-            <button class="btn btn-primary btn-sm" @click="showAddGroup = true">添加群聊</button>
+            <button :disabled="refreshingNames" class="btn btn-secondary btn-sm" @click="refreshAllGroupNames">{{ refreshingNames ? '刷新中…' : '刷新会话名称' }}</button>
+            <button class="btn btn-primary btn-sm" @click="openAddSession">添加会话</button>
           </div>
         </div>
         <div class="table-container">
-          <template v-if="loading">
+          <RequestError :message="groupsError" :busy="loading" :stale="groupsLoaded" @retry="loadGroups"/>
+          <p v-if="loading && groupsLoaded" role="status">刷新中…</p>
+          <template v-if="loading && !groupsLoaded">
             <div class="empty-state">
               <p>加载中...</p>
             </div>
           </template>
-          <template v-else-if="filteredGroups.length === 0">
+          <template v-else-if="!groupsError && filteredGroups.length === 0">
             <div class="empty-state">
-              <div class="empty-icon">👥</div>
-              <p>{{ groups.length ? '没有符合筛选条件的会话' : '暂无会话，可点击“添加群聊”输入群号' }}</p>
+              <div class="empty-icon" aria-hidden="true"><NavIcon name="admins"/></div>
+              <p>{{ groups.length ? '没有符合筛选条件的会话' : '暂无会话，可点击“添加会话”输入群号或 QQ 号' }}</p>
             </div>
           </template>
-          <template v-else>
+          <template v-else-if="filteredGroups.length > 0">
             <table class="session-table">
               <thead>
               <tr>
@@ -737,7 +869,7 @@ onUnmounted(() => {
                           :title="group.hasAdditionalPrompt ? '已设置群附加提示词' : '未设置群附加提示词'"
                           @click.stop="openPrompt(group)">附加提示词</button>
                   <button class="btn btn-danger btn-sm" style="margin-left: 6px;"
-                          @click.stop="removeGroup(sessionKey(group))">删除
+                          :disabled="removingGroups.has(sessionKey(group))" @click.stop="removeGroup(sessionKey(group))">{{ removingGroups.has(sessionKey(group)) ? '删除中…' : '删除' }}
                   </button>
                 </td>
               </tr>
@@ -756,15 +888,16 @@ onUnmounted(() => {
           <span class="msg-count">{{ chatRecords.length }} 条消息</span>
         </div>
         <div class="chat-header-actions">
-          <button :disabled="chatRecords.length === 0" class="btn btn-danger btn-sm" @click="clearGroupRecords">
-            清空消息
+          <button :disabled="chatRecords.length === 0 || clearingSessions.has(selectedGroup!)" class="btn btn-danger btn-sm" @click="clearGroupRecords">
+            {{ clearingSessions.has(selectedGroup!) ? '清空中…' : '清空消息' }}
           </button>
           <button class="btn btn-secondary btn-sm" @click="backToList">返回列表</button>
         </div>
       </div>
 
       <div ref="chatContainer" class="chat-container">
-        <div v-if="chatLoading" class="chat-empty">
+        <RequestError :message="chatError" :busy="chatLoading" :stale="chatRecords.length > 0" @retry="selectGroup(selectedGroup!, selectedGroupName)"/>
+        <div v-if="chatLoading && !chatRecords.length" class="chat-empty">
           <p>加载中...</p>
         </div>
         <template v-else>
@@ -775,58 +908,73 @@ onUnmounted(() => {
               class="chat-message"
           >
             <!-- 普通显示 -->
-            <ChatMessageView v-if="editingId !== msg.id" :message="msg" :bot-name="qqConfig!.botName"
+            <ChatMessageView v-if="editingId !== msg.id" :message="msg" :bot-name="qqConfig!.botName" :deleting="deletingRecords.has(msg.id!)"
                              @edit="startEdit(msg)" @delete="deleteRecord(msg.id!)" />
 
             <!-- 编辑模式 -->
             <template v-else>
               <div class="edit-form">
-                <textarea v-model="editContent" class="edit-textarea" rows="3"></textarea>
+                <label :for="`message-edit-${msg.id}`" class="form-label">消息内容</label>
+                <textarea :id="`message-edit-${msg.id}`" v-model="editContent" :disabled="editSaving" class="edit-textarea" rows="3"></textarea>
                 <div class="edit-actions">
-                  <button class="btn btn-success btn-sm" @click="saveEdit">保存</button>
-                  <button class="btn btn-secondary btn-sm" @click="cancelEdit">取消</button>
+                  <button :disabled="editSaving" class="btn btn-primary btn-sm" @click="saveEdit">{{ editSaving ? '保存中…' : '保存' }}</button>
+                  <button :disabled="editSaving" class="btn btn-secondary btn-sm" @click="cancelEdit">取消</button>
                 </div>
               </div>
             </template>
           </div>
 
-          <div v-if="chatRecords.length === 0" class="chat-empty">
-            <div class="chat-empty-icon">💬</div>
+          <div v-if="!chatError && chatRecords.length === 0" class="chat-empty">
+            <div class="chat-empty-icon" aria-hidden="true"><NavIcon name="groups"/></div>
             <p>暂无聊天消息</p>
           </div>
         </template>
       </div>
     </div>
 
-    <div v-if="showAddGroup" class="modal-overlay" @click.self="closeAddGroup" @keydown.esc="closeAddGroup">
-      <form class="modal-content" style="max-width: 480px;" role="dialog" aria-modal="true"
-            aria-labelledby="add-group-title" @submit.prevent="addGroup">
+    <ModalDialog v-if="showAddSession" class="modal-overlay" labelledby="add-session-title" @close="closeAddSession">
+      <form class="modal-content" style="max-width: 480px;" novalidate @submit.prevent="addSession">
         <div class="modal-header">
-          <h2 id="add-group-title">添加群聊</h2>
-          <button type="button" :disabled="addingGroup" class="btn btn-secondary btn-sm" @click="closeAddGroup">关闭</button>
+          <h2 id="add-session-title">添加会话</h2>
+          <button type="button" :disabled="addingSession" class="btn btn-secondary btn-sm" @click="closeAddSession">关闭</button>
         </div>
         <div class="modal-body">
-          <label for="new-group-id" class="form-label">群号</label>
-          <input id="new-group-id" v-model="newGroupId" :disabled="addingGroup" class="form-input"
-                 inputmode="numeric" autocomplete="off" placeholder="输入机器人已加入的群号" required>
-          <p class="form-hint">添加后将启用该群聊，随后可在列表中调整自动回复、命令及共享设置。</p>
+          <fieldset class="session-type-choice form-group" :disabled="addingSession">
+            <legend class="form-label">会话类型</legend>
+            <div class="session-type-options">
+              <label v-for="type in (['group', 'private'] as const)" :key="type" :class="{selected: newSessionType === type}">
+                <input class="sr-only" v-model="newSessionType" type="radio" name="new-session-type" :value="type">
+                <span class="choice-mark" aria-hidden="true">{{ newSessionType === type ? '✓' : '' }}</span>
+                {{ type === 'group' ? '群聊' : '私聊' }}
+              </label>
+            </div>
+          </fieldset>
+          <label for="new-session-id" class="form-label">{{ newSessionIdLabel }}</label>
+          <input v-bind="sessionForm.fieldAttrs('new-session-id', 'new-session-id-hint')" v-model="newSessionId" :disabled="addingSession" class="form-input"
+                 inputmode="numeric" autocomplete="off"
+                 :placeholder="newSessionType === 'private' ? '输入对方的 QQ 号' : '输入机器人已加入的群号'" required>
+          <FieldError field="new-session-id" :message="sessionForm.errors.value['new-session-id']"/>
+          <p id="new-session-id-hint" class="form-hint">{{ newSessionType === 'private'
+              ? '无需已有聊天记录，添加后立即启用该私聊；对方后续发来的消息将按私聊处理。'
+              : '添加后将启用该群聊，随后可在列表中调整自动回复、命令及共享设置。' }}</p>
         </div>
         <div class="modal-footer">
-          <button type="button" :disabled="addingGroup" class="btn btn-secondary" @click="closeAddGroup">取消</button>
-          <button type="submit" :disabled="addingGroup" class="btn btn-primary">{{ addingGroup ? '添加中…' : '添加并启用' }}</button>
+          <button type="button" :disabled="addingSession" class="btn btn-secondary" @click="closeAddSession">取消</button>
+          <button type="submit" :disabled="addingSession" class="btn btn-primary">{{ addingSession ? '添加中…' : '添加并启用' }}</button>
         </div>
       </form>
-    </div>
+    </ModalDialog>
 
     <!-- 定时任务弹窗 -->
-    <div v-if="tasksGroupId" class="modal-overlay" @click.self="closeTasks">
+    <ModalDialog v-if="tasksGroupId" class="modal-overlay" labelledby="tasks-title" @close="closeTasks">
       <div class="modal-content">
         <div class="modal-header">
-          <h2>{{ tasksGroupName }} - 定时任务</h2>
+          <h2 id="tasks-title" tabindex="-1" data-modal-initial-focus>{{ tasksGroupName }} - 定时任务</h2>
           <button class="btn btn-secondary btn-sm" @click="closeTasks">关闭</button>
         </div>
         <div class="modal-body">
-          <div v-if="tasksLoading" class="memory-loading">
+          <RequestError :message="tasksError" :busy="tasksLoading" :stale="tasksList.length > 0" @retry="viewTasks(tasksGroupId!, tasksGroupName)"/>
+          <div v-if="tasksLoading && !tasksList.length" class="memory-loading">
             <p>加载中...</p>
           </div>
           <table v-else-if="tasksList.length > 0" class="affinity-table">
@@ -855,15 +1003,15 @@ onUnmounted(() => {
             </tr>
             </tbody>
           </table>
-          <div v-else class="memory-loading">
+          <div v-else-if="!tasksError" class="memory-loading">
             <p>暂无待触发的定时任务，可在群聊中让 AI 设置提醒</p>
           </div>
         </div>
       </div>
-    </div>
+    </ModalDialog>
 
-    <div v-if="promptGroup" class="modal-overlay" @click.self="closePrompt" @keydown.esc="closePrompt">
-      <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="group-prompt-title">
+    <ModalDialog v-if="promptGroup" class="modal-overlay" labelledby="group-prompt-title" @close="closePrompt">
+      <div class="modal-content">
         <div class="modal-header">
           <h2 id="group-prompt-title">{{ sessionLabel(promptGroup) }} - 附加提示词</h2>
           <button :disabled="promptSaving" class="btn btn-secondary btn-sm" @click="closePrompt">关闭</button>
@@ -875,23 +1023,25 @@ onUnmounted(() => {
             <button class="btn btn-secondary" @click="openPrompt(promptGroup)">重新加载</button>
           </div>
           <template v-else>
-            <textarea v-model="promptDraft" :disabled="promptSaving" class="memory-editor" aria-label="本群附加提示词"
-                      :aria-invalid="promptBytes > 16000" placeholder="附加提示词"></textarea>
-            <p class="form-hint" :style="promptBytes > 16000 ? {color: 'var(--danger)'} : {}">{{ promptBytes }} / 16000 字节</p>
+            <label for="group-prompt" class="form-label">本群附加提示词</label>
+            <textarea v-bind="promptForm.fieldAttrs('group-prompt', 'group-prompt-hint')" v-model="promptDraft" :disabled="promptSaving" class="memory-editor" aria-label="本群附加提示词"
+                      placeholder="附加提示词"></textarea>
+            <FieldError field="group-prompt" :message="promptForm.errors.value['group-prompt']"/>
+            <p id="group-prompt-hint" class="form-hint" :style="promptBytes > 16000 ? {color: 'var(--danger)'} : {}">{{ promptBytes }} / 16000 字节</p>
           </template>
         </div>
         <div class="modal-footer">
           <button :disabled="promptLoading || promptSaving || !!promptError" class="btn btn-secondary" @click="promptDraft = ''">清空内容</button>
-          <button :disabled="promptLoading || promptSaving || !!promptError || promptBytes > 16000" class="btn btn-primary" @click="savePrompt">{{ promptSaving ? '保存中...' : '保存' }}</button>
+          <button :disabled="promptLoading || promptSaving || !!promptError" class="btn btn-primary" @click="savePrompt">{{ promptSaving ? '保存中...' : '保存' }}</button>
         </div>
       </div>
-    </div>
+    </ModalDialog>
 
     <!-- 压缩聊天摘要：按覆盖时间从早到晚展示，不混入原始消息。 -->
-    <div v-if="summarySession" class="modal-overlay" @click.self="closeSummaries">
-      <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="conversation-summary-title">
+    <ModalDialog v-if="summarySession" class="modal-overlay" labelledby="conversation-summary-title" @close="closeSummaries">
+      <div class="modal-content">
         <div class="modal-header">
-          <h2 id="conversation-summary-title">{{ summarySession.name }} - 聊天摘要</h2>
+          <h2 id="conversation-summary-title" tabindex="-1" data-modal-initial-focus>{{ summarySession.name }} - 聊天摘要</h2>
           <button class="btn btn-secondary btn-sm" @click="closeSummaries">关闭</button>
         </div>
         <div class="modal-body">
@@ -909,47 +1059,50 @@ onUnmounted(() => {
           </ol>
         </div>
       </div>
-    </div>
+    </ModalDialog>
 
     <!-- 会话外号弹窗 -->
-    <div v-if="memoryGroupId" class="modal-overlay" @click.self="closeMemory">
+    <ModalDialog v-if="memoryGroupId" class="modal-overlay" labelledby="aliases-title" @close="closeMemory">
       <div class="modal-content">
         <div class="modal-header">
-          <h2>{{ memoryGroupName }} - 会话外号</h2>
+          <h2 id="aliases-title">{{ memoryGroupName }} - 会话外号</h2>
           <button class="btn btn-secondary btn-sm" @click="closeMemory">关闭</button>
         </div>
         <div class="modal-body">
+          <RequestError :message="memoryError" :busy="memoryLoading" @retry="viewMemory(memoryGroupId!, memoryGroupName)"/>
           <div v-if="memoryLoading" class="memory-loading">
             <p>加载中...</p>
           </div>
+          <label v-if="!memoryError && !memoryLoading" for="session-aliases" class="form-label">会话外号（JSON）</label>
           <textarea
-              v-else
+              v-if="!memoryError && !memoryLoading" id="session-aliases"
               v-model="groupMemory"
               class="memory-editor"
               placeholder='{"aliases": [{"qq": "123456", "names": ["外号"]}]}'
           ></textarea>
         </div>
         <div class="modal-footer">
-          <button :disabled="memorySaving" class="btn btn-primary" @click="saveMemory">
+          <button :disabled="memorySaving || memoryLoading || !!memoryError" class="btn btn-primary" @click="saveMemory">
             {{ memorySaving ? '保存中...' : '保存' }}
           </button>
         </div>
       </div>
-    </div>
+    </ModalDialog>
 
     <!-- 长期记忆弹窗 -->
-    <div v-if="ltmGroupId" class="modal-overlay" @click.self="closeLongTermMemory">
+    <ModalDialog v-if="ltmGroupId" class="modal-overlay" labelledby="ltm-title" @close="closeLongTermMemory">
       <div class="modal-content">
         <div class="modal-header">
-          <h2>{{ ltmGroupName }} - 长期记忆</h2>
+          <h2 id="ltm-title" tabindex="-1" data-modal-initial-focus>{{ ltmGroupName }} - 长期记忆</h2>
           <button class="btn btn-secondary btn-sm" @click="closeLongTermMemory">关闭</button>
         </div>
         <div class="modal-body">
-          <div v-if="ltmLoading" class="memory-loading">
+          <RequestError :message="ltmError" :busy="ltmLoading" :stale="ltmList.length > 0" @retry="loadLongTermMemories()"/>
+          <div v-if="ltmLoading && !ltmList.length" class="memory-loading">
             <p>加载中...</p>
           </div>
           <template v-else>
-            <div v-if="ltmList.length === 0" class="memory-loading">
+            <div v-if="!ltmError && ltmList.length === 0" class="memory-loading">
               <p>暂无长期记忆，等待记忆迁移入库</p>
             </div>
             <div v-else class="ltm-list">
@@ -976,11 +1129,21 @@ onUnmounted(() => {
           </template>
         </div>
       </div>
-    </div>
+    </ModalDialog>
   </div>
 </template>
 
 <style scoped>
+.session-type-choice { border: 0; padding: 0; }
+.session-type-options { display: flex; border: 1px solid var(--control-border); }
+.session-type-options label {
+  position: relative; flex: 1; min-height: 42px; padding: 8px 12px; display: flex; align-items: center;
+  justify-content: center; gap: 8px; cursor: pointer; color: var(--text-secondary);
+}
+.session-type-options label + label { border-left: 1px solid var(--control-border); }
+.session-type-options label.selected { background: var(--primary-soft); color: var(--primary); font-weight: 600; }
+.session-type-options label:focus-within { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+
 .summary-list {
   margin: 0;
   padding: 0;
@@ -1057,7 +1220,7 @@ onUnmounted(() => {
 }
 
 .row-disabled {
-  opacity: 0.5;
+  color: var(--text-secondary);
 }
 
 .connection-status {
@@ -1251,7 +1414,7 @@ onUnmounted(() => {
   width: 100%;
   height: min(400px, 55vh);
   padding: 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--control-border);
   border-radius: 0;
   font-size: 13px;
   font-family: inherit;
@@ -1262,7 +1425,8 @@ onUnmounted(() => {
 }
 
 .memory-editor:focus {
-  outline: none;
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
   border-color: var(--primary);
 }
 

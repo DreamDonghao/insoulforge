@@ -8,6 +8,7 @@
 
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/logging/LogBuffer.hpp>
+#include <infrastructure/logging/LogRedaction.hpp>
 
 namespace insoulforge {
     namespace {
@@ -33,6 +34,8 @@ namespace insoulforge {
             std::string line;
             while (std::getline(file, line)) {
                 if (auto entry = parseLine(line)) {
+                    // 旧版本的滚动文件可能包含启动令牌，恢复到网页历史前同样脱敏。
+                    entry->content = redactAdminLogCredentials(std::move(entry->content));
                     fileEntries.push_back(std::move(*entry));
                 }
             }
@@ -52,6 +55,7 @@ namespace insoulforge {
     }
 
     auto LogBuffer::append(LogEntry entry) -> LogEntry {
+        entry.content = redactAdminLogCredentials(std::move(entry.content));
         std::lock_guard lock(m_mutex);
         entry.id = m_nextId++;
         if (m_entries.size() >= kMaxEntries) {

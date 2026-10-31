@@ -1,6 +1,9 @@
 <script lang="ts" setup>
-import {computed, inject, onMounted, reactive, ref} from 'vue'
-import EnabledSwitch from '../../components/EnabledSwitch.vue'
+import {inject, onMounted, reactive, ref} from 'vue'
+import {confirmDiscard, useUnsavedChanges} from '../../composables/useUnsavedChanges'
+import FieldError from '../../components/FieldError.vue'
+import {useFormValidation} from '../../composables/useFormValidation'
+import {numberError} from '../../utils/validation'
 import type {ApiResponse, ExecutionConfig} from '../../vite-env.d'
 
 const showToast = inject<(message: string, isError?: boolean) => void>('showToast')
@@ -10,16 +13,14 @@ const mcpFields = [
   {key: 'mcpMaxToolsPerEnable', label: '单次启用工具上限', maximum: 20},
   {key: 'mcpMaxToolsPerReply', label: '本次回复启用工具上限', maximum: 64}
 ] as const
-const loading = ref(true)
+const loading = ref(false)
 const saving = ref(false)
 const loadError = ref('')
-const validRounds = computed(() => Number.isInteger(config.maxToolRounds) &&
-    config.maxToolRounds >= 1 && config.maxToolRounds <= 100)
-const validConfig = computed(() => validRounds.value &&
-    mcpFields.every(field => Number.isInteger(config[field.key]) && config[field.key] >= 1 && config[field.key] <= field.maximum) &&
-    config.mcpMaxToolsPerEnable <= config.mcpMaxToolsPerReply)
-
+const savedConfig = ref<string | null>(null)
+const isDirty = (): boolean => savedConfig.value !== null && JSON.stringify(config) !== savedConfig.value
+useUnsavedChanges(isDirty, () => saving.value)
 const loadConfig = async (): Promise<void> => {
+  if (loading.value || saving.value || !confirmDiscard(isDirty())) return
   loading.value = true
   loadError.value = ''
   try {
@@ -36,6 +37,7 @@ const loadConfig = async (): Promise<void> => {
       config[field.key] = data[field.key]
     }
     if (config.mcpMaxToolsPerEnable > config.mcpMaxToolsPerReply) throw new Error('单次启用上限不能大于本次回复上限')
+    savedConfig.value = JSON.stringify(config)
   } catch (error) {
     loadError.value = error instanceof Error ? error.message : '无法连接管理服务'
   } finally {
@@ -43,17 +45,26 @@ const loadConfig = async (): Promise<void> => {
   }
 }
 
+const {errors, fieldAttrs, validateForm} = useFormValidation(() => {
+  const result: Record<string, string> = {'max-tool-rounds': numberError(config.maxToolRounds, 1, 100)}
+  for (const field of mcpFields) result[field.key] = numberError(config[field.key], 1, field.maximum)
+  if (config.mcpMaxToolsPerEnable > config.mcpMaxToolsPerReply) result.mcpMaxToolsPerEnable = '单次启用上限不能大于本次回复上限'
+  return result
+})
+
 const saveConfig = async (): Promise<void> => {
-  if (!validConfig.value || saving.value || loading.value || loadError.value) return
+  if (saving.value || loading.value || loadError.value || !validateForm()) return
+  const submitted = JSON.stringify(config)
   saving.value = true
   try {
     const response = await fetch('/admin/api/execution-config', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(config)
+      body: submitted
     })
     const data: ApiResponse = await response.json()
     if (!response.ok || !data.success) throw new Error(data.error || '保存执行配置失败')
+    savedConfig.value = submitted
     showToast?.('执行配置已保存')
   } catch (error) {
     showToast?.(error instanceof Error ? error.message : '无法连接管理服务', true)
@@ -76,35 +87,34 @@ onMounted(loadConfig)
       <p class="load-error">{{ loadError }}</p>
       <button class="btn btn-secondary" type="button" @click="loadConfig">重新加载</button>
     </div>
-    <form v-else class="card" @submit.prevent="saveConfig">
+    <form v-else class="card" novalidate @submit.prevent="saveConfig">
       <div class="card-header">
         <h2 class="card-title">工具调用</h2>
       </div>
       <div class="form-group rounds-field">
         <label class="form-label" for="max-tool-rounds">最大迭代轮数</label>
-        <input id="max-tool-rounds" v-model.number="config.maxToolRounds" :disabled="saving"
-               :aria-invalid="!validRounds" aria-describedby="rounds-range" class="form-input"
+        <input v-bind="fieldAttrs('max-tool-rounds', 'rounds-range')" v-model.number="config.maxToolRounds" :disabled="saving"
+               class="form-input"
                type="number" min="1" max="100" step="1" required>
-        <p id="rounds-range" :class="{'invalid-range': !validRounds}" class="form-hint">1～100 轮</p>
+        <p id="rounds-range" class="form-hint">1～100 轮</p>
+        <FieldError field="max-tool-rounds" :message="errors['max-tool-rounds']"/>
       </div>
       <h2 class="card-title mcp-heading">MCP 工具按需启用</h2>
       <div class="form-row mcp-fields">
         <div v-for="field in mcpFields" :key="field.key" class="form-group rounds-field">
           <label class="form-label" :for="field.key">{{ field.label }}</label>
-          <input :id="field.key" v-model.number="config[field.key]" class="form-input" type="number" min="1"
+          <input v-bind="fieldAttrs(field.key, field.key + '-hint')" v-model.number="config[field.key]" class="form-input" type="number" min="1"
                  :max="field.maximum" step="1" required :disabled="saving">
-          <p class="form-hint">1～{{ field.maximum }}</p>
+          <p :id="field.key + '-hint'" class="form-hint">1～{{ field.maximum }}</p>
+          <FieldError :field="field.key" :message="errors[field.key]"/>
         </div>
       </div>
-      <p v-if="config.mcpMaxToolsPerEnable > config.mcpMaxToolsPerReply" class="invalid-range" role="alert">单次启用上限不能大于本次回复上限</p>
       <h2 class="card-title mcp-heading">群聊消息判断</h2>
       <div class="form-group">
-        <label class="form-label">回复期间继续判断新消息</label>
-        <EnabledSwitch :model-value="config.routeWhileReplying" :disabled="saving" label="回复期间继续判断新消息"
-                       @update:model-value="config.routeWhileReplying = $event" />
-        <p class="form-hint">默认关闭。开启后，普通群消息在回复期间仍由 Jev 优先判断，无法确定时回退回复决策模型；需要回复的消息合并到下一轮，不打断当前回复，也不同时生成多条回复。会增加路由请求量。</p>
+        <label class="form-checkbox"><input v-model="config.routeWhileReplying" :disabled="saving" type="checkbox" aria-describedby="route-while-replying-hint">回复期间继续判断新消息（保存后生效）</label>
+        <p id="route-while-replying-hint" class="form-hint">默认关闭。开启后，普通群消息在回复期间仍由 Jev 优先判断，无法确定时回退回复决策模型；需要回复的消息合并到下一轮，不打断当前回复，也不同时生成多条回复。会增加路由请求量。</p>
       </div>
-      <button :disabled="saving || !validConfig" class="btn btn-primary" type="submit">
+      <button :disabled="saving" class="btn btn-primary" type="submit">
         {{ saving ? '保存中...' : '保存配置' }}
       </button>
     </form>

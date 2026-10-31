@@ -17,7 +17,7 @@ function setup(page, fetch = () => { throw new Error('Unexpected request') }) {
   const modules = new Map()
   let conversions = 0
   const api = {
-    ...vue, onMounted() {}, onUnmounted() {},
+    ...vue, onMounted() {}, onUnmounted() {}, onBeforeUnmount() {},
     inject: (key, fallback) => key === 'showToast' ? () => {} : fallback,
     computed(getter) {
       const result = vue.computed(() => {
@@ -107,7 +107,7 @@ test('memory settings save the affinity switch as a boolean with the other param
   const view = setup('conversation/MemoryConfig', async (url, options) => {
     assert.equal(url, '/admin/api/memory-config')
     saved = JSON.parse(options.body)
-    return {json: async () => ({success: true})}
+    return {ok: true, json: async () => ({success: true})}
   })
   try {
     assert.equal(view.state.memoryConfig.affinityEnabled, true)
@@ -120,6 +120,7 @@ test('memory settings save the affinity switch as a boolean with the other param
     view.state.memoryConfig.personProfileMaxChars = 200
     view.state.memoryConfig.jevWindowSize = 15
     view.state.memoryConfig.affinityEnabled = false
+    view.state.loaded = true
     await view.state.saveMemoryConfig()
     assert.equal(saved.affinityEnabled, false)
     assert.equal(saved.jevWindowSize, 15)
@@ -282,6 +283,8 @@ test('session helpers preserve large IDs and each page keeps its own fallback la
 })
 
 test('opening a new custom tool restores all defaults without replacing the reactive draft', async () => {
+  const originalWindow = globalThis.window
+  globalThis.window = {scrollY: 0, scrollTo() {}}
   const view = setup('tools/CustomTools')
   try {
     const original = view.state.editTool
@@ -291,18 +294,18 @@ test('opening a new custom tool restores all defaults without replacing the reac
     assert.notEqual(first, second)
     assert.deepEqual(first, defaults)
     for (let i = 0; i < 2; i++) {
-      view.state.openEditDialog({id: 99, name: 'Old', description: 'Changed', parameters: '[]',
+      view.state.openEditEditor({id: 99, name: 'Old', description: 'Changed', parameters: '[]',
         executorType: 'lua', scriptContent: 'old', readme: 'Old readme', enabled: false})
       view.state.testArgs = '{"old":true}'
       view.state.testResult = 'old result'
-      view.state.openAddDialog()
+      view.state.openAddEditor()
       await vue.nextTick()
       assert.equal(view.state.editTool, original)
       assert.deepEqual(view.state.editTool, defaults)
       assert.equal(view.state.isEdit, false)
-      assert.equal(view.state.showDialog, true)
+      assert.equal(view.state.showEditor, true)
       assert.equal(view.state.testArgs, '{}')
       assert.equal(view.state.testResult, '')
     }
-  } finally { view.dispose() }
+  } finally { view.dispose(); if (originalWindow === undefined) delete globalThis.window; else globalThis.window = originalWindow }
 })

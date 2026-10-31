@@ -12,6 +12,7 @@
 
 #include <cstdio>
 #include <drogon/HttpAppFramework.h>
+#include <fmt/color.h>
 #include <fmt/format.h>
 #include <poll.h>
 #include <stop_token>
@@ -37,7 +38,25 @@
 namespace {
     using namespace insoulforge;
 
-    /// @brief 处理控制台的退出和日志等级命令；输入关闭或收到停止请求时结束。
+    /// @brief 仅向服务终端输出当前登录凭据，不经过应用日志系统。
+    void printLoginInstructions() {
+        // 登录引导只直接输出到服务终端，不进入文件日志、日志缓存或 WebSocket 推送。
+        std::string loginInstructions = std::format(
+          "管理后台访问令牌（重启后失效）: {}\n也可尝试一下链接访问\n", AdminAccessToken::token());
+        // 枚举当前进程可见的 IPv4 地址；容器内不能据此获取宿主机的局域网地址。
+        for (const auto &url: AdminAccessToken::loginUrls(7778)) {
+            loginInstructions.append(url+'\n');
+    }
+    // 与 info 日志使用相同的终端绿色；重定向输出时保持纯文本。
+    if (isatty(STDOUT_FILENO)) {
+        fmt::print(stdout, fmt::fg(fmt::terminal_color::green), "{}", loginInstructions);
+    } else {
+        fmt::print(stdout, "{}", loginInstructions);
+    }
+    std::fflush(stdout);
+    }
+
+    /// @brief 处理控制台的退出、登录凭据和日志等级命令；输入关闭或收到停止请求时结束。
     void processConsoleCommands(const std::stop_token &stopToken) {
         std::string command;
         while (!stopToken.stop_requested()) {
@@ -55,6 +74,10 @@ namespace {
             if (command == "exit") {
                 drogon::app().quit();
                 return;
+            }
+            if (command == "login-token") {
+                printLoginInstructions();
+                continue;
             }
             if (command == "log-level") {
                 std::string level;
@@ -138,12 +161,8 @@ auto main() -> int {
         drogon::app().setDocumentRoot("public");
         Logger::info(0, "Main", "HTTP 服务启动 | port=7778");
 
-        Logger::info(0, "Admin", std::format("管理后台访问令牌（重启后失效）: {}", AdminAccessToken::token()));
-        Logger::info(0, "Admin", "也可尝试一下链接访问");
-        // 枚举当前进程可见的 IPv4 地址；容器内不能据此获取宿主机的局域网地址。
-        for (const auto &url: AdminAccessToken::loginUrls(7778)) {
-            Logger::info(0, "Admin", " " + url + " ");
-        }
+        printLoginInstructions();
+        Logger::info(0, "Admin", "管理后台登录信息已输出到服务终端");
 
         // 资源历史在无人访问后台时也持续采样，退出事件循环后停止采样。
         ProcessMetrics::instance().start(*drogon::app().getLoop());
