@@ -16,13 +16,15 @@
 namespace insoulforge::MemoryStore {
     auto normalizeSessionMemory(const json &value) -> std::optional<json> {
         if (!value.is_object() || !atOrNull(value, "aliases").is_array() ||
-            (value.contains("recent_events") && !value["recent_events"].is_array()) ||
-            (value.contains("legacy_entries") && !value["legacy_entries"].is_array()))
+            std::ranges::any_of(value.items(), [](const auto &entry) {
+                return entry.key() != "aliases" && entry.key() != "pending_entries" &&
+                       entry.key() != "conversation_summaries";
+            }))
             return std::nullopt;
         json result = {{"aliases", json::array()}};
         std::unordered_map<u64, size_t> aliasIndices;
         for (const auto &alias: value["aliases"]) {
-            const auto userId = parseUInt64(getStr(alias, "user_id", getStr(alias, "qq")));
+            const auto userId = parseUInt64(getStr(alias, "user_id"));
             if (!alias.is_object() || userId == 0 || userId == SessionId::kSystemAccountId || SessionId::isPrivate(userId) ||
                 !atOrNull(alias, "names").is_array())
                 return std::nullopt;
@@ -40,17 +42,18 @@ namespace insoulforge::MemoryStore {
                     names.push_back(std::move(text));
             }
         }
-        for (const auto *key: {"recent_events", "legacy_entries"}) {
-            if (!value.contains(key))
-                continue;
-            result[key] = json::array();
+        if (value.contains("pending_entries")) {
+            const auto &entries = value["pending_entries"];
+            if (!entries.is_array())
+                return std::nullopt;
+            auto &pending = result["pending_entries"] = json::array();
             std::unordered_set<std::string> seen;
-            for (const auto &entry: atOrNull(value, key)) {
+            for (const auto &entry: entries) {
                 if (!entry.is_string())
                     return std::nullopt;
                 auto text = trim(entry.get<std::string>());
                 if (!text.empty() && seen.insert(text).second)
-                    result[key].push_back(std::move(text));
+                    pending.push_back(std::move(text));
             }
         }
         if (value.contains("conversation_summaries")) {
@@ -94,35 +97,13 @@ namespace insoulforge::MemoryStore {
         return {{"aliases", json::array()}};
     }
 
-    auto pendingLegacyEntries(const std::string &memory) -> std::vector<std::string> {
-        std::vector<std::string> lines;
-        std::unordered_set<std::string> seen;
-        const auto append = [&](const std::string &text) {
-            auto value = trim(text);
-            if (!value.empty() && seen.insert(value).second)
-                lines.push_back(std::move(value));
-        };
+    auto pendingEntries(const std::string &memory) -> std::vector<std::string> {
         json parsed;
-        if (tryParseJson(memory, parsed)) {
-            if (auto structured = normalizeSessionMemory(parsed)) {
-                for (const auto *key: {"recent_events", "legacy_entries"})
-                    for (const auto &entry: atOrNull(*structured, key))
-                        append(entry.get<std::string>());
-                return lines;
-            }
-            if (parsed.is_array() && std::ranges::all_of(parsed, [](const json &entry) { return entry.is_string(); })) {
-                for (const auto &entry: parsed)
-                    append(entry.get<std::string>());
-                return lines;
-            }
-        }
-        for (size_t start = 0; start < memory.size();) {
-            const auto end = memory.find('\n', start);
-            const auto stop = end == std::string::npos ? memory.size() : end;
-            append(memory.substr(start, stop - start));
-            start = stop + 1;
-        }
-        return lines;
+        if (!tryParseJson(memory, parsed))
+            return {};
+        const auto normalized = normalizeSessionMemory(parsed);
+        return normalized && normalized->contains("pending_entries")
+          ? (*normalized)["pending_entries"].get<std::vector<std::string>>() : std::vector<std::string>{};
     }
 
     auto getShortTermMemory(const u64 sessionId) -> std::string {

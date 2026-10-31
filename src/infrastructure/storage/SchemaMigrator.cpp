@@ -1,11 +1,13 @@
 /// @file SchemaMigrator.cpp
 /// @brief 数据库 Schema 版本迁移 - 实现
 
-#include <infrastructure/JsonUtil.hpp>
+#include <array>
+
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/SchemaMigrator.hpp>
 #include <infrastructure/storage/Statement.hpp>
+#include <infrastructure/storage/migrations/V25.hpp>
 
 namespace insoulforge {
     namespace {
@@ -25,46 +27,8 @@ namespace insoulforge {
                 execSQL(db, sql);
         }
 
-        auto tableExists(sqlite3 *db, const std::string_view name) -> bool {
-            const Statement stmt(db, "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?");
-            stmt.bind(1, name);
-            return stmt.step();
-        }
-
-        auto columnExists(sqlite3 *db, std::string_view table, const std::string_view column) -> bool {
-            const Statement stmt(db, fmt::format("PRAGMA table_info({})", table));
-            while (stmt.step()) {
-                if (stmt.getText(1) == column)
-                    return true;
-            }
-            return false;
-        }
-
-        void ensureColumn(sqlite3 *db, std::string_view table, std::string_view column, std::string_view ddl) {
-            if (columnExists(db, table, column))
-                return;
-            Logger::info(0, "Storage", fmt::format("数据库迁移: 新增 {}.{}", table, column));
-            execSQL(db, fmt::format("ALTER TABLE {} ADD COLUMN {}", table, ddl));
-        }
-
-        void dropColumnIfExists(sqlite3 *db, std::string_view table, std::string_view column) {
-            if (!columnExists(db, table, column))
-                return;
-            Logger::info(0, "Storage", fmt::format("数据库迁移: 移除废弃的 {}.{}", table, column));
-            execSQL(db, fmt::format("ALTER TABLE {} DROP COLUMN {}", table, column));
-        }
-
-        void storeSetting(sqlite3 *db, const std::string_view key, const json &value) {
-            const std::string payload = dumpJson(value);
-
-            const Statement stmt(db, "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
-            stmt.bind(1, key);
-            stmt.bind(2, payload);
-            stmt.exec();
-        }
-
-        /// @brief v2 Schema 的全部建表语句（IF NOT EXISTS，可安全重复执行）
-        constexpr std::array v2Tables = {
+        // 新安装直接创建当前结构，不再执行历史版本迁移。
+        constexpr std::array currentTables = {
           R"(CREATE TABLE IF NOT EXISTS group_config (
         group_id INTEGER PRIMARY KEY,
         all_mes_count INTEGER DEFAULT 0,
@@ -99,19 +63,8 @@ namespace insoulforge {
         added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ))",
           R"(CREATE TABLE IF NOT EXISTS admins (
-        qq_number INTEGER PRIMARY KEY,
+        user_id INTEGER PRIMARY KEY,
         added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    ))",
-          R"(CREATE TABLE IF NOT EXISTS llm_config (
-        name TEXT PRIMARY KEY,
-        api_key TEXT,
-        base_url TEXT,
-        path TEXT,
-        model TEXT,
-        max_tokens INTEGER DEFAULT 1024,
-        temperature REAL DEFAULT 0.7,
-        top_p REAL DEFAULT 0.9,
-        reasoning_effort TEXT DEFAULT ''
     ))",
           R"(CREATE TABLE IF NOT EXISTS llm_usage (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -121,18 +74,6 @@ namespace insoulforge {
         completion_tokens INTEGER DEFAULT 0,
         total_tokens INTEGER DEFAULT 0,
         cached_tokens INTEGER DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    ))",
-          R"(CREATE TABLE IF NOT EXISTS custom_tools (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT UNIQUE NOT NULL,
-        description TEXT NOT NULL,
-        parameters TEXT,
-        executor_type TEXT NOT NULL CHECK(executor_type IN ('python', 'http', 'lua')),
-        executor_config TEXT,
-        script_content TEXT,
-        readme TEXT,
-        enabled INTEGER DEFAULT 1,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ))",
           R"(CREATE TABLE IF NOT EXISTS scheduled_tasks (
@@ -145,32 +86,6 @@ namespace insoulforge {
         is_daily INTEGER NOT NULL DEFAULT 0 CHECK(is_daily IN (0, 1)),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ))",
-          R"(CREATE TABLE IF NOT EXISTS settings (
-        key TEXT PRIMARY KEY,
-        value TEXT
-    ))"};
-
-        constexpr std::array indexes = {"CREATE INDEX IF NOT EXISTS idx_chat_records_group ON chat_records(group_id)",
-          "CREATE INDEX IF NOT EXISTS idx_chat_records_time ON chat_records(group_id, created_at DESC)",
-          "CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_status ON scheduled_tasks(status, remind_time)"};
-
-        /// @brief 基线 v1 Schema 额外需要的三张单行配置表（v2 已并入 settings）
-        constexpr std::array v1ExtraTables = {
-          R"(CREATE TABLE IF NOT EXISTS kb_config (id INTEGER PRIMARY KEY CHECK (id = 1), enabled INTEGER DEFAULT 1, api_key TEXT, base_url TEXT, knowledge_dataset_id TEXT, memory_dataset_id TEXT, memory_document_id TEXT))",
-          R"(CREATE TABLE IF NOT EXISTS memory_config (id INTEGER PRIMARY KEY CHECK (id = 1), window_trigger_count INTEGER DEFAULT 100, window_keep_count INTEGER DEFAULT 50, memory_extract_max_tokens INTEGER DEFAULT 4000, router_window_trigger_count INTEGER DEFAULT 20, router_window_keep_count INTEGER DEFAULT 10, short_term_memory_max INTEGER DEFAULT 15, memory_migrate_count INTEGER DEFAULT 5))",
-          R"(CREATE TABLE IF NOT EXISTS qq_config (id INTEGER PRIMARY KEY CHECK (id = 1), access_token TEXT, self_qq_number INTEGER, qq_http_host TEXT, bot_name TEXT DEFAULT '小喵'))"};
-
-        /// @brief v3 新增表：group_affinity（每个会话独立维护 用户 ID → 好感度映射，[-100, 100]）
-        constexpr std::array v3Tables = {
-          R"(CREATE TABLE IF NOT EXISTS group_affinity (
-        group_id INTEGER NOT NULL,
-        qq_number INTEGER NOT NULL,
-        affinity INTEGER NOT NULL DEFAULT 0,
-        PRIMARY KEY (group_id, qq_number)
-    ))"};
-
-        /// @brief v6 新增表：long_term_memory（长期记忆，embedding 以 f32 数组存 BLOB，检索为暴力余弦）
-        constexpr std::array v6Tables = {
           R"(CREATE TABLE IF NOT EXISTS long_term_memory (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         group_id INTEGER NOT NULL,
@@ -178,10 +93,6 @@ namespace insoulforge {
         embedding BLOB,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ))",
-          "CREATE INDEX IF NOT EXISTS idx_long_term_memory_group ON long_term_memory(group_id)"};
-
-        /// @brief v7 新增表：按媒体字节哈希缓存视觉描述，避免相同图片重复调用视觉模型
-        constexpr std::array v7Tables = {
           R"(CREATE TABLE IF NOT EXISTS image_description_cache (
         content_hash TEXT NOT NULL,
         model TEXT NOT NULL,
@@ -193,42 +104,41 @@ namespace insoulforge {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (content_hash, model, prompt_version)
-    ))"};
-
-        /// @brief v8 新增表：持久化记忆维护任务，避免重启或失败时丢失总结输入
-        constexpr std::array v8Tables = {
-          R"(CREATE TABLE IF NOT EXISTS memory_maintenance_jobs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id INTEGER NOT NULL,
-        messages TEXT NOT NULL,
-        context_messages TEXT NOT NULL DEFAULT '[]',
-        remove_count INTEGER NOT NULL DEFAULT 0,
-        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'completed')),
-        attempt_count INTEGER NOT NULL DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ))",
-          "CREATE INDEX IF NOT EXISTS idx_memory_maintenance_jobs_session ON memory_maintenance_jobs(session_id, id)"};
-
-        /// @brief v10 新增表：独立持久化好感度维护任务
-        constexpr std::array v10Tables = {
-          R"(CREATE TABLE IF NOT EXISTS affinity_maintenance_jobs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id INTEGER NOT NULL,
-        messages TEXT NOT NULL,
-        attempt_count INTEGER NOT NULL DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    ))",
-          "CREATE INDEX IF NOT EXISTS idx_affinity_maintenance_jobs_session ON affinity_maintenance_jobs(session_id, "
-          "id)"};
-
-        /// @brief v11 新增表：blacklisted_users（全局忽略的 QQ 用户）
-        constexpr std::array v11Tables = {
           R"(CREATE TABLE IF NOT EXISTS blacklisted_users (
-        qq_number INTEGER PRIMARY KEY,
+        user_id INTEGER PRIMARY KEY,
         added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ))",
+          R"(CREATE TABLE IF NOT EXISTS person_affinity (
+        user_id INTEGER PRIMARY KEY,
+        affinity INTEGER NOT NULL DEFAULT 0 CHECK(affinity BETWEEN -100 AND 100)
+    ))",
+          R"(CREATE TABLE IF NOT EXISTS person_memories (
+        user_id INTEGER PRIMARY KEY,
+        profile TEXT NOT NULL DEFAULT '[]',
+        recent_interactions TEXT NOT NULL DEFAULT '[]',
+        relationship TEXT NOT NULL DEFAULT '[]'
+    ))",
+          R"(CREATE TABLE IF NOT EXISTS person_memory_entries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        source_session INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ))",
+          R"(CREATE TABLE IF NOT EXISTS person_memory_daily_state (
+        id INTEGER PRIMARY KEY CHECK(id = 1),
+        completed_day TEXT NOT NULL DEFAULT '',
+        running_day TEXT NOT NULL DEFAULT ''
     ))"};
+
+        constexpr std::array indexes = {
+          "CREATE INDEX IF NOT EXISTS idx_chat_records_group ON chat_records(group_id)",
+          "CREATE INDEX IF NOT EXISTS idx_chat_records_time ON chat_records(group_id, created_at DESC)",
+          "CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_status ON scheduled_tasks(status, remind_time)",
+          "CREATE INDEX IF NOT EXISTS idx_long_term_memory_group ON long_term_memory(group_id)",
+          "CREATE INDEX IF NOT EXISTS idx_person_memory_entries_user_id ON person_memory_entries(user_id, id)"};
+
         auto getUserVersion(sqlite3 *db) -> i32 {
             const Statement stmt(db, "PRAGMA user_version");
             return stmt.step() ? stmt.getInt(0) : 0;
@@ -244,473 +154,59 @@ namespace insoulforge {
             return stmt.step();
         }
 
-        constexpr std::array v21Tables = {"CREATE TABLE IF NOT EXISTS person_affinity (qq_number INTEGER PRIMARY KEY, "
-                                          "affinity INTEGER NOT NULL DEFAULT 0 CHECK(affinity BETWEEN -100 AND 100))",
-          "CREATE TABLE IF NOT EXISTS person_memories (qq_number INTEGER PRIMARY KEY, "
-          "stable_memory TEXT NOT NULL DEFAULT '[]', recent_interactions TEXT NOT NULL DEFAULT '[]')",
-          "CREATE TABLE IF NOT EXISTS person_memory_entries (id INTEGER PRIMARY KEY AUTOINCREMENT, "
-          "qq_number INTEGER NOT NULL, source_session INTEGER NOT NULL, content TEXT NOT NULL, "
-          "created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-          "CREATE INDEX IF NOT EXISTS idx_person_memory_entries_qq ON person_memory_entries(qq_number, id)"};
-
-        constexpr std::array v22Tables = {
-          "CREATE TABLE IF NOT EXISTS person_memory_daily_state (id INTEGER PRIMARY KEY CHECK(id = 1), "
-          "completed_day TEXT NOT NULL DEFAULT '', running_day TEXT NOT NULL DEFAULT '')"};
-
-        void migrateV21ToV22(sqlite3 *db) { execAll(db, v22Tables); }
-
-        void migrateV22ToV23(sqlite3 *db) {
-            if (columnExists(db, "person_memories", "stable_memory"))
-                execSQL(db, "ALTER TABLE person_memories RENAME COLUMN stable_memory TO profile");
-            ensureColumn(db, "person_memories", "relationship", "relationship TEXT NOT NULL DEFAULT '[]'");
-        }
-
-        void migrateV23ToV24(sqlite3 *db) {
-            // 历史档案没有可靠的来源会话，0 表示历史迁移；时间仅为本次入队时间。
-            // 迁移框架在事务内执行，全部入队成功后才清空旧分类，重启不会重复入队。
-            for (const auto *field: {"profile", "relationship", "recent_interactions"}) {
-                execSQL(db, fmt::format(
-                  "INSERT INTO person_memory_entries (qq_number, source_session, content) "
-                  "SELECT p.qq_number, 0, item.value FROM person_memories p, json_each(p.{}) item "
-                  "ORDER BY p.qq_number, item.key", field));
+        // 建库和每次增量迁移都整体提交；失败不留下半完成的结构或数据。
+        void transaction(sqlite3 *db, const auto &action) {
+            execSQL(db, "BEGIN IMMEDIATE");
+            try {
+                action();
+                execSQL(db, "COMMIT");
+            } catch (...) {
+                sqlite3_exec(db, "ROLLBACK", nullptr, nullptr, nullptr);
+                throw;
             }
-            execSQL(db, "UPDATE person_memories SET profile='[]', relationship='[]', recent_interactions='[]'");
-        }
-
-        // 只转换身份对象，不改动正文、图片元数据或自定义工具参数。
-        void renameLegacyUserId(json &identity) {
-            if (!identity.is_object() || !identity.contains("qq"))
-                return;
-            if (!identity.contains("user_id"))
-                identity["user_id"] = identity["qq"];
-            identity.erase("qq");
-        }
-
-        void migrateV24ToV25(sqlite3 *db) {
-            for (const auto *table: {"admins", "blacklisted_users", "person_affinity", "person_memories",
-                   "person_memory_entries"}) {
-                if (columnExists(db, table, "qq_number"))
-                    execSQL(db, fmt::format("ALTER TABLE {} RENAME COLUMN qq_number TO user_id", table));
-            }
-            execSQL(db, "DROP INDEX IF EXISTS idx_person_memory_entries_qq");
-            execSQL(db, "CREATE INDEX IF NOT EXISTS idx_person_memory_entries_user_id "
-                        "ON person_memory_entries(user_id, id)");
-
-            // 保留记录 ID 和所有非身份内容，包括 CQ 码。
-            if (tableExists(db, "chat_records")) {
-                const Statement records(db, "SELECT id, content FROM chat_records");
-                const Statement updateRecord(db, "UPDATE chat_records SET content = ? WHERE id = ?");
-                while (records.step()) {
-                    json record;
-                    if (!tryParseJson(records.getText(1), record) || !record.is_object())
-                        continue;
-                    auto original = record;
-                    if (record.contains("sender"))
-                        renameLegacyUserId(record["sender"]);
-                    if (record.contains("segments") && record["segments"].is_array()) {
-                        for (auto &segment: record["segments"]) {
-                            if (!segment.is_object())
-                                continue;
-                            renameLegacyUserId(segment);
-                            for (const auto *key: {"target", "operator"})
-                                if (segment.contains(key))
-                                    renameLegacyUserId(segment[key]);
-                        }
-                    }
-                    if (record == original)
-                        continue;
-                    updateRecord.bind(1, dumpJson(record));
-                    updateRecord.bind(2, records.getInt64(0));
-                    updateRecord.execOrThrow();
-                    updateRecord.reset();
-                }
-            }
-            if (tableExists(db, "short_term_memory")) {
-                const Statement memories(db, "SELECT group_id, memory_content FROM short_term_memory");
-                const Statement updateMemory(db, "UPDATE short_term_memory SET memory_content = ? WHERE group_id = ?");
-                while (memories.step()) {
-                    json memory;
-                    if (!tryParseJson(memories.getText(1), memory) || !memory.is_object() ||
-                        !memory.contains("aliases") || !memory["aliases"].is_array())
-                        continue;
-                    auto original = memory;
-                    for (auto &alias: memory["aliases"])
-                        renameLegacyUserId(alias);
-                    if (memory == original)
-                        continue;
-                    updateMemory.bind(1, dumpJson(memory));
-                    updateMemory.bind(2, memories.getInt64(0));
-                    updateMemory.execOrThrow();
-                    updateMemory.reset();
-                }
-            }
-        }
-
-        void createFreshSchema(sqlite3 *db) {
-            execAll(db, v2Tables);
-            execAll(db, v21Tables);
-            execAll(db, v22Tables);
-            migrateV22ToV23(db);
-            execAll(db, v6Tables);
-            execAll(db, v7Tables);
-            execAll(db, v11Tables);
-            execAll(db, indexes);
-            execSQL(db, "DROP TABLE IF EXISTS custom_tools");
-            migrateV24ToV25(db);
-            setUserVersion(db, SchemaMigrator::kLatestVersion);
-        }
-
-        void migrateV0ToV1(sqlite3 *db) {
-            Logger::info(0, "Storage", fmt::format("执行基线迁移: 历史遗留 Schema 调整"));
-
-            // 兜底补齐所有表（正常情况下旧库已全部存在）
-            execAll(db, v2Tables);
-            execAll(db, v1ExtraTables);
-            execAll(db, indexes);
-
-            ensureColumn(db, "kb_config", "enabled", "enabled INTEGER DEFAULT 1");
-            ensureColumn(db, "kb_config", "memory_document_id", "memory_document_id TEXT DEFAULT ''");
-            ensureColumn(db, "llm_config", "reasoning_effort", "reasoning_effort TEXT DEFAULT ''");
-            ensureColumn(db, "llm_usage", "role", "role TEXT NOT NULL DEFAULT ''");
-
-            // long_term_memory → short_term_memory
-            // 注：表可能刚被上面创建为空表，需先检查旧表是否有数据
-            if (tableExists(db, "long_term_memory")) {
-                i64 oldCount = 0;
-                if (const Statement stmt(db, "SELECT COUNT(*) FROM long_term_memory"); stmt.step()) {
-                    oldCount = stmt.getInt64(0);
-                }
-                if (oldCount > 0) {
-                    if (tableExists(db, "short_term_memory")) {
-                        execSQL(db, "DROP TABLE short_term_memory");
-                    }
-                    Logger::info(0, "Storage",
-                      fmt::format("数据库迁移: 重命名 long_term_memory → short_term_memory ({} 条数据)", oldCount));
-                    execSQL(db, "ALTER TABLE long_term_memory RENAME TO short_term_memory");
-                } else {
-                    Logger::info(0, "Storage", fmt::format("数据库迁移: 删除空的 long_term_memory 表"));
-                    execSQL(db, "DROP TABLE long_term_memory");
-                }
-            }
-
-            // 上下文窗口配置（窗口触发条数/保留条数/提取 maxTokens）
-            ensureColumn(db, "memory_config", "window_trigger_count", "window_trigger_count INTEGER DEFAULT 100");
-            ensureColumn(db, "memory_config", "window_keep_count", "window_keep_count INTEGER DEFAULT 50");
-            ensureColumn(
-              db, "memory_config", "memory_extract_max_tokens", "memory_extract_max_tokens INTEGER DEFAULT 4000");
-            ensureColumn(
-              db, "memory_config", "router_window_trigger_count", "router_window_trigger_count INTEGER DEFAULT 20");
-            ensureColumn(
-              db, "memory_config", "router_window_keep_count", "router_window_keep_count INTEGER DEFAULT 10");
-            ensureColumn(db, "memory_config", "short_term_memory_max", "short_term_memory_max INTEGER DEFAULT 15");
-            ensureColumn(db, "memory_config", "memory_migrate_count", "memory_migrate_count INTEGER DEFAULT 5");
-            ensureColumn(db, "short_term_memory", "watermark_id", "watermark_id INTEGER DEFAULT 0");
-            dropColumnIfExists(db, "memory_config", "memory_trigger_count");
-            dropColumnIfExists(db, "memory_config", "memory_chat_record_limit");
-            dropColumnIfExists(db, "memory_config", "executor_context_limit");
-            dropColumnIfExists(db, "memory_config", "short_term_memory_limit");
-
-            // 老群已有短期记忆：水位线初始化为该群最新记录 id，
-            // 避免升级后首次触发时把全部历史重新提取一遍（历史已浓缩在现有记忆中）
-            execSQL(db,
-              "UPDATE short_term_memory SET watermark_id = "
-              "(SELECT COALESCE(MAX(id), 0) FROM chat_records c WHERE c.group_id = short_term_memory.group_id) "
-              "WHERE watermark_id = 0 "
-              "AND EXISTS (SELECT 1 FROM chat_records c WHERE c.group_id = short_term_memory.group_id)");
-
-            // emojis 表已废弃（表情包改为直接使用 QQ 收藏表情，不再存库）
-            if (tableExists(db, "emojis")) {
-                Logger::info(0, "Storage", fmt::format("数据库迁移: 删除废弃的 emojis 表"));
-                execSQL(db, "DROP TABLE emojis");
-            }
-        }
-
-        void migrateV1ToV2(sqlite3 *db) {
-            Logger::info(0, "Storage", fmt::format("执行迁移: kb_config/memory_config/qq_config 并入 settings"));
-
-            json kb;
-            {
-                const Statement stmt(db, "SELECT enabled, api_key, base_url, knowledge_dataset_id, memory_dataset_id, "
-                                         "memory_document_id FROM kb_config WHERE id = 1");
-                if (stmt.step()) {
-                    kb["enabled"] = stmt.getInt(0) != 0;
-                    kb["apiKey"] = stmt.getText(1);
-                    kb["baseUrl"] = stmt.getText(2);
-                    kb["knowledgeDatasetId"] = stmt.getText(3);
-                    kb["memoryDatasetId"] = stmt.getText(4);
-                    kb["memoryDocumentId"] = stmt.getText(5);
-                } else {
-                    kb["enabled"] = true;
-                    kb["apiKey"] = "";
-                    kb["baseUrl"] = "";
-                    kb["knowledgeDatasetId"] = "";
-                    kb["memoryDatasetId"] = "";
-                    kb["memoryDocumentId"] = "";
-                }
-            }
-            storeSetting(db, "kb_config", kb);
-
-            json memory;
-            {
-                const Statement stmt(db,
-                  "SELECT window_trigger_count, window_keep_count, memory_extract_max_tokens, "
-                  "router_window_trigger_count, router_window_keep_count, short_term_memory_max, "
-                  "memory_migrate_count FROM memory_config WHERE id = 1");
-                if (stmt.step()) {
-                    memory["windowTriggerCount"] = stmt.getInt(0);
-                    memory["windowKeepCount"] = stmt.getInt(1);
-                    memory["memoryExtractMaxTokens"] = stmt.getInt(2);
-                    memory["routerWindowTriggerCount"] = stmt.getInt(3);
-                    memory["routerWindowKeepCount"] = stmt.getInt(4);
-                    memory["memoryMigrateCount"] = stmt.getInt(6);
-                } else {
-                    memory["windowTriggerCount"] = 100;
-                    memory["windowKeepCount"] = 50;
-                    memory["memoryExtractMaxTokens"] = 4000;
-                    memory["routerWindowTriggerCount"] = 20;
-                    memory["routerWindowKeepCount"] = 10;
-                    memory["memoryMigrateCount"] = 5;
-                }
-            }
-            storeSetting(db, "memory_config", memory);
-
-            json qq;
-            {
-                const Statement stmt(
-                  db, "SELECT access_token, self_qq_number, qq_http_host, bot_name FROM qq_config WHERE id = 1");
-                if (stmt.step()) {
-                    qq["accessToken"] = stmt.getText(0);
-                    qq["selfQQNumber"] = stmt.getInt64(1);
-                    qq["qqHttpHost"] = stmt.getText(2);
-                    qq["botName"] = stmt.getText(3);
-                } else {
-                    qq["accessToken"] = "";
-                    qq["selfQQNumber"] = 0;
-                    qq["qqHttpHost"] = "http://127.0.0.1:3000";
-                    qq["botName"] = "小喵";
-                }
-            }
-            storeSetting(db, "qq_config", qq);
-
-            execSQL(db, "DROP TABLE kb_config");
-            execSQL(db, "DROP TABLE memory_config");
-            execSQL(db, "DROP TABLE qq_config");
-        }
-
-        void migrateV2ToV3(sqlite3 *db) {
-            Logger::info(0, "Storage", fmt::format("执行迁移: 新增 group_affinity 好感度表"));
-            execAll(db, v3Tables);
-        }
-
-        void migrateV3ToV4(sqlite3 *db) {
-            Logger::info(0, "Storage", fmt::format("执行迁移: scheduled_tasks 状态扩展（新增 cancelled）"));
-            // SQLite 无法直接修改 CHECK 约束，需重建表
-            execSQL(db, R"(CREATE TABLE scheduled_tasks_new (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_type TEXT NOT NULL CHECK(session_type IN ('group', 'private')),
-            target_id INTEGER NOT NULL,
-            remind_time INTEGER NOT NULL,
-            content TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'done', 'cancelled')),
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        ))");
-            execSQL(db,
-              "INSERT INTO scheduled_tasks_new (id, session_type, target_id, remind_time, content, status, created_at) "
-              "SELECT id, session_type, target_id, remind_time, content, status, created_at FROM scheduled_tasks");
-            execSQL(db, "DROP TABLE scheduled_tasks");
-            execSQL(db, "ALTER TABLE scheduled_tasks_new RENAME TO scheduled_tasks");
-            execSQL(
-              db, "CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_status ON scheduled_tasks(status, remind_time)");
-        }
-
-        void migrateV4ToV5(sqlite3 *db) {
-            Logger::info(0, "Storage", fmt::format("执行迁移: scheduled_tasks 新增 is_daily（每日重复任务）"));
-            // 只加一列，ALTER TABLE 即可，无需像 v4 那样重建表
-            ensureColumn(
-              db, "scheduled_tasks", "is_daily", "is_daily INTEGER NOT NULL DEFAULT 0 CHECK(is_daily IN (0, 1))");
-        }
-
-        void migrateV5ToV6(sqlite3 *db) {
-            Logger::info(0, "Storage", fmt::format("执行迁移: 新增 long_term_memory 长期记忆表"));
-            execAll(db, v6Tables);
-            // RAGFlow 已移除，settings 中的知识库配置一并清理
-            execSQL(db, "DELETE FROM settings WHERE key = 'kb_config'");
-        }
-
-        void migrateV6ToV7(sqlite3 *db) {
-            Logger::info(0, "Storage", fmt::format("执行迁移: 新增图片描述缓存表"));
-            execAll(db, v7Tables);
-            ensureColumn(
-              db, "image_description_cache", "sampled_frame_count", "sampled_frame_count INTEGER NOT NULL DEFAULT 1");
-        }
-
-        void migrateV7ToV8(sqlite3 *db) {
-            Logger::info(0, "Storage", fmt::format("执行迁移: 新增持久化记忆维护任务队列并移除旧记忆水位线"));
-            execAll(db, v8Tables);
-            dropColumnIfExists(db, "short_term_memory", "watermark_id");
-        }
-
-        void migrateV8ToV9(sqlite3 *db) {
-            Logger::info(0, "Storage", fmt::format("执行迁移: 记忆任务保留总结上下文与完成删除状态"));
-            ensureColumn(
-              db, "memory_maintenance_jobs", "context_messages", "context_messages TEXT NOT NULL DEFAULT '[]'");
-            ensureColumn(db, "memory_maintenance_jobs", "remove_count", "remove_count INTEGER NOT NULL DEFAULT 0");
-            ensureColumn(db, "memory_maintenance_jobs", "status",
-              "status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'completed'))");
-        }
-
-        void migrateV9ToV10(sqlite3 *db) {
-            Logger::info(0, "Storage", fmt::format("执行迁移: 新增独立的好感度维护任务队列"));
-            execAll(db, v10Tables);
-            execSQL(db, "INSERT INTO affinity_maintenance_jobs (session_id, messages) "
-                        "SELECT session_id, messages FROM memory_maintenance_jobs WHERE status = 'pending'");
-        }
-
-        void migrateV10ToV11(sqlite3 *db) {
-            Logger::info(0, "Storage", "执行迁移: 新增全局 QQ 黑名单");
-            execAll(db, v11Tables);
-        }
-
-        void migrateV11ToV12(sqlite3 *db) {
-            Logger::info(0, "Storage", "执行迁移: 自定义工具支持 Lua 执行器");
-            execSQL(db, R"(CREATE TABLE custom_tools_new (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT UNIQUE NOT NULL,
-                description TEXT NOT NULL,
-                parameters TEXT,
-                executor_type TEXT NOT NULL CHECK(executor_type IN ('python', 'http', 'lua')),
-                executor_config TEXT,
-                script_content TEXT,
-                readme TEXT,
-                enabled INTEGER DEFAULT 1,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            ))");
-            execSQL(db, "INSERT INTO custom_tools_new SELECT * FROM custom_tools");
-            execSQL(db, "DROP TABLE custom_tools");
-            execSQL(db, "ALTER TABLE custom_tools_new RENAME TO custom_tools");
-        }
-        void migrateV12ToV13(sqlite3 *db) {
-            Logger::warn(0, "Storage", "自定义工具改用文件存储；旧工具内容不迁移，请重新添加工具");
-            execSQL(db, "DROP TABLE IF EXISTS custom_tools");
-        }
-
-        void migrateV20ToV21(sqlite3 *db) {
-            execAll(db, v21Tables);
-            if (tableExists(db, "group_affinity")) {
-                execSQL(db, "INSERT INTO person_affinity (qq_number, affinity) "
-                            "SELECT qq_number, max(-100, min(100, CAST(round(avg(affinity)) AS INTEGER))) "
-                            "FROM group_affinity GROUP BY qq_number "
-                            "ON CONFLICT(qq_number) DO NOTHING");
-                execSQL(db, "DROP TABLE group_affinity");
-            }
-        }
-
-        void migrateV19ToV20(sqlite3 *db) {
-            ensureColumn(
-              db, "group_config", "cross_session_sharing", "cross_session_sharing INTEGER NOT NULL DEFAULT 0");
-        }
-
-        void migrateV18ToV19(sqlite3 *db) {
-            ensureColumn(db, "group_config", "command_enabled", "command_enabled INTEGER NOT NULL DEFAULT 1");
-        }
-
-        void migrateV17ToV18(sqlite3 *db) {
-            Logger::info(0, "Storage", "执行迁移: 记忆维护改用内存任务，删除旧维护队列");
-            execSQL(db, "DROP TABLE IF EXISTS memory_maintenance_jobs");
-            execSQL(db, "DROP TABLE IF EXISTS affinity_maintenance_jobs");
-        }
-
-        void migrateV16ToV17(sqlite3 *db) {
-            execSQL(db, "CREATE TABLE IF NOT EXISTS group_config (group_id INTEGER PRIMARY KEY, all_mes_count INTEGER "
-                        "DEFAULT 0)");
-            ensureColumn(db, "group_config", "additional_prompt", "additional_prompt TEXT NOT NULL DEFAULT ''");
-        }
-
-        void migrateV15ToV16(sqlite3 *db) {
-            execSQL(db, "CREATE TABLE IF NOT EXISTS group_config (group_id INTEGER PRIMARY KEY, all_mes_count INTEGER "
-                        "DEFAULT 0)");
-            ensureColumn(db, "group_config", "auto_reply", "auto_reply INTEGER NOT NULL DEFAULT 1");
-        }
-
-        void migrateV14ToV15(sqlite3 *db) {
-            execSQL(db, "CREATE TABLE IF NOT EXISTS group_config (group_id INTEGER PRIMARY KEY, all_mes_count INTEGER "
-                        "DEFAULT 0)");
-            ensureColumn(db, "group_config", "send_group_card", "send_group_card INTEGER NOT NULL DEFAULT 0");
-        }
-
-        void migrateV13ToV14(sqlite3 *db) {
-            Logger::info(0, "Storage", "执行迁移: 移除自定义工具 Python 解释器设置");
-            execSQL(db, "DELETE FROM settings WHERE key='custom_tool_python'");
         }
     } // namespace
 
     namespace SchemaMigrator {
         void migrate(sqlite3 *db) {
             const i32 version = getUserVersion(db);
-
             if (version == 0 && !hasUserTables(db)) {
                 Logger::info(0, "Storage", fmt::format("检测到全新数据库，直接创建最新 Schema (v{})", kLatestVersion));
-                createFreshSchema(db);
+                transaction(db, [db] {
+                    execAll(db, currentTables);
+                    execAll(db, indexes);
+                    setUserVersion(db, kLatestVersion);
+                });
                 return;
             }
 
-            if (version >= kLatestVersion)
+            // 在执行任何写入前检查兼容范围，旧库必须先用 v1.7.x 完成中转升级。
+            if (version < kMinimumSupportedVersion)
+                throw DbError(fmt::format("数据库版本 v{} 过旧，最低支持 v{}（InSoulForge v1.7.0）。"
+                                         "请先运行支持旧库迁移的 InSoulForge v1.7.x（例如 v1.7.2）完成数据库升级，再安装当前版本。",
+                  version, kMinimumSupportedVersion));
+            if (version > kLatestVersion)
+                throw DbError(fmt::format("数据库版本 v{} 高于当前程序支持的 v{}，请使用匹配或更新的程序版本。",
+                  version, kLatestVersion));
+            if (version == kLatestVersion)
                 return;
 
+            // steps[i] 将 kMinimumSupportedVersion + i 升级到下一版本。
+            constexpr std::array steps = {&migrateV24ToV25};
+            static_assert(steps.size() == kLatestVersion - kMinimumSupportedVersion);
             Logger::info(0, "Storage", fmt::format("数据库版本 v{}，开始迁移到 v{}", version, kLatestVersion));
-
-            // 迁移步骤表：steps[i] 将版本 i 升级到版本 i+1
-            constexpr std::array steps = {
-              &migrateV0ToV1, // 基线：历史遗留 Schema 调整到统一基线
-              &migrateV1ToV2, // kb_config/memory_config/qq_config 并入 settings
-              &migrateV2ToV3, // 新增 group_affinity 好感度表
-              &migrateV3ToV4, // scheduled_tasks 状态扩展（新增 cancelled）
-              &migrateV4ToV5, // scheduled_tasks 新增 is_daily（每日重复任务）
-              &migrateV5ToV6, // 新增 long_term_memory 长期记忆表
-              &migrateV6ToV7, // 新增图片描述缓存表
-              &migrateV7ToV8, // 新增持久化记忆维护任务队列
-              &migrateV8ToV9, // 记忆任务完成后再删除消息列表前缀
-              &migrateV9ToV10, // 好感度维护任务与记忆维护任务解耦
-              &migrateV10ToV11, // 新增全局 QQ 黑名单
-              &migrateV11ToV12, // 自定义工具增加 Lua 执行器
-              &migrateV12ToV13, // 自定义工具改为文件存储，不迁移旧工具内容
-              &migrateV13ToV14, // 删除已停用的 Python 解释器设置
-              &migrateV14ToV15, // 群名片发送开关按会话保存
-              &migrateV15ToV16, // 群普通消息自动回复开关，默认开启
-              &migrateV16ToV17, // 群独立附加提示词，默认留空
-              &migrateV17ToV18, // 删除记忆与好感度维护任务队列
-              &migrateV18ToV19, // 群命令解析开关，默认开启
-              &migrateV19ToV20, // 跨会话近期消息共享，默认关闭
-              &migrateV20ToV21, // 全局人物记忆与好感度；旧分数按 QQ 取平均
-              &migrateV21ToV22, // 人物记忆每日整理执行状态
-              &migrateV22ToV23, // 人物档案与机器人关系，完整保留旧记忆
-              &migrateV23ToV24, // 旧分类全部移入待整理条目，按新规则重新归类
-              &migrateV24ToV25, // 用户身份统一为 user_id，保留已有记录与记忆
-            };
-
             for (i32 v = version; v < kLatestVersion; ++v) {
-                char *errMsg = nullptr;
-                if (sqlite3_exec(db, "BEGIN IMMEDIATE", nullptr, nullptr, &errMsg) != SQLITE_OK) {
-                    std::string err = errMsg ? errMsg : "BEGIN failed";
-                    sqlite3_free(errMsg);
-                    throw DbError(err);
-                }
                 try {
-                    steps[v](db);
-                    setUserVersion(db, v + 1);
-                    if (sqlite3_exec(db, "COMMIT", nullptr, nullptr, &errMsg) != SQLITE_OK) {
-                        const std::string err = errMsg ? errMsg : "COMMIT failed";
-                        sqlite3_free(errMsg);
-                        throw DbError(err);
-                    }
+                    transaction(db, [db, v, &steps] {
+                        steps[v - kMinimumSupportedVersion](db);
+                        setUserVersion(db, v + 1);
+                    });
                 } catch (...) {
-                    sqlite3_exec(db, "ROLLBACK", nullptr, nullptr, nullptr);
                     Logger::error(0, "Storage", fmt::format("数据库迁移 v{} -> v{} 失败，已回滚", v, v + 1));
                     throw;
                 }
                 Logger::info(0, "Storage", fmt::format("数据库迁移完成: v{} -> v{}", v, v + 1));
             }
         }
-
     } // namespace SchemaMigrator
 } // namespace insoulforge

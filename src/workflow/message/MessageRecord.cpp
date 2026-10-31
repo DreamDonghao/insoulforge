@@ -1,5 +1,5 @@
 /// @file MessageRecord.cpp
-/// @brief 聊天记录富内容的构造、兼容与投影实现
+/// @brief 当前聊天记录的构造与投影实现
 
 #include <algorithm>
 #include <cctype>
@@ -68,7 +68,7 @@ namespace insoulforge::MessageRecord {
             return params;
         }
 
-        /// @brief 从新旧图片条目中提取模型可见的识别摘要
+        /// @brief 从图片资产或生成图片段中提取模型可见的识别摘要
         [[nodiscard]] auto imageSummary(const json &image, const size_t imageIndex) -> json {
             json summary;
             summary["type"] = "image";
@@ -82,48 +82,24 @@ namespace insoulforge::MessageRecord {
             return summary;
         }
 
-        /// @brief 将旧版或新版 @ 段投影为统一结构
-        [[nodiscard]] auto projectMention(const json &segment) -> json {
-            json mention;
-            mention["type"] = "at";
-            if (const json &target = atOrNull(segment, "target"); target.is_object()) {
-                mention["target"] = target;
-                return mention;
-            }
-            if (const std::string userId = getStr(segment, "user_id"); userId == "0") {
-                mention["target"] = {{"kind", "all"}};
-            } else {
-                json target;
-                target["user_id"] = userId;
-                if (const std::string name = getStr(segment, "name"); !name.empty() && name != "未知") {
-                    target["name"] = name;
-                }
-                mention["target"] = std::move(target);
-            }
-            return mention;
-        }
-
-        /// @brief 读取新版记录的图片资产
+        /// @brief 读取当前记录的图片资产。
         [[nodiscard]] auto assetImages(const json &record) -> const json & {
-            const json &assets = atOrNull(record, "assets");
-            const json &images = atOrNull(assets, "images");
-            return images.is_array() ? images : atOrNull(record, "images");
+            return atOrNull(atOrNull(record, "assets"), "images");
         }
 
         /// @brief 将单个段投影为不含图片来源的 Agent 输入
-        void projectSegment(json &result, const json &segment, const json &images, size_t &legacyImageIndex) {
+        void projectSegment(json &result, const json &segment, const json &images) {
             const std::string type = getStr(segment, "type");
             if (type == "text") {
                 appendText(result, getStr(segment, "text"));
                 return;
             }
             if (type == "at") {
-                result.push_back(projectMention(segment));
+                result.push_back({{"type", "at"}, {"target", atOrNull(segment, "target")}});
                 return;
             }
             if (type == "image") {
-                const i32 explicitIndex = getInt(segment, "image_index", -1);
-                const size_t imageIndex = explicitIndex >= 0 ? static_cast<size_t>(explicitIndex) : legacyImageIndex++;
+                const size_t imageIndex = static_cast<size_t>(getUInt(segment, "image_index"));
                 const json &image = imageIndex < images.size() ? images[imageIndex] : segment;
                 result.push_back(imageSummary(image, imageIndex));
                 return;
@@ -141,34 +117,9 @@ namespace insoulforge::MessageRecord {
             if (type == "poke") {
                 json poke;
                 poke["type"] = "poke";
-                if (const json &target = atOrNull(segment, "target"); target.is_object()) {
-                    poke["target"] = target;
-                } else {
-                    poke["target"] = {{"user_id", getStr(segment, "target_id")}, {"name", getStr(segment, "target_name")}};
-                }
+                poke["target"] = atOrNull(segment, "target");
                 poke["direction"] = getStr(segment, "direction", "inbound");
                 result.push_back(std::move(poke));
-                return;
-            }
-            if (type == "notification") {
-                json event;
-                event["type"] = "member_event";
-                std::string action = getStr(segment, "action");
-                if (action.empty()) {
-                    action = getStr(segment, "kind");
-                    if (action.starts_with("member_")) {
-                        action.erase(0, std::string_view("member_").size());
-                    }
-                }
-                event["action"] = action;
-                if (const std::string reason = getStr(segment, "reason", getStr(segment, "sub_type"));
-                  !reason.empty()) {
-                    event["reason"] = reason;
-                }
-                if (const u64 operatorId = getUInt(segment, "operator_id"); operatorId > 0) {
-                    event["operator"] = {{"user_id", std::to_string(operatorId)}};
-                }
-                result.push_back(std::move(event));
                 return;
             }
             if (type == "member_event" || type == "sticker" || type == "unsupported") {
@@ -271,9 +222,8 @@ namespace insoulforge::MessageRecord {
     auto extractText(const json &record) -> std::string {
         std::string text;
         const json &segments = atOrNull(record, "segments");
-        if (!segments.is_array()) {
-            return getStr(record, "text");
-        }
+        if (!segments.is_array())
+            return text;
         for (const json &segment: segments) {
             if (getStr(segment, "type") == "text") {
                 text += getStr(segment, "text");
@@ -290,7 +240,7 @@ namespace insoulforge::MessageRecord {
     auto mentions(const json &record, const u64 qqNumber) -> bool {
         return std::ranges::any_of(atOrNull(record, "segments"), [qqNumber](const json &segment) -> bool {
             return getStr(segment, "type") == "at" &&
-                   getUInt(atOrNull(segment, "target"), "user_id", getUInt(segment, "user_id")) == qqNumber;
+                   getUInt(atOrNull(segment, "target"), "user_id") == qqNumber;
         });
     }
 
@@ -338,23 +288,9 @@ namespace insoulforge::MessageRecord {
 
         json segments = json::array();
         const json &images = assetImages(record);
-        size_t legacyImageIndex = 0;
         if (const json &sourceSegments = atOrNull(record, "segments"); sourceSegments.is_array()) {
             for (const auto &segment: sourceSegments) {
-                projectSegment(segments, segment, images, legacyImageIndex);
-            }
-        } else if (const std::string text = getStr(record, "text"); !text.empty()) {
-            appendText(segments, text);
-        }
-
-        if (segments.empty()) {
-            for (const auto &face: atOrNull(record, "faces")) {
-                projectSegment(segments,
-                  json{{"type", "face"}, {"id", getStr(face, "id")}, {"label", getStr(face, "label")}}, images,
-                  legacyImageIndex);
-            }
-            for (const auto &notification: atOrNull(record, "notifications")) {
-                projectSegment(segments, notification, images, legacyImageIndex);
+                projectSegment(segments, segment, images);
             }
         }
         projected["segments"] = std::move(segments);
@@ -399,8 +335,8 @@ namespace insoulforge::MessageRecord {
         const json &image = images[imageIndex];
         const json &source = atOrNull(image, "source");
         ImageSource result{
-          .file = getStr(source.is_object() ? source : image, "file"),
-          .url = getStr(source.is_object() ? source : image, "url"),
+          .file = getStr(source, "file"),
+          .url = getStr(source, "url"),
         };
         return result.file.empty() && result.url.empty() ? std::nullopt : std::optional{std::move(result)};
     }

@@ -27,6 +27,7 @@
 
 #include <admin/access/AdminAccessToken.hpp>
 #include <workflow/access/AdminStore.hpp>
+#include <workflow/access/BlacklistStore.hpp>
 #include <admin/http/AdminController.hpp>
 #include <workflow/agent/ability/AsyncTaskManager.hpp>
 #include <workflow/agent/memory/LongTermMemoryStore.hpp>
@@ -403,9 +404,9 @@ namespace {
           "does not mix legacy text when segments exist", kTestName);
         const insoulforge::json legacyText = {{"text", "legacy text"}};
         check(
-          insoulforge::MessageRecord::extractText(legacyText) == "legacy text", "falls back to legacy text", kTestName);
+          insoulforge::MessageRecord::extractText(legacyText).empty(), "runtime requires normalized text segments", kTestName);
         check(insoulforge::MessageRecord::mentions(modernMention, 42), "matches modern mention target", kTestName);
-        check(insoulforge::MessageRecord::mentions(legacyMention, 42), "matches legacy mention target", kTestName);
+        check(!insoulforge::MessageRecord::mentions(legacyMention, 42), "flat mention targets must be migrated first", kTestName);
         check(
           insoulforge::MessageRecord::hasSegmentType(modernMention, "at"), "finds semantic segment type", kTestName);
         check(insoulforge::MessageRecord::isAssistant(modernMention), "recognizes assistant sender", kTestName);
@@ -611,18 +612,6 @@ namespace {
         check(insoulforge::MessageRecord::extractRecallText(record).contains("一只蓝色的猫"),
           "image description participates in recall", kTestName);
 
-        const insoulforge::json legacyRecord = {
-          {"message_id", "8"},
-          {"segments", {{{"type", "image"}, {"file", "legacy.jpg"}, {"url", "https://example.com/legacy.jpg"},
-                         {"recognition_status", "succeeded"}, {"description", "旧版图片"}}}},
-          {"images", {{{"file", "legacy.jpg"}, {"url", "https://example.com/legacy.jpg"},
-                       {"recognition_status", "succeeded"}, {"description", "旧版图片"}}}},
-        };
-        const insoulforge::json legacyProjection = insoulforge::MessageRecord::projectForAgent(legacyRecord);
-        check(!legacyProjection.dump().contains("https://example.com/legacy.jpg"),
-          "legacy projection excludes image URL", kTestName);
-        const auto legacySource = insoulforge::MessageRecord::findImageSource(legacyRecord, 0);
-        check(legacySource && legacySource->file == "legacy.jpg", "tool resolves legacy image source", kTestName);
     }
 
     void testAssistantStickerRecordKeepsOnlyName() {
@@ -650,147 +639,86 @@ namespace {
         check(!record.dump().contains("base64://"), "record excludes image transport data", kTestName);
     }
 
-    void restoreLegacyIdentityColumns(sqlite3 *db) {
-        bool legacy = false;
-        {
-            const insoulforge::Statement version(db, "PRAGMA user_version");
-            legacy = version.step() && version.getInt64(0) < 25;
-        }
-        if (legacy) {
-            for (const auto *table: {"admins", "blacklisted_users", "person_affinity", "person_memories",
-                   "person_memory_entries"}) {
-                bool needsRename = false;
-                {
-                    const insoulforge::Statement column(db,
-                      fmt::format("SELECT name FROM pragma_table_info('{}') WHERE name='user_id'", table));
-                    needsRename = column.step();
-                }
-                if (needsRename)
-                    insoulforge::Statement(db,
-                      fmt::format("ALTER TABLE {} RENAME COLUMN user_id TO qq_number", table)).execOrThrow();
-            }
-        }
-    }
-
-    void migrateTestSchema(sqlite3 *db) {
-        restoreLegacyIdentityColumns(db);
-        insoulforge::SchemaMigrator::migrate(db);
+    // v1.7.0 的身份列仍为 qq_number，其余结构与当前版本一致。
+    void prepareV24Schema(sqlite3 *db) {
+        for (const auto *table: {"admins", "blacklisted_users", "person_affinity", "person_memories",
+               "person_memory_entries"})
+            insoulforge::Statement(db,
+              fmt::format("ALTER TABLE {} RENAME COLUMN user_id TO qq_number", table)).execOrThrow();
+        insoulforge::Statement(db, "DROP INDEX idx_person_memory_entries_user_id").execOrThrow();
+        insoulforge::Statement(db,
+          "CREATE INDEX idx_person_memory_entries_qq ON person_memory_entries(qq_number, id)").execOrThrow();
+        insoulforge::Statement(db, "PRAGMA user_version=24").execOrThrow();
     }
 
     void testSchemaMigration() {
-        constexpr std::string_view kTestName = "schema migration";
+        constexpr std::string_view kTestName = "schema migration boundary";
+        using namespace insoulforge;
         sqlite3 *db = nullptr;
-        check(sqlite3_open(":memory:", &db) == SQLITE_OK, "opens in-memory database", kTestName);
+        check(sqlite3_open(":memory:", &db) == SQLITE_OK, "opens fixture", kTestName);
         if (!db)
             return;
+        const auto schema = [db] {
+            json result = json::array();
+            const Statement query(db, "SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name");
+            while (query.step())
+                result.push_back({query.getText(0), query.getText(1), query.getText(2), query.getText(3)});
+            return result;
+        };
+        const auto version = [db] {
+            const Statement query(db, "PRAGMA user_version");
+            return query.step() ? query.getInt(0) : -1;
+        };
+        SchemaMigrator::migrate(db);
+        {
+            const Statement tables(db, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
+            check(tables.step() && tables.getInt(0) == 15 && version() == SchemaMigrator::kLatestVersion,
+              "new installation creates all current tables and latest version directly", kTestName);
+            const Statement obsolete(db, "SELECT COUNT(*) FROM sqlite_master WHERE name IN "
+              "('custom_tools','group_affinity','memory_maintenance_jobs','affinity_maintenance_jobs','kb_config','memory_config','qq_config','llm_config','settings')");
+            check(obsolete.step() && obsolete.getInt(0) == 0, "does not create obsolete tables", kTestName);
+        }
+        const auto original = schema();
+        SchemaMigrator::migrate(db);
+        check(schema() == original, "current version is unchanged on repeated startup", kTestName);
+        Statement(db, "INSERT INTO prompts(prompt_key,prompt_content) VALUES('preserved','original')").execOrThrow();
+        for (const auto legacyVersion: {0, 1, 12, 23}) {
+            Statement(db, fmt::format("PRAGMA user_version={}", legacyVersion)).execOrThrow();
+            std::string error;
+            try { SchemaMigrator::migrate(db); }
+            catch (const DbError &e) { error = e.what(); }
+            const Statement data(db, "SELECT prompt_content FROM prompts WHERE prompt_key='preserved'");
+            check(error.find("v1.7.x") != std::string::npos && error.find("v24") != std::string::npos &&
+                    version() == legacyVersion && schema() == original && data.step() && data.getText(0) == "original",
+              "unsupported old database is rejected with upgrade instructions and no changes", kTestName);
+        }
+        Statement(db, fmt::format("PRAGMA user_version={}", SchemaMigrator::kLatestVersion + 1)).execOrThrow();
+        bool rejectedFuture = false;
+        try { SchemaMigrator::migrate(db); }
+        catch (const DbError &) { rejectedFuture = true; }
+        check(rejectedFuture && version() == SchemaMigrator::kLatestVersion + 1 && schema() == original,
+          "newer database is rejected without downgrading or changing its schema", kTestName);
+        sqlite3_close(db);
 
-        sqlite3_exec(db, "PRAGMA user_version = 6", nullptr, nullptr, nullptr);
-        sqlite3_exec(db,
-          "CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT); "
-          "INSERT INTO settings VALUES('custom_tool_python','python3'),('other','preserved')",
-          nullptr, nullptr, nullptr);
-        sqlite3_exec(db,
-          "CREATE TABLE custom_tools (id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, description TEXT NOT NULL, "
-          "parameters TEXT, executor_type TEXT NOT NULL CHECK(executor_type IN ('python', 'http')), "
-          "executor_config TEXT, script_content TEXT, readme TEXT, enabled INTEGER DEFAULT 1, "
-          "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
-          nullptr, nullptr, nullptr);
-        sqlite3_exec(db,
-          "INSERT INTO custom_tools (id, name, description, executor_type) VALUES (7, 'old_tool', 'old', 'python')",
-          nullptr, nullptr, nullptr);
-        migrateTestSchema(db);
-        sqlite3_stmt *stmt = nullptr;
-        const i32 prepareResult =
-          sqlite3_prepare_v2(db, "SELECT sampled_frame_count FROM image_description_cache LIMIT 1", -1, &stmt, nullptr);
-        check(prepareResult == SQLITE_OK, "v6 migration creates sampled frame count column", kTestName);
-        sqlite3_finalize(stmt);
-        const i32 jobPrepareResult = sqlite3_prepare_v2(
-          db, "SELECT messages, attempt_count FROM memory_maintenance_jobs LIMIT 1", -1, &stmt, nullptr);
-        check(jobPrepareResult != SQLITE_OK, "migration removes memory maintenance jobs", kTestName);
-        sqlite3_finalize(stmt);
-        const i32 affinityJobPrepareResult = sqlite3_prepare_v2(
-          db, "SELECT messages, attempt_count FROM affinity_maintenance_jobs LIMIT 1", -1, &stmt, nullptr);
-        check(affinityJobPrepareResult != SQLITE_OK, "migration removes affinity maintenance jobs", kTestName);
-        sqlite3_finalize(stmt);
-        check(sqlite3_prepare_v2(db, "SELECT * FROM custom_tools", -1, &stmt, nullptr) != SQLITE_OK,
-          "migration removes legacy tool storage", kTestName);
-        sqlite3_finalize(stmt);
-        migrateTestSchema(db);
-        check(sqlite3_prepare_v2(db, "SELECT value FROM settings WHERE key='custom_tool_python'", -1, &stmt, nullptr) ==
-                  SQLITE_OK &&
-                sqlite3_step(stmt) == SQLITE_DONE,
-          "upgrade removes obsolete Python setting", kTestName);
-        sqlite3_finalize(stmt);
-        check(sqlite3_prepare_v2(db, "SELECT value FROM settings WHERE key='other'", -1, &stmt, nullptr) == SQLITE_OK &&
-                sqlite3_step(stmt) == SQLITE_ROW,
-          "upgrade preserves unrelated settings", kTestName);
-        sqlite3_finalize(stmt);
-        sqlite3_exec(db, "CREATE TABLE custom_tools(id INTEGER); PRAGMA user_version=12", nullptr, nullptr, nullptr);
-        migrateTestSchema(db);
-        check(sqlite3_prepare_v2(db, "SELECT * FROM custom_tools", -1, &stmt, nullptr) != SQLITE_OK,
-          "v12 upgrade removes legacy table", kTestName);
-        sqlite3_finalize(stmt);
-        check(sqlite3_exec(db,
-                "ALTER TABLE person_memories RENAME COLUMN profile TO stable_memory;"
-                "ALTER TABLE person_memories DROP COLUMN relationship;"
-                "INSERT INTO person_memories VALUES(42, '[\"旧偏好\"]', '[\"旧互动\"]');"
-                "INSERT INTO person_memory_entries(user_id,source_session,content) VALUES(42,100,'新材料');"
-                "INSERT INTO person_affinity VALUES(42,7);"
-                "INSERT INTO person_memory_daily_state VALUES(1,'2026-10-23','');"
-                "PRAGMA user_version=22", nullptr, nullptr, nullptr) == SQLITE_OK,
-          "creates populated v22 person fixture", kTestName);
-        migrateTestSchema(db);
-        migrateTestSchema(db);
+        db = nullptr;
+        check(sqlite3_open(":memory:", &db) == SQLITE_OK, "opens fresh rollback fixture", kTestName);
+        if (!db)
+            return;
+        sqlite3_set_authorizer(db, [](void *, int action, const char *name, const char *, const char *, const char *) {
+            return action == SQLITE_CREATE_TABLE && name && std::string_view(name) == "person_memories"
+              ? SQLITE_DENY : SQLITE_OK;
+        }, nullptr);
+        bool failed = false;
+        try { SchemaMigrator::migrate(db); }
+        catch (const DbError &) { failed = true; }
+        sqlite3_set_authorizer(db, nullptr, nullptr);
         {
-            const insoulforge::Statement person(db,
-              "SELECT p.profile,p.relationship,p.recent_interactions,e.content,a.affinity,s.completed_day "
-              "FROM person_memories p JOIN person_memory_entries e USING(user_id) "
-              "JOIN person_affinity a USING(user_id) JOIN person_memory_daily_state s ON s.id=1 WHERE p.user_id=42");
-            check(person.step() && person.getText(0) == "[]" && person.getText(1) == "[]" &&
-                    person.getText(2) == "[]" && person.getText(3) == "新材料" &&
-                    person.getInt(4) == 7 && person.getText(5) == "2026-10-23",
-              "v22 upgrade clears old categories and preserves existing entries, affinity and checkpoint", kTestName);
-            const insoulforge::Statement migrated(db,
-              "SELECT COUNT(*), SUM(source_session=0 AND content IN ('旧偏好','旧互动')) "
-              "FROM person_memory_entries WHERE user_id=42");
-            check(migrated.step() && migrated.getInt(0) == 3 && migrated.getInt(1) == 2,
-              "old memory text moves to pending once without duplication", kTestName);
+            const Statement tables(db, "SELECT COUNT(*) FROM sqlite_master WHERE type='table'");
+            const Statement current(db, "PRAGMA user_version");
+            check(failed && tables.step() && tables.getInt(0) == 0 && current.step() && current.getInt(0) == 0,
+              "failed fresh initialization rolls back tables and version together", kTestName);
         }
-        check(sqlite3_exec(db,
-                "INSERT INTO person_memories VALUES(43,'[\"档案原文\"]','[\"互动原文\"]','[\"关系原文\"]');"
-                "INSERT INTO person_memories(user_id) VALUES(44);"
-                "INSERT INTO person_memory_entries(user_id,source_session,content,created_at) "
-                "VALUES(43,200,'已有条目','2026-10-20 01:02:03');"
-                "CREATE TRIGGER reject_history_migration BEFORE INSERT ON person_memory_entries "
-                "WHEN NEW.content='关系原文' BEGIN SELECT RAISE(ABORT,'test'); END;"
-                "PRAGMA user_version=23", nullptr, nullptr, nullptr) == SQLITE_OK,
-          "creates populated v23 migration failure fixture", kTestName);
-        bool migrationFailed = false;
-        try { migrateTestSchema(db); }
-        catch (const insoulforge::DbError &) { migrationFailed = true; }
-        {
-            const insoulforge::Statement original(db,
-              "SELECT profile,relationship,recent_interactions,"
-              "(SELECT COUNT(*) FROM person_memory_entries WHERE qq_number=43) "
-              "FROM person_memories WHERE qq_number=43");
-            check(migrationFailed && original.step() && original.getText(0) == "[\"档案原文\"]" &&
-                    original.getText(1) == "[\"关系原文\"]" && original.getText(2) == "[\"互动原文\"]" &&
-                    original.getInt(3) == 1,
-              "migration insert failure rolls back all enqueues and preserves old categories", kTestName);
-        }
-        sqlite3_exec(db, "DROP TRIGGER reject_history_migration", nullptr, nullptr, nullptr);
-        migrateTestSchema(db);
-        migrateTestSchema(db);
-        {
-            const insoulforge::Statement migrated(db,
-              "SELECT COUNT(*), SUM(source_session=0 AND content IN ('档案原文','关系原文','互动原文')),"
-              "SUM(source_session=200 AND content='已有条目' AND created_at='2026-10-20 01:02:03') "
-              "FROM person_memory_entries WHERE user_id=43");
-            check(migrated.step() && migrated.getInt(0) == 4 && migrated.getInt(1) == 3 && migrated.getInt(2) == 1,
-              "v23 upgrade moves all categories once and preserves existing pending metadata", kTestName);
-            const insoulforge::Statement empty(db, "SELECT COUNT(*) FROM person_memory_entries WHERE user_id=44");
-            check(empty.step() && empty.getInt(0) == 0, "empty old categories create no pending entries", kTestName);
-        }
+        SchemaMigrator::migrate(db);
         sqlite3_close(db);
     }
 
@@ -1429,16 +1357,6 @@ namespace {
           insoulforge::MemoryMaintenanceService::prepare(100, insoulforge::json::array(), insoulforge::json::array()));
         check(memory.has_value() && memory->affinity.empty(), "empty input is a successful empty calculation",
           kTestName);
-        check(sqlite3_exec(database.handle(),
-                "CREATE TABLE memory_maintenance_jobs(id INTEGER PRIMARY KEY);"
-                "INSERT INTO memory_maintenance_jobs VALUES(1);"
-                "CREATE TABLE affinity_maintenance_jobs(id INTEGER PRIMARY KEY);"
-                "INSERT INTO affinity_maintenance_jobs VALUES(1);"
-                "PRAGMA user_version = 17",
-                nullptr, nullptr, nullptr) == SQLITE_OK,
-          "creates v17 queues", kTestName);
-        migrateTestSchema(database.handle());
-        check(noTaskTables() && resultsPreserved(), "upgrade removes old tasks but preserves results", kTestName);
         insoulforge::MemoryMaintenanceStore::apply(database, 200, {.longTerm = {longTerm}});
         const auto oldEntries = insoulforge::LongTermMemoryStore::listMemories(200, 1, 0);
         const i64 sourceId = oldEntries.front().id;
@@ -1478,9 +1396,32 @@ namespace {
           R"({"aliases":[{"qq":"9007199254740993","names":["老王"]}],"conversation_summaries":[]})");
         AdminStore::addAdmin(9007199254740993ULL);
         AffinityStore::adjustAffinity(42, 7);
-        check(sqlite3_exec(db.handle(), "PRAGMA user_version=24", nullptr, nullptr, nullptr) == SQLITE_OK,
-          "marks legacy version", kTestName);
-        restoreLegacyIdentityColumns(db.handle());
+        BlacklistStore::add(42);
+        MemoryMaintenanceStore::apply(db, 100, {.personEntries = {{42, "待整理内容"}}});
+        Statement(db.handle(), R"(UPDATE person_memories SET profile='["喜欢摄影"]',
+          relationship='["经常交流"]', recent_interactions='["约好拍照"]' WHERE user_id=42)").execOrThrow();
+        PersonMemoryStore::saveDailyState({"2026-10-30", ""});
+        const auto originalPerson = PersonMemoryStore::getPerson(42);
+        ChatRecordStore::addChatRecord(101, "user", R"({"text":"旧正文","sender":{"qq":"11"},
+          "images":[{"file":"legacy.jpg","url":"https://example.com/legacy.jpg","description":"旧图片","recognition_status":"succeeded"}],
+          "faces":[{"id":"1","label":"微笑"}],
+          "notifications":[{"kind":"member_increase","operator_id":42}]})");
+        ChatRecordStore::addChatRecord(102, "user", R"({"segments":[
+          {"type":"at","qq":"0"},{"type":"at","qq":"42","name":"Alice"},
+          {"type":"poke","target_id":"43","target_name":"Bob"},
+          {"type":"notification","kind":"member_decrease","sub_type":"leave","operator_id":42},
+          {"type":"image","file":"inline.jpg","url":"https://example.com/inline.jpg","description":"段内图片"}]})");
+        ChatRecordStore::addChatRecord(103, "assistant", "纯文本历史消息");
+        ChatRecordStore::addChatRecord(104, "user", R"({"segments":[],"text":"空段旧正文", "faces":[{"id":"2"}]})");
+        MemoryStore::updateShortTermMemory(101, " 旧事件 \n\n旧称呼\n");
+        MemoryStore::updateShortTermMemory(102, R"(["旧条目","旧条目","第二条"])");
+        MemoryStore::updateShortTermMemory(103, R"({"aliases":[{"qq":"11","names":["老王"]}],
+          "recent_events":["旧事件","旧事件"],"legacy_entries":["旧偏好"],
+          "conversation_summaries":[{"start_time":"2026-10-30 10:00:00","end_time":"2026-10-30 10:10:00","summary":"聊天摘要"}]})");
+        MemoryStore::updateShortTermMemory(104, "");
+        prepareV24Schema(db.handle());
+        Statement(db.handle(), "CREATE TABLE llm_config(name TEXT)").execOrThrow();
+        Statement(db.handle(), "CREATE TABLE settings(key TEXT,value TEXT)").execOrThrow();
         check(sqlite3_exec(db.handle(),
                 "CREATE TRIGGER reject_identity_migration BEFORE UPDATE ON chat_records "
                 "BEGIN SELECT RAISE(ABORT,'test'); END", nullptr, nullptr, nullptr) == SQLITE_OK,
@@ -1496,6 +1437,17 @@ namespace {
         }
         check(sqlite3_exec(db.handle(), "DROP TRIGGER reject_identity_migration", nullptr, nullptr, nullptr) == SQLITE_OK,
           "removes failure fixture", kTestName);
+        MemoryStore::updateShortTermMemory(105, R"({"aliases":[],"legacy_entries":42})");
+        bool invalidMemoryRejected = false;
+        try { SchemaMigrator::migrate(db.handle()); }
+        catch (const DbError &error) { invalidMemoryRejected = std::string(error.what()).find("105") != std::string::npos; }
+        {
+            const Statement version(db.handle(), "PRAGMA user_version");
+            check(invalidMemoryRejected && version.step() && version.getInt(0) == 24 &&
+                    json::parse(ChatRecordStore::getChatRecords(100, 1)[0]["content"].get<std::string>()) == record,
+              "malformed historical memory reports its session and rolls back prior record conversions", kTestName);
+        }
+        MemoryStore::updateShortTermMemory(105, "修复后的历史条目");
         SchemaMigrator::migrate(db.handle());
         const auto migrated = json::parse(ChatRecordStore::getChatRecords(100, 1)[0]["content"].get<std::string>());
         check(migrated["sender"]["user_id"] == "9007199254740993" && !migrated["sender"].contains("qq") &&
@@ -1509,8 +1461,40 @@ namespace {
                 "9007199254740993" && AdminStore::isAdmin(9007199254740993ULL) &&
                 AffinityStore::getAffinityMap().at(42) == 7,
           "preserves aliases, administrators and affinity", kTestName);
+        check(PersonMemoryStore::getPerson(42) == originalPerson && BlacklistStore::contains(42) &&
+                PersonMemoryStore::dailyState().completedDay == "2026-10-30",
+          "v24 upgrade preserves existing person profiles, pending entries, blacklist and daily state", kTestName);
+        const auto readRecord = [&](u64 id) {
+            return json::parse(ChatRecordStore::getChatRecords(id, 1)[0]["content"].get<std::string>());
+        };
+        const auto oldMedia = readRecord(101);
+        const auto oldSegments = readRecord(102);
+        check(!oldMedia.contains("text") && !oldMedia.contains("images") && !oldMedia.contains("faces") &&
+                !oldMedia.contains("notifications") && MessageRecord::extractText(oldMedia) == "旧正文" &&
+                MessageRecord::findImageSource(oldMedia, 0)->file == "legacy.jpg" &&
+                MessageRecord::projectForAgent(oldMedia)["segments"][1]["description"] == "旧图片" &&
+                oldMedia["segments"][2]["type"] == "face" && oldMedia["segments"][3]["type"] == "member_event",
+          "converts old text, image assets, faces and notifications for current readers", kTestName);
+        check(oldSegments["segments"][0]["target"]["kind"] == "all" && MessageRecord::mentions(oldSegments, 42) &&
+                oldSegments["segments"][2]["target"]["user_id"] == "43" &&
+                oldSegments["segments"][3]["reason"] == "leave" &&
+                MessageRecord::findImageSource(oldSegments, 0)->file == "inline.jpg" &&
+                MessageRecord::isAssistant(readRecord(103)) && MessageRecord::extractText(readRecord(103)) == "纯文本历史消息" &&
+                MessageRecord::extractText(readRecord(104)) == "空段旧正文" &&
+                readRecord(104)["segments"][1]["type"] == "face",
+          "converts flat targets, inline image sources and raw assistant text", kTestName);
+        check(MemoryStore::pendingEntries(MemoryStore::getShortTermMemory(101)) == std::vector<std::string>{"旧事件", "旧称呼"} &&
+                MemoryStore::pendingEntries(MemoryStore::getShortTermMemory(102)) == std::vector<std::string>{"旧条目", "第二条"} &&
+                MemoryStore::pendingEntries(MemoryStore::getShortTermMemory(103)) == std::vector<std::string>{"旧事件", "旧偏好"} &&
+                MemoryStore::normalizeSessionMemory(json::parse(MemoryStore::getShortTermMemory(104))).has_value() &&
+                MemoryStore::conversationSummaries(MemoryStore::getShortTermMemory(103))[0]["summary"] == "聊天摘要",
+          "converts historical memory once while preserving pending contents, aliases and summaries", kTestName);
+        {
+            const Statement obsolete(db.handle(), "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('llm_config','settings')");
+            check(obsolete.step() && obsolete.getInt(0) == 0, "removes configuration tables with no runtime readers", kTestName);
+        }
         SchemaMigrator::migrate(db.handle());
-        check(json::parse(ChatRecordStore::getChatRecords(100, 1)[0]["content"].get<std::string>()) == migrated,
+        check(readRecord(100) == migrated && readRecord(101) == oldMedia && readRecord(102) == oldSegments,
           "repeated migration is idempotent", kTestName);
         db.close();
     }
@@ -1523,19 +1507,12 @@ namespace {
                           ("insoulforge-person-memory-" +
                             std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".db");
         check(db.initialize(path.string()).has_value(), "initializes database", kTestName);
-        check(sqlite3_exec(db.handle(),
-                "DROP TABLE person_affinity;"
-                "CREATE TABLE group_affinity(group_id INTEGER, qq_number INTEGER, affinity INTEGER);"
-                "INSERT INTO group_affinity VALUES(100,11,10),(200,11,11),(100,22,-3),(200,22,-4),(100,33,120);"
-                "PRAGMA user_version = 20", nullptr, nullptr, nullptr) == SQLITE_OK,
-          "creates old per-session scores", kTestName);
-        migrateTestSchema(db.handle());
-        const auto scores = AffinityStore::getAffinityMap();
-        check(scores.at(11) == 11 && scores.at(22) == -4 && scores.at(33) == 100,
-          "migration averages existing rows, rounds halves away from zero and clamps", kTestName);
+        AffinityStore::adjustAffinity(11, 11);
+        AffinityStore::adjustAffinity(22, -4);
+        AffinityStore::adjustAffinity(33, 100);
         AffinityStore::adjustAffinity(11, 2);
-        migrateTestSchema(db.handle());
-        check(AffinityStore::getAffinityMap().at(11) == 13, "migration does not reapply old scores", kTestName);
+        SchemaMigrator::migrate(db.handle());
+        check(AffinityStore::getAffinityMap().at(11) == 13, "startup preserves global scores", kTestName);
         const auto privateId = SessionId::fromPrivateUser(11);
         MemoryMaintenanceStore::apply(db, 100, {.personEntries = {{11, "喜欢摄影"}, {22, "喜欢编程"}}});
         MemoryMaintenanceStore::apply(db, privateId, {.personEntries = {{11, "准备比赛"}}, .affinity = {{11, -1}}});
@@ -1622,14 +1599,11 @@ namespace {
           "missed dates coalesce and unfinished run resumes even before 03:00", kTestName);
         auto &db = Database::instance();
         check(db.initialize(":memory:").has_value(), "initializes database", kTestName);
-        check(sqlite3_exec(db.handle(), "DROP TABLE person_memory_daily_state; PRAGMA user_version = 21",
-                nullptr, nullptr, nullptr) == SQLITE_OK, "creates v21 upgrade fixture", kTestName);
-        migrateTestSchema(db.handle());
         PersonMemoryStore::saveDailyState({"2026-10-19", "2026-10-20"});
-        migrateTestSchema(db.handle());
+        SchemaMigrator::migrate(db.handle());
         const auto state = PersonMemoryStore::dailyState();
         check(state.completedDay == "2026-10-19" && state.runningDay == "2026-10-20",
-          "v22 migration and repeated migration preserve daily checkpoint", kTestName);
+          "startup preserves daily checkpoint", kTestName);
         MemoryMaintenanceStore::apply(db, 100, {.personEntries = {{11, "旧条目"}}, .affinity = {{11, 3}}});
         const auto snapshot = PersonMemoryStore::pendingSnapshot(11);
         check(snapshot.has_value(), "reads pending snapshot", kTestName);
@@ -1780,35 +1754,21 @@ namespace {
         auto &db = Database::instance();
         check(db.initialize(":memory:").has_value(), "initializes database", kTestName);
         const json input = {{"aliases", {{{"user_id", "11"}, {"names", {" 老王 ", "老王"}}},
-          {{"user_id", "11"}, {"names", {"摄影佬"}}}}}, {"recent_events", {" 联机待定 ", "联机待定"}}};
+          {{"user_id", "11"}, {"names", {"摄影佬"}}}}}, {"pending_entries", {" 联机待定 ", "联机待定"}}};
         const auto normalized = MemoryStore::normalizeSessionMemory(input);
         check(normalized && (*normalized)["aliases"].size() == 1 &&
                 (*normalized)["aliases"][0]["names"] == json::array({"老王", "摄影佬"}) &&
-                (*normalized)["recent_events"] == json::array({"联机待定"}),
-          "deduplicates aliases by QQ, names and events", kTestName);
-        auto legacyInput = input;
-        legacyInput["legacy_entries"] = {" 喜欢摄影 ", "喜欢摄影", "以前的约定"};
-        const auto legacyNormalized = MemoryStore::normalizeSessionMemory(legacyInput);
-        check(legacyNormalized && (*legacyNormalized)["legacy_entries"] == json::array({"喜欢摄影", "以前的约定"}),
-          "legacy contents remain readable and are deduplicated", kTestName);
-        check(MemoryStore::normalizeSessionMemory({{"aliases", json::array()}}).has_value() &&
-                MemoryStore::pendingLegacyEntries(R"(["旧条目","旧条目","第二条"])") ==
-                  std::vector<std::string>{"旧条目", "第二条"} &&
-                MemoryStore::pendingLegacyEntries(dumpJson(*legacyNormalized)) ==
-                  std::vector<std::string>{"联机待定", "喜欢摄影", "以前的约定"},
-          "accepts alias-only records and migrates old arrays and historical fields once", kTestName);
-        legacyInput["legacy_entries"] = "invalid";
-        check(!MemoryStore::normalizeSessionMemory(legacyInput), "rejects malformed legacy entries", kTestName);
+                (*normalized)["pending_entries"] == json::array({"联机待定"}),
+          "deduplicates current aliases, names and pending entries", kTestName);
+        check(MemoryStore::pendingEntries(dumpJson(*normalized)) == std::vector<std::string>{"联机待定"},
+          "reads canonical pending entries", kTestName);
         for (const auto &invalid: json::array({nullptr, json::array(),
-               json{{"aliases", json::array()}, {"recent_events", "wrong"}},
-               json{{"aliases", {{{"user_id", "self"}, {"names", {"bot"}}}}}, {"recent_events", json::array()}},
-               json{{"aliases", json::array()}, {"recent_events", {42}}}})) {
-            check(!MemoryStore::normalizeSessionMemory(invalid), "rejects malformed structure", kTestName);
+               json{{"aliases", json::array()}, {"pending_entries", "wrong"}},
+               json{{"aliases", {{{"user_id", "self"}, {"names", {"bot"}}}}}},
+               json{{"aliases", json::array()}, {"pending_entries", {42}}},
+               json{{"aliases", json::array()}, {"recent_events", {"old"}}}})) {
+            check(!MemoryStore::normalizeSessionMemory(invalid), "rejects noncanonical structures", kTestName);
         }
-        MemoryStore::updateShortTermMemory(100, " 旧事件 \n\n旧称呼\n");
-        check(MemoryStore::projectShortTermMemory(MemoryStore::getShortTermMemory(100)) == json{{"aliases", json::array()}} &&
-                MemoryStore::pendingLegacyEntries(MemoryStore::getShortTermMemory(100)) == std::vector<std::string>{"旧事件", "旧称呼"},
-          "legacy memory remains readable without rewriting storage", kTestName);
         const AdminController controller;
         drogon::HttpResponsePtr response;
         const auto save = [&](const std::string &content) {
@@ -1867,10 +1827,6 @@ namespace {
             const auto stored = insoulforge::json::parse(input);
             check(!stored["memory"].contains("shortTermMemoryMax"), "writes migration back to disk", kTestName);
         }
-        memory["shortTermMemoryMax"] = "old frontend";
-        check(config.saveMemoryConfig(memory).has_value() && !config.getMemoryConfig().contains("shortTermMemoryMax") &&
-                config.contextWindowLimit == 73 && config.getMemoryConfig()["futureSetting"] == true,
-          "old frontend field is ignored without changing other settings", kTestName);
         check(config.initialize(path.string()).has_value() && !config.getMemoryConfig().contains("shortTermMemoryMax"),
           "removed field does not return after restart", kTestName);
         std::filesystem::remove(path);
@@ -1974,7 +1930,7 @@ namespace {
         {
             std::ofstream output(path);
             output
-              << R"({"llm":{"executor":{"apiKey":"old-key","baseUrl":"https://old.example.com/v1","path":"/chat/completions","model":"old-model","maxTokens":150,"temperature":0.7,"topP":0.9,"reasoningEffort":""}},"memory":{"memoryExtractMaxTokens":8192}})";
+              << R"({"llm":{"executor":{"apiKey":"old-key","baseUrl":"https://old.example.com/v1","path":"/chat/completions","model":"old-model","maxTokens":150,"temperature":0.7,"top_P":0.8,"reasoningEffort":""}},"memory":{"memoryExtractMaxTokens":8192}})";
         }
         check(insoulforge::Config::instance().initialize(path.string()).has_value(), "initializes config", kTestName);
         const auto defaultGeneration = insoulforge::Config::instance().getLLMConfig("imageGeneration");
@@ -1982,6 +1938,14 @@ namespace {
           "creates official image generation URL default", kTestName);
         check(defaultGeneration.value("model", "") == "gpt-image-2.5-flare",
           "creates official image generation model default", kTestName);
+        const auto executor = insoulforge::Config::instance().getLLMConfig("executor");
+        check(executor["topP"] == 0.8 && !executor.contains("top_P"), "startup converts legacy top_P before runtime reads", kTestName);
+        {
+            std::ifstream input(path);
+            const auto persisted = insoulforge::json::parse(input);
+            check(persisted["llm"]["executor"]["topP"] == 0.8 &&
+                    !persisted["llm"]["executor"].contains("top_P"), "converted configuration is persisted", kTestName);
+        }
         const auto memory = insoulforge::Config::instance().getLLMConfig("memory");
         check(memory.value("model", "") == "old-model", "inherits executor model", kTestName);
         check(memory.value("maxTokens", 0) == 8192, "preserves old memory token limit", kTestName);
@@ -2231,16 +2195,6 @@ namespace {
         drogon::sync_wait(insoulforge::CommandProcessor::execute(command));
         check(!insoulforge::SessionStore::hasSessionConfig(insoulforge::SessionId::fromPrivateUser(11)),
           "private command rejected", kTestName);
-        // Simulate the last schema before the group-card column was introduced.
-        check(sqlite3_exec(db.handle(), "ALTER TABLE group_config DROP COLUMN send_group_card", nullptr, nullptr,
-                nullptr) == SQLITE_OK,
-          "restores old schema", kTestName);
-        check(sqlite3_exec(db.handle(), "PRAGMA user_version = 14", nullptr, nullptr, nullptr) == SQLITE_OK,
-          "sets old schema version", kTestName);
-        migrateTestSchema(db.handle());
-        check(!insoulforge::SessionStore::getSessionConfig(100).sendGroupCard &&
-                insoulforge::SessionStore::getSessionConfig(100).allMesCount == 2,
-          "migration defaults off and preserves statistics", kTestName);
         db.close();
     }
 
@@ -2341,15 +2295,6 @@ namespace {
         db.close();
         check(db.initialize(path.string()).has_value() && !insoulforge::SessionStore::getSessionConfig(100).autoReply,
           "setting survives restart", kTestName);
-        check(sqlite3_exec(db.handle(), "ALTER TABLE group_config DROP COLUMN auto_reply; PRAGMA user_version = 15",
-                nullptr, nullptr, nullptr) == SQLITE_OK,
-          "restores v15 schema", kTestName);
-        restoreLegacyIdentityColumns(db.handle());
-        db.close();
-        check(db.initialize(path.string()).has_value() && insoulforge::SessionStore::getSessionConfig(100).autoReply &&
-                insoulforge::SessionStore::getSessionConfig(100).sendGroupCard &&
-                insoulforge::SessionStore::getSessionConfig(100).allMesCount == 2,
-          "v15 upgrade defaults on and preserves other fields", kTestName);
         db.close();
         std::filesystem::remove(path);
     }
@@ -2405,17 +2350,6 @@ namespace {
         check(
           db.initialize(path.string()).has_value() && !insoulforge::SessionStore::getSessionConfig(100).commandEnabled,
           "setting survives restart", kTestName);
-        check(
-          sqlite3_exec(db.handle(), "ALTER TABLE group_config DROP COLUMN command_enabled; PRAGMA user_version = 18",
-            nullptr, nullptr, nullptr) == SQLITE_OK,
-          "restores v18 schema", kTestName);
-        restoreLegacyIdentityColumns(db.handle());
-        db.close();
-        check(db.initialize(path.string()).has_value(), "upgrades v18 schema", kTestName);
-        saved = insoulforge::SessionStore::getSessionConfig(100);
-        check(saved.commandEnabled && saved.sendGroupCard && !saved.autoReply && saved.allMesCount == 1 &&
-                saved.additionalPrompt == "test prompt",
-          "migration defaults on and preserves existing data", kTestName);
         db.close();
         std::filesystem::remove(path);
     }
@@ -2538,16 +2472,6 @@ namespace {
         check(db.initialize(path.string()).has_value() &&
                 insoulforge::SessionStore::getSessionConfig(100).crossSessionSharing,
           "sharing survives restart", kTestName);
-        check(sqlite3_exec(db.handle(),
-                "ALTER TABLE group_config DROP COLUMN cross_session_sharing; PRAGMA user_version = 19",
-                nullptr, nullptr, nullptr) == SQLITE_OK,
-          "restores v19 schema", kTestName);
-        restoreLegacyIdentityColumns(db.handle());
-        db.close();
-        check(db.initialize(path.string()).has_value(), "migrates v19", kTestName);
-        config = insoulforge::SessionStore::getSessionConfig(100);
-        check(!config.crossSessionSharing && config.sendGroupCard && config.allMesCount == 1,
-          "migration defaults sharing off and preserves other settings", kTestName);
         db.close();
         std::filesystem::remove(path);
     }
@@ -2617,18 +2541,6 @@ namespace {
         check(db.initialize(path.string()).has_value() &&
                 insoulforge::SessionStore::getSessionConfig(100).additionalPrompt == prompt,
           "prompt survives restart", kTestName);
-        check(
-          sqlite3_exec(db.handle(), "ALTER TABLE group_config DROP COLUMN additional_prompt; PRAGMA user_version = 16",
-            nullptr, nullptr, nullptr) == SQLITE_OK,
-          "restores v16 schema", kTestName);
-        restoreLegacyIdentityColumns(db.handle());
-        db.close();
-        check(db.initialize(path.string()).has_value() &&
-                insoulforge::SessionStore::getSessionConfig(100).additionalPrompt.empty() &&
-                !insoulforge::SessionStore::getSessionConfig(100).autoReply &&
-                insoulforge::SessionStore::getSessionConfig(100).sendGroupCard &&
-                insoulforge::SessionStore::getSessionConfig(100).allMesCount == 1,
-          "migration adds empty prompt and preserves existing settings", kTestName);
         db.close();
         std::filesystem::remove(path);
     }

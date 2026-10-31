@@ -19,7 +19,7 @@ namespace insoulforge {
                   ConfigError{.type = ConfigErrorType::InvalidArgument, .message = "配置必须是 JSON 对象"});
             }
             for (const auto &[key, field]: value.items()) {
-                constexpr std::array floatFields{"temperature", "topP", "top_P", "minConfidence",
+                constexpr std::array floatFields{"temperature", "topP", "minConfidence",
                   "longTermRecallThreshold", "longTermInjectThreshold"};
                 constexpr std::array stringFields{"apiKey", "baseUrl", "path", "model", "reasoningEffort",
                   "accessToken", "oneBotTransport", "qqHttpHost", "qqWebSocketHost", "botName"};
@@ -75,7 +75,7 @@ namespace insoulforge {
                     }
                     if (const auto number = field.get<f64>();
                       (key == "temperature" && (number < 0.0 || number > 2.0)) ||
-                      ((key == "topP" || key == "top_P" || key == "minConfidence") && (number < 0.0 || number > 1.0))) {
+                      ((key == "topP" || key == "minConfidence") && (number < 0.0 || number > 1.0))) {
                         return std::unexpected(
                           ConfigError{.type = ConfigErrorType::InvalidArgument, .message = key + " 超出允许范围"});
                     }
@@ -111,7 +111,7 @@ namespace insoulforge {
             if (modelParams) {
                 modelParams->maxTokens = getInt(cfg, "maxTokens");
                 modelParams->temperature = getDouble(cfg, "temperature");
-                modelParams->topP = getDouble(cfg, "topP", getDouble(cfg, "top_P"));
+                modelParams->topP = getDouble(cfg, "topP");
             }
         }
     } // namespace

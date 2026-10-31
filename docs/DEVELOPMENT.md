@@ -335,9 +335,10 @@ MessageService → OneBot API
 统一入口在一次调用中提取人物记忆、全局好感度和会话聊天摘要，再整理本会话外号与长期记忆，全部成功后一起保存。
 
 - **会话外号**：复用 `short_term_memory` 原文本列，按统一会话 ID 保存 `aliases` JSON 对象。
-  Executor 只注入结构化外号，`normalizeSessionMemory` 合并重复 QQ 和称呼，不限制条数。
-  原编辑接口兼容读取和修改历史字段；旧 `recent_events`、`legacy_entries`、纯文本及字符串数组不再直接注入上下文，
-  作为会话内的待整理历史内容参与下一次成功的长期记忆整理。未配置向量服务或整理失败时保留，成功后保留外号和独立聊天摘要，无独立数据库迁移。
+  Executor 只注入结构化外号，`normalizeSessionMemory` 合并重复用户 ID 和称呼，不限制条数。
+  当前存储格式仅包含 `aliases`、可选的 `conversation_summaries` 和 `pending_entries` 字符串数组，编辑接口只接受当前格式。
+  数据库 v25 将旧 `recent_events`、`legacy_entries`、纯文本和字符串数组一次性转成 `pending_entries`；
+  运行时不再解析旧格式。待整理条目不直接注入上下文，后续参与长期记忆整理；未配置向量服务或整理失败时保留。
 - **会话聊天摘要**：`short_term_memory` JSON 中的 `conversation_summaries` 按批保存消息起止时间和摘要。
   `memory.conversationSummaryMaxChars` 默认 100，`conversationSummaryMaxCount` 默认 10；摘要按时间从旧到新排列，超过条数删除最旧内容。
   Executor 在 `session_memory` 之后、`earlier_messages` 之前注入独立的 `conversation_summaries` 字段，摘要不会作为原始消息或待迁移内容重新提取。
@@ -354,7 +355,6 @@ MessageService → OneBot API
   启动时不恢复维护任务，也不为历史消息主动创建新批次。
 - **内存任务**：`MemoryMaintenanceCoordinator` 调用 `MemoryMaintenanceService` 联合提取人物条目和好感度，再整理会话外号与长期记忆；全部成功后，
   由 `MemoryMaintenanceStore` 在同一 SQLite 事务中保存结果。任务本身不写入数据库，不保存完成状态或重试次数。
-  数据库升级到 v18 时删除旧维护任务表，不迁移未完成任务；已有消息、记忆和好感度结果保留。
 - **聊天记忆整理**：第一次请求提取人物待整理条目、好感度与会话聊天摘要；新条目及历史待迁移内容按 `longTermRecallThreshold`
   逐条召回本会话旧记忆，按 ID 去重并限制实际交给模型的条数。第二次请求只接收本批条目、历史内容、召回旧记忆和已有外号，不再接收原始聊天。
   模型输出 `aliases` 完整列表及 `longTerm` 字符串数组，不再返回 `sources`。程序独立记录实际参与整理的旧 ID，
@@ -363,9 +363,8 @@ MessageService → OneBot API
 - **人物记忆**：`person_memories` 按 QQ 保存 `profile`、`relationship` 和 `recent_interactions` 字符串数组；
   `person_memory_entries` 保存追加的待整理条目、来源会话和 UTC 写入时间。群聊与私聊共用，不受原始消息共享开关影响。
   `PersonMemoryConsolidator` 每分钟按本地日历检查凌晨 03:00 的每日任务，使用 Memory 模型逐人处理有待整理条目的人，不重叠执行。
-  v22 新增 `person_memory_daily_state`，记录完成日期和进行中日期，启动合并补跑错过的日期；首次启用在 03:00 前不补昨天。
-  v23 将旧 `stable_memory` 无损重命名为 `profile`，新增默认空数组的 `relationship`，旧近期互动及待整理条目不变。
-  v24 在迁移事务中将三个旧分类的每条原文追加到 `person_memory_entries`，全部成功后清空分类；保留已有条目、好感度和每日执行标记，不重复入队。
+  `person_memory_daily_state` 记录完成日期和进行中日期，启动合并补跑错过的日期；首次启用在 03:00 前不补昨天。
+  历史分类迁入待整理条目的升级由中转版本完成，当前程序保留这些已有条目及其来源信息。
   迁移条目 `source_session=0` 表示原始来源未知，`created_at` 为入队时间，不能视为新发生的互动；前端显示「历史记忆迁移」。
   人物档案合并事实、偏好和有依据的印象，关系保留与机器人的相处方式及重要经历，近期互动仅保留值得跟进的事项，不记录话题流水账；三类去重、持续更新。
   每日任务不为没有新条目的人额外调用模型；`POST /admin/api/people/{user_id}/consolidate` 可立即整理当前人物，允许仅有旧档案，无材料时不调用模型。
@@ -384,8 +383,7 @@ MessageService → OneBot API
   回复上下文不注入分数及对应说明。人物 API 不返回分数，编辑只修改记忆，旧好感度查询接口返回 403；前端隐藏评分与排序入口。
   历史分数保持不变，重开后继续累计，不补算停用期间的互动；明确删除人物的全部数据仍清除历史分数。
   QQ 必须属于待提取消息的真实发送者，补充上下文不可作为新增记忆或评分来源；重复人物条目去重，重复评分或无效归属使批次失败。
-  每批变化限制为 [-5, 5]，`person_affinity` 按 QQ 原子累计并限制在 [-100, 100]。v21 将旧 `group_affinity` 分数按 QQ 平均并四舍五入后迁移，
-  不把没有记录的会话当作零分；后台沿用原查询路径，但列表、弹窗和群聊/私聊上下文均使用全局分数。
+  每批变化限制为 [-5, 5]，`person_affinity` 按用户 ID 原子累计并限制在 [-100, 100]；后台沿用原查询路径，列表、弹窗和群聊/私聊上下文均使用全局分数。
 - **任务收尾**：同一会话最多执行一个维护任务。全部成功并提交后，按批次条数删除消息列表队首；失败保留消息并释放执行状态，
   等下一条消息重新触发，不自动循环重试。重启后不恢复任务，后续消息会根据恢复的消息列表重新触发。
 - **清空消息**：不会取消执行中的维护任务；旧任务成功后仍按原批次数量删除队首，可能删除清空后收到的新消息。
@@ -442,6 +440,8 @@ Router 在系统消息和明确 @ 机器人规则之后、Jev/Router 模型请�
 保存只更新对应配置域的运行时字段；执行参数保存仍仅写入原子值，不重写模型或 OneBot 配置。
 启动期的日志、管理令牌、数据库和 Agent 初始化接口返回 `std::expected<void, std::string>`，
 `main` 检查每一步的结果，失败时输出原因并退出，不启动后续服务。日志尚未就绪时使用标准错误输出；
+旧配置文件字段统一由 `ConfigMigration` 在启动加载时转换，校验后原子保存；正常读取和保存只使用当前字段，
+不再在模型读取时兼容 `top_P`，也不在每次保存时重复运行历史转换。
 文件日志不可用仍允许降级为控制台日志。数据库迁移错误在初始化边界转换为返回值并关闭新连接；
 Agent 仅在工具和提示词加载完成后标记为就绪，工具重载失败也通过返回值报告。
 启动初始化必须显式传递实际依赖：`AgentSystem::initialize(database, config.botName)` 将已初始化的数据库
@@ -574,6 +574,13 @@ Schema 中写清楚触发条件与边界。需要调整同类别展示位置时�
 
 数据库初始化由 `Database::initialize()` 调用 `SchemaMigrator` 完成。修改表结构时，除了更新建表语句，还必须在
 `SchemaMigrator` 中加入带版本号的增量迁移；迁移应能安全处理已存在的表、列和数据，不能只依赖新数据库的建表结果。
+
+最低可升级数据库版本为 `kMinimumSupportedVersion=24`，对应 v1.7.0 正式版。仅保留 `24 → 25` 及后续迁移；
+更旧数据库必须先用已发布的 v1.7.2 等中转版本完成升级。空库直接使用 `currentTables`、`indexes` 创建当前结构，
+不调用历史迁移。v25 的一次性数据转换集中于 `storage/migrations/V25.cpp`：统一用户身份、消息段和图片资产、会话待整理条目，
+删除已无业务读写的 `llm_config` 和 `settings` 表。建库及每次迁移均在事务中完成；版本过旧或过新时在写入前拒绝启动。
+数据格式无法转换时报告记录或会话 ID 并回滚，修复原数据后可重新启动重试。
+迁移数组从最低支持版本开始编号，并通过静态断言检查是否覆盖到 `kLatestVersion`。
 
 ## 调试
 

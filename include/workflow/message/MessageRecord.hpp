@@ -1,7 +1,7 @@
 /// @file MessageRecord.hpp
-/// @brief 聊天记录富内容的构造、兼容与投影
+/// @brief 聊天记录富内容的构造与投影
 /// @details 持久化记录以 `segments` 保存唯一的内容顺序，图片传输来源仅存于 `assets.images`。
-///          面向 Agent、记忆和工具的读取逻辑统一在此处兼容旧记录，避免重复暴露图片 URL。
+///          历史格式在数据库升级时转换；运行时仅处理当前结构，避免重复暴露图片 URL。
 
 #pragma once
 
@@ -44,7 +44,7 @@ namespace insoulforge::MessageRecord {
 
     /// @brief 按段出现顺序拼接记录中的文本内容
     /// @param record 统一聊天记录
-    /// @return 所有 `text` 段拼接后的文本；无段时兼容旧版 `text` 字段
+    /// @return 所有 `text` 段拼接后的文本
     [[nodiscard]] auto extractText(const json &record) -> std::string;
 
     /// @brief 判断记录是否包含指定类型的内容段
@@ -53,7 +53,7 @@ namespace insoulforge::MessageRecord {
     [[nodiscard]] auto hasSegmentType(const json &record, std::string_view type) -> bool;
 
     /// @brief 判断记录是否 @ 指定用户 ID
-    /// @details 同时兼容新结构 `target.user_id` 与旧结构 `user_id`。
+    /// @details 目标身份读取 `target.user_id`。
     /// @param record 统一聊天记录
     /// @param qqNumber 目标用户 ID
     [[nodiscard]] auto mentions(const json &record, u64 qqNumber) -> bool;
@@ -67,7 +67,7 @@ namespace insoulforge::MessageRecord {
     /// @brief 生成供 Router、Executor 与记忆任务使用的精简内容投影
     /// @param record 已解析的持久化聊天记录
     /// @return 保留时间、发送者、引用和有序语义段的记录，不含图片来源
-    /// @details 同时兼容旧版 `text`、`images`、`faces` 与 `notifications` 字段。
+    /// @details 图片来源只从 `assets.images` 读取。
     /// @param includeToolHistory 仅 Executor 读取工具历史；其他调用方默认不包含。
     /// @details 群名片按 本群设置 决定是否发送，原始记录不受影响。
     [[nodiscard]] auto projectForAgent(
@@ -82,6 +82,6 @@ namespace insoulforge::MessageRecord {
     /// @param record 已解析的持久化聊天记录
     /// @param imageIndex 图片在消息内按出现顺序从 0 开始的索引
     /// @return 图片存在且至少具有 file 或 url 时返回来源，否则返回空值
-    /// @details 兼容新结构 `assets.images` 和旧结构 `images`。
+    /// @details 来源统一存于 `assets.images[].source`。
     [[nodiscard]] auto findImageSource(const json &record, size_t imageIndex) -> std::optional<ImageSource>;
 } // namespace insoulforge::MessageRecord

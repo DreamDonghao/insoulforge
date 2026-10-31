@@ -256,7 +256,7 @@ namespace {
     auto sessionMemory(const bool legacy = false) -> json {
         json result = {{"aliases", {{{"user_id", "11"}, {"names", {"阿梨"}}}}}};
         if (legacy)
-            result["legacy_entries"] = {"原记忆"};
+            result["pending_entries"] = {"原记忆"};
         return result;
     }
 
@@ -360,7 +360,8 @@ namespace {
             config.memorySummaryTriggerCount = 3;
             config.memorySummaryBatchSize = 2;
             config.memorySummaryContextCount = 1;
-            MemoryMaintenanceStore::apply(database, 100, {.shortTerm = "原记忆", .affinity = {{22, 1}}});
+            const auto originalMemory = json{{"aliases", json::array()}, {"pending_entries", {"原记忆"}}}.dump();
+            MemoryMaintenanceStore::apply(database, 100, {.shortTerm = originalMemory, .affinity = {{22, 1}}});
             MessageList list(100, database, config);
             for (i32 index = 0; index < 3; ++index) {
                 std::ignore = list.append({{"message_id", std::to_string(index)},
@@ -393,7 +394,7 @@ namespace {
                                   (failure == Mode::ReconcileFailure || failure == Mode::InvalidSessionMemory ? 2 : 1),
                   "invalid extraction advanced or retried");
                 list.finishSummaryBatch(0);
-                require(list.fullSnapshot() == original && MemoryStore::getShortTermMemory(100) == "原记忆" &&
+                require(list.fullSnapshot() == original && MemoryStore::getShortTermMemory(100) == originalMemory &&
                           AffinityStore::getAffinityMap()[22] == 1 &&
                           PersonMemoryStore::getForSenders(original).empty(),
                   "failure committed partial memory or affinity");
@@ -473,7 +474,7 @@ namespace {
             require(summaries.size() == 2 && summaries.back()["start_time"] == dated[0]["time"] &&
                       summaries.back()["end_time"] == dated[2]["time"] &&
                       summaries.back()["summary"] == "讨论了编程爱好和近期安排。" &&
-                      MemoryStore::pendingLegacyEntries(MemoryStore::getShortTermMemory(100)) ==
+                      MemoryStore::pendingEntries(MemoryStore::getShortTermMemory(100)) ==
                         std::vector<std::string>{"原记忆"},
               "summary timestamp, retention or legacy separation failed");
             config.conversationSummaryMaxCount = 10;
@@ -482,7 +483,7 @@ namespace {
             require(co_await MemoryMaintenanceCoordinator::process(database, 100, original, json::array()),
               "alias correction failed");
             require(json::parse(MemoryStore::getShortTermMemory(100))["aliases"][0]["names"] == json::array({"摄影佬"}) &&
-                      MemoryStore::pendingLegacyEntries(MemoryStore::getShortTermMemory(100)) ==
+                      MemoryStore::pendingEntries(MemoryStore::getShortTermMemory(100)) ==
                         std::vector<std::string>{"原记忆"},
               "alias correction lost deferred historical memory");
 
@@ -596,14 +597,14 @@ namespace {
             }
             registry.unregisterPlugin("contract.thinking");
             auto transitional = sessionMemory();
-            transitional["recent_events"] = {"旧事件"};
-            transitional["legacy_entries"] = {"旧偏好一", "旧偏好二"};
+            transitional["pending_entries"] = {"旧事件", "旧偏好一", "旧偏好二"};
             MemoryStore::updateShortTermMemory(600, transitional.dump());
-            MemoryStore::updateShortTermMemory(700, "小王喜欢摄影\n某人的职业尚未关联QQ\n");
+            MemoryStore::updateShortTermMemory(700, json{{"aliases", json::array()},
+              {"pending_entries", {"小王喜欢摄影", "某人的职业尚未关联用户 ID"}}}.dump());
             const auto beforeLegacy = PersonMemoryStore::getForSenders(original);
             mode.store(Mode::LegacyForget);
             require(co_await MemoryMaintenanceCoordinator::process(database, 600, original, json::array()) &&
-                      MemoryStore::pendingLegacyEntries(MemoryStore::getShortTermMemory(600)) ==
+                      MemoryStore::pendingEntries(MemoryStore::getShortTermMemory(600)) ==
                         std::vector<std::string>({"旧事件", "旧偏好一", "旧偏好二"}),
               "unconfigured embedding consumed historical memory");
             const auto beforeMigration = MemoryStore::getShortTermMemory(600);
@@ -619,7 +620,7 @@ namespace {
             for (const auto id: {600ULL, 700ULL}) {
                 require(co_await MemoryMaintenanceCoordinator::process(database, id, original, json::array()),
                   "historical migration failed");
-                require(MemoryStore::pendingLegacyEntries(MemoryStore::getShortTermMemory(id)).empty() &&
+                require(MemoryStore::pendingEntries(MemoryStore::getShortTermMemory(id)).empty() &&
                           LongTermMemoryStore::countMemories(id) > 0,
                   "historical contents were not converted into long-term memory");
                 const auto count = LongTermMemoryStore::countMemories(id);
@@ -862,7 +863,7 @@ auto main() -> int {
                   aliases = {{{"user_id", "11"}, {"names", {"摄影佬"}}}};
               auto entries = json::array();
               if (prompt.find("向量服务未配置") == std::string::npos) {
-                  for (const auto *key: {"pending_entries", "legacy_entries", "recalled_memories"})
+                  for (const auto *key: {"pending_entries", "recalled_memories"})
                       for (const auto &entry: input[key])
                           entries.push_back(entry);
               }

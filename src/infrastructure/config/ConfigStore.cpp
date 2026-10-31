@@ -11,6 +11,7 @@
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/config/ConfigStore.hpp>
+#include <infrastructure/config/ConfigMigration.hpp>
 #include <infrastructure/logging/Logger.hpp>
 
 
@@ -153,61 +154,6 @@ namespace insoulforge::ConfigStore {
             return changed;
         }
 
-        /// @brief 将早期配置文件字段迁移为当前命名与结构。
-        auto migrateLegacyFields(json &config) -> bool {
-            bool changed = false;
-            changed = config.erase("version") > 0;
-            if (const auto memory = config.find("memory"); memory != config.end() && memory->is_object()) {
-                changed = memory->erase("shortTermMemoryMax") > 0 || changed;
-            }
-            const auto llm = config.find("llm");
-            if (llm == config.end() || !llm->is_object())
-                return changed;
-
-            if (!llm->contains("memory")) {
-                json memoryConfig = llm->value("executor", defaultChatConfig(4000, 0.4, 0.9));
-                if (!memoryConfig.is_object()) {
-                    memoryConfig = defaultChatConfig(4000, 0.4, 0.9);
-                }
-                const json &legacyMemory = atOrNull(config, "memory");
-                const i32 maxTokens = getInt(legacyMemory, "memoryExtractMaxTokens", 4000);
-                memoryConfig["maxTokens"] = maxTokens > 0 ? maxTokens : 4000;
-                memoryConfig["temperature"] = 0.4;
-                memoryConfig["topP"] = 0.9;
-                memoryConfig["timeoutSeconds"] = 180;
-                memoryConfig["maxRetries"] = 0;
-                (*llm)["memory"] = std::move(memoryConfig);
-                changed = true;
-            }
-            if (const auto memory = config.find("memory"); memory != config.end() && memory->is_object()) {
-                changed = memory->erase("memoryExtractMaxTokens") > 0 || changed;
-            }
-
-            for (auto &entry: llm->items()) {
-                auto &modelConfig = entry.value();
-                if (!modelConfig.is_object())
-                    continue;
-                if (entry.key() == "imageGeneration" && !modelConfig.contains("apiType")) {
-                    modelConfig["apiType"] = "openrouter";
-                    changed = true;
-                }
-                if (modelConfig.contains("top_P")) {
-                    if (!modelConfig.contains("topP")) {
-                        modelConfig["topP"] = modelConfig["top_P"];
-                    }
-                    modelConfig.erase("top_P");
-                    changed = true;
-                }
-                if (entry.key() == "embedding" || entry.key() == "jev" || entry.key() == "imageGeneration") {
-                    changed = modelConfig.erase("maxTokens") > 0 || changed;
-                    changed = modelConfig.erase("temperature") > 0 || changed;
-                    changed = modelConfig.erase("topP") > 0 || changed;
-                    changed = modelConfig.erase("reasoningEffort") > 0 || changed;
-                }
-            }
-            return changed;
-        }
-
         auto writeConfigFile(const std::filesystem::path &path, const json &config)
           -> std::expected<void, ConfigError> {
             const std::filesystem::path temporaryPath = path.string() + ".tmp";
@@ -262,7 +208,6 @@ namespace insoulforge::ConfigStore {
             requireInitializedLocked();
             auto nextConfig = fileState.content;
             nextConfig[std::string(section)] = std::move(content);
-            migrateLegacyFields(nextConfig);
             applyDefaults(nextConfig, defaultConfig());
             if (auto result = validate(nextConfig); !result) {
                 return result;
@@ -328,7 +273,7 @@ namespace insoulforge::ConfigStore {
                 needsWrite = true;
             } else {
                 config = std::move(parsed);
-                needsWrite = migrateLegacyFields(config);
+                needsWrite = migrateConfigFile(config, defaultConfig());
                 needsWrite = applyDefaults(config, defaultConfig()) || needsWrite;
             }
         }
@@ -365,7 +310,6 @@ namespace insoulforge::ConfigStore {
         json llm = getSection("llm");
         json persistedConfig = config;
         persistedConfig.erase("name");
-        persistedConfig.erase("top_P");
         for (const auto *key: {"timeoutSeconds", "maxRetries"}) {
             if (!persistedConfig.contains(key) && atOrNull(llm, name.c_str()).contains(key))
                 persistedConfig[key] = llm[name][key];
@@ -391,7 +335,7 @@ namespace insoulforge::ConfigStore {
                 persistedConfig["minConfidence"] = std::isfinite(confidence) ? std::clamp(confidence, 0.0, 1.0) : 0.6;
             }
         } else {
-            persistedConfig["topP"] = getDouble(config, "topP", getDouble(config, "top_P", 0.9));
+            persistedConfig["topP"] = getDouble(config, "topP", 0.9);
         }
         if (name != "jev") {
             persistedConfig.erase("minConfidence");
