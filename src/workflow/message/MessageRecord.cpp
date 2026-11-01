@@ -155,8 +155,10 @@ namespace insoulforge::MessageRecord {
                     segments.push_back({{"type", "at"}, {"target", {{"kind", "all"}}}});
                 } else {
                     json target{{"user_id", userId}};
-                    if (const std::string name = QQNameDirectory::getName(parseUInt64(userId)); name != "未知") {
-                        target["name"] = name;
+                    if (const auto id = UserId::parse(userId); id) {
+                        const auto name = QQNameDirectory::getName(*id);
+                        if (name != "未知")
+                            target["name"] = name;
                     }
                     segments.push_back({{"type", "at"}, {"target", std::move(target)}});
                 }
@@ -237,10 +239,10 @@ namespace insoulforge::MessageRecord {
           [type](const json &segment) -> bool { return getStr(segment, "type") == type; });
     }
 
-    auto mentions(const json &record, const u64 qqNumber) -> bool {
-        return std::ranges::any_of(atOrNull(record, "segments"), [qqNumber](const json &segment) -> bool {
+    auto mentions(const json &record, const UserId userId) -> bool {
+        return std::ranges::any_of(atOrNull(record, "segments"), [userId](const json &segment) -> bool {
             return getStr(segment, "type") == "at" &&
-                   getUInt(atOrNull(segment, "target"), "user_id") == qqNumber;
+                   getStr(atOrNull(segment, "target"), "user_id") == userId.toString();
         });
     }
 

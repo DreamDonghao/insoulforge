@@ -312,10 +312,10 @@ namespace {
             const auto conflict = co_await registry.executeTool(tool,
                 {{"content", "test"}, {"name", "fixture"}, {"group_id", "200"}, {"user_id", "702"}}, {.sessionId = 100});
             require(conflict.contains("不能同时"), "ambiguous target was sent");
-            BlacklistStore::add(702);
+            BlacklistStore::add(insoulforge::UserId{702});
             const auto blocked = co_await registry.executeTool(tool,
                 {{"content", "test"}, {"name", "fixture"}, {"user_id", "702"}}, {.sessionId = 100});
-            BlacklistStore::remove(702);
+            BlacklistStore::remove(insoulforge::UserId{702});
             require(blocked.contains("黑名单"), "blacklisted private target accepted");
         }
         require(fixture.messages().size() == sentBefore && fixture.stickerQueries == stickerQueriesBefore &&

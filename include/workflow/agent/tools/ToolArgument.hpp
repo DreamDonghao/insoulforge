@@ -3,11 +3,13 @@
 
 #pragma once
 
-#include <string>
 #include <charconv>
+#include <string>
+
 #include <expected>
 
 #include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/UserId.hpp>
 #include <workflow/message/SessionId.hpp>
 
 namespace insoulforge {
@@ -17,17 +19,15 @@ namespace insoulforge {
     /// @return 参数值；缺失或类型不匹配时返回空字符串
     inline auto argString(const json &args, const char *key) -> std::string { return getStr(args, key); }
 
-    /// @brief 读取私聊目标用户 ID，不接受内部私聊会话 ID 或系统账号。
-    inline auto userIdArgument(const json &args) -> std::expected<u64, std::string> {
+    /// @brief 读取用户身份；数字协议和私聊会话限制在各自边界校验。
+    inline auto userIdArgument(const json &args) -> std::expected<UserId, std::string> {
         const auto &value = atOrNull(args, "user_id");
-        if (!value.is_string()) return std::unexpected("user_id 必须是数字字符串 用户 ID");
-        const auto &text = value.get_ref<const std::string &>();
-        u64 userId = 0;
-        const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), userId);
-        if (error != std::errc{} || end != text.data() + text.size() || userId == 0 ||
-            SessionId::isPrivate(userId) || userId == SessionId::kSystemAccountId)
-            return std::unexpected("user_id 无效，必须填写有效的用户 ID，不能使用内部会话 ID");
-        return userId;
+        if (!value.is_string())
+            return std::unexpected("user_id 必须是字符串用户 ID");
+        const auto id = UserId::parse(value.get_ref<const std::string &>());
+        if (!id || id->toString() == "self" || *id == UserId{SessionId::kSystemAccountId})
+            return std::unexpected("user_id 必须是有效的用户 ID，不能使用机器人或系统身份");
+        return id;
     }
 
     /// @brief 严格读取必填 group_id，仅接受有效的数字字符串群号。

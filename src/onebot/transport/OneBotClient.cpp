@@ -2,6 +2,7 @@
 /// @brief OneBot API 客户端实现
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/UserId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/http/HttpUtil.hpp>
 #include <infrastructure/logging/Logger.hpp>
@@ -102,15 +103,23 @@ namespace insoulforge::OneBotClient {
         co_return co_await sendMessage("send_group_msg", "group_id", groupId, std::move(message), groupId);
     }
 
-    auto sendPrivateMsg(const u64 userId, std::string message, const std::optional<u64> sessionId)
+    auto sendPrivateMsg(const UserId userId, std::string message, const std::optional<u64> sessionId)
       -> drogon::Task<std::expected<u64, std::string>> {
-        co_return co_await sendMessage("send_private_msg", "user_id", userId, std::move(message), sessionId);
+        const auto number = userId.toU64();
+        if (!number || *number == 0)
+            co_return std::unexpected("OneBot 11 要求非零数字用户 ID");
+        co_return co_await sendMessage("send_private_msg", "user_id", *number, std::move(message), sessionId);
     }
 
-    auto setGroupBan(const u64 groupId, const u64 userId, const u64 duration) -> drogon::Task<bool> {
+    auto setGroupBan(const u64 groupId, const UserId userId, const u64 duration) -> drogon::Task<bool> {
+        const auto number = userId.toU64();
+        if (!number || *number == 0) {
+            Logger::warn(groupId, "OneBot", "OneBot 11 要求非零数字用户 ID");
+            co_return false;
+        }
         json params;
         params["group_id"] = groupId;
-        params["user_id"] = userId;
+        params["user_id"] = *number;
         params["duration"] = duration;
 
         if (const auto resp = co_await callApi("[Ban]", "set_group_ban", params, groupId); !resp) {
@@ -128,19 +137,29 @@ namespace insoulforge::OneBotClient {
         co_return resp.value_or(json{});
     }
 
-    auto getStrangerInfo(const u64 userId, const std::optional<u64> sessionId, const f64 timeout)
+    auto getStrangerInfo(const UserId userId, const std::optional<u64> sessionId, const f64 timeout)
       -> drogon::Task<json> {
+        const auto number = userId.toU64();
+        if (!number || *number == 0) {
+            Logger::warn(sessionId.value_or(0), "OneBot", "OneBot 11 要求非零数字用户 ID");
+            co_return json{};
+        }
         json params;
-        params["user_id"] = userId;
+        params["user_id"] = *number;
 
         const auto resp = co_await callApi("[StrangerInfo]", "get_stranger_info", params, sessionId, timeout);
         co_return resp.value_or(json{});
     }
 
-    auto sendPoke(const u64 groupId, const u64 userId) -> drogon::Task<bool> {
+    auto sendPoke(const u64 groupId, const UserId userId) -> drogon::Task<bool> {
+        const auto number = userId.toU64();
+        if (!number || *number == 0) {
+            Logger::warn(groupId, "OneBot", "OneBot 11 要求非零数字用户 ID");
+            co_return false;
+        }
         json params;
         params["group_id"] = groupId;
-        params["user_id"] = userId;
+        params["user_id"] = *number;
 
         if (const auto resp = co_await callApi("[Poke]", "send_poke", params, groupId); !resp) {
             co_return false;

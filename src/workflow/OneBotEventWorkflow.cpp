@@ -31,7 +31,7 @@ namespace insoulforge {
         [[nodiscard]] auto shouldQueueWhileReplying(
           const u64 sessionId, const json &message, const Config &config) -> bool {
             return SessionId::isPrivate(sessionId) || MessageRecord::isSystem(message) ||
-                   MessageRecord::mentions(message, config.selfQQNumber);
+                   MessageRecord::mentions(message, UserId{config.selfQQNumber});
         }
 
         /// @brief 记录已完成主处理消息的会话统计
@@ -235,7 +235,7 @@ namespace insoulforge {
         try {
             const auto response = co_await CommandProcessor::execute(message);
             if (SessionId::isPrivate(sessionId)) {
-                co_await MessageService::sendPrivateMsg(SessionId::privateUserId(sessionId), response);
+                co_await MessageService::sendPrivateMsg(UserId{SessionId::privateUserId(sessionId)}, response);
             } else {
                 co_await MessageService::sendGroupMsg(sessionId, response);
             }
@@ -256,7 +256,7 @@ namespace insoulforge {
         if (!normalizedMessage || MessageRecord::isAssistant(*normalizedMessage) || !m_dependencies->agent.isReady()) {
             return;
         }
-        if (BlacklistStore::contains(getUInt(atOrNull(*normalizedMessage, "sender"), "user_id"))) {
+        if (BlacklistStore::contains(UserId{getStr(atOrNull(*normalizedMessage, "sender"), "user_id")})) {
             return;
         }
         const auto sessionId = MessageRecord::getSessionId(*normalizedMessage);
@@ -373,7 +373,7 @@ namespace insoulforge {
                           co_await ExecutorAgent::execute(records, memory, std::move(routerDecision));
                         if (replyDecision && replyDecision->shouldReply && !replyDecision->content.empty()) {
                             if (SessionId::isPrivate(sessionId)) {
-                                co_await MessageService::sendPrivateMsg(SessionId::privateUserId(sessionId),
+                                co_await MessageService::sendPrivateMsg(UserId{SessionId::privateUserId(sessionId)},
                                   replyDecision->content, std::nullopt, replyDecision->toolHistory);
                             } else {
                                 co_await MessageService::sendGroupMsg(

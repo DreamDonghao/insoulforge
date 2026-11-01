@@ -7,6 +7,7 @@
 
 #include <admin/http/PersonNameResolver.hpp>
 #include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/UserId.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <onebot/transport/OneBotClient.hpp>
 #include <workflow/session/QQNameDirectory.hpp>
@@ -25,10 +26,10 @@ namespace insoulforge {
         return resolver;
     }
 
-    auto PersonNameResolver::lookup(const u64 userId, const Clock::time_point now) -> Name {
+    auto PersonNameResolver::lookup(const UserId &userId, const Clock::time_point now) -> Name {
         std::lock_guard lock(m_mutex);
         auto name = QQNameDirectory::getName(userId);
-        if (m_stopping || userId == 0 || isKnownName(name))
+        if (m_stopping || isKnownName(name))
             return {std::move(name), false};
         auto &state = m_states[userId];
         if (!state.pending && now >= state.retryAfter) {
@@ -41,7 +42,7 @@ namespace insoulforge {
     }
 
     void PersonNameResolver::pump() {
-        std::vector<u64> ready;
+        std::vector<UserId> ready;
         {
             std::lock_guard lock(m_mutex);
             while (!m_stopping && m_active < kMaxConcurrentQueries && !m_queue.empty()) {
@@ -54,7 +55,7 @@ namespace insoulforge {
             drogon::async_run([this, userId] { return query(userId); });
     }
 
-    auto PersonNameResolver::query(const u64 userId) -> drogon::Task<> {
+    auto PersonNameResolver::query(const UserId userId) -> drogon::Task<> {
         std::string name;
         try {
             bool shouldQuery;

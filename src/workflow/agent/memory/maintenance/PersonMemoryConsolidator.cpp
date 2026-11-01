@@ -5,6 +5,7 @@
 #include <array>
 
 #include <infrastructure/CommonUtil.hpp>
+#include <infrastructure/UserId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <workflow/agent/llm/LlmClient.hpp>
@@ -168,7 +169,7 @@ namespace insoulforge {
     }
 
     auto PersonMemoryConsolidator::consolidatePerson(
-      const u64 userId, std::shared_ptr<LlmClient::MaintenanceRequestControl> control, const bool includeExisting)
+      const UserId userId, std::shared_ptr<LlmClient::MaintenanceRequestControl> control, const bool includeExisting)
       -> drogon::Task<Result> {
         try {
             std::optional<PersonMemoryStore::PendingSnapshot> snapshot;
@@ -225,7 +226,7 @@ namespace insoulforge {
         service.m_busy = false;
     }
 
-    auto PersonMemoryConsolidator::runPerson(const u64 userId) -> drogon::Task<Result> {
+    auto PersonMemoryConsolidator::runPerson(const UserId userId) -> drogon::Task<Result> {
         std::shared_ptr<LlmClient::MaintenanceRequestControl> control;
         {
             std::lock_guard lock(m_mutex);
@@ -252,7 +253,7 @@ namespace insoulforge {
         BusyGuard guard{*this};
         try {
             PersonMemoryStore::DailyState state;
-            std::vector<u64> people;
+            std::vector<UserId> people;
             {
                 std::lock_guard lock(m_mutex);
                 if (control->isCancelled())

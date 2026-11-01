@@ -14,3 +14,7 @@ export function numberError(value: unknown, minimum: number, maximum: number, in
   return typeof value !== 'number' || !Number.isFinite(value) || (integer && !Number.isInteger(value)) ||
       value < minimum || value > maximum ? `请输入 ${minimum}～${maximum} 的${integer ? '整数' : '数值'}` : ''
 }
+
+export function userIdError(value: string): string {
+  return !value || value.includes('\0') ? '请输入有效的用户 ID' : ''
+}

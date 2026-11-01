@@ -2,27 +2,28 @@
 /// @brief 好感度存储 - 实现
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/UserId.hpp>
+#include <infrastructure/config/Config.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 #include <workflow/agent/memory/affinity/AffinityStore.hpp>
-#include <infrastructure/config/Config.hpp>
 
 
 namespace insoulforge::AffinityStore {
-    auto getAffinityMap() -> std::unordered_map<u64, i32> {
+    auto getAffinityMap() -> std::unordered_map<UserId, i32> {
         if (!Config::instance().affinityEnabled.load(std::memory_order_relaxed))
             return {};
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
         const Statement stmt(db.handle(), "SELECT user_id, affinity FROM person_affinity");
-        std::unordered_map<u64, i32> affinityMap;
+        std::unordered_map<UserId, i32> affinityMap;
         while (stmt.step()) {
-            affinityMap.emplace(static_cast<u64>(stmt.getInt64(0)), stmt.getInt(1));
+            affinityMap.emplace(UserId{stmt.getText(0)}, stmt.getInt(1));
         }
         return affinityMap;
     }
 
-    void adjustAffinity(const u64 qqNumber, const i32 delta) {
+    void adjustAffinity(const UserId &userId, const i32 delta) {
         if (!Config::instance().affinityEnabled.load(std::memory_order_relaxed))
             return;
         const auto &db = Database::instance();
@@ -31,7 +32,7 @@ namespace insoulforge::AffinityStore {
         const Statement stmt(db.handle(),
           "INSERT INTO person_affinity (user_id, affinity) VALUES (?, max(min(?, 100), -100)) "
           "ON CONFLICT(user_id) DO UPDATE SET affinity = max(min(affinity + ?, 100), -100)");
-        stmt.bind(1, qqNumber);
+        stmt.bind(1, userId.toString());
         stmt.bind(2, delta);
         stmt.bind(3, delta);
         stmt.execOrThrow();

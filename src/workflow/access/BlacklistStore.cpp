@@ -4,45 +4,46 @@
 #include <fmt/format.h>
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/UserId.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 #include <workflow/access/BlacklistStore.hpp>
 
 namespace insoulforge::BlacklistStore {
-    auto contains(const u64 qqNumber) -> bool {
+    auto contains(const UserId &userId) -> bool {
         const auto &database = Database::instance();
         std::shared_lock lock(database.mutex());
         const Statement statement(database.handle(), "SELECT 1 FROM blacklisted_users WHERE user_id = ?");
-        statement.bind(1, qqNumber);
+        statement.bind(1, userId.toString());
         return statement.step();
     }
 
-    void add(const u64 qqNumber) {
+    void add(const UserId &userId) {
         const auto &database = Database::instance();
         std::unique_lock lock(database.mutex());
         const Statement statement(database.handle(), "INSERT OR IGNORE INTO blacklisted_users (user_id) VALUES (?)");
-        statement.bind(1, qqNumber);
+        statement.bind(1, userId.toString());
         statement.exec();
-        Logger::info(0, "Blacklist", fmt::format("已添加: {}", qqNumber));
+        Logger::info(0, "Blacklist", fmt::format("已添加: {}", userId));
     }
 
-    void remove(const u64 qqNumber) {
+    void remove(const UserId &userId) {
         const auto &database = Database::instance();
         std::unique_lock lock(database.mutex());
         const Statement statement(database.handle(), "DELETE FROM blacklisted_users WHERE user_id = ?");
-        statement.bind(1, qqNumber);
+        statement.bind(1, userId.toString());
         statement.exec();
-        Logger::info(0, "Blacklist", fmt::format("已移除: {}", qqNumber));
+        Logger::info(0, "Blacklist", fmt::format("已移除: {}", userId));
     }
 
-    auto getAll() -> std::vector<u64> {
+    auto getAll() -> std::vector<UserId> {
         const auto &database = Database::instance();
         std::shared_lock lock(database.mutex());
-        std::vector<u64> users;
+        std::vector<UserId> users;
         const Statement statement(database.handle(), "SELECT user_id FROM blacklisted_users ORDER BY user_id");
         while (statement.step()) {
-            users.push_back(statement.getInt64(0));
+            users.emplace_back(statement.getText(0));
         }
         return users;
     }

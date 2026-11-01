@@ -126,7 +126,7 @@ namespace insoulforge {
                 }
                 const auto sent = SessionId::isPrivate(sessionId)
                                     ? co_await MessageService::sendPrivateMsg(
-                                        SessionId::privateUserId(sessionId), content, imageDescription)
+                                        UserId{SessionId::privateUserId(sessionId)}, content, imageDescription)
                                     : co_await MessageService::sendGroupMsg(sessionId, content, imageDescription);
                 if (!sent) {
                     throw std::runtime_error("结果发送未确认成功：" + sent.error());

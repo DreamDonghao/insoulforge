@@ -52,20 +52,20 @@ function setup(page, fetch = () => { throw new Error('Unexpected request') }) {
   }
 }
 
-test('700+ people retain search and numeric ordering while searches reuse cached sorting', () => {
+test('700+ people retain search and string identity ordering while searches reuse cached sorting', () => {
   const view = setup('conversation/PeopleManager')
   try {
     const people = Array.from({length: 700}, (_, i) => ({
       user_id: String(9007199254740000n + BigInt(699 - i) * 2n), name: `Person ${i}`,
       affinity: i % 11 - 5, name_pending: false, pending_count: 0, updated_at: ''
     }))
-    people.push(...['10', '2'].map(user_id => ({...people[0], user_id})))
+    people.push(...['10', '2', '0010', 'user:alpha', '用户'].map(user_id => ({...people[0], user_id})))
     const originalOrder = people.map(person => person.user_id)
     view.state.people = people
     const expected = () => people.filter(person =>
       `${person.user_id} ${person.name}`.toLowerCase().includes(view.state.search.trim().toLowerCase()))
       .sort((a, b) => (view.state.ascending ? a.affinity - b.affinity : b.affinity - a.affinity) ||
-        (BigInt(a.user_id) < BigInt(b.user_id) ? -1 : BigInt(a.user_id) > BigInt(b.user_id) ? 1 : 0))
+        (a.user_id < b.user_id ? -1 : a.user_id > b.user_id ? 1 : 0))
       .map(person => person.user_id)
     for (const ascending of [false, true]) {
       view.state.ascending = ascending
@@ -75,8 +75,7 @@ test('700+ people retain search and numeric ordering while searches reuse cached
       }
     }
     assert.equal(view.runs('sortedPeople'), 2)
-    assert.equal(view.runs('indexedPeople'), 1)
-    assert.equal(view.conversions(), people.length)
+    assert.equal(view.conversions(), 0)
     assert.deepEqual(people.map(person => person.user_id), originalOrder)
 
     const person = view.state.people[0]
@@ -84,17 +83,16 @@ test('700+ people retain search and numeric ordering while searches reuse cached
     view.state.search = 'renamed'
     assert.equal(view.state.filtered[0], person)
     assert.equal(view.runs('sortedPeople'), 2)
-    assert.equal(view.conversions(), people.length)
+    assert.equal(view.conversions(), 0)
     person.affinity = 100
     view.state.search = ''
     assert.equal(view.state.filtered.at(-1), person)
     assert.equal(view.runs('sortedPeople'), 3)
-    assert.equal(view.conversions(), people.length)
+    assert.equal(view.conversions(), 0)
 
     person.user_id = '9007199254740993'
     assert.deepEqual(view.state.filtered.map(person => person.user_id), expected())
-    assert.equal(view.runs('indexedPeople'), 2)
-    assert.equal(view.conversions(), people.length * 2)
+    assert.equal(view.conversions(), 0)
     view.state.people = []
     assert.deepEqual(view.state.filtered, [])
     view.state.people = [{...people[0], user_id: '7'}]

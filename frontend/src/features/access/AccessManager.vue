@@ -6,7 +6,7 @@
 import {inject, onMounted, reactive, ref, type Ref} from 'vue'
 import FieldError from '../../components/FieldError.vue'
 import {useFormValidation} from '../../composables/useFormValidation'
-import {identifierError} from '../../utils/validation'
+import {userIdError} from '../../utils/validation'
 import RequestError from '../../components/RequestError.vue'
 import {requestJson, requestError} from '../../utils/api'
 import type {Admin, ApiResponse, BlacklistEntry} from '../../vite-env'
@@ -61,8 +61,8 @@ const loadBlacklist = async (): Promise<void> => {
   }
 }
 
-const adminForm = useFormValidation(() => ({'admin-user-id': identifierError(newAdminQQ.value, '用户 ID')}))
-const blacklistForm = useFormValidation(() => ({'blacklist-user-id': identifierError(newBlacklistQQ.value, '用户 ID')}))
+const adminForm = useFormValidation(() => ({'admin-user-id': userIdError(newAdminQQ.value)}))
+const blacklistForm = useFormValidation(() => ({'blacklist-user-id': userIdError(newBlacklistQQ.value)}))
 const addAdmin = async (): Promise<void> => {
   if (saving.value) return
   if (!adminForm.validateForm()) return
@@ -71,7 +71,7 @@ const addAdmin = async (): Promise<void> => {
     const resp = await fetch('/admin/api/admin', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({user_id: newAdminQQ.value.trim()})
+      body: JSON.stringify({user_id: newAdminQQ.value})
     })
     const data: ApiResponse = await resp.json()
     if (resp.ok && data.success) {
@@ -93,7 +93,7 @@ const removeAdmin = async (user_id: string): Promise<void> => {
   if (removingAdmins.has(user_id)) return
   removingAdmins.add(user_id)
   try {
-    await requestJson<ApiResponse>(`/admin/api/admin/${user_id}`, {method: 'DELETE'})
+    await requestJson<ApiResponse>(`/admin/api/admin/${encodeURIComponent(user_id)}`, {method: 'DELETE'})
     showToast!('移除管理员成功')
     await loadAdmins()
   } catch (cause) {
@@ -111,7 +111,7 @@ const addBlacklistEntry = async (): Promise<void> => {
     const resp = await fetch('/admin/api/blacklist', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({user_id: newBlacklistQQ.value.trim()})
+      body: JSON.stringify({user_id: newBlacklistQQ.value})
     })
     const data: ApiResponse = await resp.json()
     if (resp.ok && data.success) {
@@ -133,7 +133,7 @@ const removeBlacklistEntry = async (user_id: string): Promise<void> => {
   if (removingBlacklist.has(user_id)) return
   removingBlacklist.add(user_id)
   try {
-    await requestJson<ApiResponse>(`/admin/api/blacklist/${user_id}`, {method: 'DELETE'})
+    await requestJson<ApiResponse>(`/admin/api/blacklist/${encodeURIComponent(user_id)}`, {method: 'DELETE'})
     showToast!('移出黑名单成功')
     await loadBlacklist()
   } catch (cause) {
@@ -162,7 +162,7 @@ onMounted(() => void Promise.all([loadAdmins(), loadBlacklist()]))
           <form class="access-form-row" novalidate @submit.prevent="addAdmin">
             <div class="form-group access-form-group">
               <label for="admin-user-id" class="form-label access-form-label">用户 ID</label>
-              <input v-model="newAdminQQ" v-bind="adminForm.fieldAttrs('admin-user-id')" :disabled="saving" class="form-input access-input" placeholder="输入 用户 ID" type="text" inputmode="numeric" autocomplete="off">
+              <input v-model="newAdminQQ" v-bind="adminForm.fieldAttrs('admin-user-id')" :disabled="saving" class="form-input access-input" placeholder="输入 用户 ID" type="text" autocomplete="off">
               <FieldError field="admin-user-id" :message="adminForm.errors.value['admin-user-id']"/>
             </div>
             <button :disabled="saving" class="btn btn-primary access-submit" type="submit">
@@ -214,7 +214,7 @@ onMounted(() => void Promise.all([loadAdmins(), loadBlacklist()]))
           <form class="access-form-row" novalidate @submit.prevent="addBlacklistEntry">
             <div class="form-group access-form-group">
               <label for="blacklist-user-id" class="form-label access-form-label">用户 ID</label>
-              <input v-model="newBlacklistQQ" v-bind="blacklistForm.fieldAttrs('blacklist-user-id')" :disabled="blacklistSaving" class="form-input access-input" placeholder="输入 用户 ID" type="text" inputmode="numeric" autocomplete="off">
+              <input v-model="newBlacklistQQ" v-bind="blacklistForm.fieldAttrs('blacklist-user-id')" :disabled="blacklistSaving" class="form-input access-input" placeholder="输入 用户 ID" type="text" autocomplete="off">
               <FieldError field="blacklist-user-id" :message="blacklistForm.errors.value['blacklist-user-id']"/>
             </div>
             <button :disabled="blacklistSaving" class="btn btn-danger access-submit" type="submit">

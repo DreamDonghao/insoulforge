@@ -104,7 +104,7 @@ export interface Group {
     hasAdditionalPrompt?: boolean
     enabled?: boolean
     sessionType?: 'private'
-    userId?: number
+    userId?: string
 }
 
 export interface ChatMessage {

@@ -487,7 +487,7 @@ namespace insoulforge::LuaToolExecutor {
                 } else {
                     const auto sent =
                       SessionId::isPrivate(sessionId)
-                        ? co_await MessageService::sendPrivateMsg(SessionId::privateUserId(sessionId), text)
+                        ? co_await MessageService::sendPrivateMsg(UserId{SessionId::privateUserId(sessionId)}, text)
                         : co_await MessageService::sendGroupMsg(sessionId, text);
                     response = sent ? json{{"ok", true}, {"message_id", std::to_string(*sent)}}
                                     : json{{"ok", false}, {"error", sent.error()}};

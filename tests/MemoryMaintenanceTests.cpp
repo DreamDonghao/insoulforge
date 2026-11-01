@@ -66,9 +66,10 @@ namespace {
         auto &config = Config::instance();
         config.memory.baseUrl = endpoint;
         config.memory.path = "/person-consolidation-fixture";
-        MemoryMaintenanceStore::apply(db, 100, {
-          .personEntries = {{22, "已有条目"}, {88001, "喜欢摄影"}, {88002, "继续保留"}, {88003, "请求失败"}},
-          .affinity = {{22, 3}}});
+        MemoryMaintenanceStore::apply(db, 100,
+          {.personEntries = {{insoulforge::UserId{22}, "已有条目"}, {insoulforge::UserId{88001}, "喜欢摄影"},
+             {insoulforge::UserId{88002}, "继续保留"}, {insoulforge::UserId{88003}, "请求失败"}},
+            .affinity = {{insoulforge::UserId{22}, 3}}});
         std::tm local{};
         local.tm_year = 126;
         local.tm_mon = 9;
@@ -78,14 +79,14 @@ namespace {
         const auto today = std::mktime(&local);
         PersonMemoryConsolidator service;
         co_await service.runDue(today);
-        auto person = PersonMemoryStore::getPerson(88001);
+        auto person = PersonMemoryStore::getPerson(insoulforge::UserId{88001});
         if (personFixture.requests != 4 || person["profile"] != json::array({"整理后的人物档案"}) ||
-            person["relationship"] != json::array({"相处随意"}) ||
-            person["pending_entries"].size() != 1 || person["pending_entries"][0]["content"] != "请求期间新增" ||
-            PersonMemoryStore::getPerson(88002)["pending_entries"].size() != 1 ||
-            PersonMemoryStore::getPerson(88003)["pending_entries"].size() != 1 ||
+            person["relationship"] != json::array({"相处随意"}) || person["pending_entries"].size() != 1 ||
+            person["pending_entries"][0]["content"] != "请求期间新增" ||
+            PersonMemoryStore::getPerson(insoulforge::UserId{88002})["pending_entries"].size() != 1 ||
+            PersonMemoryStore::getPerson(insoulforge::UserId{88003})["pending_entries"].size() != 1 ||
             PersonMemoryStore::dailyState().completedDay != "2026-10-20" ||
-            PersonMemoryStore::getPerson(22)["affinity"] != 3)
+            PersonMemoryStore::getPerson(insoulforge::UserId{22})["affinity"] != 3)
             throw std::runtime_error("daily consolidation lost entries, failed isolation, or changed affinity");
         co_await service.runDue(today);
         if (personFixture.requests != 4)
@@ -105,32 +106,32 @@ namespace {
         using Result = PersonMemoryConsolidator::Result;
         const auto checkpoint = PersonMemoryStore::dailyState();
         const auto beforeManual = personFixture.requests.load();
-        if (co_await restarted.runPerson(999999) != Result::NoMemory ||
-            co_await restarted.runPerson(88001) != Result::Updated ||
+        if (co_await restarted.runPerson(insoulforge::UserId{999999}) != Result::NoMemory ||
+            co_await restarted.runPerson(insoulforge::UserId{88001}) != Result::Updated ||
             personFixture.requests != beforeManual + 1 ||
             PersonMemoryStore::dailyState().completedDay != checkpoint.completedDay ||
             PersonMemoryStore::dailyState().runningDay != checkpoint.runningDay)
             throw std::runtime_error("manual consolidation cannot reorganize existing memory or changes daily checkpoint");
         personFixture.editRelationship = true;
-        if (co_await restarted.runPerson(88001) != Result::Conflict ||
-            PersonMemoryStore::getPerson(88001)["relationship"] != json::array({"人工修改关系"}))
+        if (co_await restarted.runPerson(insoulforge::UserId{88001}) != Result::Conflict ||
+            PersonMemoryStore::getPerson(insoulforge::UserId{88001})["relationship"] != json::array({"人工修改关系"}))
             throw std::runtime_error("manual consolidation overwrote concurrent relationship edit");
         personFixture.omitRelationship = true;
-        const auto beforeInvalid = PersonMemoryStore::getPerson(88001);
-        if (co_await restarted.runPerson(88001) != Result::Failed ||
-            PersonMemoryStore::getPerson(88001) != beforeInvalid)
+        const auto beforeInvalid = PersonMemoryStore::getPerson(insoulforge::UserId{88001});
+        if (co_await restarted.runPerson(insoulforge::UserId{88001}) != Result::Failed ||
+            PersonMemoryStore::getPerson(insoulforge::UserId{88001}) != beforeInvalid)
             throw std::runtime_error("invalid model profile overwrote original data");
         personFixture.delay = true;
         std::atomic_bool manualDone{false};
         Result manualResult = Result::Failed;
         const auto beforeBusy = personFixture.requests.load();
         drogon::async_run([&]() -> drogon::Task<> {
-            manualResult = co_await restarted.runPerson(88001);
+            manualResult = co_await restarted.runPerson(insoulforge::UserId{88001});
             manualDone = true;
         });
         while (personFixture.requests == beforeBusy)
             co_await drogon::sleepCoro(drogon::app().getLoop(), 0.001);
-        const auto busy = co_await restarted.runPerson(88002);
+        const auto busy = co_await restarted.runPerson(insoulforge::UserId{88002});
         co_await restarted.runDue(today);
         while (!manualDone)
             co_await drogon::sleepCoro(drogon::app().getLoop(), 0.001);
@@ -141,13 +142,13 @@ namespace {
         drogon::HttpResponsePtr apiResponse;
         const auto callback = [&](const drogon::HttpResponsePtr &response) { apiResponse = response; };
         auto request = drogon::HttpRequest::newHttpRequest();
-        co_await controller.consolidatePerson(request, callback, "invalid");
+        co_await controller.consolidatePerson(request, callback, "");
         if (apiResponse->statusCode() != drogon::k400BadRequest)
-            throw std::runtime_error("manual API accepts invalid QQ");
+            throw std::runtime_error("manual API accepts empty user ID");
         co_await controller.consolidatePerson(request, callback, "999999");
         if (apiResponse->statusCode() != drogon::k404NotFound)
             throw std::runtime_error("manual API accepts absent person");
-        MemoryMaintenanceStore::apply(db, 100, {.affinity = {{88005, 1}}});
+        MemoryMaintenanceStore::apply(db, 100, {.affinity = {{insoulforge::UserId{88005}, 1}}});
         const auto beforeEmpty = personFixture.requests.load();
         co_await controller.consolidatePerson(request, callback, "88005");
         if (apiResponse->statusCode() != drogon::k200OK || personFixture.requests != beforeEmpty)
@@ -156,13 +157,13 @@ namespace {
         if (apiResponse->statusCode() != drogon::k200OK || personFixture.requests != beforeEmpty + 1)
             throw std::runtime_error("manual API did not consolidate existing profile");
         personFixture.fail = true;
-        const auto beforeFailure = PersonMemoryStore::getPerson(88003);
+        const auto beforeFailure = PersonMemoryStore::getPerson(insoulforge::UserId{88003});
         co_await controller.consolidatePerson(request, callback, "88003");
         if (apiResponse->statusCode() != drogon::k502BadGateway ||
-            PersonMemoryStore::getPerson(88003) != beforeFailure)
+            PersonMemoryStore::getPerson(insoulforge::UserId{88003}) != beforeFailure)
             throw std::runtime_error("manual API failed to preserve original data on model failure");
         personFixture.fail = false;
-        MemoryMaintenanceStore::apply(db, 100, {.personEntries = {{88004, "退出期间保留"}}});
+        MemoryMaintenanceStore::apply(db, 100, {.personEntries = {{insoulforge::UserId{88004}, "退出期间保留"}}});
         ++local.tm_mday;
         const auto interruptedDay = std::mktime(&local);
         PersonMemoryConsolidator interrupted;
@@ -184,7 +185,7 @@ namespace {
         if (MemoryStore::conversationSummaries(MemoryStore::getShortTermMemory(99999)) !=
               durableMemory["conversation_summaries"])
             throw std::runtime_error("database reopen lost conversation summaries");
-        if (PersonMemoryStore::getPerson(88004)["pending_entries"].empty() ||
+        if (PersonMemoryStore::getPerson(insoulforge::UserId{88004})["pending_entries"].empty() ||
             PersonMemoryStore::dailyState().runningDay != "2026-10-23")
             throw std::runtime_error("stopped service committed late result or completed unfinished run");
         PersonMemoryConsolidator resumed;
@@ -206,7 +207,7 @@ namespace {
         db.close();
         if (!db.initialize(":memory:"))
             throw std::runtime_error("could not restore test database");
-        MemoryMaintenanceStore::apply(db, 100, {.affinity = {{22, 3}}});
+        MemoryMaintenanceStore::apply(db, 100, {.affinity = {{insoulforge::UserId{22}, 3}}});
         std::filesystem::remove(path);
     }
 
@@ -230,6 +231,7 @@ namespace {
         }
     }
     enum class Mode {
+        StringIdentity,
         Success,
         ExtractFailure,
         ReconcileFailure,
@@ -277,7 +279,7 @@ namespace {
         config.oneBotTransport = "http";
         config.qqHttpHost = endpoint;
         for (u64 user_id = 91000; user_id < 91012; ++user_id)
-            AffinityStore::adjustAffinity(user_id, 1);
+            AffinityStore::adjustAffinity(insoulforge::UserId{user_id}, 1);
         const AdminController controller;
         drogon::HttpResponsePtr response;
         const auto callback = [&](const drogon::HttpResponsePtr &value) { response = value; };
@@ -291,7 +293,9 @@ namespace {
         co_await controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, "22");
         co_await waitFor([&initialPeople] {
             return std::ranges::all_of(initialPeople, [](const json &person) {
-                return !PersonNameResolver::instance().lookup(std::stoull(person["user_id"].get<std::string>())).pending;
+                return !PersonNameResolver::instance()
+                          .lookup(insoulforge::UserId{person["user_id"].get<std::string>()})
+                          .pending;
             });
         });
         require(nameFixture.peak == 4 && nameFixture.count(22) == 1 &&
@@ -303,11 +307,12 @@ namespace {
         co_await controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, "22");
         require(json::parse(response->body())["name"] == "Fixture 22" && nameRequests.load() == queried,
           "person detail did not reuse resolved nickname");
-        QQNameDirectory::setCustomName(22, "自定义昵称");
+        QQNameDirectory::setCustomName(insoulforge::UserId{22}, "自定义昵称");
         co_await controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, "22");
         require(json::parse(response->body())["name"] == "自定义昵称" && nameRequests.load() == queried,
           "custom nickname was overwritten or queried unnecessarily");
-        MemoryMaintenanceStore::apply(database, 100, {.affinity = {{991, 1}, {992, 2}}});
+        MemoryMaintenanceStore::apply(
+          database, 100, {.affinity = {{insoulforge::UserId{991}, 1}, {insoulforge::UserId{992}, 2}}});
         for (const auto *user_id: {"991", "992"}) {
             co_await controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, user_id);
             const auto person = json::parse(response->body());
@@ -315,34 +320,38 @@ namespace {
               "failed or empty nickname hid person data");
         }
         co_await waitFor([] {
-            return !PersonNameResolver::instance().lookup(991).pending &&
-              !PersonNameResolver::instance().lookup(992).pending;
+            return !PersonNameResolver::instance().lookup(insoulforge::UserId{991}).pending &&
+                   !PersonNameResolver::instance().lookup(insoulforge::UserId{992}).pending;
         });
         const auto failedQueries = nameRequests.load();
         co_await controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, "991");
         require(nameRequests.load() == failedQueries && json::parse(response->body())["name_pending"] == false,
           "failed nickname query bypassed cooldown");
-        require(PersonNameResolver::instance().lookup(991,
-                  PersonNameResolver::Clock::now() + std::chrono::seconds(61)).pending,
+        require(PersonNameResolver::instance()
+                  .lookup(insoulforge::UserId{991}, PersonNameResolver::Clock::now() + std::chrono::seconds(61))
+                  .pending,
           "failed nickname query could not retry after cooldown");
-        co_await waitFor([] { return !PersonNameResolver::instance().lookup(991).pending; });
+        co_await waitFor([] { return !PersonNameResolver::instance().lookup(insoulforge::UserId{991}).pending; });
         require(nameRequests.load() == failedQueries + 1, "cooldown retry did not issue one request");
-        require(PersonNameResolver::instance().lookup(995).pending, "timeout test did not start");
-        co_await waitFor([] { return !PersonNameResolver::instance().lookup(995).pending; });
-        require(QQNameDirectory::getName(995) == "未知", "timed out nickname query updated cache");
+        require(PersonNameResolver::instance().lookup(insoulforge::UserId{995}).pending, "timeout test did not start");
+        co_await waitFor([] { return !PersonNameResolver::instance().lookup(insoulforge::UserId{995}).pending; });
+        require(QQNameDirectory::getName(insoulforge::UserId{995}) == "未知", "timed out nickname query updated cache");
         config.oneBotTransport = "websocket";
-        MemoryMaintenanceStore::apply(database, 100, {.affinity = {{993, 1}}});
+        MemoryMaintenanceStore::apply(database, 100, {.affinity = {{insoulforge::UserId{993}, 1}}});
         co_await controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, "993");
         require(json::parse(response->body())["name"] == "未知", "disconnected OneBot broke person detail");
-        co_await waitFor([] { return !PersonNameResolver::instance().lookup(993).pending; });
+        co_await waitFor([] { return !PersonNameResolver::instance().lookup(insoulforge::UserId{993}).pending; });
         config.oneBotTransport = "http";
-        require(PersonNameResolver::instance().lookup(996).pending, "stop test did not queue nickname");
+        require(
+          PersonNameResolver::instance().lookup(insoulforge::UserId{996}).pending, "stop test did not queue nickname");
         co_await waitFor([] { return nameFixture.count(996) == 1; });
-        require(PersonNameResolver::instance().lookup(997).pending, "stop test did not queue next nickname");
+        require(PersonNameResolver::instance().lookup(insoulforge::UserId{997}).pending,
+          "stop test did not queue next nickname");
         PersonNameResolver::instance().stop();
         co_await waitFor([] { return nameFixture.active == 0; });
-        require(QQNameDirectory::getName(996) == "未知" && QQNameDirectory::getName(997) == "未知" &&
-                  !PersonNameResolver::instance().lookup(998).pending,
+        require(QQNameDirectory::getName(insoulforge::UserId{996}) == "未知" &&
+                  QQNameDirectory::getName(insoulforge::UserId{997}) == "未知" &&
+                  !PersonNameResolver::instance().lookup(insoulforge::UserId{998}).pending,
           "stopped resolver updated nickname cache or accepted new work");
     }
 
@@ -361,7 +370,8 @@ namespace {
             config.memorySummaryBatchSize = 2;
             config.memorySummaryContextCount = 1;
             const auto originalMemory = json{{"aliases", json::array()}, {"pending_entries", {"原记忆"}}}.dump();
-            MemoryMaintenanceStore::apply(database, 100, {.shortTerm = originalMemory, .affinity = {{22, 1}}});
+            MemoryMaintenanceStore::apply(
+              database, 100, {.shortTerm = originalMemory, .affinity = {{insoulforge::UserId{22}, 1}}});
             MessageList list(100, database, config);
             for (i32 index = 0; index < 3; ++index) {
                 std::ignore = list.append({{"message_id", std::to_string(index)},
@@ -369,6 +379,15 @@ namespace {
                   {"segments", {{{"type", "text"}, {"text", "我喜欢编程"}}}}});
             }
             const auto original = list.fullSnapshot();
+            mode.store(Mode::StringIdentity);
+            auto stringRecords = original;
+            stringRecords[0]["sender"]["user_id"] = "user:alpha";
+            stringRecords[1]["sender"]["user_id"] = "00123";
+            stringRecords[2]["sender"]["user_id"] = "00123";
+            const auto stringResult = co_await MemoryMaintenanceService::prepare(100, stringRecords, {});
+            require(stringResult && stringResult->personEntries[0].userId == UserId{"user:alpha"} &&
+                      stringResult->affinity[0].first == UserId{"00123"},
+              "model extraction lost string identity");
             config.affinityEnabled = false;
             mode.store(Mode::Empty);
             const auto withoutScores = co_await MemoryMaintenanceService::prepare(100, original, json::array());
@@ -395,7 +414,7 @@ namespace {
                   "invalid extraction advanced or retried");
                 list.finishSummaryBatch(0);
                 require(list.fullSnapshot() == original && MemoryStore::getShortTermMemory(100) == originalMemory &&
-                          AffinityStore::getAffinityMap()[22] == 1 &&
+                          AffinityStore::getAffinityMap()[insoulforge::UserId{22}] == 1 &&
                           PersonMemoryStore::getForSenders(original).empty(),
                   "failure committed partial memory or affinity");
             }
@@ -409,7 +428,8 @@ namespace {
               database, 100, embeddingBatch->messages, embeddingBatch->contextMessages);
             list.finishSummaryBatch(embeddingCompleted ? embeddingBatch->messages.size() : 0);
             require(!embeddingCompleted && list.fullSnapshot() == original &&
-                      PersonMemoryStore::getForSenders(original).empty() && AffinityStore::getAffinityMap()[22] == 1,
+                      PersonMemoryStore::getForSenders(original).empty() &&
+                      AffinityStore::getAffinityMap()[insoulforge::UserId{22}] == 1,
               "embedding failure committed partial extraction");
             config.embedding = {};
 
@@ -421,18 +441,18 @@ namespace {
             require(completed && requests.load() - before == 2, "extraction and affinity were not one shared call");
             list.finishSummaryBatch(batch->messages.size());
             const auto profiles = PersonMemoryStore::getForSenders(original);
-            require(list.fullSnapshot().size() == 1 &&
-                      storedSessionMemory(100) == sessionMemory(true) &&
-                      AffinityStore::getAffinityMap()[22] == 3 && profiles.size() == 1 && profiles[0]["user_id"] == "11" &&
-                      profiles[0]["pending_entries"].size() == 1 && profiles[0]["profile"].empty() &&
-                      profiles[0]["recent_interactions"].empty(),
+            require(list.fullSnapshot().size() == 1 && storedSessionMemory(100) == sessionMemory(true) &&
+                      AffinityStore::getAffinityMap()[insoulforge::UserId{22}] == 3 && profiles.size() == 1 &&
+                      profiles[0]["user_id"] == "11" && profiles[0]["pending_entries"].size() == 1 &&
+                      profiles[0]["profile"].empty() && profiles[0]["recent_interactions"].empty(),
               "success failed to atomically save independent people and preserve old reconciliation");
 
             mode.store(Mode::Empty);
             const auto emptyBefore = requests.load();
             require(co_await MemoryMaintenanceCoordinator::process(database, 100, original, json::array()),
               "empty results were treated as failure");
-            require(requests.load() - emptyBefore == 1 && AffinityStore::getAffinityMap()[22] == 3 &&
+            require(requests.load() - emptyBefore == 1 &&
+                      AffinityStore::getAffinityMap()[insoulforge::UserId{22}] == 3 &&
                       PersonMemoryStore::getForSenders(original) == profiles &&
                       storedSessionMemory(100) == sessionMemory(true),
               "empty person extraction skipped session summary or changed global state");
@@ -441,13 +461,15 @@ namespace {
             mode.store(Mode::AffinityOnly);
             require(co_await MemoryMaintenanceCoordinator::process(database, privateId, original, json::array()),
               "private affinity-only batch failed");
-            require(AffinityStore::getAffinityMap()[22] == 5 && PersonMemoryStore::getForSenders(original) == profiles,
+            require(AffinityStore::getAffinityMap()[insoulforge::UserId{22}] == 5 &&
+                      PersonMemoryStore::getForSenders(original) == profiles,
               "private score did not update globally or created unwanted memory");
             mode.store(Mode::MemoryOnly);
             require(co_await MemoryMaintenanceCoordinator::process(database, privateId, original, json::array()),
               "private memory-only batch failed");
             const auto privateProfiles = PersonMemoryStore::getForSenders(original);
-            require(AffinityStore::getAffinityMap()[22] == 5 && privateProfiles[0]["pending_entries"].size() == 2 &&
+            require(AffinityStore::getAffinityMap()[insoulforge::UserId{22}] == 5 &&
+                      privateProfiles[0]["pending_entries"].size() == 2 &&
                       privateProfiles[0]["pending_entries"][1]["source_session"] == std::to_string(privateId),
               "private entries were not globally shared or altered affinity");
 
@@ -535,7 +557,8 @@ namespace {
             config.executor.path = "/executor-fixture";
             config.executor.model = "fixture";
             config.execution.maxToolRounds.store(3);
-            MemoryMaintenanceStore::apply(database, 100, {.personEntries = {{99, "older sender must not be loaded"}}});
+            MemoryMaintenanceStore::apply(
+              database, 100, {.personEntries = {{insoulforge::UserId{99}, "older sender must not be loaded"}}});
             auto chat = json::array({"legacy text"});
             for (i32 index = 0; index < 13; ++index) {
                 const json record = {{"time", "2026-10-20 12:00:00"},
@@ -715,13 +738,14 @@ auto main() -> int {
           if (!profile.contains("relationship") || profile.contains("stable_memory"))
               throw std::runtime_error("consolidation receives obsolete person schema");
           if (user_id == "88001" && personFixture.injectNew.exchange(false)) {
-              MemoryMaintenanceStore::apply(Database::instance(), 200, {.personEntries = {{88001, "请求期间新增"}}});
+              MemoryMaintenanceStore::apply(
+                Database::instance(), 200, {.personEntries = {{insoulforge::UserId{88001}, "请求期间新增"}}});
           }
           if (personFixture.editRelationship.exchange(false)) {
-              const auto original = PersonMemoryStore::getPerson(parseUInt64(user_id));
+              const auto original = PersonMemoryStore::getPerson(insoulforge::UserId{user_id});
               auto edited = original;
               edited["relationship"] = {"人工修改关系"};
-              PersonMemoryStore::updatePerson(parseUInt64(user_id), original, edited);
+              PersonMemoryStore::updatePerson(insoulforge::UserId{user_id}, original, edited);
           }
           if (auto *service = personFixture.stopService.exchange(nullptr)) {
               service->stop();
@@ -900,6 +924,10 @@ auto main() -> int {
                   current != Mode::EventRetired && current != Mode::LegacyForget && current != Mode::LegacyInjection) {
                   extracted["affinity_changes"].push_back({{"user_id", "22"}, {"delta", 2}});
               }
+              if (current == Mode::StringIdentity) {
+                  extracted["memories"][0]["user_id"] = "user:alpha";
+                  extracted["affinity_changes"][0]["user_id"] = "00123";
+              }
               if (current == Mode::AliasCorrection)
                   extracted["memories"][0]["entries"] = {"以后只叫我摄影佬"};
               if (current == Mode::InvalidQq)
@@ -947,12 +975,12 @@ auto main() -> int {
               context["conversation_summaries"][0]["summary"] == "讨论了部署方式，等待后续验证。"
               : !context["conversation_summaries"].empty());
           valid = valid && context["session_memory"] == sessionMemory() &&
-              (isPrivate ? context["current_session"]["user_id"] == 22 :
-                context["current_session"]["group_id"] == 100) &&
-              context["earlier_messages"].size() == 2 && context["earlier_messages"][0] == "legacy text" &&
-              context["earlier_messages"][1]["segments"][0]["text"] == std::string(500, 'x') + "…" &&
-              context["recent_messages"].size() == 12 &&
-              context["recent_messages"][0]["segments"][0]["text"] == std::string(501, 'x');
+                  (isPrivate ? context["current_session"]["user_id"] == "22"
+                             : context["current_session"]["group_id"] == 100) &&
+                  context["earlier_messages"].size() == 2 && context["earlier_messages"][0] == "legacy text" &&
+                  context["earlier_messages"][1]["segments"][0]["text"] == std::string(500, 'x') + "…" &&
+                  context["recent_messages"].size() == 12 &&
+                  context["recent_messages"][0]["segments"][0]["text"] == std::string(501, 'x');
           for (const auto key : {"earlier_messages", "recent_messages"}) {
               for (const auto &record: context[key]) {
                   if (record.is_string()) continue;

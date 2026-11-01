@@ -130,7 +130,7 @@ namespace {
         co_await saveQQConfig(qq);
         co_await saveQQConfig(qq);
         require(client.isConnected() && attempts.load() == previousAttempts &&
-                  QQNameDirectory::getName(123) == "改名后的机器人(我)",
+                  QQNameDirectory::getName(insoulforge::UserId{123}) == "改名后的机器人(我)",
           "identity-only and unchanged saves must preserve the connection");
         co_await waitFor([&] { return action->finished; }, "pending action did not finish after renaming");
         require(action->response.has_value(), "renaming must not interrupt an in-flight action");

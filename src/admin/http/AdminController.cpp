@@ -38,7 +38,7 @@ namespace {
     const auto g_processStartTime = std::chrono::system_clock::now();
 
     void addPersonName(json &person) {
-        const auto name = PersonNameResolver::instance().lookup(parseUInt64(getStr(person, "user_id")));
+        const auto name = PersonNameResolver::instance().lookup(UserId{getStr(person, "user_id")});
         person["name"] = name.value;
         person["name_pending"] = name.pending;
     }
@@ -64,7 +64,7 @@ namespace {
         item["groupIdStr"] = std::to_string(sessionId);
         if (SessionId::isPrivate(sessionId)) {
             item["sessionType"] = "private";
-            item["userId"] = SessionId::privateUserId(sessionId);
+            item["userId"] = std::to_string(SessionId::privateUserId(sessionId));
         }
         return item;
     }
@@ -353,9 +353,9 @@ auto AdminController::getAdmins(HttpRequestPtr req, std::function<void(const Htt
     const auto admins = AdminStore::getAdmins();
 
     json result(json::array());
-    for (const u64 userId: admins) {
+    for (const auto &userId: admins) {
         json admin;
-        admin["user_id"] = std::to_string(userId);
+        admin["user_id"] = userId.toString();
         result.push_back(admin);
     }
     callback(jsonResponse(result));
@@ -370,12 +370,12 @@ auto AdminController::addAdmin(HttpRequestPtr req, std::function<void(const Http
         co_return;
     }
 
-    const auto userId = jsonToUInt64((*body)["user_id"]);
-    if (userId == 0) {
+    const auto userId = UserId::parse(getStr(*body, "user_id"));
+    if (!userId) {
         callback(jsonResponse(AdminResponse::errorJson("缺少有效的 user_id 字段")));
         co_return;
     }
-    AdminStore::addAdmin(userId);
+    AdminStore::addAdmin(*userId);
 
     callback(jsonResponse(AdminResponse::okJson("管理员已添加")));
     co_return;
@@ -383,8 +383,12 @@ auto AdminController::addAdmin(HttpRequestPtr req, std::function<void(const Http
 
 auto AdminController::removeAdmin(
   HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &userId) const -> Task<> {
-    const u64 qqNum = std::stoull(userId);
-    AdminStore::removeAdmin(qqNum);
+    const auto id = UserId::parse(userId);
+    if (!id) {
+        callback(jsonResponse(AdminResponse::errorJson(id.error())));
+        co_return;
+    }
+    AdminStore::removeAdmin(*id);
 
     callback(jsonResponse(AdminResponse::okJson("管理员已删除")));
     co_return;
@@ -393,8 +397,8 @@ auto AdminController::removeAdmin(
 auto AdminController::getBlacklist(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
   -> Task<> {
     json result = json::array();
-    for (const u64 userId: BlacklistStore::getAll()) {
-        result.push_back({{"user_id", std::to_string(userId)}});
+    for (const auto &userId: BlacklistStore::getAll()) {
+        result.push_back({{"user_id", userId.toString()}});
     }
     callback(jsonResponse(result));
     co_return;
@@ -403,21 +407,21 @@ auto AdminController::getBlacklist(HttpRequestPtr req, std::function<void(const 
 auto AdminController::addBlacklistEntry(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
   -> Task<> {
     const auto body = parseJsonBody(req);
-    const u64 userId = body && body->contains("user_id") ? jsonToUInt64((*body)["user_id"]) : 0;
-    if (userId == 0) {
+    const auto userId = UserId::parse(body ? getStr(*body, "user_id") : "");
+    if (!userId) {
         callback(jsonResponse(AdminResponse::errorJson("缺少有效的 user_id 字段")));
         co_return;
     }
 
-    BlacklistStore::add(userId);
+    BlacklistStore::add(*userId);
     callback(jsonResponse(AdminResponse::okJson("黑名单已添加")));
     co_return;
 }
 
 auto AdminController::removeBlacklistEntry(
   HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &userId) const -> Task<> {
-    const auto parsedQq = tryParseUInt64(userId);
-    if (!parsedQq || *parsedQq == 0) {
+    const auto parsedQq = UserId::parse(userId);
+    if (!parsedQq) {
         callback(jsonResponse(AdminResponse::errorJson("无效的用户 ID")));
         co_return;
     }
@@ -818,12 +822,12 @@ auto AdminController::getPeople(HttpRequestPtr req, std::function<void(const Htt
 
 auto AdminController::getPerson(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
   const std::string &userId) const -> Task<> {
-    const auto id = parseUInt64(userId);
-    if (id == 0 || SessionId::isPrivate(id) || id == SessionId::kSystemAccountId) {
+    const auto id = UserId::parse(userId);
+    if (!id || id->toString() == "self" || *id == UserId{SessionId::kSystemAccountId}) {
         callback(jsonResponse(AdminResponse::errorJson("无效的用户 ID")));
         co_return;
     }
-    auto person = PersonMemoryStore::getPerson(id);
+    auto person = PersonMemoryStore::getPerson(*id);
     if (person.is_null()) {
         callback(jsonResponse(AdminResponse::errorJson("没有该人物的记录")));
         co_return;
@@ -837,14 +841,14 @@ auto AdminController::consolidatePerson(HttpRequestPtr req,
   std::function<void(const HttpResponsePtr &)> callback, const std::string &userId) const -> Task<> {
     auto status = drogon::k400BadRequest;
     std::string message = "无效的用户 ID";
-    const auto id = parseUInt64(userId);
-    if (id && !SessionId::isPrivate(id) && id != SessionId::kSystemAccountId) {
-        if (PersonMemoryStore::getPerson(id).is_null()) {
+    const auto id = UserId::parse(userId);
+    if (id && id->toString() != "self" && *id != UserId{SessionId::kSystemAccountId}) {
+        if (PersonMemoryStore::getPerson(*id).is_null()) {
             status = drogon::k404NotFound;
             message = "没有该人物的记录";
         } else {
             using Result = PersonMemoryConsolidator::Result;
-            const auto result = co_await PersonMemoryConsolidator::instance().runPerson(id);
+            const auto result = co_await PersonMemoryConsolidator::instance().runPerson(*id);
             switch (result) {
             case Result::Updated:
                 status = drogon::k200OK;
@@ -911,14 +915,15 @@ namespace {
 
 auto AdminController::updatePerson(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
   const std::string &userId) const -> Task<> {
-    const auto id = parseUInt64(userId);
+    const auto id = UserId::parse(userId);
     const auto body = parseJsonBody(req);
     auto status = drogon::k400BadRequest;
     std::string message = Config::instance().affinityEnabled.load(std::memory_order_relaxed)
       ? "人物数据无效：好感度须为 -100～100 的整数，记忆须为非空文本"
       : "人物数据无效：记忆须为非空文本";
-    if (id && !SessionId::isPrivate(id) && id != SessionId::kSystemAccountId && body && validPersonEdit(*body)) {
-        const bool saved = PersonMemoryStore::updatePerson(id, body->at("expected"), body->at("replacement"));
+    if (id && id->toString() != "self" && *id != UserId{SessionId::kSystemAccountId} && body &&
+        validPersonEdit(*body)) {
+        const bool saved = PersonMemoryStore::updatePerson(*id, body->at("expected"), body->at("replacement"));
         status = saved ? drogon::k200OK : drogon::k409Conflict;
         message = saved ? "人物信息已保存" : "人物信息已变化，请重新读取后编辑；当前草稿已保留";
     }
@@ -930,12 +935,13 @@ auto AdminController::updatePerson(HttpRequestPtr req, std::function<void(const 
 
 auto AdminController::deletePerson(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
   const std::string &userId) const -> Task<> {
-    const auto id = parseUInt64(userId);
+    const auto id = UserId::parse(userId);
     const auto body = parseJsonBody(req);
     auto status = drogon::k400BadRequest;
     std::string message = "无效的人物删除请求";
-    if (id && !SessionId::isPrivate(id) && id != SessionId::kSystemAccountId && body && body->contains("expected") && body->at("expected").is_object()) {
-        const bool removed = PersonMemoryStore::deletePerson(id, body->at("expected"));
+    if (id && id->toString() != "self" && *id != UserId{SessionId::kSystemAccountId} && body &&
+        body->contains("expected") && body->at("expected").is_object()) {
+        const bool removed = PersonMemoryStore::deletePerson(*id, body->at("expected"));
         status = removed ? drogon::k200OK : drogon::k409Conflict;
         message = removed ? "人物已删除" : "人物信息已变化，请刷新后重试";
     }
@@ -956,14 +962,14 @@ auto AdminController::getSessionAffinity(HttpRequestPtr req, std::function<void(
     const u64 gid = std::stoull(sessionId);
     auto affinityMap = AffinityStore::getAffinityMap();
 
-    std::vector<std::pair<u64, i32>> entries(affinityMap.begin(), affinityMap.end());
+    std::vector<std::pair<UserId, i32>> entries(affinityMap.begin(), affinityMap.end());
     std::ranges::sort(entries, [](const auto &a, const auto &b) -> auto { return a.second > b.second; });
 
     json list(json::array());
     for (const auto &[userId, affinity]: entries) {
         json item;
         // 用户 ID以字符串返回（超过 JS Number 安全范围）
-        item["user_id"] = std::to_string(userId);
+        item["user_id"] = userId.toString();
         // 昵称优先取运行时映射（含自定义昵称），缺失时回退 OneBot 实时查询
         std::string name(QQNameDirectory::getName(userId));
         if (name.empty() || name == "未知") {
@@ -1089,7 +1095,7 @@ auto AdminController::saveQQConfig(HttpRequestPtr req, std::function<void(const 
     const auto &config = Config::instance();
 
     // 更新机器人自己的自定义昵称
-    QQNameDirectory::setCustomName(config.selfQQNumber, config.botName + "(我)");
+    QQNameDirectory::setCustomName(UserId{config.selfQQNumber}, config.botName + "(我)");
     const auto savedConfig = config.getQQConfig();
     // 名称和私聊默认状态不影响连接，不应中断正在等待的 OneBot 动作。
     if (previousConfig["oneBotTransport"] != savedConfig["oneBotTransport"] ||

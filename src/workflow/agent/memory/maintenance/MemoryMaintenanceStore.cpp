@@ -64,25 +64,25 @@ namespace insoulforge::MemoryMaintenanceStore {
                 statement.execOrThrow();
             }
 
-            for (const auto &[qqNumber, content]: result.personEntries) {
+            for (const auto &[userId, content]: result.personEntries) {
                 const Statement profile(handle, "INSERT OR IGNORE INTO person_memories (user_id) VALUES (?)");
-                profile.bind(1, qqNumber);
+                profile.bind(1, userId.toString());
                 profile.execOrThrow();
                 const Statement entry(
                   handle, "INSERT INTO person_memory_entries (user_id, source_session, content) VALUES (?, ?, ?)");
-                entry.bind(1, qqNumber);
+                entry.bind(1, userId.toString());
                 entry.bind(2, sessionId);
                 entry.bind(3, content);
                 entry.execOrThrow();
             }
 
-            for (const auto &[qqNumber, delta]: result.affinity) {
+            for (const auto &[userId, delta]: result.affinity) {
                 if (!Config::instance().affinityEnabled.load(std::memory_order_relaxed))
                     break;
                 const Statement statement(handle,
                   "INSERT INTO person_affinity (user_id, affinity) VALUES (?, max(min(?, 100), -100)) "
                   "ON CONFLICT(user_id) DO UPDATE SET affinity = max(min(affinity + ?, 100), -100)");
-                statement.bind(1, qqNumber);
+                statement.bind(1, userId.toString());
                 statement.bind(2, delta);
                 statement.bind(3, delta);
                 statement.execOrThrow();

@@ -323,7 +323,7 @@ namespace insoulforge::MessageRouter {
             co_return applySessionType(
               makeDecision(RouterDecision::Action::REPLY, "系统消息触发", 100, true), sessionId);
         }
-        if (MessageRecord::mentions(*trigger, Config::instance().selfQQNumber)) {
+        if (MessageRecord::mentions(*trigger, UserId{Config::instance().selfQQNumber})) {
             co_return applySessionType(
               makeDecision(RouterDecision::Action::REPLY, "用户@提及", std::nullopt, true), sessionId);
         }

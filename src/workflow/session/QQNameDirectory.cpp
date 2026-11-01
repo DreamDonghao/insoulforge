@@ -1,56 +1,57 @@
 /// @file QQNameDirectory.cpp
-/// @brief 运行时 QQ 昵称目录实现
+/// @brief 运行时用户昵称目录实现
 
 #include <shared_mutex>
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/UserId.hpp>
 #include <workflow/session/QQNameDirectory.hpp>
 
 namespace insoulforge::QQNameDirectory {
     namespace {
         std::shared_mutex nameMutex;
-        std::unordered_map<u64, std::string> observedNames;
-        std::unordered_map<u64, std::string> customNames;
+        std::unordered_map<UserId, std::string> observedNames;
+        std::unordered_map<UserId, std::string> customNames;
     } // namespace
 
-    void recordName(const u64 qqNumber, std::string name) {
-        if (qqNumber == 0 || name.empty()) {
+    void recordName(const UserId &userId, std::string name) {
+        if (name.empty()) {
             return;
         }
         std::unique_lock lock(nameMutex);
-        if (!customNames.contains(qqNumber)) {
-            observedNames[qqNumber] = std::move(name);
+        if (!customNames.contains(userId)) {
+            observedNames[userId] = std::move(name);
         }
     }
 
-    void setCustomName(const u64 qqNumber, std::string name) {
-        if (qqNumber == 0 || name.empty()) {
+    void setCustomName(const UserId &userId, std::string name) {
+        if (name.empty()) {
             return;
         }
         std::unique_lock lock(nameMutex);
-        customNames[qqNumber] = std::move(name);
+        customNames[userId] = std::move(name);
     }
 
-    auto getName(const u64 qqNumber) -> std::string {
+    auto getName(const UserId &userId) -> std::string {
         std::shared_lock lock(nameMutex);
-        if (const auto custom = customNames.find(qqNumber); custom != customNames.end()) {
+        if (const auto custom = customNames.find(userId); custom != customNames.end()) {
             return custom->second;
         }
-        if (const auto observed = observedNames.find(qqNumber); observed != observedNames.end()) {
+        if (const auto observed = observedNames.find(userId); observed != observedNames.end()) {
             return observed->second;
         }
         return "未知";
     }
 
-    auto nameToQQMap() -> std::unordered_map<std::string, u64> {
+    auto nameToQQMap() -> std::unordered_map<std::string, UserId> {
         std::shared_lock lock(nameMutex);
-        std::unordered_map<std::string, u64> names;
+        std::unordered_map<std::string, UserId> names;
         names.reserve(observedNames.size() + customNames.size());
-        for (const auto &[qqNumber, name]: observedNames) {
-            names[name] = qqNumber;
+        for (const auto &[userId, name]: observedNames) {
+            names.insert_or_assign(name, userId);
         }
-        for (const auto &[qqNumber, name]: customNames) {
-            names[name] = qqNumber;
+        for (const auto &[userId, name]: customNames) {
+            names.insert_or_assign(name, userId);
         }
         return names;
     }

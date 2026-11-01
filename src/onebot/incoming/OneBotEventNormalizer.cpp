@@ -131,7 +131,7 @@ namespace insoulforge::OneBotEventNormalizer {
             }
 
             const std::string senderName = displayName(atOrNull(body, "sender"));
-            QQNameDirectory::recordName(senderId, senderName);
+            QQNameDirectory::recordName(UserId{senderId}, senderName);
             json record = createRecord(body, senderId, senderName, messageId);
             json images = json::array();
             std::optional<std::string> replyTo;
@@ -162,7 +162,7 @@ namespace insoulforge::OneBotEventNormalizer {
             }
 
             const std::string senderName = displayName(atOrNull(body, "sender"));
-            QQNameDirectory::recordName(actorId, senderName);
+            QQNameDirectory::recordName(UserId{actorId}, senderName);
             json record = createRecord(body, actorId, senderName, makeSyntheticMessageId());
             if (actorId == getUInt(body, "self_id")) {
                 record["sender"]["user_id"] = "self";
@@ -182,7 +182,7 @@ namespace insoulforge::OneBotEventNormalizer {
 
             const std::string noticeType = getStr(body, "notice_type");
             const std::string senderName = displayName(atOrNull(body, "sender"));
-            QQNameDirectory::recordName(memberId, senderName);
+            QQNameDirectory::recordName(UserId{memberId}, senderName);
             json record = createRecord(body, memberId, senderName, makeSyntheticMessageId());
             json event{{"type", "member_event"}, {"action", noticeType == "group_increase" ? "join" : "leave"}};
             if (const std::string reason = getStr(body, "sub_type"); !reason.empty()) {

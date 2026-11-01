@@ -227,12 +227,13 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         }
 
         /// @brief 注入发送者当前好感度（读时注入，保证 LLM 看到的永远是最新值）
-        /// @details userId 非数字（机器人记录的 "self"）跳过；映射中不存在的用户按 0（中立）注入
-        [[nodiscard]] auto injectAffinity(json content, const std::unordered_map<u64, i32> &affinityMap) -> json {
+        /// @details 跳过机器人身份标记；映射中不存在的用户按 0（中立）注入
+        [[nodiscard]] auto injectAffinity(json content, const std::unordered_map<UserId, i32> &affinityMap) -> json {
             if (!content.is_object() || !content.contains("sender"))
                 return content;
-            if (const u64 userId = parseUInt64(getStr(content["sender"], "user_id")); userId > 0) {
-                const auto it = affinityMap.find(userId);
+            if (const auto userId = UserId::parse(getStr(content["sender"], "user_id"));
+              userId && userId->toString() != "self") {
+                const auto it = affinityMap.find(*userId);
                 content["sender"]["affinity"] = it != affinityMap.end() ? it->second : 0;
             }
             return content;
@@ -253,7 +254,8 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
             const size_t olderCount = totalRecords > kRecentRecordCount ? totalRecords - kRecentRecordCount : 0;
 
             const bool affinityEnabled = Config::instance().affinityEnabled.load(std::memory_order_relaxed);
-            const auto affinityMap = affinityEnabled ? AffinityStore::getAffinityMap() : std::unordered_map<u64, i32>{};
+            const auto affinityMap =
+              affinityEnabled ? AffinityStore::getAffinityMap() : std::unordered_map<UserId, i32>{};
 
             const bool includeGroupCard = !SessionId::isPrivate(chatRecords.getSessionId()) &&
                                           SessionStore::getSessionConfig(chatRecords.getSessionId()).sendGroupCard;
@@ -290,7 +292,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
             json sessionInfo;
             if (SessionId::isPrivate(sessionId)) {
                 sessionInfo["type"] = "private";
-                sessionInfo["user_id"] = SessionId::toStorageTarget(sessionId).second;
+                sessionInfo["user_id"] = std::to_string(SessionId::toStorageTarget(sessionId).second);
             } else {
                 sessionInfo["type"] = "group";
                 sessionInfo["group_id"] = sessionId;

@@ -26,7 +26,7 @@ namespace insoulforge {
         std::string name;
         if (SessionId::isPrivate(sessionId)) {
             // 私聊会话取 QQ 昵称，复用 groupName 列存储
-            const u64 userId = SessionId::privateUserId(sessionId);
+            const UserId userId{SessionId::privateUserId(sessionId)};
             const auto resp = co_await OneBotClient::getStrangerInfo(userId, sessionId);
             name = getStr(atOrNull(resp, "data"), "nickname");
         } else {

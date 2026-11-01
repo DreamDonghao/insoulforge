@@ -9,12 +9,10 @@
 #include <limits>
 #include <memory>
 #include <optional>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -22,14 +20,32 @@
 #include <openssl/evp.h>
 #include <spdlog/sinks/ostream_sink.h>
 #include <spdlog/spdlog.h>
-#include <infrastructure/logging/Logger.hpp>
-#include <infrastructure/logging/LogBuffer.hpp>
+#include <sstream>
+#include <type_traits>
 
 #include <admin/access/AdminAccessToken.hpp>
+#include <admin/http/AdminController.hpp>
+#include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/config/Config.hpp>
+#include <infrastructure/http/HttpUtil.hpp>
+#include <infrastructure/logging/LogBuffer.hpp>
+#include <infrastructure/logging/Logger.hpp>
+#include <infrastructure/storage/Database.hpp>
+#include <infrastructure/storage/SchemaMigrator.hpp>
+#include <infrastructure/storage/Statement.hpp>
+#include <onebot/incoming/OneBotEventNormalizer.hpp>
+#include <onebot/messaging/MessageFormatter.hpp>
+#include <onebot/transport/OneBotClient.hpp>
+#include <workflow/MessageList.hpp>
+#include <workflow/MessageRouter.hpp>
+#include <workflow/OneBotEventWorkflow.hpp>
+#include <workflow/SessionWorkflowState.hpp>
 #include <workflow/access/AdminStore.hpp>
 #include <workflow/access/BlacklistStore.hpp>
-#include <admin/http/AdminController.hpp>
 #include <workflow/agent/ability/AsyncTaskManager.hpp>
+#include <workflow/agent/llm/JevClient.hpp>
+#include <workflow/agent/llm/prompts/PromptService.hpp>
+#include <workflow/agent/llm/usage/UsageStore.hpp>
 #include <workflow/agent/memory/LongTermMemoryStore.hpp>
 #include <workflow/agent/memory/MemoryStore.hpp>
 #include <workflow/agent/memory/PersonMemoryStore.hpp>
@@ -42,34 +58,20 @@
 #include <workflow/agent/tools/ToolRegistry.hpp>
 #include <workflow/agent/tools/custom/LuaToolExecutor.hpp>
 #include <workflow/agent/tools/custom/ToolStore.hpp>
+#include <workflow/agent/tools/image/CharacterImageStore.hpp>
+#include <workflow/agent/tools/image/ImageGenerationService.hpp>
 #include <workflow/agent/tools/plugins/ActionToolsPlugin.hpp>
-#include <workflow/history/ChatRecordStore.hpp>
+#include <workflow/command/CommandProcessor.hpp>
 #include <workflow/history/ChatRecordManager.hpp>
+#include <workflow/history/ChatRecordStore.hpp>
 #include <workflow/history/SharedConversationContext.hpp>
 #include <workflow/message/MessageRecord.hpp>
+#include <workflow/message/MessageService.hpp>
 #include <workflow/message/SessionId.hpp>
-#include <workflow/session/QQNameDirectory.hpp>
-#include <workflow/session/SessionStore.hpp>
-#include <workflow/command/CommandProcessor.hpp>
-#include <workflow/MessageList.hpp>
-#include <workflow/MessageRouter.hpp>
-#include <onebot/incoming/OneBotEventNormalizer.hpp>
-#include <onebot/messaging/MessageFormatter.hpp>
-#include <workflow/OneBotEventWorkflow.hpp>
-#include <workflow/SessionWorkflowState.hpp>
-#include <infrastructure/NumericTypes.hpp>
-#include <infrastructure/config/Config.hpp>
-#include <infrastructure/http/HttpUtil.hpp>
-#include <infrastructure/storage/Database.hpp>
-#include <infrastructure/storage/SchemaMigrator.hpp>
-#include <infrastructure/storage/Statement.hpp>
-#include <workflow/agent/llm/JevClient.hpp>
-#include <workflow/agent/llm/prompts/PromptService.hpp>
-#include <workflow/agent/llm/usage/UsageStore.hpp>
-#include <workflow/agent/tools/image/CharacterImageStore.hpp>
 #include <workflow/message/image/ImageDescriptionService.hpp>
 #include <workflow/message/image/ImageDescriptionStore.hpp>
-#include <workflow/agent/tools/image/ImageGenerationService.hpp>
+#include <workflow/session/QQNameDirectory.hpp>
+#include <workflow/session/SessionStore.hpp>
 
 namespace {
     using insoulforge::i32;
@@ -109,8 +111,8 @@ namespace {
     void testOneBotMessageFormatter() {
         constexpr std::string_view kTestName = "OneBot message formatter";
         using insoulforge::MessageFormatter::convertAtToCQCode;
-        insoulforge::QQNameDirectory::setCustomName(81001, "FormatUser");
-        insoulforge::QQNameDirectory::setCustomName(81002, "FormatUserLong");
+        insoulforge::QQNameDirectory::setCustomName(insoulforge::UserId{81001}, "FormatUser");
+        insoulforge::QQNameDirectory::setCustomName(insoulforge::UserId{81002}, "FormatUserLong");
         check(convertAtToCQCode("hello") == "hello", "plain text is unchanged", kTestName);
         check(convertAtToCQCode("@[QQ:81003]") == "[CQ:at,qq=81003]", "numeric mention is converted", kTestName);
         check(convertAtToCQCode("@FormatUserLong @FormatUser") == "[CQ:at,qq=81002] [CQ:at,qq=81001]",
@@ -151,7 +153,8 @@ namespace {
         check((*record)["assets"]["images"].size() == 1, "image source has one asset entry", kTestName);
         check((*record)["assets"]["images"][0]["source"]["url"] == "https://example.com/cat.jpg",
           "image URL stays in assets", kTestName);
-        check(insoulforge::QQNameDirectory::getName(11) == "Alice", "sender name is recorded", kTestName);
+        check(insoulforge::QQNameDirectory::getName(insoulforge::UserId{11}) == "Alice", "sender name is recorded",
+          kTestName);
         check(insoulforge::SessionId::toStorageTarget(insoulforge::SessionId::fromPrivateUser(11)).first == "private",
           "private session storage target is preserved", kTestName);
 
@@ -405,8 +408,10 @@ namespace {
         const insoulforge::json legacyText = {{"text", "legacy text"}};
         check(
           insoulforge::MessageRecord::extractText(legacyText).empty(), "runtime requires normalized text segments", kTestName);
-        check(insoulforge::MessageRecord::mentions(modernMention, 42), "matches modern mention target", kTestName);
-        check(!insoulforge::MessageRecord::mentions(legacyMention, 42), "flat mention targets must be migrated first", kTestName);
+        check(insoulforge::MessageRecord::mentions(modernMention, insoulforge::UserId{42}),
+          "matches modern mention target", kTestName);
+        check(!insoulforge::MessageRecord::mentions(legacyMention, insoulforge::UserId{42}),
+          "flat mention targets must be migrated first", kTestName);
         check(
           insoulforge::MessageRecord::hasSegmentType(modernMention, "at"), "finds semantic segment type", kTestName);
         check(insoulforge::MessageRecord::isAssistant(modernMention), "recognizes assistant sender", kTestName);
@@ -639,8 +644,38 @@ namespace {
         check(!record.dump().contains("base64://"), "record excludes image transport data", kTestName);
     }
 
+    void prepareV25Schema(sqlite3 *db) {
+        using namespace insoulforge;
+        Statement(db, "DROP INDEX idx_person_memory_entries_user_id").execOrThrow();
+        for (const std::string table:
+          {"admins", "blacklisted_users", "person_affinity", "person_memories", "person_memory_entries"}) {
+            std::string body;
+            {
+                const Statement schema(db, "SELECT sql FROM sqlite_master WHERE name=? AND type='table'");
+                schema.bind(1, table);
+                check(schema.step(), "fixture table exists", "integer identity fixture");
+                const auto sql = schema.getText(0);
+                body = sql.substr(sql.find('('));
+            }
+            const auto start = body.find("user_id TEXT NOT NULL PRIMARY KEY");
+            if (start != std::string::npos)
+                body.replace(
+                  start, std::string_view("user_id TEXT NOT NULL PRIMARY KEY").size(), "user_id INTEGER PRIMARY KEY");
+            else
+                body.replace(body.find("user_id TEXT"), std::string_view("user_id TEXT").size(), "user_id INTEGER");
+            Statement(db, fmt::format("CREATE TABLE {}_old {}", table, body)).execOrThrow();
+            Statement(db, fmt::format("INSERT INTO {}_old SELECT * FROM {}", table, table)).execOrThrow();
+            Statement(db, "DROP TABLE " + table).execOrThrow();
+            Statement(db, fmt::format("ALTER TABLE {}_old RENAME TO {}", table, table)).execOrThrow();
+        }
+        Statement(db, "CREATE INDEX idx_person_memory_entries_user_id ON person_memory_entries(user_id, id)")
+          .execOrThrow();
+        Statement(db, "PRAGMA user_version=25").execOrThrow();
+    }
+
     // v1.7.0 的身份列仍为 qq_number，其余结构与当前版本一致。
     void prepareV24Schema(sqlite3 *db) {
+        prepareV25Schema(db);
         for (const auto *table: {"admins", "blacklisted_users", "person_affinity", "person_memories",
                "person_memory_entries"})
             insoulforge::Statement(db,
@@ -649,6 +684,158 @@ namespace {
         insoulforge::Statement(db,
           "CREATE INDEX idx_person_memory_entries_qq ON person_memory_entries(qq_number, id)").execOrThrow();
         insoulforge::Statement(db, "PRAGMA user_version=24").execOrThrow();
+    }
+
+    void testStringUserId() {
+        using namespace insoulforge;
+        constexpr std::string_view kTestName = "string user identity";
+        static_assert(!std::is_convertible_v<u64, UserId>);
+        static_assert(!std::is_convertible_v<std::string, UserId>);
+        static_assert(!std::is_convertible_v<UserId, u64>);
+        static_assert(!std::is_convertible_v<UserId, std::string>);
+        static_assert(!std::is_default_constructible_v<UserId>);
+        const UserId number{std::numeric_limits<u64>::max()};
+        check(number.toU64() == std::numeric_limits<u64>::max() && number.toString() == "18446744073709551615",
+          "maximum unsigned integer round trips", kTestName);
+        check(UserId{0}.toString() == "0" && UserId{"00123"} != UserId{123} && UserId{"00123"}.toString() == "00123",
+          "string identity is never normalized", kTestName);
+        check(UserId{"用户:abc"}.toString() == "用户:abc" && !UserId{"用户:abc"}.toU64() &&
+                !UserId{"18446744073709551616"}.toU64() && !UserId{"-1"}.toU64() && !UserId{" 1"}.toU64() &&
+                !UserId{"1 "}.toU64(),
+          "numeric conversions report invalid IDs", kTestName);
+        bool negativeRejected = false, emptyRejected = false;
+        try {
+            const UserId invalid{-1};
+        } catch (const std::invalid_argument &) {
+            negativeRejected = true;
+        }
+        try {
+            const UserId invalid{""};
+        } catch (const std::invalid_argument &) {
+            emptyRejected = true;
+        }
+        check(negativeRejected && emptyRejected && !UserId::parse("") && !UserId::parse(std::string_view{"a\0b", 3}),
+          "constructors and parse reject invalid input", kTestName);
+        const std::unordered_set<UserId> ids{UserId{"00123"}, UserId{123}, UserId{"用户:abc"}, UserId{"00123"}};
+        check(ids.size() == 3 && ids.contains(UserId{"用户:abc"}) && UserId{"a"} < UserId{"b"},
+          "hash and ordering use exact strings", kTestName);
+
+        auto &db = Database::instance();
+        check(db.initialize(":memory:").has_value(), "initializes string identity storage", kTestName);
+        const UserId person{"user:alpha/测试"};
+        const UserId padded{"00123"};
+        AdminStore::addAdmin(person);
+        BlacklistStore::add(person);
+        QQNameDirectory::recordName(person, "Alpha");
+        AffinityStore::adjustAffinity(person, 3);
+        MemoryMaintenanceStore::apply(
+          db, 100, {.personEntries = {{person, "喜欢摄影"}, {padded, "保留前导零"}, {UserId{123}, "另一个人"}}});
+        check(AdminStore::isAdmin(person) && BlacklistStore::contains(person) &&
+                QQNameDirectory::getName(person) == "Alpha" && PersonMemoryStore::getPerson(person)["affinity"] == 3,
+          "non-numeric identity works across stores and nickname cache", kTestName);
+        check(PersonMemoryStore::getPerson(padded)["pending_entries"][0]["content"] == "保留前导零" &&
+                PersonMemoryStore::getPerson(UserId{123})["pending_entries"][0]["content"] == "另一个人",
+          "TEXT storage keeps padded and unpadded identities separate", kTestName);
+        const auto profiles = PersonMemoryStore::getForSenders(
+          json::array({{{"sender", {{"user_id", person.toString()}}}}, {{"sender", {{"user_id", "self"}}}}}));
+        check(profiles.size() == 1 && profiles[0]["user_id"] == person.toString(),
+          "context loads non-numeric people and excludes self", kTestName);
+        const auto aliases =
+          MemoryStore::normalizeSessionMemory({{"aliases", {{{"user_id", person.toString()}, {"names", {"阿甲"}}}}}});
+        check(aliases && (*aliases)["aliases"][0]["user_id"] == person.toString(),
+          "session aliases accept non-numeric users", kTestName);
+        const AdminController controller;
+        drogon::HttpResponsePtr response;
+        drogon::sync_wait(controller.getPerson(
+          drogon::HttpRequest::newHttpRequest(), [&](const auto &value) { response = value; }, person.toString()));
+        check(response && json::parse(response->body())["user_id"] == person.toString(),
+          "person API accepts and returns an exact string identity", kTestName);
+        auto original = PersonMemoryStore::getPerson(person);
+        auto edit = original;
+        edit["profile"] = {"喜欢摄影"};
+        check(PersonMemoryStore::updatePerson(person, original, edit), "string user can be edited", kTestName);
+        const auto snapshot = PersonMemoryStore::pendingSnapshot(person);
+        check(snapshot.has_value(), "string user has consolidation snapshot", kTestName);
+        PersonMemoryStore::applyConsolidation(*snapshot,
+          {{"profile", {"喜欢摄影"}}, {"relationship", json::array()}, {"recent_interactions", json::array()}});
+        check(PersonMemoryStore::getPerson(person)["pending_entries"].empty(), "string user can be consolidated",
+          kTestName);
+        check(PersonMemoryStore::deletePerson(person, PersonMemoryStore::getPerson(person)),
+          "string user can be deleted", kTestName);
+        AdminStore::removeAdmin(person);
+        BlacklistStore::remove(person);
+        check(!AdminStore::isAdmin(person) && !BlacklistStore::contains(person), "string access records can be removed",
+          kTestName);
+        check(!drogon::sync_wait(OneBotClient::sendPrivateMsg(person, "must not send")) &&
+                !drogon::sync_wait(MessageService::sendPrivateMsg(person, "must not send")),
+          "numeric protocol and session boundaries reject non-numeric users before network calls", kTestName);
+        db.close();
+    }
+
+    void testTextUserIdMigration() {
+        using namespace insoulforge;
+        constexpr std::string_view kTestName = "text user identity migration";
+        auto &db = Database::instance();
+        check(db.initialize(":memory:").has_value(), "initializes migration fixture", kTestName);
+        AdminStore::addAdmin(UserId{9007199254740993ULL});
+        BlacklistStore::add(UserId{42});
+        AffinityStore::adjustAffinity(UserId{42}, 7);
+        MemoryMaintenanceStore::apply(db, 100, {.personEntries = {{UserId{42}, "保留条目"}}});
+        const auto original = PersonMemoryStore::getPerson(UserId{42});
+        prepareV25Schema(db.handle());
+        Statement(db.handle(), "INSERT INTO admins(user_id) VALUES (-1)").execOrThrow();
+        Statement(db.handle(), "CREATE INDEX custom_affinity_index ON person_affinity(affinity)").execOrThrow();
+        Statement(db.handle(), "CREATE TRIGGER reject_blocked_user BEFORE INSERT ON admins WHEN NEW.user_id='blocked' "
+                               "BEGIN SELECT RAISE(ABORT,'blocked'); END")
+          .execOrThrow();
+        Statement(db.handle(), "UPDATE sqlite_sequence SET seq=100 WHERE name='person_memory_entries'").execOrThrow();
+        sqlite3_set_authorizer(
+          db.handle(),
+          [](void *, int action, const char *name, const char *, const char *, const char *) -> int {
+              return action == SQLITE_DROP_TABLE && std::string_view(name) == "person_memories" ? SQLITE_DENY
+                                                                                                : SQLITE_OK;
+          },
+          nullptr);
+        bool rejected = false;
+        try {
+            SchemaMigrator::migrate(db.handle());
+        } catch (const DbError &) {
+            rejected = true;
+        }
+        sqlite3_set_authorizer(db.handle(), nullptr, nullptr);
+        {
+            const Statement version(db.handle(), "PRAGMA user_version");
+            const Statement type(db.handle(), "SELECT type FROM pragma_table_info('admins') WHERE name='user_id'");
+            check(rejected && version.step() && version.getInt(0) == 25 && type.step() && type.getText(0) == "INTEGER",
+              "failed rebuild rolls back all table conversions and version", kTestName);
+        }
+        SchemaMigrator::migrate(db.handle());
+        check(AdminStore::isAdmin(UserId{9007199254740993ULL}) &&
+                AdminStore::isAdmin(UserId{std::numeric_limits<u64>::max()}) && BlacklistStore::contains(UserId{42}) &&
+                PersonMemoryStore::getPerson(UserId{42}) == original,
+          "migration preserves large identity, memory, source session and affinity", kTestName);
+        for (const auto *table:
+          {"admins", "blacklisted_users", "person_affinity", "person_memories", "person_memory_entries"}) {
+            const Statement type(
+              db.handle(), fmt::format("SELECT type FROM pragma_table_info('{}') WHERE name='user_id'", table));
+            check(type.step() && type.getText(0) == "TEXT", "all user identity columns are TEXT", kTestName);
+        }
+        bool triggerPreserved = false;
+        try {
+            Statement(db.handle(), "INSERT INTO admins(user_id) VALUES ('blocked')").execOrThrow();
+        } catch (const DbError &) {
+            triggerPreserved = true;
+        }
+        const Statement index(db.handle(), "SELECT 1 FROM sqlite_master WHERE name='custom_affinity_index'");
+        check(triggerPreserved && index.step(), "migration preserves triggers and custom indexes", kTestName);
+        MemoryMaintenanceStore::apply(db, 100, {.personEntries = {{UserId{"new-user"}, "新记录"}}});
+        check(std::stoll(
+                PersonMemoryStore::getPerson(UserId{"new-user"})["pending_entries"][0]["id"].get<std::string>()) > 100,
+          "migration preserves AUTOINCREMENT high watermark", kTestName);
+        SchemaMigrator::migrate(db.handle());
+        check(PersonMemoryStore::getPerson(UserId{"new-user"})["pending_entries"].size() == 1,
+          "repeat migration preserves string identity", kTestName);
+        db.close();
     }
 
     void testSchemaMigration() {
@@ -1311,15 +1498,17 @@ namespace {
         check(noTaskTables(), "fresh schema has no maintenance queues", kTestName);
         const insoulforge::PreparedLongTermMemory longTerm{
           .content = "Alice 喜欢 C++", .embedding = {0.1F, 0.2F}};
-        insoulforge::MemoryMaintenanceStore::apply(
-          database, 100, {.shortTerm = "近期状态", .longTerm = {longTerm},
-            .personEntries = {{11, "喜欢 C++"}}, .affinity = {{11, 3}}});
+        insoulforge::MemoryMaintenanceStore::apply(database, 100,
+          {.shortTerm = "近期状态",
+            .longTerm = {longTerm},
+            .personEntries = {{insoulforge::UserId{11}, "喜欢 C++"}},
+            .affinity = {{insoulforge::UserId{11}, 3}}});
         const auto personSenders = insoulforge::json::array({{{"sender", {{"user_id", "11"}}}}});
         const auto initialProfiles = insoulforge::PersonMemoryStore::getForSenders(personSenders);
         const auto resultsPreserved = [&]() -> bool {
             return insoulforge::MemoryStore::getShortTermMemory(100) == "近期状态" &&
                    insoulforge::LongTermMemoryStore::countMemories(100) == 1 &&
-                   insoulforge::AffinityStore::getAffinityMap()[11] == 3 &&
+                   insoulforge::AffinityStore::getAffinityMap()[insoulforge::UserId{11}] == 3 &&
                    insoulforge::PersonMemoryStore::getForSenders(personSenders) == initialProfiles;
         };
         check(resultsPreserved(), "commits memory and affinity together", kTestName);
@@ -1329,9 +1518,11 @@ namespace {
           "creates failure fixture", kTestName);
         bool failed = false;
         try {
-            insoulforge::MemoryMaintenanceStore::apply(
-              database, 100, {.shortTerm = "不能保存", .longTerm = {longTerm},
-                .personEntries = {{11, "不能保存"}}, .affinity = {{12, 5}}});
+            insoulforge::MemoryMaintenanceStore::apply(database, 100,
+              {.shortTerm = "不能保存",
+                .longTerm = {longTerm},
+                .personEntries = {{insoulforge::UserId{11}, "不能保存"}},
+                .affinity = {{insoulforge::UserId{12}, 5}}});
         } catch (const insoulforge::DbError &) {
             failed = true;
         }
@@ -1341,8 +1532,10 @@ namespace {
         failed = false;
         try {
             insoulforge::MemoryMaintenanceStore::apply(database, 100,
-              {.shortTerm = "不能保存", .longTerm = {longTerm}, .replacedLongTermIds = {existingId},
-                .affinity = {{12, 5}}});
+              {.shortTerm = "不能保存",
+                .longTerm = {longTerm},
+                .replacedLongTermIds = {existingId},
+                .affinity = {{insoulforge::UserId{12}, 5}}});
         } catch (const insoulforge::DbError &) {
             failed = true;
         }
@@ -1394,14 +1587,14 @@ namespace {
         ChatRecordStore::addChatRecord(100, "user", dumpJson(record));
         MemoryStore::updateShortTermMemory(100,
           R"({"aliases":[{"qq":"9007199254740993","names":["老王"]}],"conversation_summaries":[]})");
-        AdminStore::addAdmin(9007199254740993ULL);
-        AffinityStore::adjustAffinity(42, 7);
-        BlacklistStore::add(42);
-        MemoryMaintenanceStore::apply(db, 100, {.personEntries = {{42, "待整理内容"}}});
+        AdminStore::addAdmin(insoulforge::UserId{9007199254740993ULL});
+        AffinityStore::adjustAffinity(insoulforge::UserId{42}, 7);
+        BlacklistStore::add(insoulforge::UserId{42});
+        MemoryMaintenanceStore::apply(db, 100, {.personEntries = {{insoulforge::UserId{42}, "待整理内容"}}});
         Statement(db.handle(), R"(UPDATE person_memories SET profile='["喜欢摄影"]',
           relationship='["经常交流"]', recent_interactions='["约好拍照"]' WHERE user_id=42)").execOrThrow();
         PersonMemoryStore::saveDailyState({"2026-10-30", ""});
-        const auto originalPerson = PersonMemoryStore::getPerson(42);
+        const auto originalPerson = PersonMemoryStore::getPerson(insoulforge::UserId{42});
         ChatRecordStore::addChatRecord(101, "user", R"({"text":"旧正文","sender":{"qq":"11"},
           "images":[{"file":"legacy.jpg","url":"https://example.com/legacy.jpg","description":"旧图片","recognition_status":"succeeded"}],
           "faces":[{"id":"1","label":"微笑"}],
@@ -1458,10 +1651,12 @@ namespace {
                 migrated["tool_history"] == record["tool_history"],
           "does not rewrite text, CQ codes or custom tool arguments", kTestName);
         check(MemoryStore::projectShortTermMemory(MemoryStore::getShortTermMemory(100))["aliases"][0]["user_id"] ==
-                "9007199254740993" && AdminStore::isAdmin(9007199254740993ULL) &&
-                AffinityStore::getAffinityMap().at(42) == 7,
+                  "9007199254740993" &&
+                AdminStore::isAdmin(insoulforge::UserId{9007199254740993ULL}) &&
+                AffinityStore::getAffinityMap().at(insoulforge::UserId{42}) == 7,
           "preserves aliases, administrators and affinity", kTestName);
-        check(PersonMemoryStore::getPerson(42) == originalPerson && BlacklistStore::contains(42) &&
+        check(PersonMemoryStore::getPerson(insoulforge::UserId{42}) == originalPerson &&
+                BlacklistStore::contains(insoulforge::UserId{42}) &&
                 PersonMemoryStore::dailyState().completedDay == "2026-10-30",
           "v24 upgrade preserves existing person profiles, pending entries, blacklist and daily state", kTestName);
         const auto readRecord = [&](u64 id) {
@@ -1475,11 +1670,13 @@ namespace {
                 MessageRecord::projectForAgent(oldMedia)["segments"][1]["description"] == "旧图片" &&
                 oldMedia["segments"][2]["type"] == "face" && oldMedia["segments"][3]["type"] == "member_event",
           "converts old text, image assets, faces and notifications for current readers", kTestName);
-        check(oldSegments["segments"][0]["target"]["kind"] == "all" && MessageRecord::mentions(oldSegments, 42) &&
+        check(oldSegments["segments"][0]["target"]["kind"] == "all" &&
+                MessageRecord::mentions(oldSegments, insoulforge::UserId{42}) &&
                 oldSegments["segments"][2]["target"]["user_id"] == "43" &&
                 oldSegments["segments"][3]["reason"] == "leave" &&
                 MessageRecord::findImageSource(oldSegments, 0)->file == "inline.jpg" &&
-                MessageRecord::isAssistant(readRecord(103)) && MessageRecord::extractText(readRecord(103)) == "纯文本历史消息" &&
+                MessageRecord::isAssistant(readRecord(103)) &&
+                MessageRecord::extractText(readRecord(103)) == "纯文本历史消息" &&
                 MessageRecord::extractText(readRecord(104)) == "空段旧正文" &&
                 readRecord(104)["segments"][1]["type"] == "face",
           "converts flat targets, inline image sources and raw assistant text", kTestName);
@@ -1507,31 +1704,35 @@ namespace {
                           ("insoulforge-person-memory-" +
                             std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".db");
         check(db.initialize(path.string()).has_value(), "initializes database", kTestName);
-        AffinityStore::adjustAffinity(11, 11);
-        AffinityStore::adjustAffinity(22, -4);
-        AffinityStore::adjustAffinity(33, 100);
-        AffinityStore::adjustAffinity(11, 2);
+        AffinityStore::adjustAffinity(insoulforge::UserId{11}, 11);
+        AffinityStore::adjustAffinity(insoulforge::UserId{22}, -4);
+        AffinityStore::adjustAffinity(insoulforge::UserId{33}, 100);
+        AffinityStore::adjustAffinity(insoulforge::UserId{11}, 2);
         SchemaMigrator::migrate(db.handle());
-        check(AffinityStore::getAffinityMap().at(11) == 13, "startup preserves global scores", kTestName);
+        check(AffinityStore::getAffinityMap().at(insoulforge::UserId{11}) == 13, "startup preserves global scores",
+          kTestName);
         const auto privateId = SessionId::fromPrivateUser(11);
-        MemoryMaintenanceStore::apply(db, 100, {.personEntries = {{11, "喜欢摄影"}, {22, "喜欢编程"}}});
-        MemoryMaintenanceStore::apply(db, privateId, {.personEntries = {{11, "准备比赛"}}, .affinity = {{11, -1}}});
+        MemoryMaintenanceStore::apply(
+          db, 100, {.personEntries = {{insoulforge::UserId{11}, "喜欢摄影"}, {insoulforge::UserId{22}, "喜欢编程"}}});
+        MemoryMaintenanceStore::apply(db, privateId,
+          {.personEntries = {{insoulforge::UserId{11}, "准备比赛"}}, .affinity = {{insoulforge::UserId{11}, -1}}});
         const auto senders = json::array({{{"sender", {{"user_id", "11"}}}}, {{"sender", {{"user_id", "11"}}}},
           {{"sender", {{"user_id", "self"}}}}, {{"sender", {{"user_id", std::to_string(SessionId::kSystemAccountId)}}}},
           {{"sender", {{"user_id", "33"}}}}, {{"segments", {{{"type", "at"}, {"target", {{"user_id", "22"}}}}}}}});
         const auto profiles = PersonMemoryStore::getForSenders(senders);
         check(profiles.size() == 1 && profiles[0]["user_id"] == "11" && profiles[0]["pending_entries"].size() == 2 &&
                 profiles[0]["pending_entries"][1]["source_session"] == std::to_string(privateId) &&
-                AffinityStore::getAffinityMap().at(11) == 12,
-          "deduplicates recent senders, excludes mentions and missing profiles, shares private entries globally", kTestName);
+                AffinityStore::getAffinityMap().at(insoulforge::UserId{11}) == 12,
+          "deduplicates recent senders, excludes mentions and missing profiles, shares private entries globally",
+          kTestName);
         check(!SessionStore::getSessionConfig(100).crossSessionSharing &&
                 !SessionStore::getSessionConfig(privateId).crossSessionSharing,
           "person memory is independent of raw-message sharing", kTestName);
-        MemoryMaintenanceStore::apply(db, 100, {.personEntries = {{44, "仅有人物记忆"}}});
+        MemoryMaintenanceStore::apply(db, 100, {.personEntries = {{insoulforge::UserId{44}, "仅有人物记忆"}}});
         const auto people = PersonMemoryStore::listPeople();
         check(people.size() == 4 && people[0]["pending_count"] == 2 && !people[0].contains("pending_entries"),
           "admin summaries include memory-only and affinity-only people without loading memory bodies", kTestName);
-        const auto person = PersonMemoryStore::getPerson(11);
+        const auto person = PersonMemoryStore::getPerson(insoulforge::UserId{11});
         check(person["affinity"] == 12 && person["pending_entries"].size() == 2 &&
                 person["pending_entries"][0]["source_session"] == std::to_string(privateId),
           "person detail combines global score and newest-first entries with exact session IDs", kTestName);
@@ -1541,26 +1742,34 @@ namespace {
                 !person["pending_entries"][1].contains("created_at") &&
                 profiles[0]["pending_entries"][0]["created_at"] == person["pending_entries"][1]["time"],
           "model uses created_at while admin API retains original timestamp contract", kTestName);
-        check(PersonMemoryStore::getPerson(33)["profile"].empty() &&
-                PersonMemoryStore::getPerson(44)["affinity"] == 0 && PersonMemoryStore::getPerson(999).is_null(),
+        check(PersonMemoryStore::getPerson(insoulforge::UserId{33})["profile"].empty() &&
+                PersonMemoryStore::getPerson(insoulforge::UserId{44})["affinity"] == 0 &&
+                PersonMemoryStore::getPerson(insoulforge::UserId{999}).is_null(),
           "handles score-only, memory-only and unknown profiles", kTestName);
         const AdminController controller;
         auto response = drogon::HttpResponsePtr{};
         const auto callback = [&](const drogon::HttpResponsePtr &value) { response = value; };
         for (const u64 user_id: {11, 22, 33, 44})
-            QQNameDirectory::recordName(user_id, "Known " + std::to_string(user_id));
+            QQNameDirectory::recordName(insoulforge::UserId{user_id}, "Known " + std::to_string(user_id));
         drogon::sync_wait(controller.getPeople(drogon::HttpRequest::newHttpRequest(), callback));
         check(json::parse(response->body()).size() == 4, "people API returns all profiles", kTestName);
         drogon::sync_wait(controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, "11"));
         check(json::parse(response->body())["user_id"] == "11", "person API returns string identity", kTestName);
         drogon::sync_wait(controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, "invalid"));
         check(json::parse(response->body()).contains("error"), "person API rejects invalid identities", kTestName);
-        std::thread first([] { for (int index = 0; index < 50; ++index) AffinityStore::adjustAffinity(77, 1); });
-        std::thread second([] { for (int index = 0; index < 50; ++index) AffinityStore::adjustAffinity(77, 1); });
+        std::thread first([] {
+            for (int index = 0; index < 50; ++index)
+                AffinityStore::adjustAffinity(insoulforge::UserId{77}, 1);
+        });
+        std::thread second([] {
+            for (int index = 0; index < 50; ++index)
+                AffinityStore::adjustAffinity(insoulforge::UserId{77}, 1);
+        });
         first.join();
         second.join();
-        AffinityStore::adjustAffinity(77, 10);
-        check(AffinityStore::getAffinityMap().at(77) == 100, "concurrent global increments do not overwrite or overflow", kTestName);
+        AffinityStore::adjustAffinity(insoulforge::UserId{77}, 10);
+        check(AffinityStore::getAffinityMap().at(insoulforge::UserId{77}) == 100,
+          "concurrent global increments do not overwrite or overflow", kTestName);
         {
             const Statement query(db.handle(), "SELECT COUNT(*) FROM sqlite_master WHERE name = 'group_affinity'");
             check(query.step() && query.getInt(0) == 0, "old per-session affinity table is removed", kTestName);
@@ -1604,11 +1813,13 @@ namespace {
         const auto state = PersonMemoryStore::dailyState();
         check(state.completedDay == "2026-10-19" && state.runningDay == "2026-10-20",
           "startup preserves daily checkpoint", kTestName);
-        MemoryMaintenanceStore::apply(db, 100, {.personEntries = {{11, "旧条目"}}, .affinity = {{11, 3}}});
-        const auto snapshot = PersonMemoryStore::pendingSnapshot(11);
+        MemoryMaintenanceStore::apply(db, 100,
+          {.personEntries = {{insoulforge::UserId{11}, "旧条目"}}, .affinity = {{insoulforge::UserId{11}, 3}}});
+        const auto snapshot = PersonMemoryStore::pendingSnapshot(insoulforge::UserId{11});
         check(snapshot.has_value(), "reads pending snapshot", kTestName);
         if (snapshot) {
-            MemoryMaintenanceStore::apply(db, SessionId::fromPrivateUser(11), {.personEntries = {{11, "并发新增"}}});
+            MemoryMaintenanceStore::apply(
+              db, SessionId::fromPrivateUser(11), {.personEntries = {{insoulforge::UserId{11}, "并发新增"}}});
             const json profile = {{"profile", {"喜欢摄影"}}, {"relationship", {"经常交流摄影"}},
               {"recent_interactions", {"准备一起拍照"}}};
             check(sqlite3_exec(db.handle(),
@@ -1618,74 +1829,82 @@ namespace {
             bool failed = false;
             try { PersonMemoryStore::applyConsolidation(*snapshot, profile); }
             catch (const DbError &) { failed = true; }
-            check(failed && PersonMemoryStore::getPerson(11)["profile"].empty() &&
-                    PersonMemoryStore::getPerson(11)["pending_entries"].size() == 2,
+            check(failed && PersonMemoryStore::getPerson(insoulforge::UserId{11})["profile"].empty() &&
+                    PersonMemoryStore::getPerson(insoulforge::UserId{11})["pending_entries"].size() == 2,
               "delete failure rolls back profile update and preserves entries", kTestName);
             check(sqlite3_exec(db.handle(), "DROP TRIGGER reject_person_delete", nullptr, nullptr, nullptr) == SQLITE_OK,
               "removes failure trigger", kTestName);
             PersonMemoryStore::applyConsolidation(*snapshot, profile);
-            const auto person = PersonMemoryStore::getPerson(11);
+            const auto person = PersonMemoryStore::getPerson(insoulforge::UserId{11});
             check(person["profile"] == profile["profile"] && person["pending_entries"].size() == 1 &&
                     person["relationship"] == profile["relationship"] &&
                     person["pending_entries"][0]["content"] == "并发新增" && person["affinity"] == 3 &&
                     MemoryStore::getShortTermMemory(100).empty(),
               "snapshot commit keeps new entries and does not touch affinity or session memory", kTestName);
         }
-        check(!PersonMemoryStore::pendingSnapshot(999), "absent person has no work", kTestName);
-        auto original = PersonMemoryStore::getPerson(11);
+        check(!PersonMemoryStore::pendingSnapshot(insoulforge::UserId{999}), "absent person has no work", kTestName);
+        auto original = PersonMemoryStore::getPerson(insoulforge::UserId{11});
         auto edited = original;
         edited["affinity"] = -100;
         edited["profile"] = json::array();
         edited["pending_entries"][0]["content"] = "人工修正";
-        const auto stale = PersonMemoryStore::pendingSnapshot(11);
-        check(PersonMemoryStore::updatePerson(11, original, edited), "updates person atomically", kTestName);
-        check(PersonMemoryStore::getPerson(11)["affinity"] == -100 &&
-                PersonMemoryStore::getPerson(11)["pending_entries"][0]["content"] == "人工修正",
+        const auto stale = PersonMemoryStore::pendingSnapshot(insoulforge::UserId{11});
+        check(PersonMemoryStore::updatePerson(insoulforge::UserId{11}, original, edited), "updates person atomically",
+          kTestName);
+        check(PersonMemoryStore::getPerson(insoulforge::UserId{11})["affinity"] == -100 &&
+                PersonMemoryStore::getPerson(insoulforge::UserId{11})["pending_entries"][0]["content"] == "人工修正",
           "edits affinity and pending content", kTestName);
-        check(!PersonMemoryStore::updatePerson(11, original, edited) &&
-                !PersonMemoryStore::deletePerson(11, original), "rejects stale admin snapshots", kTestName);
+        check(!PersonMemoryStore::updatePerson(insoulforge::UserId{11}, original, edited) &&
+                !PersonMemoryStore::deletePerson(insoulforge::UserId{11}, original),
+          "rejects stale admin snapshots", kTestName);
         bool conflict = false;
         try { PersonMemoryStore::applyConsolidation(*stale,
             {{"profile", {"过期结果"}}, {"recent_interactions", json::array()}}); }
         catch (const PersonMemoryStore::ConsolidationConflict &) { conflict = true; }
-        check(conflict && PersonMemoryStore::getPerson(11)["profile"].empty(),
+        check(conflict && PersonMemoryStore::getPerson(insoulforge::UserId{11})["profile"].empty(),
           "daily consolidation cannot overwrite manual edits", kTestName);
-        original = PersonMemoryStore::getPerson(11);
+        original = PersonMemoryStore::getPerson(insoulforge::UserId{11});
         edited = original;
         edited["pending_entries"] = json::array();
-        check(PersonMemoryStore::updatePerson(11, original, edited) &&
-                PersonMemoryStore::getPerson(11)["pending_entries"].empty(),
+        check(PersonMemoryStore::updatePerson(insoulforge::UserId{11}, original, edited) &&
+                PersonMemoryStore::getPerson(insoulforge::UserId{11})["pending_entries"].empty(),
           "editing can remove pending entries", kTestName);
-        MemoryMaintenanceStore::apply(db, 100, {.personEntries = {{11, "删除前条目"}, {22, "保留其他人"}}});
-        const auto beforeDelete = PersonMemoryStore::pendingSnapshot(11);
-        check(PersonMemoryStore::deletePerson(11, PersonMemoryStore::getPerson(11)) &&
-                PersonMemoryStore::getPerson(11).is_null() && !PersonMemoryStore::getPerson(22).is_null(),
+        MemoryMaintenanceStore::apply(db, 100,
+          {.personEntries = {{insoulforge::UserId{11}, "删除前条目"}, {insoulforge::UserId{22}, "保留其他人"}}});
+        const auto beforeDelete = PersonMemoryStore::pendingSnapshot(insoulforge::UserId{11});
+        check(PersonMemoryStore::deletePerson(
+                insoulforge::UserId{11}, PersonMemoryStore::getPerson(insoulforge::UserId{11})) &&
+                PersonMemoryStore::getPerson(insoulforge::UserId{11}).is_null() &&
+                !PersonMemoryStore::getPerson(insoulforge::UserId{22}).is_null(),
           "deletes all person data without touching others", kTestName);
         conflict = false;
         try { PersonMemoryStore::applyConsolidation(*beforeDelete,
             {{"profile", {"过期结果"}}, {"recent_interactions", json::array()}}); }
         catch (const PersonMemoryStore::ConsolidationConflict &) { conflict = true; }
-        check(conflict && PersonMemoryStore::getPerson(11).is_null(),
+        check(conflict && PersonMemoryStore::getPerson(insoulforge::UserId{11}).is_null(),
           "daily consolidation cannot recreate deleted person", kTestName);
-        MemoryMaintenanceStore::apply(db, 100, {.affinity = {{33, 1}}});
-        original = PersonMemoryStore::getPerson(33);
+        MemoryMaintenanceStore::apply(db, 100, {.affinity = {{insoulforge::UserId{33}, 1}}});
+        original = PersonMemoryStore::getPerson(insoulforge::UserId{33});
         edited = original;
         edited["profile"] = {"首次手动记忆"};
         edited["relationship"] = {"熟悉的聊天伙伴"};
-        check(PersonMemoryStore::updatePerson(33, original, edited) &&
-                PersonMemoryStore::getPerson(33)["profile"] == edited["profile"],
+        check(PersonMemoryStore::updatePerson(insoulforge::UserId{33}, original, edited) &&
+                PersonMemoryStore::getPerson(insoulforge::UserId{33})["profile"] == edited["profile"],
           "affinity-only person can receive a profile", kTestName);
-        check(!PersonMemoryStore::pendingSnapshot(33) && PersonMemoryStore::pendingSnapshot(33, true),
+        check(!PersonMemoryStore::pendingSnapshot(insoulforge::UserId{33}) &&
+                PersonMemoryStore::pendingSnapshot(insoulforge::UserId{33}, true),
           "manual snapshot includes existing profile without pending entries", kTestName);
-        const auto manual = PersonMemoryStore::pendingSnapshot(33, true);
-        edited = PersonMemoryStore::getPerson(33);
+        const auto manual = PersonMemoryStore::pendingSnapshot(insoulforge::UserId{33}, true);
+        edited = PersonMemoryStore::getPerson(insoulforge::UserId{33});
         original = edited;
         edited["relationship"] = {"人工修改关系"};
-        check(PersonMemoryStore::updatePerson(33, original, edited), "edits relationship", kTestName);
+        check(
+          PersonMemoryStore::updatePerson(insoulforge::UserId{33}, original, edited), "edits relationship", kTestName);
         conflict = false;
         try { PersonMemoryStore::applyConsolidation(*manual, original); }
         catch (const PersonMemoryStore::ConsolidationConflict &) { conflict = true; }
-        check(conflict && PersonMemoryStore::getPerson(33)["relationship"] == edited["relationship"],
+        check(
+          conflict && PersonMemoryStore::getPerson(insoulforge::UserId{33})["relationship"] == edited["relationship"],
           "manual consolidation checks relationship even without pending entries", kTestName);
         const auto context = PersonMemoryStore::getForSenders(
           json::array({{{"sender", {{"user_id", "33"}}}}}));
@@ -1694,12 +1913,12 @@ namespace {
         const AdminController controller;
         drogon::HttpResponsePtr response;
         const auto callback = [&](const drogon::HttpResponsePtr &value) { response = value; };
-        const auto unchanged = PersonMemoryStore::getPerson(22);
+        const auto unchanged = PersonMemoryStore::getPerson(insoulforge::UserId{22});
         check(sqlite3_exec(db.handle(),
                 "CREATE TRIGGER reject_unchanged_entry_update BEFORE UPDATE ON person_memory_entries "
                 "BEGIN SELECT RAISE(ABORT, 'unexpected entry update'); END", nullptr, nullptr, nullptr) == SQLITE_OK,
           "creates no-op update guard", kTestName);
-        check(PersonMemoryStore::updatePerson(22, unchanged, unchanged),
+        check(PersonMemoryStore::updatePerson(insoulforge::UserId{22}, unchanged, unchanged),
           "unchanged pending entries do not issue updates", kTestName);
         sqlite3_exec(db.handle(), "DROP TRIGGER reject_unchanged_entry_update", nullptr, nullptr, nullptr);
         auto duplicateEntries = unchanged;
@@ -1707,7 +1926,8 @@ namespace {
         auto duplicateRequest = drogon::HttpRequest::newHttpRequest();
         duplicateRequest->setBody(json({{"expected", unchanged}, {"replacement", duplicateEntries}}).dump());
         drogon::sync_wait(controller.updatePerson(duplicateRequest, callback, "22"));
-        check(response->statusCode() == drogon::k400BadRequest && PersonMemoryStore::getPerson(22) == unchanged,
+        check(response->statusCode() == drogon::k400BadRequest &&
+                PersonMemoryStore::getPerson(insoulforge::UserId{22}) == unchanged,
           "duplicate pending IDs are rejected without modifying data", kTestName);
         const auto update = [&](const json &body) {
             auto request = drogon::HttpRequest::newHttpRequest();
@@ -1716,7 +1936,7 @@ namespace {
             drogon::sync_wait(controller.updatePerson(request, callback, "33"));
             return response->statusCode();
         };
-        original = PersonMemoryStore::getPerson(33);
+        original = PersonMemoryStore::getPerson(insoulforge::UserId{33});
         edited = original;
         for (const json &score : {json(-101), json(101), json(0.5), json("1")}) {
             edited["affinity"] = score;
@@ -1733,7 +1953,7 @@ namespace {
           "API cannot add arbitrary pending IDs", kTestName);
         edited["pending_entries"] = json::array();
         check(update({{"expected", original}, {"replacement", edited}}) == drogon::k200OK &&
-                PersonMemoryStore::getPerson(33)["affinity"] == 100,
+                PersonMemoryStore::getPerson(insoulforge::UserId{33})["affinity"] == 100,
           "API accepts upper affinity bound and empty categories", kTestName);
         check(update({{"expected", original}, {"replacement", edited}}) == drogon::k409Conflict,
           "API reports stale edits as HTTP 409", kTestName);
@@ -1741,9 +1961,10 @@ namespace {
         request->setBody(json({{"expected", original}}).dump());
         drogon::sync_wait(controller.deletePerson(request, callback, "33"));
         check(response->statusCode() == drogon::k409Conflict, "delete API rejects stale snapshot", kTestName);
-        request->setBody(json({{"expected", PersonMemoryStore::getPerson(33)}}).dump());
+        request->setBody(json({{"expected", PersonMemoryStore::getPerson(insoulforge::UserId{33})}}).dump());
         drogon::sync_wait(controller.deletePerson(request, callback, "33"));
-        check(response->statusCode() == drogon::k200OK && PersonMemoryStore::getPerson(33).is_null(),
+        check(
+          response->statusCode() == drogon::k200OK && PersonMemoryStore::getPerson(insoulforge::UserId{33}).is_null(),
           "delete API removes person", kTestName);
         db.close();
     }
@@ -1889,20 +2110,24 @@ namespace {
         auto &database = Database::instance();
         check(database.initialize(":memory:").has_value(), "initializes database", kTestName);
         config.affinityEnabled = true;
-        MemoryMaintenanceStore::apply(database, 100, {.personEntries = {{11, "喜欢摄影"}}, .affinity = {{11, 7}}});
+        MemoryMaintenanceStore::apply(database, 100,
+          {.personEntries = {{insoulforge::UserId{11}, "喜欢摄影"}}, .affinity = {{insoulforge::UserId{11}, 7}}});
         config.affinityEnabled = false;
-        MemoryMaintenanceStore::apply(database, 100, {.personEntries = {{11, "会修相机"}}, .affinity = {{11, 5}, {22, 3}}});
-        AffinityStore::adjustAffinity(11, 5);
+        MemoryMaintenanceStore::apply(database, 100,
+          {.personEntries = {{insoulforge::UserId{11}, "会修相机"}},
+            .affinity = {{insoulforge::UserId{11}, 5}, {insoulforge::UserId{22}, 3}}});
+        AffinityStore::adjustAffinity(insoulforge::UserId{11}, 5);
         check(AffinityStore::getAffinityMap().empty(), "disabled scores cannot be read", kTestName);
-        auto person = PersonMemoryStore::getPerson(11);
+        auto person = PersonMemoryStore::getPerson(insoulforge::UserId{11});
         check(!person.contains("affinity") && person["pending_entries"].size() == 2 &&
                 !PersonMemoryStore::listPeople()[0].contains("affinity"),
           "disabled score is hidden while memory still updates", kTestName);
         auto replacement = person;
         replacement["profile"] = {"喜欢摄影，会修相机"};
         replacement["affinity"] = 99;
-        check(PersonMemoryStore::updatePerson(11, person, replacement), "disabled score is ignored when editing", kTestName);
-        person = PersonMemoryStore::getPerson(11);
+        check(PersonMemoryStore::updatePerson(insoulforge::UserId{11}, person, replacement),
+          "disabled score is ignored when editing", kTestName);
+        person = PersonMemoryStore::getPerson(insoulforge::UserId{11});
         AdminController controller;
         drogon::HttpResponsePtr response;
         const auto callback = [&](const auto &value) { response = value; };
@@ -1914,11 +2139,13 @@ namespace {
         drogon::sync_wait(controller.updatePerson(request, callback, "11"));
         check(response->statusCode() == drogon::k200OK, "memory API accepts edits without scores", kTestName);
         config.affinityEnabled = true;
-        check(AffinityStore::getAffinityMap().at(11) == 7 && !AffinityStore::getAffinityMap().contains(22) &&
-                PersonMemoryStore::getPerson(11)["profile"] == replacement["profile"],
+        check(AffinityStore::getAffinityMap().at(insoulforge::UserId{11}) == 7 &&
+                !AffinityStore::getAffinityMap().contains(insoulforge::UserId{22}) &&
+                PersonMemoryStore::getPerson(insoulforge::UserId{11})["profile"] == replacement["profile"],
           "re-enabling restores historical scores without backfilling", kTestName);
-        MemoryMaintenanceStore::apply(database, 100, {.affinity = {{11, 2}}});
-        check(AffinityStore::getAffinityMap().at(11) == 9, "updates resume after re-enabling", kTestName);
+        MemoryMaintenanceStore::apply(database, 100, {.affinity = {{insoulforge::UserId{11}, 2}}});
+        check(AffinityStore::getAffinityMap().at(insoulforge::UserId{11}) == 9, "updates resume after re-enabling",
+          kTestName);
         database.close();
     }
 
@@ -2183,7 +2410,7 @@ namespace {
         drogon::sync_wait(insoulforge::CommandProcessor::execute(command));
         check(
           insoulforge::SessionStore::getSessionConfig(100).sendGroupCard, "non-admin cannot change setting", kTestName);
-        insoulforge::AdminStore::addAdmin(11);
+        insoulforge::AdminStore::addAdmin(insoulforge::UserId{11});
         drogon::sync_wait(insoulforge::CommandProcessor::execute(command));
         check(
           !insoulforge::SessionStore::getSessionConfig(100).sendGroupCard, "admin command disables setting", kTestName);
@@ -2255,7 +2482,7 @@ namespace {
         drogon::sync_wait(insoulforge::CommandProcessor::execute(command));
         check(
           !insoulforge::SessionStore::getSessionConfig(100).autoReply, "non-admin cannot change setting", kTestName);
-        insoulforge::AdminStore::addAdmin(11);
+        insoulforge::AdminStore::addAdmin(insoulforge::UserId{11});
         drogon::sync_wait(insoulforge::CommandProcessor::execute(command));
         check(insoulforge::SessionStore::getSessionConfig(100).autoReply, "admin command enables setting", kTestName);
         command["segments"][0]["text"] = "/autoreply off";
@@ -3196,6 +3423,8 @@ auto main() -> int {
     testAssistantStickerRecordKeepsOnlyName();
     testGeneratedImageRecordKeepsDescription();
     testSchemaMigration();
+    testStringUserId();
+    testTextUserIdMigration();
     testFileToolStore();
     testLuaToolExecutor();
     testLuaToolExamples();

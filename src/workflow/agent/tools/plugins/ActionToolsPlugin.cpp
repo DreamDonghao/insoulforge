@@ -41,13 +41,26 @@ namespace insoulforge {
                 return std::unexpected("group_id 和 user_id 不能同时指定，请只选择一个发送目标");
             if (!privateTarget && !args.contains("group_id"))
                 return currentSession;
-            const auto id = privateTarget ? userIdArgument(args) : groupIdArgument(args);
-            if (!id) return std::unexpected(id.error());
-            const auto target = privateTarget ? SessionId::fromPrivateUser(*id) : *id;
+            u64 target;
+            if (privateTarget) {
+                const auto id = userIdArgument(args);
+                if (!id)
+                    return std::unexpected(id.error());
+                const auto number = id->toU64();
+                if (!number || *number == 0 || SessionId::isPrivate(*number) ||
+                    id->toString() != std::to_string(*number))
+                    return std::unexpected("user_id：当前私聊会话编码要求有效的数字用户 ID");
+                if (BlacklistStore::contains(*id))
+                    return std::unexpected(fmt::format("目标私聊 {} 在全局黑名单中，未发送消息", *id));
+                target = SessionId::fromPrivateUser(*number);
+            } else {
+                const auto id = groupIdArgument(args);
+                if (!id)
+                    return std::unexpected(id.error());
+                target = *id;
+            }
             if (!SessionStore::isSessionEnabled(target))
-                return std::unexpected(fmt::format("目标{} {} 未在后台启用，未发送消息", privateTarget ? "私聊" : "群", *id));
-            if (privateTarget && BlacklistStore::contains(*id))
-                return std::unexpected(fmt::format("目标私聊 {} 在全局黑名单中，未发送消息", *id));
+                return std::unexpected(fmt::format("目标会话 {} 未在后台启用，未发送消息", target));
             return target;
         }
 
@@ -60,7 +73,7 @@ namespace insoulforge {
         auto sendToSession(const u64 sessionId, std::string content) -> drogon::Task<std::expected<u64, std::string>> {
             if (SessionId::isPrivate(sessionId))
                 co_return co_await MessageService::sendPrivateMsg(
-                  SessionId::privateUserId(sessionId), std::move(content));
+                  UserId{SessionId::privateUserId(sessionId)}, std::move(content));
             co_return co_await MessageService::sendGroupMsg(sessionId, std::move(content));
         }
 
@@ -674,7 +687,13 @@ namespace insoulforge {
                 if (userId == "all") {
                     co_return std::string("[CQ:at,qq=all]");
                 }
-                co_return fmt::format("[CQ:at,qq={}]", userId);
+                const auto id = UserId::parse(userId);
+                if (!id)
+                    co_return id.error();
+                const auto number = id->toU64();
+                if (!number || *number == 0)
+                    co_return "OneBot 11 要求非零数字用户 ID";
+                co_return fmt::format("[CQ:at,qq={}]", *number);
             },
             .scope = ToolScope::GROUP_ONLY,
           },
@@ -708,13 +727,13 @@ namespace insoulforge {
                 if (sessionId == 0)
                     co_return std::string("禁言失败: 无法获取群号");
 
-                const u64 userId = parseUInt64(argString(args, "user_id"));
+                const auto userId = userIdArgument(args);
                 const u64 duration = getUInt(args, "duration", 600);
-                if (userId == 0)
+                if (!userId)
                     co_return std::string("禁言失败: 请提供有效的用户 ID");
 
-                const bool success = co_await OneBotClient::setGroupBan(sessionId, userId, duration);
-                co_return success ? fmt::format("已禁言用户 {} {}秒", userId, duration)
+                const bool success = co_await OneBotClient::setGroupBan(sessionId, *userId, duration);
+                co_return success ? fmt::format("已禁言用户 {} {}秒", *userId, duration)
                                   : "禁言失败: 权限不足或用户不存在";
             },
             .scope = ToolScope::GROUP_ONLY,
@@ -742,17 +761,17 @@ namespace insoulforge {
                            "不得拉黑管理员或机器人自身。",
             .parameters = blacklistParams,
             .handler = [](const json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
-                const auto userId = tryParseUInt64(argString(args, "user_id"));
-                if (!userId || *userId == 0) {
+                const auto userId = userIdArgument(args);
+                if (!userId) {
                     co_return std::string("加入黑名单失败: 请提供有效的用户 ID");
                 }
-                if (*userId == Config::instance().selfQQNumber || AdminStore::isAdmin(*userId)) {
+                if (*userId == UserId{Config::instance().selfQQNumber} || AdminStore::isAdmin(*userId)) {
                     co_return std::string("加入黑名单失败: 不能拉黑机器人或管理员");
                 }
                 bool seenInConversation = false;
                 if (ctx.messageSnapshot.is_array()) {
                     for (const json &message: ctx.messageSnapshot) {
-                        if (getStr(atOrNull(message, "sender"), "user_id") == std::to_string(*userId)) {
+                        if (getStr(atOrNull(message, "sender"), "user_id") == userId->toString()) {
                             seenInConversation = true;
                             break;
                         }
@@ -797,17 +816,17 @@ namespace insoulforge {
                 if (sessionId == 0)
                     co_return std::string("拍一拍失败: 无法获取群号");
 
-                const u64 userId = parseUInt64(argString(args, "user_id"));
-                if (userId == 0)
+                const auto userId = userIdArgument(args);
+                if (!userId)
                     co_return std::string("拍一拍失败: 请提供有效的用户 ID");
 
-                if (const bool success = co_await OneBotClient::sendPoke(sessionId, userId); !success) {
+                if (const bool success = co_await OneBotClient::sendPoke(sessionId, *userId); !success) {
                     co_return std::string("拍一拍失败: 权限不足或用户不存在");
                 }
 
                 // 拍一拍不是文字消息（无 message_id），以单一语义段记录。
-                const std::string targetName = QQNameDirectory::getName(userId);
-                json target{{"user_id", std::to_string(userId)}};
+                const std::string targetName = QQNameDirectory::getName(*userId);
+                json target{{"user_id", userId->toString()}};
                 if (targetName != "未知") {
                     target["name"] = targetName;
                 }
@@ -818,7 +837,7 @@ namespace insoulforge {
                 msgJson["sender"]["user_id"] = "self";
                 msgJson["segments"] = json::array({poke});
                 OneBotEventWorkflow::instance().appendDeliveredAssistantMessage(sessionId, std::move(msgJson));
-                co_return fmt::format("已拍一拍用户 {}", userId);
+                co_return fmt::format("已拍一拍用户 {}", *userId);
             },
             .scope = ToolScope::GROUP_ONLY,
           },

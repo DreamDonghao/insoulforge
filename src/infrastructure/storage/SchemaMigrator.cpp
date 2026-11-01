@@ -8,6 +8,7 @@
 #include <infrastructure/storage/SchemaMigrator.hpp>
 #include <infrastructure/storage/Statement.hpp>
 #include <infrastructure/storage/migrations/V25.hpp>
+#include <infrastructure/storage/migrations/V26.hpp>
 
 namespace insoulforge {
     namespace {
@@ -63,7 +64,7 @@ namespace insoulforge {
         added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ))",
           R"(CREATE TABLE IF NOT EXISTS admins (
-        user_id INTEGER PRIMARY KEY,
+        user_id TEXT NOT NULL PRIMARY KEY,
         added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ))",
           R"(CREATE TABLE IF NOT EXISTS llm_usage (
@@ -106,22 +107,22 @@ namespace insoulforge {
         PRIMARY KEY (content_hash, model, prompt_version)
     ))",
           R"(CREATE TABLE IF NOT EXISTS blacklisted_users (
-        user_id INTEGER PRIMARY KEY,
+        user_id TEXT NOT NULL PRIMARY KEY,
         added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ))",
           R"(CREATE TABLE IF NOT EXISTS person_affinity (
-        user_id INTEGER PRIMARY KEY,
+        user_id TEXT NOT NULL PRIMARY KEY,
         affinity INTEGER NOT NULL DEFAULT 0 CHECK(affinity BETWEEN -100 AND 100)
     ))",
           R"(CREATE TABLE IF NOT EXISTS person_memories (
-        user_id INTEGER PRIMARY KEY,
+        user_id TEXT NOT NULL PRIMARY KEY,
         profile TEXT NOT NULL DEFAULT '[]',
         recent_interactions TEXT NOT NULL DEFAULT '[]',
         relationship TEXT NOT NULL DEFAULT '[]'
     ))",
           R"(CREATE TABLE IF NOT EXISTS person_memory_entries (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
+        user_id TEXT NOT NULL,
         source_session INTEGER NOT NULL,
         content TEXT NOT NULL,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -192,7 +193,7 @@ namespace insoulforge {
                 return;
 
             // steps[i] 将 kMinimumSupportedVersion + i 升级到下一版本。
-            constexpr std::array steps = {&migrateV24ToV25};
+            constexpr std::array steps = {&migrateV24ToV25, &migrateV25ToV26};
             static_assert(steps.size() == kLatestVersion - kMinimumSupportedVersion);
             Logger::info(0, "Storage", fmt::format("数据库版本 v{}，开始迁移到 v{}", version, kLatestVersion));
             for (i32 v = version; v < kLatestVersion; ++v) {

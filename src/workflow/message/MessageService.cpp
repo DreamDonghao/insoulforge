@@ -7,6 +7,7 @@
 #include <fmt/format.h>
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/UserId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <onebot/messaging/MessageFormatter.hpp>
@@ -67,13 +68,17 @@ namespace insoulforge {
           groupId, "群消息", std::move(imageDescription), std::move(toolHistory));
     }
 
-    auto MessageService::sendPrivateMsg(const u64 userId, std::string message,
+    auto MessageService::sendPrivateMsg(const UserId userId, std::string message,
       std::optional<std::string> imageDescription, json toolHistory) -> drogon::Task<std::expected<u64, std::string>> {
+        const auto number = userId.toU64();
+        if (!number || *number == 0 || SessionId::isPrivate(*number) || *number == SessionId::kSystemAccountId ||
+            userId.toString() != std::to_string(*number))
+            co_return std::unexpected("当前私聊会话编码要求有效的数字用户 ID");
         const std::string processedMessage = message.starts_with("[CQ:image,file=base64://")
                                                ? std::move(message)
                                                : MessageFormatter::convertAtToCQCode(std::move(message));
         co_return co_await afterSendMessage(
-          OneBotClient::sendPrivateMsg(userId, processedMessage, SessionId::fromPrivateUser(userId)), processedMessage,
-          SessionId::fromPrivateUser(userId), "私聊消息", std::move(imageDescription), std::move(toolHistory));
+          OneBotClient::sendPrivateMsg(userId, processedMessage, SessionId::fromPrivateUser(*number)), processedMessage,
+          SessionId::fromPrivateUser(*number), "私聊消息", std::move(imageDescription), std::move(toolHistory));
     }
 } // namespace insoulforge

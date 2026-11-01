@@ -7,6 +7,7 @@
 
 #include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/UserId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
@@ -22,15 +23,15 @@ namespace insoulforge::MemoryStore {
             }))
             return std::nullopt;
         json result = {{"aliases", json::array()}};
-        std::unordered_map<u64, size_t> aliasIndices;
+        std::unordered_map<UserId, size_t> aliasIndices;
         for (const auto &alias: value["aliases"]) {
-            const auto userId = parseUInt64(getStr(alias, "user_id"));
-            if (!alias.is_object() || userId == 0 || userId == SessionId::kSystemAccountId || SessionId::isPrivate(userId) ||
-                !atOrNull(alias, "names").is_array())
+            const auto userId = UserId::parse(getStr(alias, "user_id"));
+            if (!alias.is_object() || !userId || userId->toString() == "self" ||
+                *userId == UserId{SessionId::kSystemAccountId} || !atOrNull(alias, "names").is_array())
                 return std::nullopt;
-            auto [it, inserted] = aliasIndices.try_emplace(userId, result["aliases"].size());
+            auto [it, inserted] = aliasIndices.try_emplace(*userId, result["aliases"].size());
             if (inserted)
-                result["aliases"].push_back({{"user_id", std::to_string(userId)}, {"names", json::array()}});
+                result["aliases"].push_back({{"user_id", userId->toString()}, {"names", json::array()}});
             auto &names = result["aliases"][it->second]["names"];
             for (const auto &name: alias["names"]) {
                 if (!name.is_string())

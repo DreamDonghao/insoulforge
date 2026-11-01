@@ -47,13 +47,11 @@ let nameTimer: ReturnType<typeof setTimeout> | undefined
 let disposed = false
 let summaryController: AbortController | undefined
 let detailController: AbortController | undefined
-const indexedPeople = computed(() => people.value.map(person => ({person, user_id: BigInt(person.user_id)})))
 const sortedPeople = computed(() => {
   const direction = ascending.value ? 1 : -1
-  return [...indexedPeople.value]
-    .sort((a, b) => (affinityEnabled.value ? direction * ((a.person.affinity ?? 0) - (b.person.affinity ?? 0)) : 0) ||
+  return [...people.value]
+    .sort((a, b) => (affinityEnabled.value ? direction * ((a.affinity ?? 0) - (b.affinity ?? 0)) : 0) ||
       (a.user_id < b.user_id ? -1 : a.user_id > b.user_id ? 1 : 0))
-    .map(({person}) => person)
 })
 const filtered = computed(() => {
   const query = search.value.trim().toLowerCase()

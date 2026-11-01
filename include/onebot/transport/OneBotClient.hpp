@@ -6,14 +6,15 @@
 
 #pragma once
 
-#include <expected>
 #include <optional>
 #include <string>
 
 #include <drogon/utils/coroutine.h>
+#include <expected>
 
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/UserId.hpp>
 
 /// @brief OneBot API 客户端
 /// @details 根据 OneBot 配置，通过 HTTP 或 WebSocket 与 OneBot 实现通信。
@@ -30,12 +31,12 @@ namespace insoulforge::OneBotClient {
     /// @brief 发送私聊消息
     /// @note OneBot 11: send_private_msg
     /// @return message_id；失败返回具体错误
-    [[nodiscard]] auto sendPrivateMsg(u64 userId, std::string message, std::optional<u64> sessionId = std::nullopt)
+    [[nodiscard]] auto sendPrivateMsg(UserId userId, std::string message, std::optional<u64> sessionId = std::nullopt)
       -> drogon::Task<std::expected<u64, std::string>>;
 
     /// @brief 群组单人禁言
     /// @note OneBot 11: set_group_ban（duration=0 解除禁言）
-    [[nodiscard]] auto setGroupBan(u64 groupId, u64 userId, u64 duration) -> drogon::Task<bool>;
+    [[nodiscard]] auto setGroupBan(u64 groupId, UserId userId, u64 duration) -> drogon::Task<bool>;
 
     /// @brief 获取群信息
     /// @note OneBot 11: get_group_info
@@ -46,12 +47,12 @@ namespace insoulforge::OneBotClient {
     /// @note OneBot 11: get_stranger_info
     /// @param timeout 请求超时秒数，默认保持普通 OneBot 请求的 30 秒。
     /// @return 响应 JSON（data 含 nickname 等）；失败返回 null
-    [[nodiscard]] auto getStrangerInfo(u64 userId, std::optional<u64> sessionId = std::nullopt, f64 timeout = 30.0)
+    [[nodiscard]] auto getStrangerInfo(UserId userId, std::optional<u64> sessionId = std::nullopt, f64 timeout = 30.0)
       -> drogon::Task<json>;
 
     /// @brief 群聊戳一拍
     /// @note NapCat: send_poke（支持群聊/私聊）
-    [[nodiscard]] auto sendPoke(u64 groupId, u64 userId) -> drogon::Task<bool>;
+    [[nodiscard]] auto sendPoke(u64 groupId, UserId userId) -> drogon::Task<bool>;
 
     /// @brief 撤回消息
     /// @note OneBot 11: delete_msg

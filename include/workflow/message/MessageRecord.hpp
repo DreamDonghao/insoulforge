@@ -11,6 +11,7 @@
 
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/UserId.hpp>
 
 namespace insoulforge::MessageRecord {
     /// @brief 图片的 OneBot 获取信息
@@ -55,8 +56,8 @@ namespace insoulforge::MessageRecord {
     /// @brief 判断记录是否 @ 指定用户 ID
     /// @details 目标身份读取 `target.user_id`。
     /// @param record 统一聊天记录
-    /// @param qqNumber 目标用户 ID
-    [[nodiscard]] auto mentions(const json &record, u64 qqNumber) -> bool;
+    /// @param userId 目标用户 ID
+    [[nodiscard]] auto mentions(const json &record, UserId userId) -> bool;
 
     /// @brief 判断记录是否由机器人发送
     [[nodiscard]] auto isAssistant(const json &record) -> bool;

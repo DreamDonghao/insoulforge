@@ -41,11 +41,11 @@ namespace insoulforge {
 
         auto extractMemories(const json &records, const json &context, const u64 sessionId)
           -> drogon::Task<std::optional<MemoryMaintenanceResult>> {
-            std::unordered_set<u64> participants;
+            std::unordered_set<UserId> participants;
             for (const auto &record: records) {
-                if (const auto userId = parseUInt64(getStr(atOrNull(record, "sender"), "user_id"));
-                  userId > 0 && userId != SessionId::kSystemAccountId)
-                    participants.insert(userId);
+                if (const auto userId = UserId::parse(getStr(atOrNull(record, "sender"), "user_id"));
+                  userId && userId->toString() != "self" && *userId != UserId{SessionId::kSystemAccountId})
+                    participants.insert(*userId);
             }
             const bool affinityEnabled = Config::instance().affinityEnabled.load(std::memory_order_relaxed);
             std::string prompt = std::string(R"(# 人物记忆提取器
@@ -188,10 +188,11 @@ namespace insoulforge {
             }
             MemoryMaintenanceResult result;
             result.conversationSummary = trim(summary.get<std::string>());
-            std::set<std::pair<u64, std::string>> seenEntries;
+            std::set<std::pair<UserId, std::string>> seenEntries;
             for (const json &value: values) {
-                const auto userId = parseUInt64(getStr(value, "user_id"));
-                if (!value.is_object() || !participants.contains(userId) || !atOrNull(value, "entries").is_array()) {
+                const auto userId = UserId::parse(getStr(value, "user_id"));
+                if (!value.is_object() || !userId || !participants.contains(*userId) ||
+                    !atOrNull(value, "entries").is_array()) {
                     Logger::warn(sessionId, "Memory", "人物记忆格式或用户 ID 归属无效，本批次不提交");
                     co_return std::nullopt;
                 }
@@ -199,24 +200,24 @@ namespace insoulforge {
                     if (!entry.is_string())
                         co_return std::nullopt;
                     if (auto content = trim(entry.get<std::string>());
-                      !content.empty() && seenEntries.emplace(userId, content).second) {
-                        result.personEntries.push_back({.userId = userId, .content = std::move(content)});
+                      !content.empty() && seenEntries.emplace(*userId, content).second) {
+                        result.personEntries.push_back({.userId = *userId, .content = std::move(content)});
                     }
                 }
             }
             if (!affinityEnabled)
                 co_return result;
-            std::unordered_set<u64> seenAffinity;
+            std::unordered_set<UserId> seenAffinity;
             for (const auto &value: affinity) {
-                const auto userId = parseUInt64(getStr(value, "user_id"));
+                const auto userId = UserId::parse(getStr(value, "user_id"));
                 const auto &delta = atOrNull(value, "delta");
-                if (!value.is_object() || !participants.contains(userId) || !delta.is_number_integer() ||
-                    !seenAffinity.insert(userId).second) {
+                if (!value.is_object() || !userId || !participants.contains(*userId) || !delta.is_number_integer() ||
+                    !seenAffinity.insert(*userId).second) {
                     Logger::warn(sessionId, "Memory", "好感度格式、用户 ID 归属或重复项无效，本批次不提交");
                     co_return std::nullopt;
                 }
                 if (const auto bounded = static_cast<i32>(std::clamp(jsonToDouble(delta), -5.0, 5.0)); bounded != 0)
-                    result.affinity.emplace_back(userId, bounded);
+                    result.affinity.emplace_back(*userId, bounded);
             }
             co_return result;
         }
@@ -375,7 +376,7 @@ aliases 和 longTerm 必须都是数组。longTerm 的每一项是非空字符�
 
         std::vector<std::string> newMemories;
         for (const auto &[userId, content]: extracted->personEntries) {
-            newMemories.push_back(std::to_string(userId) + ": " + content);
+            newMemories.push_back(userId.toString() + ": " + content);
         }
 
         const auto currentMemory = MemoryStore::getShortTermMemory(sessionId);

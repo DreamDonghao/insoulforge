@@ -9,7 +9,9 @@
 #include <unordered_map>
 
 #include <drogon/utils/coroutine.h>
+
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/UserId.hpp>
 
 namespace insoulforge {
     class PersonNameResolver {
@@ -21,7 +23,7 @@ namespace insoulforge {
         };
         static auto instance() -> PersonNameResolver &;
         /// @brief 立即返回缓存值，缺失时排队；now 用于失败冷却判断。
-        [[nodiscard]] auto lookup(u64 userId, Clock::time_point now = Clock::now()) -> Name;
+        [[nodiscard]] auto lookup(const UserId &userId, Clock::time_point now = Clock::now()) -> Name;
         void stop();
 
     private:
@@ -30,10 +32,10 @@ namespace insoulforge {
             Clock::time_point retryAfter{};
         };
         void pump();
-        auto query(u64 userId) -> drogon::Task<>;
+        auto query(UserId userId) -> drogon::Task<>;
         std::mutex m_mutex;
-        std::deque<u64> m_queue;
-        std::unordered_map<u64, State> m_states;
+        std::deque<UserId> m_queue;
+        std::unordered_map<UserId, State> m_states;
         size_t m_active = 0;
         bool m_stopping = false;
     };

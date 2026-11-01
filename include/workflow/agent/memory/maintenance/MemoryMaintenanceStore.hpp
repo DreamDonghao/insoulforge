@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/UserId.hpp>
 
 namespace insoulforge {
     class Database;
@@ -20,11 +21,11 @@ namespace insoulforge {
     };
 
     struct PersonMemoryEntry {
-        u64 userId;
+        UserId userId;
         std::string content;
     };
 
-    using AffinityDeltas = std::vector<std::pair<u64, i32>>;
+    using AffinityDeltas = std::vector<std::pair<UserId, i32>>;
 
     /// @brief 聊天记忆计算结果；shortTerm 复用旧列保存外号和独立聊天摘要，为空值时保留原内容
     struct MemoryMaintenanceResult {

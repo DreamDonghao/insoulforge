@@ -36,7 +36,7 @@ namespace insoulforge::CommandProcessor {
     auto isCommand(const json &message) -> bool {
         const auto sessionId = getUInt(message, "session_id");
         if (sessionId == 0 || SessionId::isPrivate(sessionId) ||
-            !MessageRecord::mentions(message, Config::instance().selfQQNumber)) {
+            !MessageRecord::mentions(message, UserId{Config::instance().selfQQNumber})) {
             return false;
         }
         if (commandText(message).empty())
@@ -46,8 +46,8 @@ namespace insoulforge::CommandProcessor {
 
     auto execute(const json &message) -> drogon::Task<std::string> {
         const u64 sessionId = getUInt(message, "session_id");
-        const u64 senderQQ = getUInt(atOrNull(message, "sender"), "user_id");
-        const bool hasPermission = AdminStore::isAdmin(senderQQ);
+        const auto sender = UserId::parse(getStr(atOrNull(message, "sender"), "user_id"));
+        const bool hasPermission = sender && AdminStore::isAdmin(*sender);
 
         std::istringstream input(commandText(message));
         std::string command;
@@ -91,7 +91,7 @@ namespace insoulforge::CommandProcessor {
                 co_return "暂无管理员";
             }
             std::string response = "管理员列表:\n";
-            for (const u64 userId: admins) {
+            for (const auto &userId: admins) {
                 response += fmt::format("- {}\n", userId);
             }
             co_return response;
@@ -105,7 +105,7 @@ namespace insoulforge::CommandProcessor {
                       "许可证: AGPL-3.0-only";
         }
         if (!hasPermission) {
-            co_return fmt::format("权限不足，你({})不是管理员", senderQQ);
+            co_return fmt::format("权限不足，你({})不是管理员", getStr(atOrNull(message, "sender"), "user_id"));
         }
         if (command == "/enable" || command == "/启用") {
             u64 targetSession = sessionId;
@@ -168,7 +168,7 @@ namespace insoulforge::CommandProcessor {
             if (!(input >> argument)) {
                 co_return "用法: /addadmin <用户 ID>";
             }
-            if (const auto userId = tryParseUInt64(argument)) {
+            if (const auto userId = UserId::parse(argument)) {
                 AdminStore::addAdmin(*userId);
                 co_return fmt::format("已添加管理员: {}", *userId);
             }
@@ -179,7 +179,7 @@ namespace insoulforge::CommandProcessor {
             if (!(input >> argument)) {
                 co_return "用法: /deladmin <用户 ID>";
             }
-            if (const auto userId = tryParseUInt64(argument)) {
+            if (const auto userId = UserId::parse(argument)) {
                 AdminStore::removeAdmin(*userId);
                 co_return fmt::format("已移除管理员: {}", *userId);
             }
@@ -191,7 +191,7 @@ namespace insoulforge::CommandProcessor {
                 co_return "黑名单为空";
             }
             std::string response = "黑名单:\n";
-            for (const u64 userId: users) {
+            for (const auto &userId: users) {
                 response += fmt::format("- {}\n", userId);
             }
             co_return response;
@@ -201,7 +201,7 @@ namespace insoulforge::CommandProcessor {
             if (!(input >> argument)) {
                 co_return "用法: /addblacklist <用户 ID>";
             }
-            if (const auto userId = tryParseUInt64(argument); userId && *userId != 0) {
+            if (const auto userId = UserId::parse(argument); userId) {
                 BlacklistStore::add(*userId);
                 co_return fmt::format("已添加黑名单: {}", *userId);
             }
@@ -212,7 +212,7 @@ namespace insoulforge::CommandProcessor {
             if (!(input >> argument)) {
                 co_return "用法: /delblacklist <用户 ID>";
             }
-            if (const auto userId = tryParseUInt64(argument); userId && *userId != 0) {
+            if (const auto userId = UserId::parse(argument); userId) {
                 BlacklistStore::remove(*userId);
                 co_return fmt::format("已移除黑名单: {}", *userId);
             }
