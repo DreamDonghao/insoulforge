@@ -696,8 +696,8 @@ namespace {
         check(!record.dump().contains("base64://"), "record excludes image transport data", kTestName);
     }
 
-    // 构造真实 v26 整数会话表，仅供迁移测试；生产代码不接受旧会话编码。
-    void prepareV26Schema(sqlite3 *db) {
+    // 恢复 v24 的整数会话结构，仅供构造已发布版本的迁移测试库。
+    void restoreIntegerSessionSchema(sqlite3 *db) {
         using namespace insoulforge;
         const auto integerKey = [](std::string_view column) {
             return fmt::format("CASE WHEN {0} LIKE 'private:%' THEN CAST(substr({0},9) AS "
@@ -765,11 +765,10 @@ namespace {
                 Statement(db, sql).execOrThrow();
             }
         }
-        Statement(db, "PRAGMA user_version=26").execOrThrow();
     }
 
-    void prepareV25Schema(sqlite3 *db) {
-        prepareV26Schema(db);
+    void restoreIntegerUserSchema(sqlite3 *db) {
+        restoreIntegerSessionSchema(db);
         using namespace insoulforge;
         Statement(db, "DROP INDEX idx_person_memory_entries_user_id").execOrThrow();
         for (const std::string table:
@@ -795,12 +794,11 @@ namespace {
         }
         Statement(db, "CREATE INDEX idx_person_memory_entries_user_id ON person_memory_entries(user_id, id)")
           .execOrThrow();
-        Statement(db, "PRAGMA user_version=25").execOrThrow();
     }
 
-    // v1.7.0 的身份列仍为 qq_number，其余结构与当前版本一致。
+    // v1.7.0 的身份列为 qq_number，会话仍使用最高位标记的整数编码。
     void prepareV24Schema(sqlite3 *db) {
-        prepareV25Schema(db);
+        restoreIntegerUserSchema(db);
         for (const auto *table: {"admins", "blacklisted_users", "person_affinity", "person_memories",
                "person_memory_entries"})
             insoulforge::Statement(db,
@@ -907,11 +905,12 @@ namespace {
         MemoryMaintenanceStore::apply(
           db, insoulforge::SessionId::group("100"), {.personEntries = {{UserId{42}, "保留条目"}}});
         const auto original = PersonMemoryStore::getPerson(UserId{42});
-        prepareV25Schema(db.handle());
-        Statement(db.handle(), "INSERT INTO admins(user_id) VALUES (-1)").execOrThrow();
+        prepareV24Schema(db.handle());
+        Statement(db.handle(), "INSERT INTO admins(qq_number) VALUES (-1)").execOrThrow();
         Statement(db.handle(), "CREATE INDEX custom_affinity_index ON person_affinity(affinity)").execOrThrow();
-        Statement(db.handle(), "CREATE TRIGGER reject_blocked_user BEFORE INSERT ON admins WHEN NEW.user_id='blocked' "
-                               "BEGIN SELECT RAISE(ABORT,'blocked'); END")
+        Statement(db.handle(),
+          "CREATE TRIGGER reject_blocked_user BEFORE INSERT ON admins WHEN NEW.qq_number='blocked' "
+          "BEGIN SELECT RAISE(ABORT,'blocked'); END")
           .execOrThrow();
         Statement(db.handle(), "UPDATE sqlite_sequence SET seq=100 WHERE name='person_memory_entries'").execOrThrow();
         sqlite3_set_authorizer(
@@ -930,8 +929,8 @@ namespace {
         sqlite3_set_authorizer(db.handle(), nullptr, nullptr);
         {
             const Statement version(db.handle(), "PRAGMA user_version");
-            const Statement type(db.handle(), "SELECT type FROM pragma_table_info('admins') WHERE name='user_id'");
-            check(rejected && version.step() && version.getInt(0) == 25 && type.step() && type.getText(0) == "INTEGER",
+            const Statement type(db.handle(), "SELECT type FROM pragma_table_info('admins') WHERE name='qq_number'");
+            check(rejected && version.step() && version.getInt(0) == 24 && type.step() && type.getText(0) == "INTEGER",
               "failed rebuild rolls back all table conversions and version", kTestName);
         }
         SchemaMigrator::migrate(db.handle());
@@ -1055,7 +1054,7 @@ namespace {
             .personEntries = {{UserId{42}, "人物条目"}}});
         const auto taskId =
           TaskStore::addScheduledTask({.sessionId = direct, .remindTime = 123, .content = "恢复任务", .isDaily = true});
-        prepareV26Schema(db.handle());
+        prepareV24Schema(db.handle());
         Statement(db.handle(), "UPDATE sqlite_sequence SET seq=100 WHERE name IN "
                                "('scheduled_tasks','chat_records','person_memory_entries','long_term_memory')")
           .execOrThrow();
@@ -1076,7 +1075,7 @@ namespace {
             const Statement version(db.handle(), "PRAGMA user_version");
             const Statement oldColumn(
               db.handle(), "SELECT type FROM pragma_table_info('group_config') WHERE name='group_id'");
-            check(failed && version.step() && version.getInt(0) == 26 && oldColumn.step() &&
+            check(failed && version.step() && version.getInt(0) == 24 && oldColumn.step() &&
                     oldColumn.getText(0) == "INTEGER",
               "failed rebuild rolls back earlier tables and version", kTestName);
         }
@@ -1146,7 +1145,7 @@ namespace {
             query.bind(1, id);
             return query.step() ? json::parse(query.getText(0)) : json{};
         };
-        Statement(db, "PRAGMA user_version=27").execOrThrow();
+        prepareV24Schema(db);
         Statement(db, "CREATE TRIGGER reject_system_update BEFORE UPDATE ON chat_records WHEN OLD.id=2 "
                       "BEGIN SELECT RAISE(ABORT,'test rollback'); END")
           .execOrThrow();
@@ -1158,7 +1157,7 @@ namespace {
         }
         {
             const Statement version(db, "PRAGMA user_version");
-            check(failed && version.step() && version.getInt(0) == 27 && read(1) == content,
+            check(failed && version.step() && version.getInt(0) == 24 && read(1) == content,
               "failed conversion rolls back both records and schema version", kTestName);
         }
         Statement(db, "DROP TRIGGER reject_system_update").execOrThrow();
@@ -1179,13 +1178,6 @@ namespace {
           "confirmed historical self references convert while unknown identities and text are preserved", kTestName);
         SchemaMigrator::migrate(db);
         check(read(1) == expected, "repeated startup preserves converted messages", kTestName);
-        insert.bind(1, dumpJson(knownSelf));
-        insert.execOrThrow();
-        insert.reset();
-        Statement(db, "PRAGMA user_version=28").execOrThrow();
-        SchemaMigrator::migrate(db);
-        check(read(9)["segments"][0]["target"]["user_id"] == "self",
-          "databases already at v28 also migrate self references", kTestName);
         // Statements 必须先析构；close_v2 允许其在离开作用域时完成清理。
         sqlite3_close_v2(db);
     }

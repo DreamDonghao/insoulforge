@@ -8,10 +8,6 @@
 #include <infrastructure/storage/SchemaMigrator.hpp>
 #include <infrastructure/storage/Statement.hpp>
 #include <infrastructure/storage/migrations/V25.hpp>
-#include <infrastructure/storage/migrations/V26.hpp>
-#include <infrastructure/storage/migrations/V27.hpp>
-#include <infrastructure/storage/migrations/V28.hpp>
-#include <infrastructure/storage/migrations/V29.hpp>
 
 namespace insoulforge {
     namespace {
@@ -195,8 +191,7 @@ namespace insoulforge {
                 return;
 
             // steps[i] 将 kMinimumSupportedVersion + i 升级到下一版本。
-            constexpr std::array steps = {
-              &migrateV24ToV25, &migrateV25ToV26, &migrateV26ToV27, &migrateV27ToV28, &migrateV28ToV29};
+            constexpr std::array steps = {&migrateV24ToV25};
             static_assert(steps.size() == kLatestVersion - kMinimumSupportedVersion);
             Logger::info(
               std::nullopt, "Storage", fmt::format("数据库版本 v{}，开始迁移到 v{}", version, kLatestVersion));
