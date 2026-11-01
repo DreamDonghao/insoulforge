@@ -13,6 +13,7 @@
 
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 
 namespace insoulforge {
     class Database;
@@ -31,10 +32,10 @@ namespace insoulforge::ToolRuntime {
 
     /// @brief 获取 QQ 收藏表情列表（调用 NapCat fetch_custom_face_detail，带60秒缓存）
     /// @return 归一化后的表情数组，失败时返回空数组
-    auto fetchFavoriteEmojis(std::optional<u64> sessionId = std::nullopt) -> drogon::Task<json>;
+    auto fetchFavoriteEmojis(std::optional<SessionId> sessionId = std::nullopt) -> drogon::Task<json>;
 
     /// @brief 在收藏表情列表中按名称查找表情（名称 = desc 或 "表情N"）
-    auto findFavoriteEmoji(std::string name, std::optional<u64> sessionId = std::nullopt) -> drogon::Task<json>;
+    auto findFavoriteEmoji(std::string name, std::optional<SessionId> sessionId = std::nullopt) -> drogon::Task<json>;
 
     /// @brief 使收藏表情缓存失效（修改/删除后调用）
     void invalidateFavoriteEmojiCache();

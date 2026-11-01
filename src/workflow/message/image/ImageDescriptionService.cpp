@@ -7,6 +7,7 @@
 #include <png.h>
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <workflow/agent/llm/LlmClient.hpp>
@@ -100,7 +101,7 @@ namespace insoulforge::ImageDescriptionService {
         }
 
         /// @brief 下载 URL 的原始媒体字节，不写入 HTTP 跟踪日志以避免二进制内容进入内存日志。
-        auto download(const std::string sourceUrl, const u64 sessionId, const size_t maxBytes)
+        auto download(const std::string sourceUrl, const SessionId sessionId, const size_t maxBytes)
           -> drogon::Task<std::optional<DownloadedMedia>> {
             static const std::regex urlPattern(R"(^(https?://[^/]+)(/.*)?$)", std::regex::icase);
             std::smatch match;
@@ -228,7 +229,8 @@ namespace insoulforge::ImageDescriptionService {
             return output;
         }
 
-        [[nodiscard]] auto extractGifFrames(const std::string &bytes, const u64 sessionId) -> std::vector<std::string> {
+        [[nodiscard]] auto extractGifFrames(const std::string &bytes, const SessionId sessionId)
+          -> std::vector<std::string> {
             GifInput input{.data = reinterpret_cast<const u8 *>(bytes.data()), .size = bytes.size()};
             i32 error = 0;
             std::unique_ptr<GifFileType, GifFileDeleter> gif(DGifOpen(&input, readGif, &error));
@@ -295,8 +297,7 @@ namespace insoulforge::ImageDescriptionService {
             return frames;
         }
 
-        auto requestVision(json messages, const u64 sessionId)
-          -> drogon::Task<std::optional<std::string>> {
+        auto requestVision(json messages, const SessionId sessionId) -> drogon::Task<std::optional<std::string>> {
             const auto &config = Config::instance();
             if (!LlmClient::isConfigured(config.image)) {
                 Logger::debug(sessionId, "Media", fmt::format("图片识别模型未配置，跳过识别"));
@@ -316,7 +317,7 @@ namespace insoulforge::ImageDescriptionService {
             co_return description.empty() ? std::nullopt : std::optional{description};
         }
 
-        auto describeMedia(DownloadedMedia media, const u64 sessionId)
+        auto describeMedia(DownloadedMedia media, const SessionId sessionId)
           -> drogon::Task<std::optional<ImageDescriptionResult>> {
             const auto &config = Config::instance();
             const std::string hash = sha256(media.bytes);
@@ -360,7 +361,7 @@ namespace insoulforge::ImageDescriptionService {
         }
     } // namespace
 
-    auto ask(std::string question, std::vector<std::string> sourceUrls, const u64 sessionId)
+    auto ask(std::string question, std::vector<std::string> sourceUrls, const SessionId sessionId)
       -> drogon::Task<std::expected<std::string, std::string>> {
         if (!LlmClient::isConfigured(Config::instance().image))
             co_return std::unexpected("图片识别模型尚未配置完整。");
@@ -429,7 +430,8 @@ namespace insoulforge::ImageDescriptionService {
         return "data:" + std::string(*mimeType) + ";base64," + base64Encode(bytes);
     }
 
-    auto referenceDataUrl(std::string sourceUrl, const u64 sessionId) -> drogon::Task<std::optional<std::string>> {
+    auto referenceDataUrl(std::string sourceUrl, const SessionId sessionId)
+      -> drogon::Task<std::optional<std::string>> {
         const auto media = co_await download(std::move(sourceUrl), sessionId, kMaxDownloadBytes);
         if (!media || media->isGif) {
             co_return std::nullopt;
@@ -437,7 +439,8 @@ namespace insoulforge::ImageDescriptionService {
         co_return staticImageDataUrl(media->bytes);
     }
 
-    auto describe(std::string sourceUrl, const u64 sessionId) -> drogon::Task<std::optional<ImageDescriptionResult>> {
+    auto describe(std::string sourceUrl, const SessionId sessionId)
+      -> drogon::Task<std::optional<ImageDescriptionResult>> {
         if (const auto &config = Config::instance(); !LlmClient::isConfigured(config.image)) {
             Logger::debug(sessionId, "Media", fmt::format("图片识别模型未配置，跳过识别"));
             co_return std::nullopt;
@@ -449,7 +452,7 @@ namespace insoulforge::ImageDescriptionService {
         co_return co_await describeMedia(std::move(*media), sessionId);
     }
 
-    auto describeGeneratedImage(std::string source, const u64 sessionId)
+    auto describeGeneratedImage(std::string source, const SessionId sessionId)
       -> drogon::Task<std::optional<ImageDescriptionResult>> {
         if (!LlmClient::isConfigured(Config::instance().image))
             co_return std::nullopt;

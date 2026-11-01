@@ -6,12 +6,12 @@
 import {computed, inject, nextTick, onMounted, onUnmounted, ref} from 'vue'
 import RequestError from '../../components/RequestError.vue'
 import {requestError} from '../../utils/api'
-import type {Group, LogEntry, LogQueryResult} from '../../vite-env.d'
-import {privateSessionUserId, sessionKey, sessionLabel} from '../../utils/session'
+import type {SessionSummary, LogEntry, LogQueryResult} from '../../vite-env.d'
+import {sessionIdLabel, sessionKey, sessionLabel} from '../../utils/session'
 
 const showToast = inject<(msg: string, isError?: boolean) => void>('showToast')
 
-const groups = ref<Group[]>([])
+const groups = ref<SessionSummary[]>([])
 const entries = ref<LogEntry[]>([])
 const loading = ref(false)
 const loadError = ref('')
@@ -30,12 +30,12 @@ const groupId = ref<'all' | 'system' | string>('all')
 const level = ref<'all' | string>('all')
 const keyword = ref('')
 const limit = ref(200)
-const activeFilters = ref({groupId: 'all', level: 'all', keyword: ''})
+const activeFilters = ref({sessionId: 'all', level: 'all', keyword: ''})
 let replacingSnapshot = false
 let liveDuringSnapshot: LogEntry[] = []
 const matchesFilters = (entry: LogEntry): boolean => {
   const filter = activeFilters.value
-  return (filter.groupId === 'all' || entry.sessionId === (filter.groupId === 'system' ? '0' : filter.groupId)) &&
+  return (filter.sessionId === 'all' || entry.sessionId === (filter.sessionId === 'system' ? null : filter.sessionId)) &&
       (filter.level === 'all' || entry.level === filter.level) &&
       (!filter.keyword || entry.source.includes(filter.keyword) || entry.content.includes(filter.keyword))
 }
@@ -65,16 +65,8 @@ const scrollToBottom = async (force = false): Promise<void> => {
 }
 
 const groupLabels = computed(() => new Map(groups.value.map(g => [sessionKey(g), sessionLabel(g)])))
-const groupTag = (sessionId: string): string => {
-  const label = groupLabels.value.get(sessionId)
-  if (label) return label
-  try {
-    const userId = privateSessionUserId(sessionId)
-    return userId !== null ? `私聊 ${userId}` : `群 ${sessionId}`
-  } catch {
-    return `群 ${sessionId}`
-  }
-}
+const groupTag = (sessionId: string | null): string =>
+  sessionId ? groupLabels.value.get(sessionId) || sessionIdLabel(sessionId) : '系统'
 
 const currentGroupLabel = computed(() => {
   if (groupId.value === 'all') return '全部日志'
@@ -149,7 +141,7 @@ const buildQuery = (beforeId?: number): string => {
   const params = new URLSearchParams()
   params.set('limit', String(limit.value))
   const filter = activeFilters.value
-  if (filter.groupId !== 'all') params.set('groupId', filter.groupId)
+  if (filter.sessionId !== 'all') params.set('sessionId', filter.sessionId)
   if (filter.level !== 'all') params.set('level', filter.level)
   if (filter.keyword) params.set('keyword', filter.keyword)
   if (beforeId && beforeId > 0) params.set('beforeId', String(beforeId))
@@ -173,7 +165,7 @@ const applySnapshot = (data: LogQueryResult, append = false): void => {
 const loadLogs = async (append = false): Promise<boolean> => {
   if (disposed || (append && loading.value)) return false
   if (!append) {
-    const next = {groupId: groupId.value, level: level.value, keyword: keyword.value.trim()}
+    const next = {sessionId: groupId.value, level: level.value, keyword: keyword.value.trim()}
     const changed = JSON.stringify(next) !== JSON.stringify(activeFilters.value)
     activeFilters.value = next
     if (changed) {
@@ -330,8 +322,8 @@ onUnmounted(() => {
              :class="['log-line', levelClass(entry.level)]">
           <span class="log-time">{{ entry.timestamp }}</span>
           <span class="log-level">{{ entry.level }}</span>
-          <span :title="entry.sessionId === '0' ? '系统' : groupTag(entry.sessionId)" class="log-group">{{
-              entry.sessionId === '0' ? '系统' : groupTag(entry.sessionId)
+          <span :title="entry.sessionId === null ? '系统' : groupTag(entry.sessionId)" class="log-group">{{
+              entry.sessionId === null ? '系统' : groupTag(entry.sessionId)
             }}</span>
           <span class="log-source">{{ entry.source }}</span>
           <span class="log-message">{{ entry.content }}</span>

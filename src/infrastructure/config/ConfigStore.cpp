@@ -268,8 +268,8 @@ namespace insoulforge::ConfigStore {
                     return std::unexpected(ConfigError{
                       .type = ConfigErrorType::FileOperation, .message = "无法备份损坏的配置文件: " + error.message()});
                 }
-                Logger::error(
-                  0, "Config", fmt::format("配置文件格式无效，已备份为 {} 并重建默认配置", backupPath.string()));
+                Logger::error(std::nullopt, "Config",
+                  fmt::format("配置文件格式无效，已备份为 {} 并重建默认配置", backupPath.string()));
                 needsWrite = true;
             } else {
                 config = std::move(parsed);
@@ -290,8 +290,8 @@ namespace insoulforge::ConfigStore {
         fileState.path = configPath;
         fileState.content = std::move(config);
         fileState.initialized = true;
-        Logger::info(
-          0, "Config", fmt::format("全局配置文件已{}: {}", needsWrite ? "初始化" : "加载", configPath.string()));
+        Logger::info(std::nullopt, "Config",
+          fmt::format("全局配置文件已{}: {}", needsWrite ? "初始化" : "加载", configPath.string()));
         return {};
     }
 
@@ -344,7 +344,7 @@ namespace insoulforge::ConfigStore {
         if (auto result = saveSection("llm", std::move(llm), validate); !result) {
             return result;
         }
-        Logger::info(0, "Config", fmt::format("LLM 配置已保存: {}", name));
+        Logger::info(std::nullopt, "Config", fmt::format("LLM 配置已保存: {}", name));
         return {};
     }
 
@@ -356,7 +356,7 @@ namespace insoulforge::ConfigStore {
         if (auto result = saveSection("qq", config, validate); !result) {
             return result;
         }
-        Logger::info(0, "Config", fmt::format("QQ Bot 配置已保存"));
+        Logger::info(std::nullopt, "Config", fmt::format("QQ Bot 配置已保存"));
         return {};
     }
 
@@ -366,7 +366,7 @@ namespace insoulforge::ConfigStore {
         if (auto result = saveSection("memory", config, validate); !result) {
             return result;
         }
-        Logger::info(0, "Config", fmt::format("记忆配置已保存"));
+        Logger::info(std::nullopt, "Config", fmt::format("记忆配置已保存"));
         return {};
     }
 
@@ -420,7 +420,7 @@ namespace insoulforge::ConfigStore {
             return result;
         }
         fileState.content = std::move(nextConfig);
-        Logger::info(0, "Config", "执行配置已保存");
+        Logger::info(std::nullopt, "Config", "执行配置已保存");
         return {};
     }
 } // namespace insoulforge::ConfigStore

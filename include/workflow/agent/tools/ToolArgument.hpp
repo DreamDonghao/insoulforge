@@ -9,8 +9,8 @@
 #include <expected>
 
 #include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <infrastructure/UserId.hpp>
-#include <workflow/message/SessionId.hpp>
 
 namespace insoulforge {
     /// @brief 从工具调用参数中读取字符串
@@ -25,21 +25,19 @@ namespace insoulforge {
         if (!value.is_string())
             return std::unexpected("user_id 必须是字符串用户 ID");
         const auto id = UserId::parse(value.get_ref<const std::string &>());
-        if (!id || id->toString() == "self" || *id == UserId{SessionId::kSystemAccountId})
+        if (!id || id->toString() == "self" || *id == UserId{kSystemUserId})
             return std::unexpected("user_id 必须是有效的用户 ID，不能使用机器人或系统身份");
         return id;
     }
 
-    /// @brief 严格读取必填 group_id，仅接受有效的数字字符串群号。
-    inline auto groupIdArgument(const json &args) -> std::expected<u64, std::string> {
+    /// @brief 将原始群 ID 转换为明确的群聊会话。
+    inline auto groupIdArgument(const json &args) -> std::expected<SessionId, std::string> {
         const auto &value = atOrNull(args, "group_id");
-        if (!value.is_string()) return std::unexpected("group_id 必须是数字字符串群号");
-        const auto &text = value.get_ref<const std::string &>();
-        u64 groupId = 0;
-        const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), groupId);
-        if (error != std::errc{} || end != text.data() + text.size() || groupId == 0 ||
-            SessionId::isPrivate(groupId) || groupId == SessionId::kSystemAccountId)
-            return std::unexpected("group_id 无效，必须填写有效的群号，不能指定私聊会话");
-        return groupId;
+        if (!value.is_string())
+            return std::unexpected("group_id 必须是字符串群 ID");
+        const auto target = UserId::parse(value.get_ref<const std::string &>());
+        if (!target)
+            return std::unexpected("group_id 无效：" + target.error());
+        return SessionId::group(target->toString());
     }
 } // namespace insoulforge

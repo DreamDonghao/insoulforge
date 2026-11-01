@@ -102,7 +102,7 @@ namespace insoulforge::ToolStore {
                     else
                         throw std::runtime_error("恢复旧工具时目录名冲突");
                 } catch (const std::exception &error) {
-                    Logger::warn(0, "Tool", fmt::format("工具保存恢复失败 '{}': {}", name, error.what()));
+                    Logger::warn(std::nullopt, "Tool", fmt::format("工具保存恢复失败 '{}': {}", name, error.what()));
                 }
             }
         }
@@ -137,8 +137,8 @@ namespace insoulforge::ToolStore {
                         throw std::runtime_error("重复工具 ID");
                     tools.push_back(std::move(tool));
                 } catch (const std::exception &error) {
-                    Logger::warn(
-                      0, "Tool", fmt::format("跳过无效工具目录 '{}': {}", entry.path().string(), error.what()));
+                    Logger::warn(std::nullopt, "Tool",
+                      fmt::format("跳过无效工具目录 '{}': {}", entry.path().string(), error.what()));
                 }
             }
             std::ranges::sort(tools, {}, &CustomTool::id);

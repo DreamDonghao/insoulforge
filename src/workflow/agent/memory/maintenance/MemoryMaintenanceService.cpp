@@ -6,6 +6,7 @@
 
 #include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <workflow/agent/llm/LlmClient.hpp>
@@ -14,14 +15,13 @@
 #include <workflow/agent/memory/maintenance/MemoryMaintenanceService.hpp>
 #include <workflow/agent/memory/maintenance/MemoryMaintenanceStore.hpp>
 #include <workflow/message/MessageRecord.hpp>
-#include <workflow/message/SessionId.hpp>
 
 namespace insoulforge {
     namespace {
         constexpr i32 kRecallPerMemory = 2;
         constexpr size_t kMaxRecalledEntries = 20;
         [[nodiscard]] auto parseLlmJson(const std::optional<std::string> &result, const std::string_view tag,
-          const u64 sessionId) -> std::optional<json> {
+          const SessionId sessionId) -> std::optional<json> {
             if (!result) {
                 Logger::error(sessionId, "Memory", fmt::format("{}: API 请求失败", tag));
                 return std::nullopt;
@@ -39,12 +39,12 @@ namespace insoulforge {
             return parsed;
         }
 
-        auto extractMemories(const json &records, const json &context, const u64 sessionId)
+        auto extractMemories(const json &records, const json &context, const SessionId sessionId)
           -> drogon::Task<std::optional<MemoryMaintenanceResult>> {
             std::unordered_set<UserId> participants;
             for (const auto &record: records) {
                 if (const auto userId = UserId::parse(getStr(atOrNull(record, "sender"), "user_id"));
-                  userId && userId->toString() != "self" && *userId != UserId{SessionId::kSystemAccountId})
+                  userId && userId->toString() != "self" && *userId != UserId{kSystemUserId})
                     participants.insert(*userId);
             }
             const bool affinityEnabled = Config::instance().affinityEnabled.load(std::memory_order_relaxed);
@@ -222,7 +222,7 @@ namespace insoulforge {
             co_return result;
         }
 
-        auto recallForMerge(const std::vector<std::string> &memories, const u64 sessionId)
+        auto recallForMerge(const std::vector<std::string> &memories, const SessionId sessionId)
           -> drogon::Task<std::optional<std::vector<SimilarMemory>>> {
             const f32 threshold = static_cast<f32>(Config::instance().longTermRecallThreshold);
             std::unordered_map<i64, SimilarMemory> recalled;
@@ -264,7 +264,7 @@ namespace insoulforge {
 
         auto reconcileMemory(const json &currentAliases, const std::vector<std::string> &pending,
           const std::vector<std::string> &newMemories, const std::vector<SimilarMemory> &recalled,
-          const bool longTermEnabled, const u64 sessionId) -> drogon::Task<std::optional<ReconcileResult>> {
+          const bool longTermEnabled, const SessionId sessionId) -> drogon::Task<std::optional<ReconcileResult>> {
             std::string prompt = R"(# 会话记忆整理器
 
 将本批待整理条目和召回的旧记忆整理为长期记忆，同时更新本会话的外号。
@@ -360,7 +360,7 @@ aliases 和 longTerm 必须都是数组。longTerm 的每一项是非空字符�
 
     } // namespace
 
-    auto MemoryMaintenanceService::prepare(const u64 sessionId, json messages, json contextMessages)
+    auto MemoryMaintenanceService::prepare(const SessionId sessionId, json messages, json contextMessages)
       -> drogon::Task<std::optional<MemoryMaintenanceResult>> {
         const auto records = projectMessages(messages);
         if (records.empty()) {

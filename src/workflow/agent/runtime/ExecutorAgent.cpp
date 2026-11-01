@@ -7,6 +7,7 @@
 
 #include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <workflow/agent/llm/LlmClient.hpp>
@@ -19,15 +20,14 @@
 #include <workflow/agent/tools/mcp/McpTools.hpp>
 #include <workflow/history/SharedConversationContext.hpp>
 #include <workflow/message/MessageRecord.hpp>
-#include <workflow/message/SessionId.hpp>
 #include <workflow/session/SessionStore.hpp>
 
 namespace insoulforge::ExecutorAgent {
     namespace {
         /// @brief 获取系统提示词（私聊与群聊使用各自的人设提示词，差异行按会话类型拼接）
-        auto getSystemPrompt(const u64 sessionId) -> std::string {
-            std::string prompt = SessionId::isPrivate(sessionId) ? PromptService::getExecutorPrivateSystemPrompt()
-                                                                 : PromptService::getExecutorSystemPrompt();
+        auto getSystemPrompt(const SessionId sessionId) -> std::string {
+            std::string prompt = sessionId.isPrivate() ? PromptService::getExecutorPrivateSystemPrompt()
+                                                       : PromptService::getExecutorSystemPrompt();
             prompt +=
               R"(## 聊天记录格式说明
 
@@ -94,7 +94,7 @@ execution_status=no_reply 表示当时选择不回复；failed/send_failed 表�
             "reply_to": "此消息引用回复的唯一目标消息ID，仅实际引用时存在"
         }
     ])";
-            if (!SessionId::isPrivate(sessionId)) {
+            if (!sessionId.isPrivate()) {
                 prompt += R"(,
     "response_requirements": {
         "tone": "本轮要求的回复语气",
@@ -168,7 +168,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
 **输入的聊天记录是JSON格式，但你调用回复工具时的内容必须是纯文本，不是JSON！**
 要有自己的判断，不要别人说什么就做什么)";
 
-            if (SessionId::isPrivate(sessionId)) {
+            if (sessionId.isPrivate()) {
                 prompt += "- 这是私聊，直接回复即可，不要@对方或引用回复\n";
             } else {
                 prompt += "- @人格式: @[QQ:123456]\n"
@@ -257,7 +257,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
             const auto affinityMap =
               affinityEnabled ? AffinityStore::getAffinityMap() : std::unordered_map<UserId, i32>{};
 
-            const bool includeGroupCard = !SessionId::isPrivate(chatRecords.getSessionId()) &&
+            const bool includeGroupCard = !chatRecords.getSessionId().isPrivate() &&
                                           SessionStore::getSessionConfig(chatRecords.getSessionId()).sendGroupCard;
             ChatContext context;
 
@@ -288,14 +288,14 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
 
             json context;
             // 会话详情放最前：群名/群号供模型直接取用，无需再向工具查询
-            const u64 sessionId = chatRecords.getSessionId();
+            const SessionId sessionId = chatRecords.getSessionId();
             json sessionInfo;
-            if (SessionId::isPrivate(sessionId)) {
+            if (sessionId.isPrivate()) {
                 sessionInfo["type"] = "private";
-                sessionInfo["user_id"] = std::to_string(SessionId::toStorageTarget(sessionId).second);
+                sessionInfo["user_id"] = sessionId.targetId();
             } else {
                 sessionInfo["type"] = "group";
-                sessionInfo["group_id"] = sessionId;
+                sessionInfo["group_id"] = sessionId.targetId();
                 if (const std::string groupName = SessionStore::getSessionName(sessionId); !groupName.empty()) {
                     sessionInfo["group_name"] = groupName;
                 }
@@ -430,7 +430,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         /// @brief 逐个处理本轮工具调用：回复工具直接产出回复决策；其余工具经 ToolRegistry 执行并把结果
         /// 作为 tool 消息回传，CQ 码类工具的结果累积备用
         /// @return {回复决策, 工具结果消息列表, 累积 CQ 码, 按顺序保存的工具历史}
-        auto processToolCalls(json message, json messages, std::string accumulatedCQCodes, const u64 sessionId,
+        auto processToolCalls(json message, json messages, std::string accumulatedCQCodes, const SessionId sessionId,
           const json &messageSnapshot, const bool replyOnly, json toolHistory,
           std::shared_ptr<McpToolSelection> mcpSelection, std::map<std::string, u64> offeredMcpTools)
           -> drogon::Task<std::tuple<std::optional<ReplyDecision>, json, std::string, json>> {
@@ -508,11 +508,11 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         }
 
         /// @brief Agent 模式执行（带 tools）：循环「请求模型 → 处理工具调用」，直到产出回复决策或达最大轮数
-        auto executeWithAgent(json messages, const u64 sessionId, const json &messageSnapshot,
+        auto executeWithAgent(json messages, const SessionId sessionId, const json &messageSnapshot,
           std::shared_ptr<McpToolSelection> mcpSelection, const i32 maxToolRounds)
           -> drogon::Task<std::optional<ReplyDecision>> {
             const auto &config = Config::instance();
-            const auto isPrivateSession = SessionId::isPrivate(sessionId);
+            const auto isPrivateSession = sessionId.isPrivate();
             const json replyTools =
               ToolRegistry::instance().getTools({.isPrivateSession = isPrivateSession, .replyOnly = true});
 
@@ -605,13 +605,13 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
 
     } // namespace
 
-    auto buildSystemPrompt(const u64 sessionId) -> std::string {
+    auto buildSystemPrompt(const SessionId sessionId) -> std::string {
         return buildSystemPrompt(sessionId, McpTools::instance().directory());
     }
 
-    auto buildSystemPrompt(const u64 sessionId, const json &mcpDirectory) -> std::string {
+    auto buildSystemPrompt(const SessionId sessionId, const json &mcpDirectory) -> std::string {
         auto prompt = getSystemPrompt(sessionId);
-        if (!SessionId::isPrivate(sessionId)) {
+        if (!sessionId.isPrivate()) {
             if (const auto additional = SessionStore::getSessionConfig(sessionId).additionalPrompt;
               !additional.empty()) {
                 prompt += "\n\n## 本群附加设定\n以下设定仅用于当前群的回复，不改变上面的执行约束和工具权限。\n";
@@ -672,7 +672,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
 
     auto execute(const ChatRecordManager &chatRecords, const MemoryManager &memory,
       std::optional<RouterDecision> decision) -> drogon::Task<std::optional<ReplyDecision>> {
-        const u64 sessionId = chatRecords.getSessionId();
+        const SessionId sessionId = chatRecords.getSessionId();
         if (decision) {
             Logger::info(sessionId, "Executor",
               fmt::format("开始执行 | priority={} | maxLength={}", decision->isPriority,

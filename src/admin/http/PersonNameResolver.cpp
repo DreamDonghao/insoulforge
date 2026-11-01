@@ -69,7 +69,7 @@ namespace insoulforge {
                 name = getStr(atOrNull(response, "data"), "nickname");
             }
         } catch (const std::exception &error) {
-            Logger::warn(0, "Admin", fmt::format("查询人物昵称失败: userId={}, {}", userId, error.what()));
+            Logger::warn(std::nullopt, "Admin", fmt::format("查询人物昵称失败: userId={}, {}", userId, error.what()));
         }
         {
             std::lock_guard lock(m_mutex);

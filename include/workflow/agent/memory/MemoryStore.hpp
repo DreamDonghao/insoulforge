@@ -10,6 +10,7 @@
 
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 
 /// @brief 会话外号与待整理条目存储
 namespace insoulforge::MemoryStore {
@@ -26,9 +27,9 @@ namespace insoulforge::MemoryStore {
     [[nodiscard]] auto pendingEntries(const std::string &memory) -> std::vector<std::string>;
 
     /// @brief 读取会话外号、聊天摘要和待整理条目；不存在时返回空字符串
-    [[nodiscard]] auto getShortTermMemory(u64 sessionId) -> std::string;
+    [[nodiscard]] auto getShortTermMemory(SessionId sessionId) -> std::string;
 
     /// @brief 保存会话外号、聊天摘要和待整理条目；已有记录时覆盖内容并更新时间
-    void updateShortTermMemory(u64 sessionId, const std::string &memory);
+    void updateShortTermMemory(SessionId sessionId, const std::string &memory);
 
 } // namespace insoulforge::MemoryStore

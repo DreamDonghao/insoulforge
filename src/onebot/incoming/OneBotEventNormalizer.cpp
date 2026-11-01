@@ -3,8 +3,8 @@
 
 #include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <onebot/incoming/OneBotEventNormalizer.hpp>
-#include <workflow/message/SessionId.hpp>
 #include <workflow/session/QQNameDirectory.hpp>
 
 namespace insoulforge::OneBotEventNormalizer {
@@ -110,16 +110,16 @@ namespace insoulforge::OneBotEventNormalizer {
         }
 
         /// @brief 从原始上报提取统一会话 ID
-        /// @details 群聊以群号为 ID；私聊以用户 用户 ID加私聊标志位，避免与群号冲突。
-        [[nodiscard]] auto extractSessionId(const json &body, const u64 senderId) -> u64 {
-            if (const u64 groupId = getUInt(body, "group_id"); groupId != 0) {
-                return groupId;
-            }
-            if (getStr(body, "post_type") == "message" && getStr(body, "message_type") != "private") {
-                return 0;
-            }
-            const u64 userId = getUInt(body, "user_id", senderId);
-            return userId == 0 ? 0 : SessionId::fromPrivateUser(userId);
+        /// @details 群聊与私聊通过显式类型区分；原始数字仅在 OneBot 11 边界解析。
+        [[nodiscard]] auto extractSessionId(const json &body, const u64 senderId) -> std::optional<SessionId> {
+            if (const auto groupId = getUInt(body, "group_id"); groupId != 0)
+                return SessionId::group(std::to_string(groupId));
+            if (getStr(body, "post_type") == "message" && getStr(body, "message_type") != "private")
+                return std::nullopt;
+            const auto userId = getUInt(body, "user_id", senderId);
+            if (userId == 0)
+                return std::nullopt;
+            return SessionId::privateChat(UserId{userId});
         }
 
         /// @brief 归一化普通消息上报
@@ -213,11 +213,11 @@ namespace insoulforge::OneBotEventNormalizer {
         }
 
         const u64 senderId = getUInt(atOrNull(body, "sender"), "user_id", getUInt(body, "user_id"));
-        const u64 sessionId = extractSessionId(body, senderId);
-        if (sessionId == 0) {
+        const auto sessionId = extractSessionId(body, senderId);
+        if (!sessionId) {
             return std::nullopt;
         }
-        (*record)["session_id"] = sessionId;
+        (*record)["session_id"] = *sessionId;
         return record;
     }
 } // namespace insoulforge::OneBotEventNormalizer

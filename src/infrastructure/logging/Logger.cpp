@@ -2,9 +2,9 @@
 /// @brief 统一运行日志入口 - 实现
 
 #include <algorithm>
-#include <cstdio>
 #include <filesystem>
 
+#include <cstdio>
 #include <fmt/chrono.h>
 #include <fmt/format.h>
 #include <spdlog/async.h>
@@ -15,9 +15,10 @@
 
 #include <admin/logging/LogWebSocketManager.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
+#include <infrastructure/logging/ConnectionRefusedLogFilter.hpp>
 #include <infrastructure/logging/LogBuffer.hpp>
 #include <infrastructure/logging/LogRedaction.hpp>
-#include <infrastructure/logging/ConnectionRefusedLogFilter.hpp>
 #include <infrastructure/logging/Logger.hpp>
 
 namespace insoulforge {
@@ -113,7 +114,7 @@ namespace insoulforge {
                 if (connectionRefusedLogFilter().shouldWrite(std::string_view(message, static_cast<size_t>(length))))
                     std::fwrite(message, 1, static_cast<size_t>(length), stdout);
             }, [] { std::fflush(stdout); });
-            info(0, "Logger", fmt::format("日志系统初始化完成 | file={}", sinks.size() > 1));
+            info(std::nullopt, "Logger", fmt::format("日志系统初始化完成 | file={}", sinks.size() > 1));
             return {};
         } catch (const spdlog::spdlog_ex &error) {
             return std::unexpected(std::string("日志系统初始化失败: ") + error.what());
@@ -122,27 +123,28 @@ namespace insoulforge {
         }
     }
 
-    void Logger::trace(const u64 sessionId, const std::string_view source, std::string content) {
+    void Logger::trace(const std::optional<SessionId> sessionId, const std::string_view source, std::string content) {
         write(Level::Trace, sessionId, source, std::move(content));
     }
 
-    void Logger::debug(const u64 sessionId, const std::string_view source, std::string content) {
+    void Logger::debug(const std::optional<SessionId> sessionId, const std::string_view source, std::string content) {
         write(Level::Debug, sessionId, source, std::move(content));
     }
 
-    void Logger::info(const u64 sessionId, const std::string_view source, std::string content) {
+    void Logger::info(const std::optional<SessionId> sessionId, const std::string_view source, std::string content) {
         write(Level::Info, sessionId, source, std::move(content));
     }
 
-    void Logger::warn(const u64 sessionId, const std::string_view source, std::string content) {
+    void Logger::warn(const std::optional<SessionId> sessionId, const std::string_view source, std::string content) {
         write(Level::Warn, sessionId, source, std::move(content));
     }
 
-    void Logger::error(const u64 sessionId, const std::string_view source, std::string content) {
+    void Logger::error(const std::optional<SessionId> sessionId, const std::string_view source, std::string content) {
         write(Level::Error, sessionId, source, std::move(content));
     }
 
-    void Logger::critical(const u64 sessionId, const std::string_view source, std::string content) {
+    void Logger::critical(
+      const std::optional<SessionId> sessionId, const std::string_view source, std::string content) {
         write(Level::Critical, sessionId, source, std::move(content));
     }
 
@@ -160,7 +162,8 @@ namespace insoulforge {
         return {level.data(), level.size()};
     }
 
-    void Logger::write(const Level level, const u64 sessionId, const std::string_view source, std::string content) {
+    void Logger::write(
+      const Level level, const std::optional<SessionId> sessionId, const std::string_view source, std::string content) {
         const auto spdlogLevel = toSpdlogLevel(level);
         if (!spdlog::default_logger()->should_log(spdlogLevel)) {
             return;
@@ -183,8 +186,8 @@ namespace insoulforge {
           .sessionId = sessionId,
           .source = std::move(sourceName),
           .content = std::move(content)};
-        const std::string line =
-          fmt::format("[{}][{}][{}][{}]", entry.level, entry.sessionId, entry.source, entry.content);
+        const std::string line = fmt::format("[{}][{}][{}][{}]", entry.level,
+          entry.sessionId ? entry.sessionId->toString() : "-", entry.source, entry.content);
 
         spdlog::log(spdlogLevel, "{}", line);
         const LogEntry stored = LogBuffer::instance().append(std::move(entry));

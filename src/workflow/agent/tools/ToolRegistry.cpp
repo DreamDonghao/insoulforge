@@ -38,7 +38,7 @@ namespace insoulforge {
 
     auto ToolRegistry::registerPlugin(std::string pluginId, const PluginRegistrar &registrar) -> bool {
         if (pluginId.empty() || !registrar || !m_activePluginId.empty()) {
-            Logger::error(0, "Tool", fmt::format("工具插件注册失败：插件 ID、注册函数无效或发生嵌套注册"));
+            Logger::error(std::nullopt, "Tool", fmt::format("工具插件注册失败：插件 ID、注册函数无效或发生嵌套注册"));
             return false;
         }
         ToolRegistry staged;
@@ -46,10 +46,10 @@ namespace insoulforge {
         try {
             registrar(staged);
         } catch (const std::exception &e) {
-            Logger::error(0, "Tool", fmt::format("工具插件 '{}' 注册异常: {}", pluginId, e.what()));
+            Logger::error(std::nullopt, "Tool", fmt::format("工具插件 '{}' 注册异常: {}", pluginId, e.what()));
             return false;
         } catch (...) {
-            Logger::error(0, "Tool", fmt::format("工具插件 '{}' 注册发生未知异常", pluginId));
+            Logger::error(std::nullopt, "Tool", fmt::format("工具插件 '{}' 注册发生未知异常", pluginId));
             return false;
         }
         if (staged.m_pluginRegistrationFailed) {
@@ -59,7 +59,7 @@ namespace insoulforge {
         for (const auto &name: staged.m_tools | std::views::keys) {
             if (const auto existing = m_tools.find(name);
               existing != m_tools.end() && existing->second.pluginId != pluginId) {
-                Logger::error(0, "Tool",
+                Logger::error(std::nullopt, "Tool",
                   fmt::format("工具插件 '{}' 与 '{}' 的工具 '{}' 冲突", pluginId, existing->second.pluginId, name));
                 return false;
             }
@@ -90,7 +90,7 @@ namespace insoulforge {
     auto ToolRegistry::registerTool(const Tool &tool, const ToolCategory category) -> bool {
         std::unique_lock lock(m_mutex);
         if (tool.name.empty() || !tool.handler) {
-            Logger::error(0, "Tool", fmt::format("工具注册失败：工具名称或处理器为空"));
+            Logger::error(std::nullopt, "Tool", fmt::format("工具注册失败：工具名称或处理器为空"));
             if (!m_activePluginId.empty())
                 m_pluginRegistrationFailed = true;
             return false;
@@ -98,7 +98,7 @@ namespace insoulforge {
 
         const std::string pluginId = m_activePluginId.empty() ? "application" : m_activePluginId;
         if (const auto it = m_tools.find(tool.name); it != m_tools.end() && it->second.pluginId != pluginId) {
-            Logger::error(0, "Tool",
+            Logger::error(std::nullopt, "Tool",
               fmt::format(
                 "工具注册冲突: '{}' 已由插件 '{}' 注册，插件 '{}' 不能覆盖", tool.name, it->second.pluginId, pluginId));
             if (!m_activePluginId.empty())
@@ -159,6 +159,7 @@ namespace insoulforge {
 
     auto ToolRegistry::executeTool(const std::string name, json args, ToolCallContext ctx) const
       -> drogon::Task<std::string> {
+        const auto logSession = ctx.sessionId; // ctx 随处理器移动，异常日志仍需保留身份。
         ToolHandler handler;
         {
             std::shared_lock lock(m_mutex);
@@ -183,10 +184,10 @@ namespace insoulforge {
             try {
                 co_return co_await handler(std::move(args), std::move(ctx));
             } catch (const std::exception &error) {
-                Logger::error(ctx.sessionId, "Tool", fmt::format("工具 '{}' 执行异常: {}", name, error.what()));
+                Logger::error(logSession, "Tool", fmt::format("工具 '{}' 执行异常: {}", name, error.what()));
                 co_return fmt::format("工具 '{}' 执行失败: {}", name, std::string_view(error.what()).substr(0, 500));
             } catch (...) {
-                Logger::error(ctx.sessionId, "Tool", fmt::format("工具 '{}' 执行发生未知异常", name));
+                Logger::error(logSession, "Tool", fmt::format("工具 '{}' 执行发生未知异常", name));
                 co_return fmt::format("工具 '{}' 执行失败: 未知异常", name);
             }
         }

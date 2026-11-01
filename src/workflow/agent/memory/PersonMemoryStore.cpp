@@ -8,12 +8,12 @@
 #include <vector>
 
 #include <infrastructure/CommonUtil.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <infrastructure/UserId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 #include <workflow/agent/memory/PersonMemoryStore.hpp>
-#include <workflow/message/SessionId.hpp>
 
 namespace insoulforge::PersonMemoryStore {
     namespace {
@@ -32,8 +32,7 @@ namespace insoulforge::PersonMemoryStore {
 
         // 详情和整理快照共用条目的列顺序：正文、来源会话、UTC 写入时间。
         auto readEntry(const Statement &row, const i32 contentColumn = 0) -> json {
-            return {{"content", row.getText(contentColumn)},
-              {"source_session", std::to_string(static_cast<u64>(row.getInt64(contentColumn + 1)))},
+            return {{"content", row.getText(contentColumn)}, {"source_session", row.getText(contentColumn + 1)},
               {"time", row.getText(contentColumn + 2)}};
         }
     } // namespace
@@ -271,7 +270,7 @@ namespace insoulforge::PersonMemoryStore {
         std::unordered_set<UserId> seen;
         for (const auto &record: recentConversation) {
             const auto userId = UserId::parse(getStr(atOrNull(record, "sender"), "user_id"));
-            if (userId && userId->toString() != "self" && *userId != UserId{SessionId::kSystemAccountId} &&
+            if (userId && userId->toString() != "self" && *userId != UserId{kSystemUserId} &&
                 seen.insert(*userId).second)
                 senders.push_back(*userId);
         }
@@ -303,8 +302,7 @@ namespace insoulforge::PersonMemoryStore {
             }
             if (!query.isNull(4)) {
                 it->second["pending_entries"].push_back({{"created_at", query.getText(7)},
-                  {"source_session", std::to_string(static_cast<u64>(query.getInt64(6)))},
-                  {"content", query.getText(5)}});
+                  {"source_session", query.getText(6)}, {"content", query.getText(5)}});
             }
         }
         for (const auto &userId: senders) {

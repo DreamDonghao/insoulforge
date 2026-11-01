@@ -8,14 +8,14 @@
 #include <vector>
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 
 /// @brief 定时任务存储
 namespace insoulforge::TaskStore {
     /// @brief 定时任务结构
     struct ScheduledTask {
         i64 id = 0;
-        std::string sessionType; ///< "group" | "private"
-        u64 targetId = 0; ///< 群号或私聊用户用户 ID
+        SessionId sessionId; ///< 带类型的会话身份
         i64 remindTime = 0; ///< 提醒时间（unix 秒，用户请求的原始时间）
         std::string content; ///< 触发时的提醒内容
         bool isDaily = false; ///< 每日重复任务：触发后自动推进到次日同一时刻，取消前一直有效
@@ -29,7 +29,7 @@ namespace insoulforge::TaskStore {
     auto getPendingScheduledTasks() -> std::vector<ScheduledTask>;
 
     /// @brief 获取指定会话待触发的定时任务（按提醒时间升序）
-    auto getPendingScheduledTasksByTarget(const std::string &sessionType, u64 targetId) -> std::vector<ScheduledTask>;
+    auto getPendingScheduledTasksBySession(const SessionId &sessionId) -> std::vector<ScheduledTask>;
 
     /// @brief 取消待触发的定时任务
     /// @return true=取消成功；false=任务不存在或已触发/已取消

@@ -351,7 +351,7 @@ namespace insoulforge {
         /// @brief 切换会话启用状态
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
-        /// @param sessionId 会话 ID（私聊会话带标志位）
+        /// @param sessionId 带类型的会话 ID
         auto toggleSession(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback,
           const std::string &sessionId) const -> drogon::Task<>;
         /// @brief 保存单个群向模型发送群名片的开关，拒绝私聊和无效参数。
@@ -381,14 +381,14 @@ namespace insoulforge {
         /// @brief 从启用列表移除会话
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
-        /// @param sessionId 会话 ID（私聊会话带标志位）
+        /// @param sessionId 带类型的会话 ID
         auto removeSession(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback,
           const std::string &sessionId) const -> drogon::Task<>;
 
         /// @brief 刷新会话名称
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
-        /// @param sessionId 会话 ID（私聊会话带标志位）
+        /// @param sessionId 带类型的会话 ID
         auto refreshSessionName(drogon::HttpRequestPtr req,
           std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &sessionId) const
           -> drogon::Task<>;
@@ -410,7 +410,7 @@ namespace insoulforge {
         /// @brief 获取指定会话的聊天记录
         /// @param req HTTP 请求，可选 limit 参数
         /// @param callback HTTP 响应回调
-        /// @param sessionId 会话 ID（私聊会话带标志位）
+        /// @param sessionId 带类型的会话 ID
         auto getChatRecords(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback,
           const std::string &sessionId) const -> drogon::Task<>;
 
@@ -431,7 +431,7 @@ namespace insoulforge {
         /// @brief 清空指定会话的聊天记录
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
-        /// @param sessionId 会话 ID（私聊会话带标志位）
+        /// @param sessionId 带类型的会话 ID
         auto clearSessionChatRecords(drogon::HttpRequestPtr req,
           std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &sessionId) const
           -> drogon::Task<>;
@@ -441,14 +441,14 @@ namespace insoulforge {
         /// @brief 获取会话短期记忆
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
-        /// @param sessionId 会话 ID（私聊会话带标志位）
+        /// @param sessionId 带类型的会话 ID
         auto getSessionMemory(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback,
           const std::string &sessionId) const -> drogon::Task<>;
 
         /// @brief 更新会话短期记忆
         /// @param req HTTP 请求，body 包含 memory
         /// @param callback HTTP 响应回调
-        /// @param sessionId 会话 ID（私聊会话带标志位）
+        /// @param sessionId 带类型的会话 ID
         auto updateSessionMemory(drogon::HttpRequestPtr req,
           std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &sessionId) const
           -> drogon::Task<>;
@@ -458,7 +458,7 @@ namespace insoulforge {
         /// @brief 获取全局好感度列表（按分数降序），保留会话路径以兼容现有入口。
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
-        /// @param sessionId 会话 ID（私聊会话带标志位）
+        /// @param sessionId 带类型的会话 ID
         auto getSessionAffinity(drogon::HttpRequestPtr req,
           std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &sessionId) const
           -> drogon::Task<>;
@@ -479,7 +479,7 @@ namespace insoulforge {
         /// @brief 获取指定会话待触发的定时任务（按触发时间升序）
         /// @param req HTTP 请求
         /// @param callback HTTP 响应回调
-        /// @param sessionId 会话 ID（私聊会话带标志位）
+        /// @param sessionId 带类型的会话 ID
         auto getScheduledTasks(drogon::HttpRequestPtr req,
           std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &sessionId) const
           -> drogon::Task<>;

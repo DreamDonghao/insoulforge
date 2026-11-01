@@ -37,7 +37,7 @@ auto AdminController::saveLLMConfig(
 
     const std::string name = getStr(*body, "name");
     if (auto result = Config::instance().saveLLMConfig(name, *body); !result) {
-        Logger::error(0, "Config", result.error().message);
+        Logger::error(std::nullopt, "Config", result.error().message);
         callback(AdminResponse::configErrorResponse(result.error()));
         co_return;
     }
@@ -65,7 +65,7 @@ auto AdminController::saveExecutionConfig(
     }
 
     if (auto result = Config::instance().saveExecutionConfig(*body); !result) {
-        Logger::error(0, "Config", result.error().message);
+        Logger::error(std::nullopt, "Config", result.error().message);
         callback(AdminResponse::configErrorResponse(result.error()));
         co_return;
     }
@@ -145,7 +145,7 @@ auto AdminController::savePrompt(HttpRequestPtr req, std::function<void(const Ht
     }
 
     PromptStore::setPrompt(key, content, description);
-    Logger::warn(0, "Admin", fmt::format("管理后台更新提示词: key={}, 长度={}", key, content.size()));
+    Logger::warn(std::nullopt, "Admin", fmt::format("管理后台更新提示词: key={}, 长度={}", key, content.size()));
 
     callback(jsonResponse(AdminResponse::okJson("提示词已保存")));
     co_return;
@@ -240,7 +240,7 @@ auto AdminController::addCustomTool(HttpRequestPtr req, std::function<void(const
 
     // 立即注册到 ToolRegistry
     if (auto result = ToolRuntime::reloadCustomTools(Database::instance()); !result) {
-        Logger::error(0, "Tool", result.error());
+        Logger::error(std::nullopt, "Tool", result.error());
         auto response =
           jsonResponse(AdminResponse::failJson("工具数据可能已保存，但运行时重载失败: " + result.error()));
         response->setStatusCode(k500InternalServerError);
@@ -291,7 +291,7 @@ auto AdminController::updateCustomTool(const HttpRequestPtr req,
 
     // 重新注册工具
     if (auto result = ToolRuntime::reloadCustomTools(Database::instance()); !result) {
-        Logger::error(0, "Tool", result.error());
+        Logger::error(std::nullopt, "Tool", result.error());
         auto response =
           jsonResponse(AdminResponse::failJson("工具数据可能已保存，但运行时重载失败: " + result.error()));
         response->setStatusCode(k500InternalServerError);
@@ -315,7 +315,7 @@ auto AdminController::deleteCustomTool(HttpRequestPtr req, const std::function<v
 
     // 重新注册工具（移除已删除的）
     if (auto result = ToolRuntime::reloadCustomTools(Database::instance()); !result) {
-        Logger::error(0, "Tool", result.error());
+        Logger::error(std::nullopt, "Tool", result.error());
         auto response =
           jsonResponse(AdminResponse::failJson("工具数据可能已保存，但运行时重载失败: " + result.error()));
         response->setStatusCode(k500InternalServerError);
@@ -339,7 +339,7 @@ auto AdminController::toggleCustomTool(HttpRequestPtr req, const std::function<v
 
     // 重新注册工具
     if (auto result = ToolRuntime::reloadCustomTools(Database::instance()); !result) {
-        Logger::error(0, "Tool", result.error());
+        Logger::error(std::nullopt, "Tool", result.error());
         auto response =
           jsonResponse(AdminResponse::failJson("工具数据可能已保存，但运行时重载失败: " + result.error()));
         response->setStatusCode(k500InternalServerError);
@@ -354,7 +354,7 @@ auto AdminController::toggleCustomTool(HttpRequestPtr req, const std::function<v
 auto AdminController::reloadCustomTools(
   HttpRequestPtr req, const std::function<void(const HttpResponsePtr &)> callback) const -> Task<> {
     if (auto result = ToolRuntime::reloadCustomTools(Database::instance()); !result) {
-        Logger::error(0, "Tool", result.error());
+        Logger::error(std::nullopt, "Tool", result.error());
         auto response =
           jsonResponse(AdminResponse::failJson("工具数据可能已保存，但运行时重载失败: " + result.error()));
         response->setStatusCode(k500InternalServerError);
@@ -403,7 +403,8 @@ auto AdminController::testCustomTool(HttpRequestPtr req, std::function<void(cons
     std::string result;
     if (executorType == "lua") {
         try {
-            result = co_await LuaToolExecutor::execute(std::move(scriptContent), std::move(testArgs), 0, false, true);
+            result = co_await LuaToolExecutor::execute(
+              std::move(scriptContent), std::move(testArgs), std::nullopt, false, true);
         } catch (const std::exception &error) {
             callback(jsonResponse(AdminResponse::errorJson(error.what())));
             co_return;
@@ -520,7 +521,7 @@ auto AdminController::importCustomTool(HttpRequestPtr req, std::function<void(co
         co_return;
     }
     if (auto result = ToolRuntime::reloadCustomTools(Database::instance()); !result) {
-        Logger::error(0, "Tool", result.error());
+        Logger::error(std::nullopt, "Tool", result.error());
         auto response =
           jsonResponse(AdminResponse::failJson("工具数据可能已保存，但运行时重载失败: " + result.error()));
         response->setStatusCode(k500InternalServerError);
@@ -528,7 +529,7 @@ auto AdminController::importCustomTool(HttpRequestPtr req, std::function<void(co
         co_return;
     }
 
-    Logger::info(0, "Admin", fmt::format("导入自定义工具: {} (ID: {})", tool.name, newId));
+    Logger::info(std::nullopt, "Admin", fmt::format("导入自定义工具: {} (ID: {})", tool.name, newId));
 
     json resp = AdminResponse::okJson("工具已导入");
     resp["id"] = newId;

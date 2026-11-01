@@ -44,7 +44,7 @@ namespace insoulforge::ImageReferences {
                 }
             }
             if (record.is_null()) {
-                const auto content = ChatRecordStore::findContentByMessageId(ctx.sessionId, messageId);
+                const auto content = ChatRecordStore::findContentByMessageId(ctx.requireSession(), messageId);
                 if (!content || !tryParseJson(*content, record))
                     return std::unexpected("未找到该会话中的图片消息。");
             }

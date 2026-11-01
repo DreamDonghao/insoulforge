@@ -4,17 +4,18 @@
 
 #pragma once
 
-#include <optional>
-#include <expected>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include <drogon/utils/coroutine.h>
+#include <expected>
 
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 
 namespace insoulforge {
     struct LLMApiConfig;
@@ -29,7 +30,7 @@ namespace insoulforge::LlmClient {
         void cancel();
         [[nodiscard]] auto isCancelled() const -> bool;
         auto recordUsage(const json &response, const std::string &model, const std::string &role,
-          std::optional<u64> sessionId) -> bool;
+          std::optional<SessionId> sessionId) -> bool;
 
     private:
         mutable std::mutex m_mutex;
@@ -42,7 +43,7 @@ namespace insoulforge::LlmClient {
     /// @brief 按模型配置快照发送 POST 请求；仅网络失败及 HTTP 429/500/503 重试，间隔 1 秒。
     /// @note 超时与重试参数只在本地使用，调用方负责业务响应校验与用量记录。
     auto sendModelRequest(std::string label, LLMApiConfig api, json body,
-      std::optional<u64> sessionId = std::nullopt, bool traceResponse = true,
+      std::optional<SessionId> sessionId = std::nullopt, bool traceResponse = true,
       std::shared_ptr<MaintenanceRequestControl> control = {})
       -> drogon::Task<std::expected<drogon::HttpResponsePtr, std::string>>;
 
@@ -64,15 +65,15 @@ namespace insoulforge::LlmClient {
     /// @param tools 工具定义；null 表示不附带
     /// @param sessionId 会话 ID
     /// @return 校验通过的完整响应 JSON；不可恢复错误或重试耗尽时返回 std::nullopt
-    auto requestChat(std::string label, std::string usageRole, LLMApiConfig apiConfig,
-      LLMModelParams params, json messages, json tools = {}, u64 sessionId = 0)
+    auto requestChat(std::string label, std::string usageRole, LLMApiConfig apiConfig, LLMModelParams params,
+      json messages, json tools = {}, std::optional<SessionId> sessionId = std::nullopt)
       -> drogon::Task<std::optional<json>>;
 
     /// @brief 使用 Memory 模型配置执行记忆或好感度维护请求。
     /// @param usageRole 用量记录中的角色（memory 或 affinity）。
     /// @param maxTokens 单次请求的输出上限；未指定时使用 Memory 模型配置。
     /// @param control 可选取消状态，取消后丢弃迟到响应且不记录用量。
-    auto requestMaintenance(json messages, u64 sessionId, std::string usageRole = "memory",
+    auto requestMaintenance(json messages, std::optional<SessionId> sessionId, std::string usageRole = "memory",
       std::optional<i32> maxTokens = std::nullopt, std::shared_ptr<MaintenanceRequestControl> control = {})
       -> drogon::Task<std::optional<std::string>>;
 
@@ -82,12 +83,12 @@ namespace insoulforge::LlmClient {
     /// @param role 角色名（router/executor/executorThinking/memory/image/embedding）
     /// @param sessionId 关联日志的会话 ID；缺省时按全局请求记录
     void logUsage(const json &responseJson, const std::string &model, const std::string &role,
-      std::optional<u64> sessionId = std::nullopt);
+      std::optional<SessionId> sessionId = std::nullopt);
 
     /// @brief 请求 Embedding API（使用 Embedding 配置）
     /// @param text 待向量化的文本
     /// @param sessionId 关联日志的会话 ID；缺省时按全局请求记录
     /// @return 向量，未配置或失败返回 std::nullopt
-    auto requestEmbedding(std::string text, std::optional<u64> sessionId = std::nullopt)
+    auto requestEmbedding(std::string text, std::optional<SessionId> sessionId = std::nullopt)
       -> drogon::Task<std::optional<std::vector<f32>>>;
 } // namespace insoulforge::LlmClient

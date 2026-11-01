@@ -463,7 +463,7 @@ test('live log pushes obey committed filters and survive an in-flight snapshot w
   globalThis.fetch = () => pending.promise
   state.level = 'error'
   const refresh = state.refresh()
-  const entry = (id, level) => ({id, level, sessionId: '0', source: 'test', content: 'event'})
+  const entry = (id, level) => ({id, level, sessionId: null, source: 'test', content: 'event'})
   const push = data => state.handleWsMessage({data: JSON.stringify({type: 'log', data})})
   push(entry(1, 'info'))
   push(entry(2, 'error'))

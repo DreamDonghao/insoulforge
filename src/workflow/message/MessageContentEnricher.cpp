@@ -5,6 +5,7 @@
 #include <fmt/format.h>
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <workflow/agent/llm/LlmClient.hpp>
@@ -24,7 +25,7 @@ namespace insoulforge::MessageContentEnricher {
         }
     } // namespace
 
-    auto enrichImages(json message, const u64 sessionId) -> drogon::Task<json> {
+    auto enrichImages(json message, const SessionId sessionId) -> drogon::Task<json> {
         if (!message.is_object()) {
             co_return message;
         }
@@ -61,7 +62,7 @@ namespace insoulforge::MessageContentEnricher {
         co_return message;
     }
 
-    auto injectMemories(json message, const u64 sessionId) -> drogon::Task<json> {
+    auto injectMemories(json message, const SessionId sessionId) -> drogon::Task<json> {
         const std::string query = MessageRecord::extractRecallText(message);
         if (utf8Length(query) <= kMinRecallChars) {
             co_return message;

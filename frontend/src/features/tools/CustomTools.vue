@@ -159,7 +159,8 @@ const currentReadme: Ref<string> = ref('')
 const currentToolName: Ref<string> = ref('')
 
 const defaultLuaScript = `function run(args, ctx)
-    return "会话 " .. ctx.session_id .. "：" .. (args.text or "你好")
+    local session = ctx.session_id ~= json.null and ctx.session_id or "独立测试"
+    return "会话 " .. session .. "：" .. (args.text or "你好")
 end
 
 -- 可选：由 bot.start_task(description, payload) 启动后台入口。

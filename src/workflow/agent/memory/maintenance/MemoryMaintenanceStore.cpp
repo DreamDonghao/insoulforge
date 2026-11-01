@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
@@ -33,34 +34,34 @@ namespace insoulforge::MemoryMaintenanceStore {
         }
     } // namespace
 
-    void apply(const Database &database, const u64 sessionId, const MemoryMaintenanceResult &result) {
+    void apply(const Database &database, const SessionId sessionId, const MemoryMaintenanceResult &result) {
         std::unique_lock lock(database.mutex());
         sqlite3 *handle = database.handle();
         execOrThrow(handle, "BEGIN IMMEDIATE");
         try {
             if (result.shortTerm) {
                 const Statement statement(handle,
-                  "INSERT INTO short_term_memory (group_id, memory_content) VALUES (?, ?) "
-                  "ON CONFLICT(group_id) DO UPDATE SET memory_content = excluded.memory_content, "
+                  "INSERT INTO short_term_memory (session_id, memory_content) VALUES (?, ?) "
+                  "ON CONFLICT(session_id) DO UPDATE SET memory_content = excluded.memory_content, "
                   "updated_at = CURRENT_TIMESTAMP");
-                statement.bind(1, sessionId);
+                statement.bind(1, sessionId.toString());
                 statement.bind(2, *result.shortTerm);
                 statement.execOrThrow();
             }
 
             for (const PreparedLongTermMemory &memory: result.longTerm) {
                 const Statement statement(
-                  handle, "INSERT INTO long_term_memory (group_id, content, embedding) VALUES (?, ?, ?)");
-                statement.bind(1, sessionId);
+                  handle, "INSERT INTO long_term_memory (session_id, content, embedding) VALUES (?, ?, ?)");
+                statement.bind(1, sessionId.toString());
                 statement.bind(2, memory.content);
                 statement.bind(3, toBytes(memory.embedding));
                 statement.execOrThrow();
             }
             const std::unordered_set<i64> replacedIds(result.replacedLongTermIds.begin(), result.replacedLongTermIds.end());
             for (const i64 memoryId: replacedIds) {
-                const Statement statement(handle, "DELETE FROM long_term_memory WHERE id = ? AND group_id = ?");
+                const Statement statement(handle, "DELETE FROM long_term_memory WHERE id = ? AND session_id = ?");
                 statement.bind(1, memoryId);
-                statement.bind(2, sessionId);
+                statement.bind(2, sessionId.toString());
                 statement.execOrThrow();
             }
 
@@ -71,7 +72,7 @@ namespace insoulforge::MemoryMaintenanceStore {
                 const Statement entry(
                   handle, "INSERT INTO person_memory_entries (user_id, source_session, content) VALUES (?, ?, ?)");
                 entry.bind(1, userId.toString());
-                entry.bind(2, sessionId);
+                entry.bind(2, sessionId.toString());
                 entry.bind(3, content);
                 entry.execOrThrow();
             }

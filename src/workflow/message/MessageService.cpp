@@ -7,6 +7,7 @@
 #include <fmt/format.h>
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <infrastructure/UserId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
@@ -15,7 +16,6 @@
 #include <workflow/OneBotEventWorkflow.hpp>
 #include <workflow/message/MessageRecord.hpp>
 #include <workflow/message/MessageService.hpp>
-#include <workflow/message/SessionId.hpp>
 
 namespace insoulforge {
     namespace {
@@ -28,7 +28,7 @@ namespace insoulforge {
         /// @param toolHistory
         /// @return 发送成功返回 message_id；失败保留带 send_error 的上下文记录，并返回具体错误。
         auto afterSendMessage(drogon::Task<std::expected<u64, std::string>> sendTask, std::string processedMessage,
-          const u64 sessionId, std::string_view channelName, std::optional<std::string> imageDescription,
+          const SessionId sessionId, std::string_view channelName, std::optional<std::string> imageDescription,
           json toolHistory) -> drogon::Task<std::expected<u64, std::string>> {
             const auto messageId = co_await std::move(sendTask);
             const auto recordMessageId = messageId ? std::optional<u64>{*messageId} : std::nullopt;
@@ -58,7 +58,7 @@ namespace insoulforge {
         }
     } // namespace
 
-    auto MessageService::sendGroupMsg(const u64 groupId, std::string message,
+    auto MessageService::sendGroupMsg(const SessionId groupId, std::string message,
       std::optional<std::string> imageDescription, json toolHistory) -> drogon::Task<std::expected<u64, std::string>> {
         // 转换 @[QQ:xxx] 为 CQ 码
         const std::string processedMessage = message.starts_with("[CQ:image,file=base64://")
@@ -70,15 +70,11 @@ namespace insoulforge {
 
     auto MessageService::sendPrivateMsg(const UserId userId, std::string message,
       std::optional<std::string> imageDescription, json toolHistory) -> drogon::Task<std::expected<u64, std::string>> {
-        const auto number = userId.toU64();
-        if (!number || *number == 0 || SessionId::isPrivate(*number) || *number == SessionId::kSystemAccountId ||
-            userId.toString() != std::to_string(*number))
-            co_return std::unexpected("当前私聊会话编码要求有效的数字用户 ID");
+        const auto sessionId = SessionId::privateChat(userId);
         const std::string processedMessage = message.starts_with("[CQ:image,file=base64://")
                                                ? std::move(message)
                                                : MessageFormatter::convertAtToCQCode(std::move(message));
-        co_return co_await afterSendMessage(
-          OneBotClient::sendPrivateMsg(userId, processedMessage, SessionId::fromPrivateUser(*number)), processedMessage,
-          SessionId::fromPrivateUser(*number), "私聊消息", std::move(imageDescription), std::move(toolHistory));
+        co_return co_await afterSendMessage(OneBotClient::sendPrivateMsg(userId, processedMessage, sessionId),
+          processedMessage, sessionId, "私聊消息", std::move(imageDescription), std::move(toolHistory));
     }
 } // namespace insoulforge

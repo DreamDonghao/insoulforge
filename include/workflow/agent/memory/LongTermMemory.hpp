@@ -10,6 +10,7 @@
 #include <drogon/utils/coroutine.h>
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 
 /// @brief 按语义检索当前会话的长期记忆
 namespace insoulforge::LongTermMemory {
@@ -18,5 +19,5 @@ namespace insoulforge::LongTermMemory {
     /// @param topK 返回结果数量
     /// @param sessionId 会话 ID
     /// @return 检索结果文本；向量化失败返回 std::nullopt，无相似记忆返回 "未找到相关信息"
-    auto searchMemory(std::string query, i32 topK, u64 sessionId) -> drogon::Task<std::optional<std::string>>;
+    auto searchMemory(std::string query, i32 topK, SessionId sessionId) -> drogon::Task<std::optional<std::string>>;
 } // namespace insoulforge::LongTermMemory

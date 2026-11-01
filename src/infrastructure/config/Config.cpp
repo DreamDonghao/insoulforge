@@ -323,7 +323,7 @@ namespace insoulforge {
             return next.loadValues(value);
         }).transform([this, &next] -> void {
             applyValues(next);
-            Logger::info(0, "Config", "配置读取和运行时加载完成");
+            Logger::info(std::nullopt, "Config", "配置读取和运行时加载完成");
         });
     }
 

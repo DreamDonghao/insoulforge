@@ -198,7 +198,7 @@ data/tools/
 ## Lua 自定义工具
 
 后台中每条 Lua 工具记录包含一个脚本，定义 `run(args, ctx)` 并返回字符串。`args` 对应工具参数 JSON；
-`ctx.session_id` 是统一会话 ID 的字符串，`ctx.is_private` 表示私聊。每次调用使用独立 Lua 状态，不保留全局变量。
+`ctx.session_id` 是带类型的规范字符串，例如 `group:123456` 或 `private:some-user`；目标中的特殊字符使用百分号编码，不能再用 `tonumber(ctx.session_id)` 取得目标。`ctx.is_private` 表示私聊。后台独立测试没有会话时，`ctx.session_id` 为 `json.null`，`ctx.is_private` 为 `false`。每次调用使用独立 Lua 状态，不保留全局变量。
 
 ```lua
 function run(args, ctx)
@@ -314,9 +314,8 @@ HTTP 响应体仍受 Lua 执行器的 1 MiB 限制，超限时返回错误，而
   `returned` 只表示工具处理器返回，不能仅凭它判断业务成功。此前查询不含完整结果，需要时仍可重新核实。
 - **调用日志**：Executor 记录工具名称，并在 debug 级别记录工具结果；不打印脚本源码。
 - **错误反馈**：普通工具的结果会作为 `tool` 消息回传给 Executor。处理器抛异常时，`ToolRegistry` 将异常摘要（最多 500 字符）转为工具结果，不让异常中断整轮调用；回复工具的参数错误则由 Executor 自行回传。Lua HTTP 接口返回传输错误或原始 HTTP 响应，由脚本将具体原因回传模型。仅返回布尔成功状态的 OneBot 接口无法提供更细的失败原因，工具会返回相应的通用提示。异步工具启动后的执行错误通过新的系统消息反馈，不作为原工具调用的即时结果。
-- **会话上下文**：所有工具签名统一为 `(json args, ToolCallContext)`，会话 ID 从 `ctx.sessionId` 取得；`ctx.messageSnapshot`
-  是本轮冻结的完整消息快照，媒体工具可用它按 `message_id` 与 `image_index` 解析图片来源。群操作类工具统一做私聊拦截与
-  `sessionId == 0` 校验
+- **会话上下文**：所有工具签名统一为 `(json args, ToolCallContext)`，需要真实会话时通过 `ctx.requireSession()` 取得 `SessionId`，可选日志归属使用 `ctx.sessionId`；`ctx.messageSnapshot`
+  是本轮冻结的完整消息快照，媒体工具可用它按 `message_id` 与 `image_index` 解析图片来源。群操作类工具统一检查会话存在并拦截私聊。
 - **参数来源**：用户 ID、消息 ID、图片索引等参数取自聊天记录 JSON 的 `sender.user_id` / `message_id` /
   `segments[].image_index` / `reply_to` 等字段；图片 `file/url` 仅由服务端从 `assets.images` 读取，不会提供给模型
 - **宽容取值**：参数读取统一走 `argString` / `getInt` / `getUInt` / `getBool`（见 `include/infrastructure/JsonUtil.hpp`

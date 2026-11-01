@@ -10,6 +10,7 @@
 
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 
 namespace insoulforge {
     class Database;
@@ -26,10 +27,10 @@ namespace insoulforge {
     class MessageList {
     public:
         /// @brief 从数据库恢复一个统一会话的最近完整消息
-        /// @param sessionId 群号或带私聊标志位的用户 用户 ID
+        /// @param sessionId 带类型的群聊或私聊会话身份
         /// @param database 已成功初始化的数据库，供恢复和持久化使用。
         /// @param config 消息窗口与总结参数；两个依赖必须覆盖消息列表的生命周期。
-        MessageList(u64 sessionId, const Database &database, const Config &config);
+        MessageList(SessionId sessionId, const Database &database, const Config &config);
 
         /// @brief 追加完整消息并生成冻结快照
         /// @param message 完整消息 JSON；内部不会保留工作流专用 `session_id`
@@ -68,7 +69,7 @@ namespace insoulforge {
         /// @brief 生成锁保护下用于恢复的完整消息快照
         [[nodiscard]] auto fullSnapshotLocked() const -> json;
 
-        u64 m_sessionId; ///< 绑定的统一会话 ID
+        SessionId m_sessionId; ///< 绑定的统一会话 ID
         const Database &m_database;
         const Config &m_config;
         mutable std::mutex m_mutex; ///< 保护消息、总结批次状态与快照生成

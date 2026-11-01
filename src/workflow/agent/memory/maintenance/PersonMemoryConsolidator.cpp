@@ -198,7 +198,8 @@ namespace insoulforge {
                                        "聊天中有人提到这个名称时，结合上下文判断是不是在说机器人，不要只看名字。";
             const json messages = json::array(
               {{{"role", "system"}, {"content", prompt}}, {{"role", "user"}, {"content", snapshot->profile.dump()}}});
-            const auto result = co_await LlmClient::requestMaintenance(messages, 0, "memory", std::nullopt, control);
+            const auto result =
+              co_await LlmClient::requestMaintenance(messages, std::nullopt, "memory", std::nullopt, control);
             // 与 stop() 互斥，检查取消状态后才允许读取或提交数据库。
             std::lock_guard lock(m_mutex);
             if (control->isCancelled())
@@ -207,16 +208,17 @@ namespace insoulforge {
             json profile;
             if (!result || !tryExtractJsonObject(*result, payload) || !tryParseJson(payload, profile) ||
                 !validProfile(profile)) {
-                Logger::warn(0, "Memory", fmt::format("人物整理失败，保留原记忆与待整理条目: userId={}", userId));
+                Logger::warn(
+                  std::nullopt, "Memory", fmt::format("人物整理失败，保留原记忆与待整理条目: userId={}", userId));
                 co_return Result::Failed;
             }
             PersonMemoryStore::applyConsolidation(*snapshot, profile);
             co_return Result::Updated;
         } catch (const PersonMemoryStore::ConsolidationConflict &error) {
-            Logger::warn(0, "Memory", fmt::format("人物整理未提交: userId={}, {}", userId, error.what()));
+            Logger::warn(std::nullopt, "Memory", fmt::format("人物整理未提交: userId={}, {}", userId, error.what()));
             co_return Result::Conflict;
         } catch (const std::exception &error) {
-            Logger::error(0, "Memory", fmt::format("人物整理异常: userId={}, {}", userId, error.what()));
+            Logger::error(std::nullopt, "Memory", fmt::format("人物整理异常: userId={}, {}", userId, error.what()));
             co_return Result::Failed;
         }
     }
@@ -266,8 +268,8 @@ namespace insoulforge {
                 PersonMemoryStore::saveDailyState(state);
                 people = PersonMemoryStore::pendingPeople();
             }
-            Logger::info(
-              0, "Memory", fmt::format("人物每日整理开始: date={}, people={}", state.runningDay, people.size()));
+            Logger::info(std::nullopt, "Memory",
+              fmt::format("人物每日整理开始: date={}, people={}", state.runningDay, people.size()));
             size_t completed = 0;
             for (const auto userId: people) {
                 if (control->isCancelled())
@@ -283,9 +285,10 @@ namespace insoulforge {
                 state.runningDay.clear();
                 PersonMemoryStore::saveDailyState(state);
             }
-            Logger::info(0, "Memory", fmt::format("人物每日整理结束: success={}, total={}", completed, people.size()));
+            Logger::info(
+              std::nullopt, "Memory", fmt::format("人物每日整理结束: success={}, total={}", completed, people.size()));
         } catch (const std::exception &error) {
-            Logger::error(0, "Memory", fmt::format("人物每日整理中断: {}", error.what()));
+            Logger::error(std::nullopt, "Memory", fmt::format("人物每日整理中断: {}", error.what()));
         }
     }
 } // namespace insoulforge

@@ -1,5 +1,4 @@
 #include <atomic>
-#include <infrastructure/logging/Logger.hpp>
 #include <chrono>
 #include <filesystem>
 #include <iostream>
@@ -9,15 +8,16 @@
 #include <trantor/net/EventLoopThread.h>
 
 #include <admin/http/AdminController.hpp>
-#include <workflow/agent/runtime/ExecutorAgent.hpp>
-#include <workflow/agent/tools/ToolRegistry.hpp>
-#include <workflow/agent/tools/mcp/McpTools.hpp>
-#include <workflow/message/SessionId.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/http/HttpTrace.hpp>
+#include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/mcp/Client.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <workflow/agent/llm/prompts/PromptService.hpp>
+#include <workflow/agent/runtime/ExecutorAgent.hpp>
+#include <workflow/agent/tools/ToolRegistry.hpp>
+#include <workflow/agent/tools/mcp/McpTools.hpp>
 
 namespace {
     using namespace drogonmcp;
@@ -136,13 +136,13 @@ namespace {
             require(selection->enabled.empty() && selection->directory[0].value("description", std::string{}) == "",
               "Old description default missing");
             const auto prompt = insoulforge::ExecutorAgent::buildSystemPrompt(
-              insoulforge::SessionId::fromPrivateUser(42), selection->directory);
+              insoulforge::SessionId::privateChat(insoulforge::UserId{42}), selection->directory);
             require(prompt.find("mcp_list_tools") != std::string::npos && prompt.find(endpoint) == std::string::npos &&
                       prompt.find("inputSchema") == std::string::npos,
               "Directory prompt exposed connection or full tool definitions");
             const auto beforeQuery = fixture.listRequests.load();
-            auto page = insoulforge::json::parse(co_await registry.executeTool(
-              "mcp_list_tools", {{"server", "fixture"}}, {.sessionId = 42, .mcpSelection = selection}));
+            auto page = insoulforge::json::parse(co_await registry.executeTool("mcp_list_tools",
+              {{"server", "fixture"}}, {.sessionId = insoulforge::SessionId::group("42"), .mcpSelection = selection}));
             require(
               page["tools"].size() == 1 && page.contains("nextCursor") && !page["tools"][0].contains("inputSchema"),
               "MCP listing did not paginate summaries");
@@ -161,11 +161,14 @@ namespace {
               co_await mcp.listTools({{"server", "fixture"}, {"query", "not-found"}}, selection));
             require(emptySearch["tools"].empty() && emptySearch["total"] == 0, "Empty search incorrect");
             auto beforeEnable = selection->enabled;
-            auto enabled = insoulforge::json::parse(co_await registry.executeTool("mcp_enable_tools",
-              {{"server", "fixture"}, {"names", {"echo", "echo"}}}, {.sessionId = 42, .mcpSelection = selection}));
+            auto enabled = insoulforge::json::parse(
+              co_await registry.executeTool("mcp_enable_tools", {{"server", "fixture"}, {"names", {"echo", "echo"}}},
+                {.sessionId = insoulforge::SessionId::group("42"), .mcpSelection = selection}));
             require(enabled["enabledTools"].size() == 1 && selection->enabled.size() == 1, "Enable/dedup failed");
-            auto unauthorized = co_await registry.executeTool(
-              "mcp_fixture_echo", {}, {.sessionId = 42, .mcpSelection = selection, .offeredMcpTools = beforeEnable});
+            auto unauthorized = co_await registry.executeTool("mcp_fixture_echo", {},
+              {.sessionId = insoulforge::SessionId::group("42"),
+                .mcpSelection = selection,
+                .offeredMcpTools = beforeEnable});
             require(
               unauthorized.find("未在本轮开放") != std::string::npos, "Same-round activation bypassed authorization");
             const auto selectedDefinitions = registry.getTools({.mcpTools = selection->enabled, .mcpManagement = true});
@@ -173,8 +176,8 @@ namespace {
             require(
               registry.getTools({.replyOnly = true, .mcpTools = selection->enabled, .mcpManagement = true}).empty(),
               "Last round exposed MCP helpers or remote tools");
-            auto lastRoundHelper = co_await registry.executeTool(
-              "mcp_enable_tools", {}, {.sessionId = 42, .replyOnly = true, .mcpSelection = selection});
+            auto lastRoundHelper = co_await registry.executeTool("mcp_enable_tools", {},
+              {.sessionId = insoulforge::SessionId::group("42"), .replyOnly = true, .mcpSelection = selection});
             require(lastRoundHelper.find("最后一轮") != std::string::npos, "Last round helper executed");
             auto otherReply = mcp.createSelection({});
             require(otherReply->enabled.empty() && registry.getTools({.mcpTools = otherReply->enabled}).empty(),
@@ -205,7 +208,9 @@ namespace {
             require(fixture.listRequests.load() == requestsAfterDiscovery, "Cached tools were queried again");
             fixture.failClose.store(true);
             auto remoteOutput = co_await registry.executeTool("mcp_fixture_echo", drogonmcp::Json{{"text", "hello"}},
-              {.sessionId = 42, .mcpSelection = selection, .offeredMcpTools = selection->enabled});
+              {.sessionId = insoulforge::SessionId::group("42"),
+                .mcpSelection = selection,
+                .offeredMcpTools = selection->enabled});
             auto parsedOutput = drogonmcp::Json::parse(remoteOutput, nullptr, false);
             require(parsedOutput.is_object() && parsedOutput["content"][0]["text"] == "hello",
               "Registered MCP tool did not execute");
@@ -213,9 +218,9 @@ namespace {
             require(std::ranges::any_of(recorded,
                       [&](const auto &entry) {
                           const auto request = drogonmcp::Json::parse(entry.requestBody, nullptr, false);
-                          return entry.tag == "MCP:fixture" && entry.url == endpoint && entry.sessionId == 42 &&
-                                 entry.status == 200 && request.is_object() &&
-                                 request.value("method", "") == "tools/call" &&
+                          return entry.tag == "MCP:fixture" && entry.url == endpoint &&
+                                 entry.sessionId == insoulforge::SessionId::group("42") && entry.status == 200 &&
+                                 request.is_object() && request.value("method", "") == "tools/call" &&
                                  entry.responseBody.find("hello") != std::string::npos;
                       }),
               "MCP tool call missing from frontend trace cache");
@@ -231,8 +236,8 @@ namespace {
                                  entry.responseBody.find("fixture-key") != std::string::npos;
                       }),
               "Authentication header leaked into trace cache");
-            auto blocked = co_await registry.executeTool(
-              "mcp_fixture_echo", drogonmcp::Json::object(), {.sessionId = 42, .replyOnly = true});
+            auto blocked = co_await registry.executeTool("mcp_fixture_echo", drogonmcp::Json::object(),
+              {.sessionId = insoulforge::SessionId::group("42"), .replyOnly = true});
             require(blocked.find("最后一轮") != std::string::npos, "MCP tool bypassed reply-only restriction");
             require(registry.getTools({.replyOnly = true}).empty(), "Remote tools included in last round");
             auto &config = insoulforge::Config::instance();
@@ -270,7 +275,9 @@ namespace {
               insoulforge::json::parse(co_await mcp.listTools({{"server", "fixture"}, {"cursor", cursor}}, selection));
             require(staleCursor.contains("error"), "Old pagination cursor survived refresh");
             auto staleCall = co_await registry.executeTool("mcp_fixture_echo", {},
-              {.sessionId = 42, .mcpSelection = selection, .offeredMcpTools = selection->enabled});
+              {.sessionId = insoulforge::SessionId::group("42"),
+                .mcpSelection = selection,
+                .offeredMcpTools = selection->enabled});
             require(staleCall.find("定义已更新") != std::string::npos, "Old tool authorization survived refresh");
             std::ignore = mcp.enableTools({{"server", "fixture"}, {"names", {"echo"}}}, *selection);
             require(registry.getTools({.mcpTools = selection->enabled}).size() == 1, "Re-enable after refresh failed");
@@ -305,7 +312,7 @@ namespace {
                       registry.getTools({.mcpManagement = !noServices->services.empty()}).empty(),
               "Helpers exposed without services");
             const auto promptWithoutMcp = insoulforge::ExecutorAgent::buildSystemPrompt(
-              insoulforge::SessionId::fromPrivateUser(42), noServices->directory);
+              insoulforge::SessionId::privateChat(insoulforge::UserId{42}), noServices->directory);
             require(
               promptWithoutMcp.find("## 可用 MCP 服务") == std::string::npos, "Empty directory injected into prompt");
             require(insoulforge::json::parse(mcp.enableTools({{"server", "fixture"}, {"names", {"echo"}}}, *selection))

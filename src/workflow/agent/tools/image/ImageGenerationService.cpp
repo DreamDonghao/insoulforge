@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <string_view>
 
+#include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <workflow/agent/llm/LlmClient.hpp>
 #include <workflow/agent/tools/image/ImageGenerationService.hpp>
@@ -75,7 +76,7 @@ namespace insoulforge::ImageGenerationService {
         return base64ImageCode(base64);
     }
 
-    auto generate(std::string prompt, std::string size, const u64 sessionId,
+    auto generate(std::string prompt, std::string size, const SessionId sessionId,
       std::vector<std::string> referenceDataUrls) -> drogon::Task<GeneratedImage> {
         const auto config = Config::instance().imageGeneration;
         if (config.apiKey.empty() || config.baseUrl.empty() || config.path.empty() || config.model.empty()) {

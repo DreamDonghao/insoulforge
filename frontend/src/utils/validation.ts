@@ -1,6 +1,5 @@
 export const I32_MAX = 2147483647
 export const U64_MAX = 18446744073709551615n
-export const SESSION_ID_MAX = (1n << 63n) - 1n
 
 export function identifierError(value: string, label: string, allowZero = false, maximum = U64_MAX): string {
   const text = value.trim()

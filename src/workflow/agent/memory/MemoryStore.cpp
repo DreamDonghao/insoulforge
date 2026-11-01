@@ -7,12 +7,12 @@
 
 #include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <infrastructure/UserId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 #include <workflow/agent/memory/MemoryStore.hpp>
-#include <workflow/message/SessionId.hpp>
 
 namespace insoulforge::MemoryStore {
     auto normalizeSessionMemory(const json &value) -> std::optional<json> {
@@ -26,8 +26,8 @@ namespace insoulforge::MemoryStore {
         std::unordered_map<UserId, size_t> aliasIndices;
         for (const auto &alias: value["aliases"]) {
             const auto userId = UserId::parse(getStr(alias, "user_id"));
-            if (!alias.is_object() || !userId || userId->toString() == "self" ||
-                *userId == UserId{SessionId::kSystemAccountId} || !atOrNull(alias, "names").is_array())
+            if (!alias.is_object() || !userId || userId->toString() == "self" || *userId == UserId{kSystemUserId} ||
+                !atOrNull(alias, "names").is_array())
                 return std::nullopt;
             auto [it, inserted] = aliasIndices.try_emplace(*userId, result["aliases"].size());
             if (inserted)
@@ -107,21 +107,21 @@ namespace insoulforge::MemoryStore {
           ? (*normalized)["pending_entries"].get<std::vector<std::string>>() : std::vector<std::string>{};
     }
 
-    auto getShortTermMemory(const u64 sessionId) -> std::string {
+    auto getShortTermMemory(const SessionId sessionId) -> std::string {
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
-        const Statement stmt(db.handle(), "SELECT memory_content FROM short_term_memory WHERE group_id = ?");
-        stmt.bind(1, sessionId);
+        const Statement stmt(db.handle(), "SELECT memory_content FROM short_term_memory WHERE session_id = ?");
+        stmt.bind(1, sessionId.toString());
         return stmt.step() ? stmt.getText(0) : "";
     }
 
-    void updateShortTermMemory(const u64 sessionId, const std::string &memory) {
+    void updateShortTermMemory(const SessionId sessionId, const std::string &memory) {
         const auto &db = Database::instance();
         std::unique_lock lock(db.mutex());
-        const Statement stmt(db.handle(), "INSERT INTO short_term_memory (group_id, memory_content) VALUES (?, ?) "
-                                          "ON CONFLICT(group_id) DO UPDATE SET memory_content = "
+        const Statement stmt(db.handle(), "INSERT INTO short_term_memory (session_id, memory_content) VALUES (?, ?) "
+                                          "ON CONFLICT(session_id) DO UPDATE SET memory_content = "
                                           "excluded.memory_content, updated_at = CURRENT_TIMESTAMP");
-        stmt.bind(1, sessionId);
+        stmt.bind(1, sessionId.toString());
         stmt.bind(2, memory);
         stmt.exec();
     }

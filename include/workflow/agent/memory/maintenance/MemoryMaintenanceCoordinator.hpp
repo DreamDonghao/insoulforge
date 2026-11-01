@@ -7,6 +7,7 @@
 
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 
 namespace insoulforge {
     class Database;
@@ -15,5 +16,6 @@ namespace insoulforge {
 namespace insoulforge::MemoryMaintenanceCoordinator {
     /// @brief 处理一个内存批次；失败不提交结果，由后续消息重新触发
     /// @note 调用方负责同会话互斥、异常处理和消息列表收尾。
-    auto process(const Database &database, u64 sessionId, json messages, json contextMessages) -> drogon::Task<bool>;
+    auto process(const Database &database, SessionId sessionId, json messages, json contextMessages)
+      -> drogon::Task<bool>;
 } // namespace insoulforge::MemoryMaintenanceCoordinator

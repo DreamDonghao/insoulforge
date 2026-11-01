@@ -6,6 +6,7 @@
 #include <utility>
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <workflow/MessageRouter.hpp>
@@ -13,7 +14,6 @@
 #include <workflow/agent/llm/LlmClient.hpp>
 #include <workflow/agent/llm/prompts/PromptService.hpp>
 #include <workflow/message/MessageRecord.hpp>
-#include <workflow/message/SessionId.hpp>
 #include <workflow/session/SessionStore.hpp>
 
 namespace insoulforge::MessageRouter {
@@ -39,8 +39,8 @@ namespace insoulforge::MessageRouter {
               .isPriority = priority};
         }
 
-        [[nodiscard]] auto applySessionType(RouterDecision decision, const u64 sessionId) -> RouterDecision {
-            decision.isPrivate = SessionId::isPrivate(sessionId);
+        [[nodiscard]] auto applySessionType(RouterDecision decision, const SessionId sessionId) -> RouterDecision {
+            decision.isPrivate = sessionId.isPrivate();
             return decision;
         }
 
@@ -155,9 +155,9 @@ namespace insoulforge::MessageRouter {
 
         /// @brief 使用独立的最近 N 条滑动窗口构建 Jev 状态。
         [[nodiscard]] auto buildJevState(
-          const u64 sessionId, const std::string_view triggerMessageId, const json &snapshot) -> json {
+          const SessionId sessionId, const std::string_view triggerMessageId, const json &snapshot) -> json {
             const bool includeGroupCard =
-              !SessionId::isPrivate(sessionId) && SessionStore::getSessionConfig(sessionId).sendGroupCard;
+              !sessionId.isPrivate() && SessionStore::getSessionConfig(sessionId).sendGroupCard;
             const auto windowSize = static_cast<size_t>(
               std::max(1, Config::instance().jevWindowSize.load(std::memory_order_relaxed)));
             const size_t startIndex = snapshot.size() > windowSize ? snapshot.size() - windowSize : 0;
@@ -216,9 +216,9 @@ namespace insoulforge::MessageRouter {
         }
 
         [[nodiscard]] auto buildPrompt(
-          const u64 sessionId, const std::string_view triggerMessageId, const json &snapshot) -> json {
+          const SessionId sessionId, const std::string_view triggerMessageId, const json &snapshot) -> json {
             const bool includeGroupCard =
-              !SessionId::isPrivate(sessionId) && SessionStore::getSessionConfig(sessionId).sendGroupCard;
+              !sessionId.isPrivate() && SessionStore::getSessionConfig(sessionId).sendGroupCard;
             const size_t startIndex = windowStartIndex(snapshot.size());
 
             json records = json::array();
@@ -239,9 +239,9 @@ namespace insoulforge::MessageRouter {
               {"messages_since_last_speak", spokeInWindow ? silentCount : snapshot.size() - startIndex}};
 
             json prompt = json::array();
-            prompt.push_back({{"role", "system"},
-              {"content", SessionId::isPrivate(sessionId) ? PromptService::getRouterPrivateSystemPrompt()
-                                                          : PromptService::getRouterSystemPrompt()}});
+            prompt.push_back(
+              {{"role", "system"}, {"content", sessionId.isPrivate() ? PromptService::getRouterPrivateSystemPrompt()
+                                                                     : PromptService::getRouterSystemPrompt()}});
             prompt.push_back({{"role", "system"},
               {"content",
                 "本轮只判断 trigger_message_id 指定的触发消息；chat_records 中 is_current 为 true 的记录就是该消息。"
@@ -307,7 +307,7 @@ namespace insoulforge::MessageRouter {
         return std::nullopt;
     }
 
-    auto route(const u64 sessionId, const std::string_view triggerMessageId, const json &snapshot)
+    auto route(const SessionId sessionId, const std::string_view triggerMessageId, const json &snapshot)
       -> drogon::Task<RouterDecision> {
         if (!snapshot.is_array() || snapshot.empty()) {
             co_return applySessionType(makeDecision(RouterDecision::Action::SKIP, "消息快照为空"), sessionId);
@@ -328,13 +328,13 @@ namespace insoulforge::MessageRouter {
               makeDecision(RouterDecision::Action::REPLY, "用户@提及", std::nullopt, true), sessionId);
         }
         // 只阻止普通群消息的自动路由；明确提及和系统任务已经在上方处理。
-        if (!SessionId::isPrivate(sessionId) && !SessionStore::getSessionConfig(sessionId).autoReply) {
+        if (!sessionId.isPrivate() && !SessionStore::getSessionConfig(sessionId).autoReply) {
             co_return makeDecision(RouterDecision::Action::SKIP, "本群已关闭自动回复");
         }
         const auto &config = Config::instance();
 
         // 群聊先由 Jev 判断；无法确定时沿用原有 Router LLM。
-        if (!SessionId::isPrivate(sessionId) && JevClient::isConfigured(config.jev)) {
+        if (!sessionId.isPrivate() && JevClient::isConfigured(config.jev)) {
             const auto jevResponse = co_await JevClient::requestSystemOne(
               config.jev, buildJevState(sessionId, triggerMessageId, snapshot), buildJevQuestions(), sessionId);
             if (jevResponse) {

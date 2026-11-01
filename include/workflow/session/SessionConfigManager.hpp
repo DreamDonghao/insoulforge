@@ -9,31 +9,32 @@
 #include <drogon/utils/coroutine.h>
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <workflow/session/SessionStore.hpp>
 
 /// @brief 通过 SessionStore 访问会话统计并刷新显示名称
 namespace insoulforge::SessionConfigManager {
     /// @brief 获取会话统计
-    /// @param sessionId 会话 ID（私聊会话带标志位）
+    /// @param sessionId 带类型的会话 ID
     /// @return 已保存的统计信息；不存在时消息数为 0
-    [[nodiscard]] auto getConfig(u64 sessionId) -> SessionConfig;
+    [[nodiscard]] auto getConfig(SessionId sessionId) -> SessionConfig;
 
     /// @brief 检查会话统计记录是否存在
-    /// @param sessionId 会话 ID（私聊会话带标志位）
+    /// @param sessionId 带类型的会话 ID
     /// @return 是否存在
-    [[nodiscard]] auto contains(u64 sessionId) -> bool;
+    [[nodiscard]] auto contains(SessionId sessionId) -> bool;
 
     /// @brief 保存会话统计
-    /// @param sessionId 会话 ID（私聊会话带标志位）
+    /// @param sessionId 带类型的会话 ID
     /// @param config 待保存的统计信息
-    void addConfig(u64 sessionId, const SessionConfig &config = SessionConfig());
+    void addConfig(SessionId sessionId, const SessionConfig &config = SessionConfig());
 
     /// @brief 增加消息计数
-    /// @param sessionId 会话 ID（私聊会话带标志位）
-    void incrementMessageCount(u64 sessionId);
+    /// @param sessionId 带类型的会话 ID
+    void incrementMessageCount(SessionId sessionId);
 
     /// @brief 查询 OneBot 并更新会话名称（群聊为群名，私聊为 QQ 昵称）
-    /// @param sessionId 会话 ID（私聊带标志位）
+    /// @param sessionId 带类型的会话 ID
     /// @return 查询到的名称；为空时不覆盖原名称
-    [[nodiscard]] auto fetchAndUpdateSessionName(u64 sessionId) -> drogon::Task<std::string>;
+    [[nodiscard]] auto fetchAndUpdateSessionName(SessionId sessionId) -> drogon::Task<std::string>;
 } // namespace insoulforge::SessionConfigManager

@@ -2,7 +2,7 @@
 import {computed, nextTick, onMounted, onUnmounted, ref} from 'vue'
 import {confirmDiscard, useUnsavedChanges} from '../../composables/useUnsavedChanges'
 import {ArrowDownWideNarrow, ArrowUpNarrowWide, Pencil, Trash2} from '@lucide/vue'
-import {privateSessionUserId} from '../../utils/session'
+import {sessionIdLabel} from '../../utils/session'
 
 interface PersonIdentity {
   user_id: string
@@ -68,9 +68,7 @@ const memorySections = computed(() => detail.value ? [
 ] : [])
 const scoreClass = (value = 0) => value > 0 ? 'positive' : value < 0 ? 'negative' : ''
 const sourceLabel = (session: string) => {
-  if (session === '0') return '历史记忆迁移'
-  const userId = privateSessionUserId(session)
-  return userId !== null ? `私聊 ${userId}` : `群聊 ${session}`
+  return sessionIdLabel(session)
 }
 const formatTime = (value: string) => value ? new Date(value.replace(' ', 'T') + 'Z').toLocaleString() : '暂无'
 

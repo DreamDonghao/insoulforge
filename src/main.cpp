@@ -85,13 +85,13 @@ namespace {
                     return;
                 }
                 if (Logger::setLevel(level)) {
-                    Logger::info(0, "Logger", fmt::format("日志等级已切换为 {}", level));
+                    Logger::info(std::nullopt, "Logger", fmt::format("日志等级已切换为 {}", level));
                 } else {
-                    Logger::warn(0, "Logger", fmt::format("无效的日志等级: {}", level));
+                    Logger::warn(std::nullopt, "Logger", fmt::format("无效的日志等级: {}", level));
                 }
                 continue;
             }
-            Logger::warn(0, "Main", fmt::format("未知命令: {}", command));
+            Logger::warn(std::nullopt, "Main", fmt::format("未知命令: {}", command));
         }
     }
 } // namespace
@@ -106,34 +106,34 @@ auto main() -> int {
             return EXIT_FAILURE;
         }
         if (auto result = AdminAccessToken::initialize(); !result) {
-            Logger::error(0, "Admin", result.error());
+            Logger::error(std::nullopt, "Admin", result.error());
             return EXIT_FAILURE;
         }
         auto &config = Config::instance();
         if (auto result = config.initialize("data/config.json"); !result) {
-            Logger::error(0, "Config", result.error().message);
+            Logger::error(std::nullopt, "Config", result.error().message);
             return EXIT_FAILURE;
         }
         auto &database = Database::instance();
         if (auto result = database.initialize("data/insoulforge.db"); !result) {
-            Logger::error(0, "Storage", result.error());
+            Logger::error(std::nullopt, "Storage", result.error());
             return EXIT_FAILURE;
         }
         auto &agentSystem = AgentSystem::instance();
         // 注册工具并加载提示词；工具说明需要已经加载的机器人名称。
         if (auto result = agentSystem.initialize(database, config.botName); !result) {
-            Logger::error(0, "Agent", result.error());
+            Logger::error(std::nullopt, "Agent", result.error());
             return EXIT_FAILURE;
         }
         // 这里只校验 MCP 配置；远程工具在首次回复前异步加载，不阻塞程序启动。
         if (auto result = McpTools::instance().initialize(config.getMcpConfig(), ToolRegistry::instance()); !result) {
-            Logger::error(0, "MCP", result.error());
+            Logger::error(std::nullopt, "MCP", result.error());
             return EXIT_FAILURE;
         }
         auto &workflow = OneBotEventWorkflow::instance();
         // 恢复会话消息和遗留维护任务，再开始接收新的 OneBot 事件。
         if (auto result = workflow.initialize(database, config, agentSystem); !result) {
-            Logger::error(0, "Workflow", result.error());
+            Logger::error(std::nullopt, "Workflow", result.error());
             return EXIT_FAILURE;
         }
 
@@ -159,10 +159,10 @@ auto main() -> int {
         drogon::app().setClientMaxMemoryBodySize(10U * 1024U * 1024U);
         // 前端构建产物位于运行目录的 public/，由同一 HTTP 服务提供。
         drogon::app().setDocumentRoot("public");
-        Logger::info(0, "Main", "HTTP 服务启动 | port=7778");
+        Logger::info(std::nullopt, "Main", "HTTP 服务启动 | port=7778");
 
         printLoginInstructions();
-        Logger::info(0, "Admin", "管理后台登录信息已输出到服务终端");
+        Logger::info(std::nullopt, "Admin", "管理后台登录信息已输出到服务终端");
 
         // 资源历史在无人访问后台时也持续采样，退出事件循环后停止采样。
         ProcessMetrics::instance().start(*drogon::app().getLoop());
@@ -182,19 +182,19 @@ auto main() -> int {
         AsyncTaskManager::instance().stop();
         workflow.flushMessageListsToStorage();
         database.close();
-        Logger::info(0, "Main", "系统正常退出");
+        Logger::info(std::nullopt, "Main", "系统正常退出");
     } catch (const std::exception &e) {
         PersonMemoryConsolidator::instance().stop();
         PersonNameResolver::instance().stop();
         ProcessMetrics::instance().stop();
-        Logger::critical(0, "Main", fmt::format("程序崩溃: {}", e.what()));
+        Logger::critical(std::nullopt, "Main", fmt::format("程序崩溃: {}", e.what()));
         Logger::shutdown();
         return EXIT_FAILURE;
     } catch (...) {
         PersonMemoryConsolidator::instance().stop();
         PersonNameResolver::instance().stop();
         ProcessMetrics::instance().stop();
-        Logger::critical(0, "Main", "程序崩溃: 未知错误");
+        Logger::critical(std::nullopt, "Main", "程序崩溃: 未知错误");
         Logger::shutdown();
         return EXIT_FAILURE;
     }

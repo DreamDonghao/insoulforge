@@ -26,7 +26,7 @@ namespace insoulforge::AdminStore {
         const Statement stmt(db.handle(), "INSERT OR IGNORE INTO admins (user_id) VALUES (?)");
         stmt.bind(1, userId.toString());
         stmt.exec();
-        Logger::info(0, "Admin", fmt::format("已添加管理员: {}", userId));
+        Logger::info(std::nullopt, "Admin", fmt::format("已添加管理员: {}", userId));
     }
 
     void removeAdmin(const UserId &userId) {
@@ -35,7 +35,7 @@ namespace insoulforge::AdminStore {
         const Statement stmt(db.handle(), "DELETE FROM admins WHERE user_id = ?");
         stmt.bind(1, userId.toString());
         stmt.exec();
-        Logger::info(0, "Admin", fmt::format("已移除管理员: {}", userId));
+        Logger::info(std::nullopt, "Admin", fmt::format("已移除管理员: {}", userId));
     }
 
     auto getAdmins() -> std::vector<UserId> {

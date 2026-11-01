@@ -14,6 +14,7 @@
 
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 
 namespace insoulforge::HttpUtil {
     /// @brief 复制 JSON 并省略其中的 base64 图片，保留提示词和其他可读参数。
@@ -31,6 +32,6 @@ namespace insoulforge::HttpUtil {
     /// @param traceResponse 是否保留原始响应体；为 false 时只记录脱敏后的 JSON 响应
     /// @return 成功时为 HTTP 响应（含 4xx/5xx），建连或发送失败时为错误说明
     auto send(std::string_view tag, std::string baseUrl, std::string path, drogon::HttpMethod method, json body,
-      std::string bearerToken, f64 timeout, std::optional<u64> sessionId = std::nullopt, bool traceResponse = true)
-      -> drogon::Task<std::expected<drogon::HttpResponsePtr, std::string>>;
+      std::string bearerToken, f64 timeout, std::optional<SessionId> sessionId = std::nullopt,
+      bool traceResponse = true) -> drogon::Task<std::expected<drogon::HttpResponsePtr, std::string>>;
 } // namespace insoulforge::HttpUtil

@@ -12,9 +12,10 @@
 #include <drogon/utils/coroutine.h>
 #include <expected>
 
-#include <workflow/SessionWorkflowState.hpp>
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
+#include <workflow/SessionWorkflowState.hpp>
 
 namespace insoulforge {
     class Database;
@@ -49,37 +50,41 @@ namespace insoulforge {
         /// @param message 完整助手消息 JSON
         /// @details OneBot 确认发送成功后调用；消息会进入内存列表并推送给管理后台。
         /// @note 线程安全。函数完成时消息已写入内存列表；追加本身不触发记忆维护。
-        void appendDeliveredAssistantMessage(u64 sessionId, json message);
+        void appendDeliveredAssistantMessage(SessionId sessionId, json message);
 
         /// @brief 将后台任务系统状态写入完整消息列表，不触发 Router 或 Executor
         /// @param sessionId 所属会话 ID
         /// @param message 已构造好的完整系统消息 JSON
         /// @note 线程安全。会推送管理后台，并按普通消息参与后续快照与记忆维护。
-        void appendSystemStatusMessage(u64 sessionId, json message);
+        void appendSystemStatusMessage(SessionId sessionId, json message);
 
         /// @brief 保存内部助手执行记录，不发送 QQ 消息，也不投递新回复任务。
-        void appendAssistantExecutionRecord(u64 sessionId, json message);
+        void appendAssistantExecutionRecord(SessionId sessionId, json message);
 
         /// @brief 获取运行中会话的完整消息列表快照
         /// @param sessionId 所属会话 ID
         /// @return 会话已在工作流中初始化时返回完整消息快照，否则返回空值
         /// @note 线程安全。供后台及工具读取；结果不受模型上下文窗口长度限制，工具须自行校验权限和投影。
-        [[nodiscard]] auto getSessionMessages(u64 sessionId) -> std::optional<json>;
+        [[nodiscard]] auto getSessionMessages(SessionId sessionId) -> std::optional<json>;
 
         /// @brief 读取指定会话有限条数的共享消息，不创建或改变会话状态。
-        [[nodiscard]] auto getSharedSessionMessages(u64 sessionId, size_t limit,
-          const std::string &earliest, const std::string &latest) -> json;
+        [[nodiscard]] auto getSharedSessionMessages(
+          SessionId sessionId, size_t limit, const std::string &earliest, const std::string &latest) -> json;
 
         /// @brief 清空会话的内存消息与持久化恢复副本，保留启用状态与已提取记忆。
-        void clearSessionMessages(u64 sessionId);
+        void clearSessionMessages(SessionId sessionId);
 
         /// @brief 将 OneBot 上报事件加入处理流程
         /// @param body 已通过 HTTP JSON 校验的 OneBot 事件对象
         /// @details 归一化并检查机器人状态、发送者后入队；会话尚无预处理任务时启动协程。
         /// @note 线程安全。函数返回仅表示事件已被接受或丢弃，不表示图片识别、回复或记忆维护已经完成。
         void enqueueOneBotEvent(const json &body);
+        /// @brief 内部定时任务直接入队，不经过 OneBot 协议字段转换。
+        void enqueueSystemMessage(SessionId sessionId, std::string text, std::string senderName = "系统任务");
 
     private:
+        void enqueueNormalizedMessage(json message);
+
         struct Dependencies {
             const Database &database;
             const Config &config;
@@ -88,7 +93,7 @@ namespace insoulforge {
         std::optional<Dependencies> m_dependencies;
         std::atomic_bool m_initialized{false};
         std::mutex m_sessionsMutex; ///< 保护会话状态索引
-        std::unordered_map<u64, std::shared_ptr<SessionWorkflowState>> m_sessions; ///< 已恢复或已激活的会话状态
+        std::unordered_map<SessionId, std::shared_ptr<SessionWorkflowState>> m_sessions; ///< 已恢复或已激活的会话状态
 
         OneBotEventWorkflow() = default;
 
@@ -96,13 +101,13 @@ namespace insoulforge {
         auto executeCommand(const json &message) -> drogon::Task<>;
 
         /// @brief 获取或创建会话工作流状态
-        [[nodiscard]] auto getOrCreateSessionState(u64 sessionId) -> std::shared_ptr<SessionWorkflowState>;
+        [[nodiscard]] auto getOrCreateSessionState(SessionId sessionId) -> std::shared_ptr<SessionWorkflowState>;
 
         /// @brief 处理一个会话的消息预处理队列，空队列时立即退出
-        auto processPreparationQueue(u64 sessionId) -> drogon::Task<>;
+        auto processPreparationQueue(SessionId sessionId) -> drogon::Task<>;
 
         /// @brief 处理一个会话的串行回复工作流，无待处理回复时立即退出
         /// @param request 首轮触发消息及可选的提前路由结果
-        auto processReplyWorkflow(u64 sessionId, ReplyRequest request) -> drogon::Task<>;
+        auto processReplyWorkflow(SessionId sessionId, ReplyRequest request) -> drogon::Task<>;
     };
 } // namespace insoulforge

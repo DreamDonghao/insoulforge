@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <infrastructure/UserId.hpp>
 
 namespace insoulforge {
@@ -41,6 +42,6 @@ namespace insoulforge {
     namespace MemoryMaintenanceStore {
         /// @brief 在同一事务中保存聊天记忆与好感度；任何写入失败时全部回滚
         /// @note 调用前完成所有模型请求，事务内不执行网络操作。
-        void apply(const Database &database, u64 sessionId, const MemoryMaintenanceResult &memory);
+        void apply(const Database &database, SessionId sessionId, const MemoryMaintenanceResult &memory);
     } // namespace MemoryMaintenanceStore
 } // namespace insoulforge

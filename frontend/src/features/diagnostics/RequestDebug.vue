@@ -7,7 +7,7 @@ import {computed, inject, onMounted, onUnmounted, ref, shallowRef} from 'vue'
 import RequestError from '../../components/RequestError.vue'
 import {requestJson, requestError} from '../../utils/api'
 import type {HttpTraceEntry, HttpTraceListResult} from '../../vite-env.d'
-import {privateSessionUserId} from '../../utils/session'
+import {sessionIdLabel} from '../../utils/session'
 
 const showToast = inject<(msg: string, isError?: boolean) => void>('showToast')
 
@@ -26,21 +26,13 @@ let controller: AbortController | undefined
 let loadVersion = 0
 let timer: number | undefined
 
-const sessionLabel = (groupId: string | null | undefined): string => {
-  if (!groupId) return '系统请求'
-  try {
-    const userId = privateSessionUserId(groupId)
-    return userId !== null ? `私聊 ${userId}` : `群 ${groupId}`
-  } catch {
-    return groupId
-  }
-}
+const sessionLabel = (sessionId: string | null | undefined): string => sessionId ? sessionIdLabel(sessionId) : '系统请求'
 
 const filtered = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
   if (!kw) return entries.value
   return entries.value.filter(e =>
-      `${e.tag} ${e.url} ${e.groupId ?? ''}`.toLowerCase().includes(kw))
+      `${e.tag} ${e.url} ${e.sessionId ?? ''}`.toLowerCase().includes(kw))
 })
 
 // 展开嵌套 JSON 的递归深度上限，防极端深层结构
@@ -259,7 +251,7 @@ onUnmounted(() => { disposed = true; ++loadVersion; controller?.abort(); window.
             <span class="method">{{ e.method }}</span>
             <span :title="shortUrl(e.url)" class="url">{{ shortUrl(e.url) }}</span>
           </span>
-          <span class="row3">{{ sessionLabel(e.groupId) }} · 请求 {{ sizeOf(e.requestBody) }} / 响应
+          <span class="row3">{{ sessionLabel(e.sessionId) }} · 请求 {{ sizeOf(e.requestBody) }} / 响应
             {{ sizeOf(e.responseBody) }} 字符
           </span>
         </button>
@@ -270,7 +262,7 @@ onUnmounted(() => { disposed = true; ++loadVersion; controller?.abort(); window.
           <div class="detail-meta">
             <span :class="['chip', statusClass(selected.status)]">{{ statusText(selected.status) }}</span>
             <span>{{ selected.method }} {{ selected.url }}</span>
-            <span>· {{ sessionLabel(selected.groupId) }} · #{{ selected.id }} · {{ selected.timestamp }}</span>
+            <span>· {{ sessionLabel(selected.sessionId) }} · #{{ selected.id }} · {{ selected.timestamp }}</span>
             <button class="btn btn-secondary btn-sm download-button" type="button"
                     @click="downloadTrace(selected.id)">下载原始记录</button>
           </div>

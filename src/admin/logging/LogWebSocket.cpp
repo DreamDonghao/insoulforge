@@ -22,19 +22,22 @@ namespace insoulforge {
         }
         json msg;
         if (!tryParseJson(message, msg)) {
-            Logger::warn(0, "LogWebSocket", "消息解析失败");
+            Logger::warn(std::nullopt, "LogWebSocket", "消息解析失败");
             return;
         }
 
         if (getStr(msg, "action") == "subscribe") {
             // 线上字段沿用 groupId，以兼容既有前端请求。
             LogSubscription sub;
-            if (const json &groupIdVal = atOrNull(msg, "groupId");
+            if (const json &groupIdVal = atOrNull(msg, "sessionId");
               groupIdVal.is_string() && groupIdVal.get<std::string>() == "system") {
-                sub.sessionId = 0;
+                sub.systemOnly = true;
             } else if (!groupIdVal.is_null() && !(groupIdVal.is_string() && groupIdVal.get<std::string>() == "all")) {
                 // sessionId 由前端以字符串形式发送（群号可能超过 JS 安全整数范围），需安全解析
-                sub.sessionId = jsonToUInt64(groupIdVal);
+                const auto id = SessionId::parse(groupIdVal.is_string() ? groupIdVal.get<std::string>() : "");
+                if (!id)
+                    return;
+                sub.sessionId = *id;
             }
             if (atOrNull(msg, "level").is_string() && getStr(msg, "level") != "all") {
                 sub.level = getStr(msg, "level");

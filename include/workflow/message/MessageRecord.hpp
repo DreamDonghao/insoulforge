@@ -11,6 +11,7 @@
 
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <infrastructure/UserId.hpp>
 
 namespace insoulforge::MessageRecord {
@@ -21,7 +22,7 @@ namespace insoulforge::MessageRecord {
         std::string url; ///< OneBot 图片下载地址
     };
 
-    [[nodiscard]] auto getSessionId(const json &record) -> u64;
+    [[nodiscard]] auto getSessionId(const json &record) -> SessionId;
 
     /// @brief 将机器人尝试发送的 CQ 内容转换为统一聊天记录
     /// @param senderName 机器人的显示名称

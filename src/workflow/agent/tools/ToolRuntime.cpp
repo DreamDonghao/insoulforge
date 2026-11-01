@@ -68,29 +68,31 @@ namespace insoulforge {
                   for (const auto &tool: tools) {
                       if (tool.executorType == "lua") {
                           if (const auto error = LuaToolExecutor::validate(tool.scriptContent)) {
-                              Logger::warn(0, "Tool", fmt::format("跳过无效 Lua 工具 '{}': {}", tool.name, *error));
+                              Logger::warn(
+                                std::nullopt, "Tool", fmt::format("跳过无效 Lua 工具 '{}': {}", tool.name, *error));
                               continue;
                           }
                       }
                       auto definition = makeCustomTool(tool, parseCustomToolParameters(tool));
                       if (!definition) {
-                          Logger::warn(0, "Tool",
+                          Logger::warn(std::nullopt, "Tool",
                             fmt::format("ToolRuntime: 跳过不支持的自定义工具 '{}' ({})", tool.name, tool.executorType));
                           continue;
                       }
                       if (pluginRegistry.registerTool(*definition, ToolCategory::INFORMATION)) {
                           ++registeredCount;
-                          Logger::info(0, "Tool",
+                          Logger::info(std::nullopt, "Tool",
                             fmt::format("ToolRuntime: 注册自定义工具 '{}' ({})", tool.name, tool.executorType));
                       }
                   }
               });
 
             if (!registered) {
-                Logger::error(0, "Tool", fmt::format("ToolRuntime: 自定义工具重载失败，已保留此前注册结果"));
+                Logger::error(std::nullopt, "Tool", fmt::format("ToolRuntime: 自定义工具重载失败，已保留此前注册结果"));
                 return std::unexpected("自定义工具重载失败，已保留此前注册结果");
             }
-            Logger::info(0, "Tool", fmt::format("ToolRuntime: 自定义工具重载完成（共{}个）", registeredCount));
+            Logger::info(
+              std::nullopt, "Tool", fmt::format("ToolRuntime: 自定义工具重载完成（共{}个）", registeredCount));
             return {};
         } catch (const DbError &error) {
             return std::unexpected(std::string("读取自定义工具失败: ") + error.what());

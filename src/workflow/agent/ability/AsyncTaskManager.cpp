@@ -12,12 +12,12 @@
 #include <fmt/format.h>
 
 #include <infrastructure/CommonUtil.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <workflow/OneBotEventWorkflow.hpp>
 #include <workflow/agent/ability/AsyncTaskManager.hpp>
 #include <workflow/message/MessageService.hpp>
-#include <workflow/message/SessionId.hpp>
 
 namespace insoulforge {
     namespace {
@@ -31,36 +31,18 @@ namespace insoulforge {
 
         /// @brief 记录启动或退出中断状态，不触发回复。
         void recordStatus(
-          const u64 sessionId, const std::string &taskId, const std::string_view phase, const std::string &text) {
+          const SessionId sessionId, const std::string &taskId, const std::string_view phase, const std::string &text) {
             json message;
             message["time"] = currentDateTime();
-            message["sender"] = {{"name", "系统异步任务"}, {"user_id", std::to_string(SessionId::kSystemAccountId)}};
+            message["sender"] = {{"name", "系统异步任务"}, {"user_id", std::string(kSystemUserId)}};
             message["message_id"] = fmt::format("async-task:{}:{}", taskId, phase);
             message["segments"] = {{{"type", "text"}, {"text", text}}};
             OneBotEventWorkflow::instance().appendSystemStatusMessage(sessionId, std::move(message));
         }
 
         /// @brief 将任务结果作为新系统消息加入入站队列，按定时任务相同的流程触发回复。
-        void enqueueResultStatus(const u64 sessionId, const std::string &text) {
-            static std::atomic nextMessageId{
-              std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch())
-                .count()};
-            json event;
-            event["post_type"] = "message";
-            event["self_id"] = Config::instance().selfQQNumber;
-            event["time"] = std::time(nullptr);
-            event["message_id"] = nextMessageId.fetch_add(1, std::memory_order_relaxed);
-            event["raw_message"] = text;
-            event["sender"] = {{"user_id", SessionId::kSystemAccountId}, {"nickname", "系统异步任务"}};
-            if (SessionId::isPrivate(sessionId)) {
-                event["message_type"] = "private";
-                event["user_id"] = SessionId::privateUserId(sessionId);
-            } else {
-                event["message_type"] = "group";
-                event["group_id"] = sessionId;
-            }
-            event["message"] = json::array({{{"type", "text"}, {"data", {{"text", text}}}}});
-            OneBotEventWorkflow::instance().enqueueOneBotEvent(event);
+        void enqueueResultStatus(const SessionId sessionId, const std::string &text) {
+            OneBotEventWorkflow::instance().enqueueSystemMessage(sessionId, text, "系统异步任务");
         }
     } // namespace
 
@@ -69,8 +51,8 @@ namespace insoulforge {
         return manager;
     }
 
-    auto AsyncTaskManager::start(const u64 sessionId, std::string description, Handler handler) -> StartResult {
-        if (sessionId == 0 || !handler) {
+    auto AsyncTaskManager::start(const SessionId sessionId, std::string description, Handler handler) -> StartResult {
+        if (!handler) {
             throw std::invalid_argument("后台任务缺少会话或处理器");
         }
         const std::string taskId = nextTaskId();
@@ -111,7 +93,7 @@ namespace insoulforge {
         return {.status = StartResult::Status::Started, .taskId = taskId};
     }
 
-    auto AsyncTaskManager::run(const u64 sessionId, std::string taskId, const Handler handler) -> drogon::Task<> {
+    auto AsyncTaskManager::run(const SessionId sessionId, std::string taskId, const Handler handler) -> drogon::Task<> {
         std::string failureReason;
         try {
             const auto [content, imageDescription] = co_await handler();
@@ -124,10 +106,10 @@ namespace insoulforge {
                 if (content.empty()) {
                     throw std::runtime_error("任务结果为空");
                 }
-                const auto sent = SessionId::isPrivate(sessionId)
-                                    ? co_await MessageService::sendPrivateMsg(
-                                        UserId{SessionId::privateUserId(sessionId)}, content, imageDescription)
-                                    : co_await MessageService::sendGroupMsg(sessionId, content, imageDescription);
+                const auto sent =
+                  sessionId.isPrivate()
+                    ? co_await MessageService::sendPrivateMsg(UserId{sessionId.targetId()}, content, imageDescription)
+                    : co_await MessageService::sendGroupMsg(sessionId, content, imageDescription);
                 if (!sent) {
                     throw std::runtime_error("结果发送未确认成功：" + sent.error());
                 }
@@ -178,7 +160,7 @@ namespace insoulforge {
         release(sessionId, taskId);
     }
 
-    void AsyncTaskManager::release(const u64 sessionId, const std::string &taskId) {
+    void AsyncTaskManager::release(const SessionId sessionId, const std::string &taskId) {
         std::lock_guard lock(m_mutex);
         if (const auto it = m_active.find(sessionId); it != m_active.end() && it->second == taskId) {
             m_active.erase(it);
@@ -186,7 +168,7 @@ namespace insoulforge {
     }
 
     void AsyncTaskManager::stop() {
-        std::vector<std::pair<u64, std::string>> interrupted;
+        std::vector<std::pair<SessionId, std::string>> interrupted;
         {
             std::lock_guard lock(m_mutex);
             m_stopping = true;

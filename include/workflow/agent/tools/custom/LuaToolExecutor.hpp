@@ -11,6 +11,7 @@
 
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 
 namespace insoulforge::LuaToolExecutor {
     /// @brief 在受限运行环境中检查脚本，并确认存在 run 入口
@@ -18,6 +19,6 @@ namespace insoulforge::LuaToolExecutor {
 
     /// @brief 执行 run 或 background；测试模式模拟有副作用的宿主操作
     /// @throws std::runtime_error 脚本错误、超限或返回值无效
-    [[nodiscard]] auto execute(std::string source, json args, u64 sessionId, bool background = false,
-      bool testMode = false) -> drogon::Task<std::string>;
+    [[nodiscard]] auto execute(std::string source, json args, std::optional<SessionId> sessionId,
+      bool background = false, bool testMode = false) -> drogon::Task<std::string>;
 } // namespace insoulforge::LuaToolExecutor

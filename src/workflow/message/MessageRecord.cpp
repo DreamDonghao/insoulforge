@@ -4,9 +4,9 @@
 #include <algorithm>
 #include <cctype>
 
-#include "workflow/message/SessionId.hpp"
 #include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <infrastructure/http/HttpUtil.hpp>
 #include <workflow/message/MessageRecord.hpp>
 #include <workflow/session/QQNameDirectory.hpp>
@@ -128,7 +128,9 @@ namespace insoulforge::MessageRecord {
         }
     } // namespace
 
-    auto getSessionId(const json &record) -> u64 { return getUInt(record, "session_id"); }
+    auto getSessionId(const json &record) -> SessionId {
+        return SessionId::parse(getStr(record, "session_id")).value();
+    }
 
     auto createAssistantRecord(std::string senderName, const std::optional<u64> messageId, const std::string &content)
       -> json {
@@ -249,7 +251,7 @@ namespace insoulforge::MessageRecord {
     auto isAssistant(const json &record) -> bool { return getStr(atOrNull(record, "sender"), "user_id") == "self"; }
 
     auto isSystem(const json &record) -> bool {
-        return getStr(atOrNull(record, "sender"), "user_id") == std::to_string(SessionId::kSystemAccountId);
+        return getStr(atOrNull(record, "sender"), "user_id") == std::string(kSystemUserId);
     }
 
     auto projectForAgent(const json &record, const bool includeToolHistory, const bool includeGroupCard) -> json {

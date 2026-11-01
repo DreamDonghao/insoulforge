@@ -172,7 +172,7 @@ reply 的场景：
         for (const auto &[key, content, desc]: defaultPrompts) {
             if (!PromptStore::hasPrompt(database, key)) {
                 PromptStore::setPrompt(database, key, content, desc);
-                Logger::info(0, "Prompt", fmt::format("插入默认提示词: {}", key));
+                Logger::info(std::nullopt, "Prompt", fmt::format("插入默认提示词: {}", key));
             }
         }
 
@@ -181,7 +181,7 @@ reply 的场景：
         if (const std::string stored = PromptStore::getPrompt(database, "router_system", "");
           stored.find("不要其他内容）：\n{{") != std::string::npos) {
             PromptStore::setPrompt(database, "router_system", defaultPrompts[1].content, defaultPrompts[1].desc);
-            Logger::warn(0, "Prompt", fmt::format("已自愈 router_system 默认值中的双花括号残留"));
+            Logger::warn(std::nullopt, "Prompt", fmt::format("已自愈 router_system 默认值中的双花括号残留"));
         }
 
         // 思考模式已改为 Executor 的 deep_think 工具：从 Router 提示词中移除 enableThinking 策略项
@@ -203,10 +203,10 @@ reply 的场景：
                 start = stop + 1;
             }
             PromptStore::setPrompt(database, key, updated);
-            Logger::info(0, "Prompt", fmt::format("已从 Router 提示词移除 enableThinking 策略项: {}", key));
+            Logger::info(std::nullopt, "Prompt", fmt::format("已从 Router 提示词移除 enableThinking 策略项: {}", key));
         }
 
-        Logger::info(0, "Prompt", fmt::format("提示词服务初始化完成"));
+        Logger::info(std::nullopt, "Prompt", fmt::format("提示词服务初始化完成"));
     }
 
     auto PromptService::getPrompt(const std::string &key) -> std::string {
@@ -225,7 +225,7 @@ reply 的场景：
 
     void PromptService::setPrompt(const std::string &key, const std::string &content) {
         PromptStore::setPrompt(key, content);
-        Logger::info(0, "Prompt", fmt::format("提示词已更新: {}", key));
+        Logger::info(std::nullopt, "Prompt", fmt::format("提示词已更新: {}", key));
     }
 
     auto PromptService::getExecutorSystemPrompt() -> std::string {

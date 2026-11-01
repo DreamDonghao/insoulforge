@@ -180,7 +180,8 @@ namespace {
                   {"sender", {{"user_id", index == 12 ? "self" : "11"}}},
                   {"segments", json::array({{{"type", "text"}, {"text", "test"}}})}});
             }
-            const auto decision = co_await MessageRouter::route(100, std::to_string(size - 1), records);
+            const auto decision =
+              co_await MessageRouter::route(insoulforge::SessionId::group("100"), std::to_string(size - 1), records);
             require(!decision.shouldReply && fixture.count(key) == 1, "Jev decision unexpectedly fell back");
             json state;
             { std::lock_guard lock(fixture.mutex); state = fixture.bodies.at(key).at("state"); }
@@ -208,7 +209,7 @@ namespace {
         for (int index = 0; index < 25; ++index)
             records.push_back({{"message_id", std::to_string(index)}, {"sender", {{"user_id", "11"}}},
               {"segments", json::array({{{"type", "text"}, {"text", "test"}}})}});
-        (void) co_await MessageRouter::route(100, "24", records);
+        (void) co_await MessageRouter::route(insoulforge::SessionId::group("100"), "24", records);
         {
             std::lock_guard lock(fixture.mutex);
             require(fixture.bodies.at("jev-window-fallback")["state"]["chat_records"].size() == 4,
@@ -262,7 +263,8 @@ namespace {
               "running retries did not retain their configuration snapshot");
 
             config.memory = apiFor(endpoint, "memory");
-            require((co_await LlmClient::requestMaintenance(messages, 0)).has_value() && fixture.count("memory") == 2,
+            require((co_await LlmClient::requestMaintenance(messages, std::nullopt)).has_value() &&
+                      fixture.count("memory") == 2,
               "maintenance ignored retry settings");
             config.embedding = apiFor(endpoint, "embedding");
             require((co_await LlmClient::requestEmbedding("test")).has_value() && fixture.count("embedding") == 2,
@@ -271,7 +273,8 @@ namespace {
             require((co_await JevClient::requestSystemOne(jev, json::object(), json::object())).has_value() &&
                       fixture.count("jev") == 2, "Jev ignored retry settings");
             config.image = apiFor(endpoint, "image");
-            const auto image = co_await ImageDescriptionService::ask("test", {endpoint + "/pixel"}, 0);
+            const auto image =
+              co_await ImageDescriptionService::ask("test", {endpoint + "/pixel"}, insoulforge::SessionId::group("0"));
             require(image.has_value() && fixture.count("image") == 2, "image question ignored retry settings");
             for (const auto *key: {"generation", "edit"}) {
                 static_cast<LLMApiConfig &>(config.imageGeneration) = apiFor(endpoint, key);
@@ -279,14 +282,16 @@ namespace {
                 config.imageGeneration.editPath = "/edit-fixture";
                 const std::vector<std::string> references = std::string(key) == "edit" ?
                   std::vector<std::string>{"data:image/png;base64,fixture"} : std::vector<std::string>{};
-                const auto result = co_await ImageGenerationService::generate("test", "1024x1024", 0, references);
+                const auto result = co_await ImageGenerationService::generate(
+                  "test", "1024x1024", insoulforge::SessionId::group("0"), references);
                 require(result.source == "https://example.com/image.png" && fixture.count(key) == 2,
                   "image generation/edit ignored retry settings");
             }
             config.memory = apiFor(endpoint, "cancel", 3);
             auto control = std::make_shared<LlmClient::MaintenanceRequestControl>();
             trantor::EventLoop::getEventLoopOfCurrentThread()->runAfter(0.2, [control] { control->cancel(); });
-            const auto cancelled = co_await LlmClient::requestMaintenance(messages, 0, "memory", std::nullopt, control);
+            const auto cancelled =
+              co_await LlmClient::requestMaintenance(messages, std::nullopt, "memory", std::nullopt, control);
             require(!cancelled && fixture.count("cancel") == 1, "cancelled maintenance retried its request");
             { std::lock_guard lock(fixture.mutex); require(fixture.consistent, "retry body changed or local settings leaked"); }
             exitCode = 0;

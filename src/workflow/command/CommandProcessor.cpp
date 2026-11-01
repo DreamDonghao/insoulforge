@@ -3,13 +3,13 @@
 
 #include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <onebot/transport/OneBotClient.hpp>
 #include <workflow/access/AdminStore.hpp>
 #include <workflow/access/BlacklistStore.hpp>
 #include <workflow/agent/tools/ToolRuntime.hpp>
 #include <workflow/message/MessageRecord.hpp>
-#include <workflow/message/SessionId.hpp>
 #include <workflow/message/image/ImageDescriptionStore.hpp>
 #include <workflow/session/SessionConfigManager.hpp>
 #include <workflow/session/SessionStore.hpp>
@@ -34,9 +34,11 @@ namespace insoulforge::CommandProcessor {
     } // namespace
 
     auto isCommand(const json &message) -> bool {
-        const auto sessionId = getUInt(message, "session_id");
-        if (sessionId == 0 || SessionId::isPrivate(sessionId) ||
-            !MessageRecord::mentions(message, UserId{Config::instance().selfQQNumber})) {
+        const auto parsedSession = SessionId::parse(getStr(message, "session_id"));
+        if (!parsedSession)
+            return false;
+        const auto sessionId = *parsedSession;
+        if (sessionId.isPrivate() || !MessageRecord::mentions(message, UserId{Config::instance().selfQQNumber})) {
             return false;
         }
         if (commandText(message).empty())
@@ -45,7 +47,7 @@ namespace insoulforge::CommandProcessor {
     }
 
     auto execute(const json &message) -> drogon::Task<std::string> {
-        const u64 sessionId = getUInt(message, "session_id");
+        const SessionId sessionId = SessionId::parse(getStr(message, "session_id")).value();
         const auto sender = UserId::parse(getStr(atOrNull(message, "sender"), "user_id"));
         const bool hasPermission = sender && AdminStore::isAdmin(*sender);
 
@@ -108,10 +110,10 @@ namespace insoulforge::CommandProcessor {
             co_return fmt::format("权限不足，你({})不是管理员", getStr(atOrNull(message, "sender"), "user_id"));
         }
         if (command == "/enable" || command == "/启用") {
-            u64 targetSession = sessionId;
+            SessionId targetSession = sessionId;
             if (std::string argument; input >> argument) {
-                if (const auto parsed = tryParseUInt64(argument)) {
-                    targetSession = *parsed;
+                if (const auto parsed = UserId::parse(argument)) {
+                    targetSession = SessionId::group(argument);
                 } else {
                     co_return "无效的ID格式";
                 }
@@ -120,10 +122,10 @@ namespace insoulforge::CommandProcessor {
             co_return fmt::format("已启用会话: {}", targetSession);
         }
         if (command == "/disable" || command == "/禁用") {
-            u64 targetSession = sessionId;
+            SessionId targetSession = sessionId;
             if (std::string argument; input >> argument) {
-                if (const auto parsed = tryParseUInt64(argument)) {
-                    targetSession = *parsed;
+                if (const auto parsed = UserId::parse(argument)) {
+                    targetSession = SessionId::group(argument);
                 } else {
                     co_return "无效的ID格式";
                 }
@@ -132,7 +134,7 @@ namespace insoulforge::CommandProcessor {
             co_return fmt::format("已禁用会话: {}", targetSession);
         }
         if (command == "/autoreply" || command == "/自动回复") {
-            if (SessionId::isPrivate(sessionId))
+            if (sessionId.isPrivate())
                 co_return "此命令仅限群聊使用";
             std::string argument, extra;
             input >> argument;
@@ -143,7 +145,7 @@ namespace insoulforge::CommandProcessor {
                                        : "已关闭本群普通消息自动回复，@机器人仍可触发回复";
         }
         if (command == "/groupcard" || command == "/群名片") {
-            if (SessionId::isPrivate(sessionId))
+            if (sessionId.isPrivate())
                 co_return "此命令仅限群聊使用";
             std::string argument, extra;
             input >> argument;
@@ -153,12 +155,12 @@ namespace insoulforge::CommandProcessor {
             co_return argument == "on" ? "已开启本群向模型发送群名片" : "已关闭本群向模型发送群名片";
         }
         if (command == "/groups" || command == "/群列表") {
-            const auto groups = SessionStore::getEnabledGroups();
+            const auto groups = SessionStore::getEnabledSessions();
             if (groups.empty()) {
                 co_return "没有启用的群聊";
             }
             std::string response = "启用的群聊列表:\n";
-            for (const u64 groupId: groups) {
+            for (const auto &groupId: groups) {
                 response += fmt::format("- {}\n", groupId);
             }
             co_return response;

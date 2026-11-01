@@ -9,6 +9,7 @@
 #include <infrastructure/storage/Statement.hpp>
 #include <infrastructure/storage/migrations/V25.hpp>
 #include <infrastructure/storage/migrations/V26.hpp>
+#include <infrastructure/storage/migrations/V27.hpp>
 
 namespace insoulforge {
     namespace {
@@ -17,7 +18,7 @@ namespace insoulforge {
             if (sqlite3_exec(db, std::string(sql).c_str(), nullptr, nullptr, &errMsg) != SQLITE_OK) {
                 std::string err = errMsg ? errMsg : sqlite3_errmsg(db);
                 sqlite3_free(errMsg);
-                Logger::error(0, "Storage", fmt::format("迁移 SQL 执行失败: {} - {}", sql, err));
+                Logger::error(std::nullopt, "Storage", fmt::format("迁移 SQL 执行失败: {} - {}", sql, err));
                 throw DbError(err);
             }
         }
@@ -31,7 +32,7 @@ namespace insoulforge {
         // 新安装直接创建当前结构，不再执行历史版本迁移。
         constexpr std::array currentTables = {
           R"(CREATE TABLE IF NOT EXISTS group_config (
-        group_id INTEGER PRIMARY KEY,
+        session_id TEXT NOT NULL PRIMARY KEY,
         all_mes_count INTEGER DEFAULT 0,
         send_group_card INTEGER NOT NULL DEFAULT 0,
         auto_reply INTEGER NOT NULL DEFAULT 1,
@@ -41,13 +42,13 @@ namespace insoulforge {
     ))",
           R"(CREATE TABLE IF NOT EXISTS chat_records (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        group_id INTEGER NOT NULL,
+        session_id TEXT NOT NULL,
         role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
         content TEXT NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ))",
           R"(CREATE TABLE IF NOT EXISTS short_term_memory (
-        group_id INTEGER PRIMARY KEY,
+        session_id TEXT NOT NULL PRIMARY KEY,
         memory_content TEXT,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ))",
@@ -58,7 +59,7 @@ namespace insoulforge {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ))",
           R"(CREATE TABLE IF NOT EXISTS enabled_groups (
-        group_id INTEGER PRIMARY KEY,
+        session_id TEXT NOT NULL PRIMARY KEY,
         group_name TEXT,
         enabled INTEGER DEFAULT 1,
         added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -79,8 +80,7 @@ namespace insoulforge {
     ))",
           R"(CREATE TABLE IF NOT EXISTS scheduled_tasks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_type TEXT NOT NULL CHECK(session_type IN ('group', 'private')),
-        target_id INTEGER NOT NULL,
+        session_id TEXT NOT NULL,
         remind_time INTEGER NOT NULL,
         content TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'done', 'cancelled')),
@@ -89,7 +89,7 @@ namespace insoulforge {
     ))",
           R"(CREATE TABLE IF NOT EXISTS long_term_memory (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        group_id INTEGER NOT NULL,
+        session_id TEXT NOT NULL,
         content TEXT NOT NULL,
         embedding BLOB,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -123,7 +123,7 @@ namespace insoulforge {
           R"(CREATE TABLE IF NOT EXISTS person_memory_entries (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT NOT NULL,
-        source_session INTEGER NOT NULL,
+        source_session TEXT NOT NULL,
         content TEXT NOT NULL,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     ))",
@@ -133,11 +133,10 @@ namespace insoulforge {
         running_day TEXT NOT NULL DEFAULT ''
     ))"};
 
-        constexpr std::array indexes = {
-          "CREATE INDEX IF NOT EXISTS idx_chat_records_group ON chat_records(group_id)",
-          "CREATE INDEX IF NOT EXISTS idx_chat_records_time ON chat_records(group_id, created_at DESC)",
+        constexpr std::array indexes = {"CREATE INDEX IF NOT EXISTS idx_chat_records_group ON chat_records(session_id)",
+          "CREATE INDEX IF NOT EXISTS idx_chat_records_time ON chat_records(session_id, created_at DESC)",
           "CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_status ON scheduled_tasks(status, remind_time)",
-          "CREATE INDEX IF NOT EXISTS idx_long_term_memory_group ON long_term_memory(group_id)",
+          "CREATE INDEX IF NOT EXISTS idx_long_term_memory_group ON long_term_memory(session_id)",
           "CREATE INDEX IF NOT EXISTS idx_person_memory_entries_user_id ON person_memory_entries(user_id, id)"};
 
         auto getUserVersion(sqlite3 *db) -> i32 {
@@ -172,7 +171,8 @@ namespace insoulforge {
         void migrate(sqlite3 *db) {
             const i32 version = getUserVersion(db);
             if (version == 0 && !hasUserTables(db)) {
-                Logger::info(0, "Storage", fmt::format("检测到全新数据库，直接创建最新 Schema (v{})", kLatestVersion));
+                Logger::info(
+                  std::nullopt, "Storage", fmt::format("检测到全新数据库，直接创建最新 Schema (v{})", kLatestVersion));
                 transaction(db, [db] {
                     execAll(db, currentTables);
                     execAll(db, indexes);
@@ -193,9 +193,10 @@ namespace insoulforge {
                 return;
 
             // steps[i] 将 kMinimumSupportedVersion + i 升级到下一版本。
-            constexpr std::array steps = {&migrateV24ToV25, &migrateV25ToV26};
+            constexpr std::array steps = {&migrateV24ToV25, &migrateV25ToV26, &migrateV26ToV27};
             static_assert(steps.size() == kLatestVersion - kMinimumSupportedVersion);
-            Logger::info(0, "Storage", fmt::format("数据库版本 v{}，开始迁移到 v{}", version, kLatestVersion));
+            Logger::info(
+              std::nullopt, "Storage", fmt::format("数据库版本 v{}，开始迁移到 v{}", version, kLatestVersion));
             for (i32 v = version; v < kLatestVersion; ++v) {
                 try {
                     transaction(db, [db, v, &steps] {
@@ -203,10 +204,10 @@ namespace insoulforge {
                         setUserVersion(db, v + 1);
                     });
                 } catch (...) {
-                    Logger::error(0, "Storage", fmt::format("数据库迁移 v{} -> v{} 失败，已回滚", v, v + 1));
+                    Logger::error(std::nullopt, "Storage", fmt::format("数据库迁移 v{} -> v{} 失败，已回滚", v, v + 1));
                     throw;
                 }
-                Logger::info(0, "Storage", fmt::format("数据库迁移完成: v{} -> v{}", v, v + 1));
+                Logger::info(std::nullopt, "Storage", fmt::format("数据库迁移完成: v{} -> v{}", v, v + 1));
             }
         }
     } // namespace SchemaMigrator

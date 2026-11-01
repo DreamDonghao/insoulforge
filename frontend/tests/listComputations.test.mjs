@@ -237,47 +237,39 @@ test('usage totals, cache rates and merged role data are unchanged after removin
   } finally { view.dispose() }
 })
 
-test('session helpers preserve large IDs and each page keeps its own fallback labels', () => {
+test('session helpers preserve typed string identities on each page', () => {
   const groupView = setup('conversation/GroupManager')
   const logView = setup('diagnostics/LogViewer')
   const requestView = setup('diagnostics/RequestDebug')
   const peopleView = setup('conversation/PeopleManager')
   try {
-    const group = {groupId: 123, groupName: 'Named group'}
-    const privateSession = {groupId: 0, groupIdStr: '9223372036854775931',
-      groupName: 'Alice', sessionType: 'private', userId: 123}
-    assert.equal(groupView.state.sessionKey(privateSession), privateSession.groupIdStr)
-    assert.equal(groupView.state.sessionKey(group), '123')
+    const group = {sessionId: 'group:123', sessionType: 'group', targetId: '123', sessionName: 'Named group'}
+    const privateSession = {sessionId: 'private:123', sessionType: 'private', targetId: '123', sessionName: 'Alice'}
+    assert.equal(groupView.state.sessionKey(privateSession), 'private:123')
+    assert.equal(groupView.state.sessionKey(group), 'group:123')
     assert.equal(groupView.state.isPrivateSession(privateSession), true)
     assert.equal(groupView.state.isPrivateSession(group), false)
     for (const view of [groupView, logView]) {
       assert.equal(view.state.sessionLabel(group), 'Named group')
-      assert.equal(view.state.sessionLabel({...group, groupName: ''}), '群 123')
+      assert.equal(view.state.sessionLabel({...group, sessionName: ''}), '群 123')
       assert.equal(view.state.sessionLabel(privateSession), 'Alice (123)')
-      assert.equal(view.state.sessionLabel({...privateSession, groupName: ''}), '私聊 123')
-      assert.equal(view.state.sessionLabel({groupId: 0, sessionType: 'private'}), '私聊 ')
+      assert.equal(view.state.sessionLabel({...privateSession, sessionName: ''}), '私聊 123')
     }
     logView.state.groups = [privateSession]
-    assert.equal(logView.state.groupTag(privateSession.groupIdStr), 'Alice (123)')
-    for (const [id, user] of [['9223372036854775808', '0'], ['9223372036854775931', '123'],
-      ['18446744073709551615', '9223372036854775807']]) {
-      logView.state.groups = []
-      assert.equal(logView.state.groupTag(id), `私聊 ${user}`)
-      assert.equal(requestView.state.sessionLabel(id), `私聊 ${user}`)
-      assert.equal(peopleView.state.sourceLabel(id), `私聊 ${user}`)
-    }
-    for (const id of ['0', '123', '9007199254740993']) {
-      assert.equal(logView.state.groupTag(id), `群 ${id}`)
-      assert.equal(requestView.state.sessionLabel(id), `群 ${id}`)
-      assert.equal(peopleView.state.sourceLabel(id), id === '0' ? '历史记忆迁移' : `群聊 ${id}`)
+    assert.equal(logView.state.groupTag('private:123'), 'Alice (123)')
+    logView.state.groups = []
+    for (const [id, label] of [['private:0', '私聊 0'], ['private:00123', '私聊 00123'],
+      ['private:some-user', '私聊 some-user'], ['group:9007199254740993', '群 9007199254740993'],
+      ['group:a%3Ab%2F%25', '群 a:b/%']]) {
+      assert.equal(logView.state.groupTag(id), label)
+      assert.equal(requestView.state.sessionLabel(id), label)
+      assert.equal(peopleView.state.sourceLabel(id), label)
     }
     for (const id of [null, undefined, '']) assert.equal(requestView.state.sessionLabel(id), '系统请求')
+    assert.equal(logView.state.groupTag(null), '系统')
     assert.equal(requestView.state.sessionLabel('invalid'), 'invalid')
-    assert.equal(logView.state.groupTag('invalid'), '群 invalid')
-    assert.throws(() => peopleView.state.sourceLabel('invalid'), SyntaxError)
-  } finally {
-    for (const view of [groupView, logView, requestView, peopleView]) view.dispose()
-  }
+    assert.equal(peopleView.state.sourceLabel('invalid'), 'invalid')
+  } finally { for (const view of [groupView, logView, requestView, peopleView]) view.dispose() }
 })
 
 test('opening a new custom tool restores all defaults without replacing the reactive draft', async () => {

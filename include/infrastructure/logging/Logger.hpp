@@ -3,16 +3,18 @@
 
 #pragma once
 
+#include <optional>
 #include <string>
 #include <string_view>
 
 #include <expected>
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 
 namespace insoulforge {
     /// @brief 负责控制台、滚动文件、内存查询和后台实时推送的全局日志系统
-    /// @details 每条日志均由等级、会话 ID、来源和内容组成。系统级日志的会话 ID 固定为 0。
+    /// @details 每条日志均由等级、会话 ID、来源和内容组成。系统级日志不关联会话，以空值表示。
     class Logger {
     public:
         enum class Level { Trace, Debug, Info, Warn, Error, Critical };
@@ -22,22 +24,22 @@ namespace insoulforge {
         [[nodiscard]] static auto initialize() -> std::expected<void, std::string>;
 
         /// @brief 写入 trace 级别日志
-        static void trace(u64 sessionId, std::string_view source, std::string content);
+        static void trace(std::optional<SessionId> sessionId, std::string_view source, std::string content);
 
         /// @brief 写入 debug 级别日志
-        static void debug(u64 sessionId, std::string_view source, std::string content);
+        static void debug(std::optional<SessionId> sessionId, std::string_view source, std::string content);
 
         /// @brief 写入 info 级别日志
-        static void info(u64 sessionId, std::string_view source, std::string content);
+        static void info(std::optional<SessionId> sessionId, std::string_view source, std::string content);
 
         /// @brief 写入 warn 级别日志
-        static void warn(u64 sessionId, std::string_view source, std::string content);
+        static void warn(std::optional<SessionId> sessionId, std::string_view source, std::string content);
 
         /// @brief 写入 error 级别日志
-        static void error(u64 sessionId, std::string_view source, std::string content);
+        static void error(std::optional<SessionId> sessionId, std::string_view source, std::string content);
 
         /// @brief 写入 critical 级别日志
-        static void critical(u64 sessionId, std::string_view source, std::string content);
+        static void critical(std::optional<SessionId> sessionId, std::string_view source, std::string content);
 
         /// @brief 设置运行时日志等级
         /// @return 等级名称有效时返回 true
@@ -53,6 +55,7 @@ namespace insoulforge {
         static void shutdown();
 
     private:
-        static void write(Level level, u64 sessionId, std::string_view source, std::string content);
+        static void write(
+          Level level, std::optional<SessionId> sessionId, std::string_view source, std::string content);
     };
 } // namespace insoulforge
