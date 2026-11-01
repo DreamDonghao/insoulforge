@@ -7,6 +7,7 @@
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/SchemaMigrator.hpp>
 #include <infrastructure/storage/Statement.hpp>
+#include <infrastructure/storage/Transaction.hpp>
 #include <infrastructure/storage/migrations/V25.hpp>
 
 namespace insoulforge {
@@ -152,17 +153,6 @@ namespace insoulforge {
             return stmt.step();
         }
 
-        // 建库和每次增量迁移都整体提交；失败不留下半完成的结构或数据。
-        void transaction(sqlite3 *db, const auto &action) {
-            execSQL(db, "BEGIN IMMEDIATE");
-            try {
-                action();
-                execSQL(db, "COMMIT");
-            } catch (...) {
-                sqlite3_exec(db, "ROLLBACK", nullptr, nullptr, nullptr);
-                throw;
-            }
-        }
     } // namespace
 
     namespace SchemaMigrator {
@@ -171,11 +161,11 @@ namespace insoulforge {
             if (version == 0 && !hasUserTables(db)) {
                 Logger::info(
                   std::nullopt, "Storage", fmt::format("检测到全新数据库，直接创建最新 Schema (v{})", kLatestVersion));
-                transaction(db, [db] {
-                    execAll(db, currentTables);
-                    execAll(db, indexes);
-                    setUserVersion(db, kLatestVersion);
-                });
+                Transaction transaction(db);
+                execAll(db, currentTables);
+                execAll(db, indexes);
+                setUserVersion(db, kLatestVersion);
+                transaction.commit();
                 return;
             }
 
@@ -197,10 +187,10 @@ namespace insoulforge {
               std::nullopt, "Storage", fmt::format("数据库版本 v{}，开始迁移到 v{}", version, kLatestVersion));
             for (i32 v = version; v < kLatestVersion; ++v) {
                 try {
-                    transaction(db, [db, v, &steps] {
-                        steps[v - kMinimumSupportedVersion](db);
-                        setUserVersion(db, v + 1);
-                    });
+                    Transaction transaction(db);
+                    steps[v - kMinimumSupportedVersion](db);
+                    setUserVersion(db, v + 1);
+                    transaction.commit();
                 } catch (...) {
                     Logger::error(std::nullopt, "Storage", fmt::format("数据库迁移 v{} -> v{} 失败，已回滚", v, v + 1));
                     throw;

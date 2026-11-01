@@ -10,6 +10,7 @@
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
+#include <infrastructure/storage/Transaction.hpp>
 #include <workflow/session/SessionStore.hpp>
 
 namespace insoulforge::SessionStore {
@@ -19,26 +20,22 @@ namespace insoulforge::SessionStore {
         {
             const Statement existing(db.handle(), "SELECT 1 FROM group_config WHERE session_id = ?");
             existing.bind(1, sessionId.toString());
-            if (existing.step()) return;
+            if (existing.step())
+                return;
         }
         auto *handle = db.handle();
-        Statement(handle, "BEGIN IMMEDIATE").execOrThrow();
-        try {
-            const Statement config(handle, "INSERT INTO group_config (session_id) VALUES (?)");
-            config.bind(1, sessionId.toString());
-            config.execOrThrow();
-            if (sessionId.isPrivate()) {
-                const Statement status(handle,
-                  "INSERT INTO enabled_groups (session_id, enabled) VALUES (?, ?) ON CONFLICT(session_id) DO NOTHING");
-                status.bind(1, sessionId.toString());
-                status.bind(2, defaultPrivateEnabled ? 1 : 0);
-                status.execOrThrow();
-            }
-            Statement(handle, "COMMIT").execOrThrow();
-        } catch (...) {
-            sqlite3_exec(handle, "ROLLBACK", nullptr, nullptr, nullptr);
-            throw;
+        Transaction transaction(handle);
+        const Statement config(handle, "INSERT INTO group_config (session_id) VALUES (?)");
+        config.bind(1, sessionId.toString());
+        config.execOrThrow();
+        if (sessionId.isPrivate()) {
+            const Statement status(handle,
+              "INSERT INTO enabled_groups (session_id, enabled) VALUES (?, ?) ON CONFLICT(session_id) DO NOTHING");
+            status.bind(1, sessionId.toString());
+            status.bind(2, defaultPrivateEnabled ? 1 : 0);
+            status.execOrThrow();
         }
+        transaction.commit();
     }
 
     auto getSessionConfig(const SessionId &sessionId) -> SessionConfig {

@@ -8,7 +8,6 @@
 #include <infrastructure/storage/Statement.hpp>
 #include <workflow/agent/memory/affinity/AffinityStore.hpp>
 
-
 namespace insoulforge::AffinityStore {
     auto getAffinityMap() -> std::unordered_map<UserId, i32> {
         if (!Config::instance().affinityEnabled.load(std::memory_order_relaxed))

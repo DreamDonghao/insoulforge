@@ -35,6 +35,7 @@
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/SchemaMigrator.hpp>
 #include <infrastructure/storage/Statement.hpp>
+#include <infrastructure/storage/Transaction.hpp>
 #include <onebot/incoming/OneBotEventNormalizer.hpp>
 #include <onebot/messaging/MessageFormatter.hpp>
 #include <onebot/transport/OneBotClient.hpp>
@@ -1837,6 +1838,85 @@ namespace {
         std::filesystem::remove(path);
     }
 
+    void testScopedTransaction() {
+        using namespace insoulforge;
+        constexpr std::string_view kTestName = "scoped transaction";
+        sqlite3 *handle = nullptr;
+        check(sqlite3_open(":memory:", &handle) == SQLITE_OK, "opens fixture", kTestName);
+        if (!handle)
+            return;
+        const std::unique_ptr<sqlite3, decltype(&sqlite3_close)> database(handle, sqlite3_close);
+        Statement(handle, "CREATE TABLE entries(value INTEGER)").execOrThrow();
+        const auto count = [handle] {
+            const Statement query(handle, "SELECT COUNT(*) FROM entries");
+            return query.step() ? query.getInt(0) : -1;
+        };
+        {
+            Transaction transaction(handle);
+            Statement(handle, "INSERT INTO entries VALUES(1)").execOrThrow();
+            transaction.commit();
+            bool repeatedCommitRejected = false;
+            try {
+                transaction.commit();
+            } catch (const DbError &) {
+                repeatedCommitRejected = true;
+            }
+            check(repeatedCommitRejected, "finished transaction cannot commit again", kTestName);
+        }
+        check(count() == 1 && sqlite3_get_autocommit(handle), "explicit commit persists writes", kTestName);
+        [handle] {
+            Transaction transaction(handle);
+            Statement(handle, "INSERT INTO entries VALUES(2)").execOrThrow();
+            return; // 未提交的正常提前返回也必须回滚。
+        }();
+        check(count() == 1 && sqlite3_get_autocommit(handle), "early return rolls back uncommitted writes", kTestName);
+        std::string error;
+        try {
+            Transaction transaction(handle);
+            Statement(handle, "INSERT INTO entries VALUES(2)").execOrThrow();
+            throw std::runtime_error("original error");
+        } catch (const std::exception &failure) {
+            error = failure.what();
+        }
+        check(error == "original error" && count() == 1 && sqlite3_get_autocommit(handle),
+          "unwinding rolls back without replacing the original exception", kTestName);
+        {
+            Transaction transaction(handle);
+            Statement(handle, "INSERT INTO entries VALUES(2)").execOrThrow();
+            transaction.rollback();
+        }
+        check(count() == 1, "explicit rollback discards writes", kTestName);
+        {
+            Transaction outer(handle);
+            Statement(handle, "INSERT INTO entries VALUES(2)").execOrThrow();
+            bool nestedRejected = false;
+            try {
+                Transaction nested(handle);
+            } catch (const DbError &) {
+                nestedRejected = true;
+            }
+            check(
+              nestedRejected && !sqlite3_get_autocommit(handle), "failed BEGIN keeps the outer transaction", kTestName);
+            outer.commit();
+        }
+        check(count() == 2, "outer transaction can commit after nested BEGIN is rejected", kTestName);
+        Statement(handle, "PRAGMA foreign_keys=ON").execOrThrow();
+        Statement(handle, "CREATE TABLE parent(id INTEGER PRIMARY KEY)").execOrThrow();
+        Statement(handle, "CREATE TABLE child(parent_id INTEGER REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED)")
+          .execOrThrow();
+        bool commitFailed = false;
+        try {
+            Transaction transaction(handle);
+            Statement(handle, "INSERT INTO child VALUES(99)").execOrThrow();
+            transaction.commit();
+        } catch (const DbError &) {
+            commitFailed = true;
+        }
+        const Statement children(handle, "SELECT COUNT(*) FROM child");
+        check(commitFailed && sqlite3_get_autocommit(handle) && children.step() && children.getInt(0) == 0,
+          "failed COMMIT is followed by rollback", kTestName);
+    }
+
     void testMemoryMaintenanceStore() {
         constexpr std::string_view kTestName = "memory maintenance results";
         auto &database = insoulforge::Database::instance();
@@ -1930,6 +2010,45 @@ namespace {
         check(insoulforge::LongTermMemoryStore::countMemories(insoulforge::SessionId::group("200")) == 0 &&
                 resultsPreserved(),
           "empty replacement deletes supplied old IDs without affecting another session", kTestName);
+        const auto batchSession = insoulforge::SessionId::group("300");
+        insoulforge::MemoryMaintenanceStore::apply(database, batchSession,
+          {.longTerm = {{.content = "first", .embedding = {1.0F, 0.0F}}, {.content = "empty", .embedding = {}},
+             {.content = "last", .embedding = {0.0F, 1.0F}}},
+            .personEntries = {{insoulforge::UserId{31}, "first entry"}, {insoulforge::UserId{32}, "other person"},
+              {insoulforge::UserId{31}, "last entry"}},
+            .affinity = {
+              {insoulforge::UserId{31}, 150}, {insoulforge::UserId{32}, -150}, {insoulforge::UserId{31}, -5}}});
+        {
+            const insoulforge::Statement rows(database.handle(),
+              "SELECT content,embedding FROM long_term_memory WHERE session_id='group:300' ORDER BY id");
+            check(rows.step() && rows.getText(0) == "first" && rows.getBlob(1).size() == 2 * sizeof(float) &&
+                    rows.step() && rows.getText(0) == "empty" && rows.isNull(1) && rows.step() &&
+                    rows.getText(0) == "last" && rows.getBlob(1).size() == 2 * sizeof(float) && !rows.step(),
+              "batch preserves distinct content and null versus non-null embeddings", kTestName);
+        }
+        const auto entries = insoulforge::PersonMemoryStore::getPerson(insoulforge::UserId{31})["pending_entries"];
+        const auto scores = insoulforge::AffinityStore::getAffinityMap();
+        check(entries.size() == 2 && entries[0]["content"] == "last entry" && entries[1]["content"] == "first entry" &&
+                scores.at(insoulforge::UserId{31}) == 95 && scores.at(insoulforge::UserId{32}) == -100,
+          "batch keeps user bindings and sequential affinity clamping independent", kTestName);
+        insoulforge::Statement(database.handle(),
+          "CREATE TRIGGER reject_batch_entry BEFORE INSERT ON person_memory_entries "
+          "WHEN NEW.content='reject-batch' BEGIN SELECT RAISE(ABORT,'test'); END")
+          .execOrThrow();
+        failed = false;
+        try {
+            insoulforge::MemoryMaintenanceStore::apply(database, batchSession,
+              {.longTerm = {longTerm},
+                .personEntries = {
+                  {insoulforge::UserId{33}, "accepted first"}, {insoulforge::UserId{34}, "reject-batch"}}});
+        } catch (const insoulforge::DbError &) {
+            failed = true;
+        }
+        check(failed && insoulforge::LongTermMemoryStore::countMemories(batchSession) == 3 &&
+                insoulforge::PersonMemoryStore::getPerson(insoulforge::UserId{33}).is_null() &&
+                insoulforge::PersonMemoryStore::getPerson(insoulforge::UserId{34}).is_null(),
+          "failure midway through a batch rolls back prior rows and profiles", kTestName);
+        insoulforge::Statement(database.handle(), "DROP TRIGGER reject_batch_entry").execOrThrow();
         database.close();
     }
 
@@ -3879,6 +3998,7 @@ auto main() -> int {
     testQzoneToolValidation();
     testBuiltinToolConfig();
     testMemoryMaintenanceStore();
+    testScopedTransaction();
     testUserIdMigration();
     testGlobalPersonMemory();
     testPersonConsolidationStore();

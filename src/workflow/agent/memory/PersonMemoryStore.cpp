@@ -12,6 +12,7 @@
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
+#include <infrastructure/storage/Transaction.hpp>
 #include <workflow/agent/memory/PersonMemoryStore.hpp>
 
 namespace insoulforge::PersonMemoryStore {
@@ -75,38 +76,33 @@ namespace insoulforge::PersonMemoryStore {
         const auto &db = Database::instance();
         std::unique_lock lock(db.mutex());
         const auto handle = db.handle();
-        Statement(handle, "BEGIN IMMEDIATE").execOrThrow();
-        try {
-            const auto current = readPerson(snapshot.userId);
-            json entries = json::array();
-            if (!current.is_null()) {
-                for (auto it = current["pending_entries"].rbegin(); it != current["pending_entries"].rend(); ++it)
-                    if (parseUInt64(getStr(*it, "id")) <= static_cast<u64>(snapshot.lastEntryId))
-                        entries.push_back(*it);
-            }
-            if (current.is_null() || current["profile"] != snapshot.profile["profile"] ||
-                current["relationship"] != snapshot.profile["relationship"] ||
-                current["recent_interactions"] != snapshot.profile["recent_interactions"] ||
-                entries != snapshot.profile["pending_entries"])
-                throw ConsolidationConflict("人物记忆已修改，丢弃过期整理结果");
-            const Statement update(handle,
-              "UPDATE person_memories SET profile = ?, relationship = ?, recent_interactions = ? WHERE user_id = ?");
-            update.bind(1, profile.at("profile").dump());
-            update.bind(2, profile.at("relationship").dump());
-            update.bind(3, profile.at("recent_interactions").dump());
-            update.bind(4, snapshot.userId.toString());
-            update.execOrThrow();
-            if (Statement::changes(handle) != 1)
-                throw ConsolidationConflict("人物档案不存在");
-            const Statement remove(handle, "DELETE FROM person_memory_entries WHERE user_id = ? AND id <= ?");
-            remove.bind(1, snapshot.userId.toString());
-            remove.bind(2, snapshot.lastEntryId);
-            remove.execOrThrow();
-            Statement(handle, "COMMIT").execOrThrow();
-        } catch (...) {
-            sqlite3_exec(handle, "ROLLBACK", nullptr, nullptr, nullptr);
-            throw;
+        Transaction transaction(handle);
+        const auto current = readPerson(snapshot.userId);
+        json entries = json::array();
+        if (!current.is_null()) {
+            for (auto it = current["pending_entries"].rbegin(); it != current["pending_entries"].rend(); ++it)
+                if (parseUInt64(getStr(*it, "id")) <= static_cast<u64>(snapshot.lastEntryId))
+                    entries.push_back(*it);
         }
+        if (current.is_null() || current["profile"] != snapshot.profile["profile"] ||
+            current["relationship"] != snapshot.profile["relationship"] ||
+            current["recent_interactions"] != snapshot.profile["recent_interactions"] ||
+            entries != snapshot.profile["pending_entries"])
+            throw ConsolidationConflict("人物记忆已修改，丢弃过期整理结果");
+        const Statement update(handle,
+          "UPDATE person_memories SET profile = ?, relationship = ?, recent_interactions = ? WHERE user_id = ?");
+        update.bind(1, profile.at("profile").dump());
+        update.bind(2, profile.at("relationship").dump());
+        update.bind(3, profile.at("recent_interactions").dump());
+        update.bind(4, snapshot.userId.toString());
+        update.execOrThrow();
+        if (Statement::changes(handle) != 1)
+            throw ConsolidationConflict("人物档案不存在");
+        const Statement remove(handle, "DELETE FROM person_memory_entries WHERE user_id = ? AND id <= ?");
+        remove.bind(1, snapshot.userId.toString());
+        remove.bind(2, snapshot.lastEntryId);
+        remove.execOrThrow();
+        transaction.commit();
     }
 
     auto dailyState() -> DailyState {
@@ -203,64 +199,58 @@ namespace insoulforge::PersonMemoryStore {
             const auto &db = Database::instance();
             std::unique_lock lock(db.mutex());
             auto *handle = db.handle();
-            Statement(handle, "BEGIN IMMEDIATE").execOrThrow();
-            try {
-                const bool affinityEnabled = Config::instance().affinityEnabled.load(std::memory_order_relaxed);
-                if (!matches(readPerson(userId), expected, affinityEnabled) ||
-                    (replacement && affinityEnabled && !atOrNull(*replacement, "affinity").is_number_integer())) {
-                    Statement(handle, "ROLLBACK").execOrThrow();
-                    return false;
-                }
-                if (replacement) {
-                    const Statement profile(handle,
-                      "INSERT INTO person_memories (user_id, profile, relationship, recent_interactions) VALUES (?, "
-                      "?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET profile=excluded.profile, "
-                      "relationship=excluded.relationship, "
-                      "recent_interactions=excluded.recent_interactions");
-                    profile.bind(1, userId.toString());
-                    profile.bind(2, replacement->at("profile").dump());
-                    profile.bind(3, replacement->at("relationship").dump());
-                    profile.bind(4, replacement->at("recent_interactions").dump());
-                    profile.execOrThrow();
-                    if (affinityEnabled && Config::instance().affinityEnabled.load(std::memory_order_relaxed)) {
-                        const Statement score(handle,
-                          "INSERT INTO person_affinity (user_id, affinity) VALUES (?, ?) ON "
-                          "CONFLICT(user_id) DO UPDATE SET affinity=excluded.affinity");
-                        score.bind(1, userId.toString());
-                        score.bind(2, replacement->at("affinity").get<i32>());
-                        score.execOrThrow();
-                    }
-                    std::unordered_map<std::string, std::string> contents;
-                    for (const auto &entry: replacement->at("pending_entries"))
-                        contents.emplace(getStr(entry, "id"), getStr(entry, "content"));
-                    for (const auto &old: expected.at("pending_entries")) {
-                        const auto id = getStr(old, "id");
-                        const auto found = contents.find(id);
-                        if (found != contents.end() && found->second == getStr(old, "content"))
-                            continue;
-                        const Statement change(
-                          handle, found == contents.end()
-                                    ? "DELETE FROM person_memory_entries WHERE user_id=? AND id=?"
-                                    : "UPDATE person_memory_entries SET content=?3 WHERE user_id=?1 AND id=?2");
-                        change.bind(1, userId.toString());
-                        change.bind(2, parseUInt64(id));
-                        if (found != contents.end())
-                            change.bind(3, found->second);
-                        change.execOrThrow();
-                    }
-                } else {
-                    for (const auto table: {"person_memory_entries", "person_memories", "person_affinity"}) {
-                        const Statement remove(handle, std::string("DELETE FROM ") + table + " WHERE user_id=?");
-                        remove.bind(1, userId.toString());
-                        remove.execOrThrow();
-                    }
-                }
-                Statement(handle, "COMMIT").execOrThrow();
-                return true;
-            } catch (...) {
-                sqlite3_exec(handle, "ROLLBACK", nullptr, nullptr, nullptr);
-                throw;
+            Transaction transaction(handle);
+            const bool affinityEnabled = Config::instance().affinityEnabled.load(std::memory_order_relaxed);
+            if (!matches(readPerson(userId), expected, affinityEnabled) ||
+                (replacement && affinityEnabled && !atOrNull(*replacement, "affinity").is_number_integer())) {
+                transaction.rollback();
+                return false;
             }
+            if (replacement) {
+                const Statement profile(handle,
+                  "INSERT INTO person_memories (user_id, profile, relationship, recent_interactions) VALUES (?, "
+                  "?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET profile=excluded.profile, "
+                  "relationship=excluded.relationship, "
+                  "recent_interactions=excluded.recent_interactions");
+                profile.bind(1, userId.toString());
+                profile.bind(2, replacement->at("profile").dump());
+                profile.bind(3, replacement->at("relationship").dump());
+                profile.bind(4, replacement->at("recent_interactions").dump());
+                profile.execOrThrow();
+                if (affinityEnabled && Config::instance().affinityEnabled.load(std::memory_order_relaxed)) {
+                    const Statement score(handle, "INSERT INTO person_affinity (user_id, affinity) VALUES (?, ?) ON "
+                                                  "CONFLICT(user_id) DO UPDATE SET affinity=excluded.affinity");
+                    score.bind(1, userId.toString());
+                    score.bind(2, replacement->at("affinity").get<i32>());
+                    score.execOrThrow();
+                }
+                std::unordered_map<std::string, std::string> contents;
+                for (const auto &entry: replacement->at("pending_entries"))
+                    contents.emplace(getStr(entry, "id"), getStr(entry, "content"));
+                for (const auto &old: expected.at("pending_entries")) {
+                    const auto id = getStr(old, "id");
+                    const auto found = contents.find(id);
+                    if (found != contents.end() && found->second == getStr(old, "content"))
+                        continue;
+                    const Statement change(
+                      handle, found == contents.end()
+                                ? "DELETE FROM person_memory_entries WHERE user_id=? AND id=?"
+                                : "UPDATE person_memory_entries SET content=?3 WHERE user_id=?1 AND id=?2");
+                    change.bind(1, userId.toString());
+                    change.bind(2, parseUInt64(id));
+                    if (found != contents.end())
+                        change.bind(3, found->second);
+                    change.execOrThrow();
+                }
+            } else {
+                for (const auto table: {"person_memory_entries", "person_memories", "person_affinity"}) {
+                    const Statement remove(handle, std::string("DELETE FROM ") + table + " WHERE user_id=?");
+                    remove.bind(1, userId.toString());
+                    remove.execOrThrow();
+                }
+            }
+            transaction.commit();
+            return true;
         }
     } // namespace
 

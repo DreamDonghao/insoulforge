@@ -7,31 +7,27 @@
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
+#include <infrastructure/storage/Transaction.hpp>
 #include <workflow/history/ChatRecordStore.hpp>
 
 namespace insoulforge::ChatRecordStore {
     void replaceSessionChatRecords(const Database &db, const SessionId &sessionId, const json &messages) {
         std::unique_lock lock(db.mutex());
         auto *handle = db.handle();
-        Statement(handle, "BEGIN IMMEDIATE").execOrThrow();
-        try {
-            const Statement remove(handle, "DELETE FROM chat_records WHERE session_id = ?");
-            remove.bind(1, sessionId.toString());
-            remove.execOrThrow();
+        Transaction transaction(handle);
+        const Statement remove(handle, "DELETE FROM chat_records WHERE session_id = ?");
+        remove.bind(1, sessionId.toString());
+        remove.execOrThrow();
 
-            const Statement insert(handle, "INSERT INTO chat_records (session_id, role, content) VALUES (?, ?, ?)");
-            for (const auto &message: messages) {
-                insert.bind(1, sessionId.toString());
-                insert.bind(2, getStr(atOrNull(message, "sender"), "user_id") == "self" ? "assistant" : "user");
-                insert.bind(3, dumpJson(message));
-                insert.execOrThrow();
-                insert.reset();
-            }
-            Statement(handle, "COMMIT").execOrThrow();
-        } catch (...) {
-            sqlite3_exec(handle, "ROLLBACK", nullptr, nullptr, nullptr);
-            throw;
+        const Statement insert(handle, "INSERT INTO chat_records (session_id, role, content) VALUES (?, ?, ?)");
+        for (const auto &message: messages) {
+            insert.bind(1, sessionId.toString());
+            insert.bind(2, getStr(atOrNull(message, "sender"), "user_id") == "self" ? "assistant" : "user");
+            insert.bind(3, dumpJson(message));
+            insert.execOrThrow();
+            insert.reset();
         }
+        transaction.commit();
     }
 
     void addChatRecord(
