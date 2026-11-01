@@ -3,13 +3,11 @@
 
 #include <algorithm>
 
-#include <ctime>
-
 #include <infrastructure/CommonUtil.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <workflow/OneBotEventWorkflow.hpp>
 #include <workflow/history/SharedConversationContext.hpp>
 #include <workflow/message/MessageRecord.hpp>
-#include <workflow/message/SessionId.hpp>
 #include <workflow/session/SessionStore.hpp>
 
 namespace insoulforge::SharedConversationContext {
@@ -32,7 +30,7 @@ namespace insoulforge::SharedConversationContext {
                 }
             } else if (value.is_object()) {
                 for (auto &[key, child]: value.items()) {
-                    if (key != "type" && key != "id" && key != "qq" && key != "recognition_status" && key != "kind") {
+                    if (key != "type" && key != "id" && key != "user_id" && key != "recognition_status" && key != "kind") {
                         limitText(child, remaining, truncated);
                     }
                 }
@@ -72,7 +70,7 @@ namespace insoulforge::SharedConversationContext {
         return result;
     }
 
-    auto build(const u64 receiverId, const i32 messagesPerSession) -> json {
+    auto build(const SessionId &receiverId, const i32 messagesPerSession) -> json {
         json result = json::array();
         const auto now = std::time(nullptr);
         const auto earliest = formatUnixTime(now - 3 * 24 * 60 * 60);
@@ -84,11 +82,10 @@ namespace insoulforge::SharedConversationContext {
                 continue;
             }
             json session;
-            if (SessionId::isPrivate(sessionId)) {
-                session = {
-                  {"type", "private"}, {"qq", std::to_string(SessionId::privateUserId(sessionId))}, {"name", name}};
+            if (sessionId.isPrivate()) {
+                session = {{"type", "private"}, {"user_id", sessionId.targetId()}, {"name", name}};
             } else {
-                session = {{"type", "group"}, {"group_id", sessionId}, {"group_name", name}};
+                session = {{"type", "group"}, {"group_id", sessionId.targetId()}, {"group_name", name}};
             }
             result.push_back({{"session", std::move(session)}, {"messages", std::move(messages)}});
         }

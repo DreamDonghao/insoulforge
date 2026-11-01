@@ -19,10 +19,16 @@
 #include <nlohmann/json.hpp>
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 
 namespace insoulforge {
     /// @brief 项目统一 JSON 类型：ordered_json 按插入顺序保存键（nlohmann::json 默认按字典序排序）
     using json = nlohmann::ordered_json;
+    inline void to_json(json &value, const SessionId &session) { value = session.toString(); }
+    inline void from_json(const json &value, SessionId &session) {
+        session = SessionId::parse(value.get_ref<const std::string &>()).value();
+    }
+
 
     /// @brief 解析 JSON，失败时打印日志并返回 null
     [[nodiscard]] auto parseJson(const std::string &jsonStr) -> json;

@@ -87,7 +87,7 @@ function observeFocus() {
   return focused
 }
 
-test('QQ validation rejects invalid notation and overflow without a request, then submits large IDs as strings', async () => {
+test('user ID validation rejects empty IDs and preserves arbitrary string identities', async () => {
   const state = mount('access/AccessManager')
   await flush()
   const focused = observeFocus(), submitted = []
@@ -96,21 +96,33 @@ test('QQ validation rejects invalid notation and overflow without a request, the
     return response(options?.method ? {success: true} : [])
   }
   assert.deepEqual(state.adminForm.errors.value, {})
-  for (const value of ['', '1e9', '-42', '123.5', '18446744073709551616']) {
+  for (const value of ['', 'a\0b']) {
     state.newAdminQQ = value
     await state.addAdmin()
-    assert.ok(state.adminForm.errors.value['admin-qq'])
+    assert.ok(state.adminForm.errors.value['admin-user-id'])
   }
   assert.equal(submitted.length, 0)
-  assert.equal(focused.at(-1), 'admin-qq')
-  state.newAdminQQ = ' 9007199254740993 '
+  assert.equal(focused.at(-1), 'admin-user-id')
+  state.newAdminQQ = '9007199254740993'
   await state.addAdmin()
-  assert.equal(submitted[0].body.qq, '9007199254740993')
+  assert.equal(submitted[0].body.user_id, '9007199254740993')
   await state.removeAdmin('9007199254740993')
   assert.ok(submitted.at(-1).url.endsWith('/9007199254740993'))
   state.newBlacklistQQ = '18446744073709551615'
   await state.addBlacklistEntry()
-  assert.equal(submitted.at(-1).body.qq, '18446744073709551615')
+  assert.equal(submitted.at(-1).body.user_id, '18446744073709551615')
+  for (const id of ['00123', 'user:alpha/测试', '18446744073709551616', ' account ']) {
+    state.newAdminQQ = id
+    await state.addAdmin()
+    assert.equal(submitted.at(-1).body.user_id, id)
+    await state.removeAdmin(id)
+    assert.ok(submitted.at(-1).url.endsWith(`/${encodeURIComponent(id)}`))
+    state.newBlacklistQQ = id
+    await state.addBlacklistEntry()
+    assert.equal(submitted.at(-1).body.user_id, id)
+    await state.removeBlacklistEntry(id)
+    assert.ok(submitted.at(-1).url.endsWith(`/${encodeURIComponent(id)}`))
+  }
 })
 
 test('OneBot validates only the selected transport and saves the exact QQ string', async () => {

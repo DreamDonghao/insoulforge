@@ -3,10 +3,10 @@
 
 #include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <workflow/OneBotEventWorkflow.hpp>
-#include <workflow/message/SessionId.hpp>
 #include <workflow/scheduling/TaskScheduler.hpp>
 
 namespace insoulforge {
@@ -51,35 +51,6 @@ namespace insoulforge {
             return text;
         }
 
-        auto buildSystemEvent(const TaskStore::ScheduledTask &task, const bool delayed) -> json {
-            const auto &config = Config::instance();
-            const std::string text = buildText(task, delayed);
-
-            // 合成消息 ID 用远离真实 ID 的固定区段，避免与 NapCat 分配的冲突
-            static std::atomic<i64> s_syntheticMsgId{0};
-            const auto msgId = 9000000000LL + s_syntheticMsgId.fetch_add(1);
-
-            json body;
-            body["post_type"] = "message";
-            body["self_id"] = config.selfQQNumber;
-            body["time"] = std::time(nullptr);
-            body["message_id"] = fmt::to_string(msgId);
-            body["raw_message"] = text;
-            body["sender"]["user_id"] = SessionId::kSystemAccountId;
-            body["sender"]["nickname"] = std::string(kSystemTaskLabel);
-            if (task.sessionType == "private") {
-                body["message_type"] = "private";
-                body["user_id"] = task.targetId;
-            } else {
-                body["message_type"] = "group";
-                body["group_id"] = task.targetId;
-            }
-            json item;
-            item["type"] = "text";
-            item["data"]["text"] = text;
-            body["message"].push_back(item);
-            return body;
-        }
     } // namespace
 
     auto TaskScheduler::instance() -> TaskScheduler & {
@@ -114,14 +85,13 @@ namespace insoulforge {
     auto TaskScheduler::schedule(TaskStore::ScheduledTask task) -> i64 {
         const i64 id = TaskStore::addScheduledTask(task);
 
-        Entry entry;
-        entry.task = std::move(task);
+        Entry entry{.task = std::move(task)};
         entry.task.id = id;
         entry.fireTime = entry.task.remindTime - kFireLead.count();
 
-        Logger::info(0, "Scheduler",
+        Logger::info(std::nullopt, "Scheduler",
           fmt::format("已创建{}定时任务 #{}: {}({}) 于 {}", entry.task.isDaily ? "每日" : "", id,
-            entry.task.sessionType == "private" ? "私聊" : "群聊", entry.task.targetId,
+            entry.task.sessionId.isPrivate() ? "私聊" : "群聊", entry.task.sessionId.targetId(),
             formatUnixTime(entry.task.remindTime)));
 
         pushEntry(std::move(entry));
@@ -159,8 +129,7 @@ namespace insoulforge {
               std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch())
                 .count();
             for (auto &task: tasks) {
-                Entry entry;
-                entry.task = std::move(task);
+                Entry entry{.task = std::move(task)};
                 // 已过期的任务钳制到当前时刻：恢复后立即补发，而不是按过期时间连发
                 entry.fireTime = std::max<std::time_t>(entry.task.remindTime - kFireLead.count(), now);
                 if (entry.task.remindTime <= now) {
@@ -169,8 +138,8 @@ namespace insoulforge {
                 m_heap.push(std::move(entry));
             }
         }
-        Logger::info(
-          0, "Scheduler", fmt::format("恢复待触发定时任务 {} 条（其中已过期 {} 条）", tasks.size(), overdue));
+        Logger::info(std::nullopt, "Scheduler",
+          fmt::format("恢复待触发定时任务 {} 条（其中已过期 {} 条）", tasks.size(), overdue));
         if (!tasks.empty()) {
             m_cv.notify_all();
         }
@@ -211,8 +180,7 @@ namespace insoulforge {
     }
 
     void TaskScheduler::trigger(TaskStore::ScheduledTask task) {
-        const u64 logSessionId =
-          task.sessionType == "private" ? SessionId::fromPrivateUser(task.targetId) : task.targetId;
+        const SessionId logSessionId = task.sessionId;
 
         const std::time_t now = std::time(nullptr);
         const bool delayed = now > task.remindTime;
@@ -221,7 +189,8 @@ namespace insoulforge {
             delayed ? "延时，" : "", task.content.substr(0, 50), formatUnixTime(task.remindTime), formatUnixTime(now)));
 
         try {
-            OneBotEventWorkflow::instance().enqueueOneBotEvent(buildSystemEvent(task, delayed));
+            OneBotEventWorkflow::instance().enqueueSystemMessage(
+              task.sessionId, buildText(task, delayed), std::string(kSystemTaskLabel));
             Logger::info(logSessionId, "Scheduler", fmt::format("定时任务 #{} 已加入消息工作流", task.id));
         } catch (const std::exception &error) {
             Logger::error(
@@ -241,8 +210,7 @@ namespace insoulforge {
         if (!TaskStore::rescheduleDailyTask(task.id, nextFire)) {
             return;
         }
-        Entry entry;
-        entry.task = std::move(task);
+        Entry entry{.task = std::move(task)};
         entry.task.remindTime = nextFire;
         entry.fireTime = nextFire - kFireLead.count();
         Logger::info(logSessionId, "Scheduler",

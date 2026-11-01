@@ -8,23 +8,30 @@
 #pragma once
 
 #include <functional>
-#include <expected>
 #include <map>
 #include <memory>
+#include <optional>
 #include <shared_mutex>
 #include <string>
 #include <vector>
 
 #include <drogon/utils/coroutine.h>
+#include <expected>
 
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 
 namespace insoulforge {
     struct McpToolSelection;
     /// @brief 单次工具调用的执行环境（随调用显式传参，无共享状态）
     struct ToolCallContext {
-        u64 sessionId = 0;
+        std::optional<SessionId> sessionId;
+        [[nodiscard]] auto requireSession() const -> const SessionId & {
+            if (!sessionId)
+                throw std::invalid_argument("工具调用缺少会话 ID");
+            return *sessionId;
+        }
         json messageSnapshot; ///< 本轮冻结的完整消息快照，图片保存等工具读取服务端媒体来源
         bool replyOnly = false; ///< 最后一轮只允许回复类工具，拒绝其他处理器执行
         std::shared_ptr<McpToolSelection> mcpSelection; ///< 当前回复的选择状态，启用只影响后续轮次。

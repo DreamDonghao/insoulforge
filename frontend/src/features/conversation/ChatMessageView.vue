@@ -21,13 +21,13 @@ const record = computed(() => {
 const sender = computed(() => getString(getRecord(record.value?.sender)?.name) ||
     (props.message.role === 'user' ? '用户' : props.botName))
 
-/** 从统一资产或兼容的旧版图片字段取得图片识别描述。 */
+/** 从当前图片资产或生成图片段取得识别描述。 */
 const imageDescription = (record: Record<string, unknown>, segment: Record<string, unknown>): string => {
   if (getString(segment.description)) return getString(segment.description)
 
   const index = typeof segment.image_index === 'number' ? segment.image_index : -1
   const assets = getRecord(record.assets)
-  const images = Array.isArray(assets?.images) ? assets.images : Array.isArray(record.images) ? record.images : []
+  const images = Array.isArray(assets?.images) ? assets.images : []
   return index >= 0 ? getString(getRecord(images[index])?.description) : ''
 }
 
@@ -45,10 +45,10 @@ const text = computed(() => {
         return getString(item.text)
       case 'at': {
         const target = getRecord(item.target)
-        if (getString(target?.kind) === 'all' || getString(item.qq) === '0') return '@全体成员'
-        const name = getString(target?.name) || getString(item.name)
-        const qq = getString(target?.qq) || getString(item.qq)
-        return name ? `@${name}` : qq ? `@${qq}` : '@成员'
+        if (getString(target?.kind) === 'all') return '@全体成员'
+        const name = getString(target?.name)
+        const user_id = getString(target?.user_id)
+        return name ? `@${name}` : user_id ? `@${user_id}` : '@成员'
       }
       case 'image': {
         const description = imageDescription(value, item)
@@ -60,12 +60,11 @@ const text = computed(() => {
         return `[表情包：${getString(item.name) || '未命名'}]`
       case 'poke': {
         const target = getRecord(item.target)
-        const name = getString(target?.name) || getString(item.target_name)
+        const name = getString(target?.name)
         return `[拍一拍${name ? `：${name}` : ''}]`
       }
-      case 'notification':
       case 'member_event': {
-        const action = getString(item.action) || getString(item.kind)
+        const action = getString(item.action)
         return `[成员事件${action ? `：${action}` : ''}]`
       }
       case 'unsupported':
@@ -75,7 +74,7 @@ const text = computed(() => {
     }
   }).join('')
 
-  return formatted || getString(value.text) || '[空消息]'
+  return formatted || '[空消息]'
 })
 
 // Computed values are lazy: collapsed messages never format their raw JSON.

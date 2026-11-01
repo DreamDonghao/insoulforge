@@ -48,7 +48,7 @@ namespace insoulforge {
         data["id"] = entry.id;
         data["timestamp"] = entry.timestamp;
         data["level"] = entry.level;
-        data["sessionId"] = std::to_string(entry.sessionId);
+        data["sessionId"] = entry.sessionId ? json(*entry.sessionId) : json(nullptr);
         data["source"] = entry.source;
         data["content"] = entry.content;
 
@@ -79,6 +79,8 @@ namespace insoulforge {
     }
 
     auto LogWebSocketManager::matches(const LogSubscription &subscription, const LogEntry &entry) -> bool {
+        if (subscription.systemOnly && entry.sessionId)
+            return false;
         if (subscription.sessionId.has_value() && entry.sessionId != *subscription.sessionId) {
             return false;
         }

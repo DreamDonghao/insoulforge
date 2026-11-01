@@ -14,6 +14,7 @@
 #include <sqlite3.h>
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <infrastructure/logging/Logger.hpp>
 
 namespace insoulforge {
@@ -29,7 +30,7 @@ namespace insoulforge {
         Statement(sqlite3 *db, std::string_view sql) : m_db(db) {
             if (sqlite3_prepare_v2(db, sql.data(), static_cast<i32>(sql.size()), &m_stmt, nullptr) != SQLITE_OK) {
                 std::string err = sqlite3_errmsg(db);
-                Logger::error(0, "Storage", fmt::format("SQL 准备失败: {} - {}", sql, err));
+                Logger::error(std::nullopt, "Storage", fmt::format("SQL 准备失败: {} - {}", sql, err));
                 throw DbError(err);
             }
         }
@@ -64,6 +65,8 @@ namespace insoulforge {
             sqlite3_bind_double(m_stmt, idx, static_cast<f64>(v));
         }
 
+        void bind(const i32 idx, const SessionId &session) const noexcept { bind(idx, session.toString()); }
+
         void bind(const i32 idx, const std::string &v) const noexcept {
             sqlite3_bind_text(m_stmt, idx, v.c_str(), static_cast<i32>(v.size()), SQLITE_TRANSIENT);
         }
@@ -93,7 +96,7 @@ namespace insoulforge {
                 return true;
             if (rc == SQLITE_DONE)
                 return false;
-            Logger::error(0, "Storage", fmt::format("SQL 执行失败: {}", sqlite3_errmsg(m_db)));
+            Logger::error(std::nullopt, "Storage", fmt::format("SQL 执行失败: {}", sqlite3_errmsg(m_db)));
             return false;
         }
 

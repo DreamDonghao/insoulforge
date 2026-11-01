@@ -7,7 +7,7 @@ import {computed, inject, nextTick, onMounted, onUnmounted, reactive, ref, type 
 import {confirmDiscard, useUnsavedChanges} from '../../composables/useUnsavedChanges'
 import FieldError from '../../components/FieldError.vue'
 import {useFormValidation} from '../../composables/useFormValidation'
-import {identifierError, SESSION_ID_MAX} from '../../utils/validation'
+import {userIdError} from '../../utils/validation'
 import RequestError from '../../components/RequestError.vue'
 import {requestJson, requestError} from '../../utils/api'
 import NavIcon from '../../components/NavIcon.vue'
@@ -20,7 +20,7 @@ import {isPrivateSession, sessionKey, sessionLabel} from '../../utils/session'
 import type {
   ApiResponse,
   ChatMessage,
-  Group,
+  SessionSummary,
   LongTermMemoryEntry,
   LongTermMemoryListResult,
   QQConfig,
@@ -32,16 +32,16 @@ const qqConfig = inject<QQConfig>('qqConfig')
 const wsConnected = inject<Ref<boolean>>('wsConnected') as Ref<boolean>
 
 // 会话列表
-const groups: Ref<(Group & { enabled?: boolean })[]> = ref([])
+const groups: Ref<(SessionSummary & { enabled?: boolean })[]> = ref([])
 // 保存请求期间收到的绝对计数，防止稍后返回的列表快照覆盖实时更新。
 const messageCounts = new Map<string, number>()
 const showAddSession = ref(false)
 const newSessionType = ref<'group' | 'private'>('group')
 const newSessionId = ref('')
 const addingSession = ref(false)
-const newSessionIdLabel = computed(() => newSessionType.value === 'private' ? 'QQ 号' : '群号')
+const newSessionIdLabel = computed(() => newSessionType.value === 'private' ? '用户 ID' : '群号')
 const sessionForm = useFormValidation(() => ({
-  'new-session-id': identifierError(newSessionId.value, newSessionIdLabel.value, false, SESSION_ID_MAX)
+  'new-session-id': userIdError(newSessionId.value)
 }))
 const openAddSession = (): void => {
   newSessionType.value = typeFilter.value === 'private' ? 'private' : 'group'
@@ -49,13 +49,13 @@ const openAddSession = (): void => {
   showAddSession.value = true
 }
 const closeAddSession = (): void => {
-  if (addingSession.value || !confirmDiscard(newSessionId.value.trim() !== '')) return
+  if (addingSession.value || !confirmDiscard(newSessionId.value !== '')) return
   showAddSession.value = false
   newSessionId.value = ''
 }
 const addSession = async (): Promise<void> => {
   if (addingSession.value) return
-  const id = newSessionId.value.trim()
+  const id = newSessionId.value
   const type = newSessionType.value
   // 按字符串提交，避免 JavaScript 数值精度丢失；后端继续校验会话 ID。
   if (!sessionForm.validateForm()) return
@@ -88,7 +88,7 @@ const filteredGroups = computed(() => {
     const matchesType = typeFilter.value === 'all' ||
         (typeFilter.value === 'private' ? isPrivateSession(g) : !isPrivateSession(g))
     return matchesType && (!keyword ||
-        `${g.groupName ?? ''} ${g.userId ?? ''} ${sessionKey(g)}`.toLowerCase().includes(keyword))
+        `${g.sessionName ?? ''} ${g.targetId ?? ''} ${sessionKey(g)}`.toLowerCase().includes(keyword))
   })
 })
 
@@ -156,7 +156,7 @@ const groupsError = ref('')
 const groupsLoaded = ref(false)
 const {refresh: loadGroups, loading} = useCoalescedRefresh(async signal => {
   try {
-    const data = await requestJson<Group[]>('/admin/api/groups', {signal})
+    const data = await requestJson<SessionSummary[]>('/admin/api/groups', {signal})
     if (signal.aborted) return
     if (!Array.isArray(data)) throw new Error('会话列表数据无效')
     groups.value = data.map(group => ({
@@ -179,9 +179,9 @@ const groupSettings = {
 } as const
 type GroupSetting = keyof typeof groupSettings
 const savingSettings = reactive(new Set<string>())
-const isSettingSaving = (group: Group, setting: GroupSetting): boolean =>
+const isSettingSaving = (group: SessionSummary, setting: GroupSetting): boolean =>
     savingSettings.has(`${sessionKey(group)}:${setting}`)
-const setGroupSetting = async (group: Group, enabled: boolean, setting: GroupSetting): Promise<void> => {
+const setGroupSetting = async (group: SessionSummary, enabled: boolean, setting: GroupSetting): Promise<void> => {
   const id = sessionKey(group)
   const key = `${id}:${setting}`
   const {route, message} = groupSettings[setting]
@@ -208,12 +208,12 @@ const deletingRecords = reactive(new Set<number>())
 const clearingSessions = reactive(new Set<string>())
 const refreshingNames = ref(false)
 const savingGroups = reactive(new Set<string>())
-const toggleGroup = async (group: Group, enabled: boolean): Promise<void> => {
+const toggleGroup = async (group: SessionSummary, enabled: boolean): Promise<void> => {
   const groupId = sessionKey(group)
   if (savingGroups.has(groupId)) return
   savingGroups.add(groupId)
   try {
-    const resp = await fetch(`/admin/api/group/${groupId}/toggle`, {method: 'POST'})
+    const resp = await fetch(`/admin/api/group/${encodeURIComponent(groupId)}/toggle`, {method: 'POST'})
     const data: ApiResponse = await resp.json()
     if (!resp.ok || !data.success) throw new Error(data.error || '保存失败')
     group.enabled = enabled
@@ -230,7 +230,7 @@ const removeGroup = async (groupId: string): Promise<void> => {
   if (removingGroups.has(groupId) || !window.confirm('确定要删除该会话吗？聊天记录将保留。')) return
   removingGroups.add(groupId)
   try {
-    const resp = await fetch(`/admin/api/group/${groupId}`, {method: 'DELETE'})
+    const resp = await fetch(`/admin/api/group/${encodeURIComponent(groupId)}`, {method: 'DELETE'})
     const data: ApiResponse = await resp.json()
     if (!resp.ok || !data.success) throw new Error(data.error || '操作未完成')
     if (data.success) {
@@ -276,7 +276,7 @@ const selectGroup = async (sessionId: string, sessionName: string): Promise<void
   chatLoading.value = true
 
   try {
-    const records = await requestJson<ChatMessage[]>(`/admin/api/chat-records/${sessionId}?limit=200`)
+    const records = await requestJson<ChatMessage[]>(`/admin/api/chat-records/${encodeURIComponent(sessionId)}?limit=200`)
     if (!Array.isArray(records)) throw new Error('聊天记录数据无效')
     if (disposed || selectedGroup.value !== sessionId) return
     chatRecords.value = records.map((record, index) =>
@@ -284,7 +284,7 @@ const selectGroup = async (sessionId: string, sessionName: string): Promise<void
 
     chatError.value = ''
     // 订阅 WebSocket（字符串形式传递，后端可正确解析大数）
-    send({action: 'subscribe', groupId: sessionId})
+    send({action: 'subscribe', sessionId: sessionId})
   } catch (cause) {
     if (!disposed && selectedGroup.value === sessionId) chatError.value = requestError(cause, '聊天记录加载失败')
   } finally {
@@ -300,7 +300,7 @@ const selectGroup = async (sessionId: string, sessionName: string): Promise<void
 const backToList = (): void => {
   if (editSaving.value || !confirmDiscard(messageDirty())) return
   finishEdit()
-  if (selectedGroup.value) send({action: 'unsubscribe', groupId: selectedGroup.value})
+  if (selectedGroup.value) send({action: 'unsubscribe', sessionId: selectedGroup.value})
   selectedGroup.value = null
   selectedGroupName.value = ''
   chatRecords.value = []
@@ -402,7 +402,7 @@ const clearGroupRecords = async (): Promise<void> => {
   finishEdit()
   clearingSessions.add(sessionId)
   try {
-    const resp = await fetch(`/admin/api/chat-records/${sessionId}/clear`, {method: 'DELETE'})
+    const resp = await fetch(`/admin/api/chat-records/${encodeURIComponent(sessionId)}/clear`, {method: 'DELETE'})
     const data: ApiResponse = await resp.json()
     if (!resp.ok || !data.success) {
       showToast!(data.error || '清空失败', true)
@@ -430,7 +430,7 @@ const viewMemory = async (sessionId: string, sessionName: string): Promise<void>
   memoryLoading.value = true
 
   try {
-    const data = await requestJson<{memory: string}>(`/admin/api/memory/${sessionId}`)
+    const data = await requestJson<{memory: string}>(`/admin/api/memory/${encodeURIComponent(sessionId)}`)
     if (memoryGroupId.value === sessionId) {
       groupMemory.value = data.memory || ''
       savedMemory.value = groupMemory.value
@@ -509,7 +509,7 @@ const viewTasks = async (sessionId: string, sessionName: string): Promise<void> 
   tasksLoading.value = true
 
   try {
-    const data = await requestJson<{tasks: ScheduledTask[]}>(`/admin/api/scheduled-tasks/${sessionId}`)
+    const data = await requestJson<{tasks: ScheduledTask[]}>(`/admin/api/scheduled-tasks/${encodeURIComponent(sessionId)}`)
     if (!Array.isArray(data.tasks)) throw new Error('定时任务数据无效')
     if (tasksGroupId.value !== sessionId) return
     tasksList.value = data.tasks
@@ -633,7 +633,7 @@ const deleteLongTermMemory = async (id: number): Promise<void> => {
   }
 }
 
-const promptGroup = ref<Group | null>(null)
+const promptGroup = ref<SessionSummary | null>(null)
 const promptDraft = ref('')
 const savedPrompt = ref('')
 const promptLoading = ref(false)
@@ -643,7 +643,7 @@ const promptBytes = computed(() => new TextEncoder().encode(promptDraft.value).l
 const promptForm = useFormValidation(() => ({'group-prompt': promptBytes.value > 16000 ? '附加提示词不能超过 16000 字节' : ''}))
 let promptRequestVersion = 0
 
-const openPrompt = async (group: Group): Promise<void> => {
+const openPrompt = async (group: SessionSummary): Promise<void> => {
   promptForm.resetValidation()
   const version = ++promptRequestVersion
   promptGroup.value = group
@@ -652,7 +652,7 @@ const openPrompt = async (group: Group): Promise<void> => {
   promptError.value = ''
   promptLoading.value = true
   try {
-    const response = await fetch(`/admin/api/group/${sessionKey(group)}/prompt`)
+    const response = await fetch(`/admin/api/group/${encodeURIComponent(sessionKey(group))}/prompt`)
     if (!response.ok) throw new Error(`附加提示词加载失败（HTTP ${response.status}）`)
     const data: {additionalPrompt: string} = await response.json()
     if (typeof data.additionalPrompt !== 'string') throw new Error('附加提示词数据无效')
@@ -699,7 +699,7 @@ useUnsavedChanges(() =>
     messageDirty() ||
     (!!memoryGroupId.value && groupMemory.value !== savedMemory.value) ||
     (!!promptGroup.value && promptDraft.value !== savedPrompt.value) ||
-    (showAddSession.value && newSessionId.value.trim() !== ''),
+    (showAddSession.value && newSessionId.value !== ''),
     () => memorySaving.value || promptSaving.value || addingSession.value || editSaving.value)
 
 const messageKey = (message: DisplayChatMessage): string | number => message.id ?? message.clientKey ?? message.content
@@ -707,25 +707,25 @@ const messageKey = (message: DisplayChatMessage): string | number => message.id 
 const {send} = useAdminWebSocket(event => {
   const data = JSON.parse(event.data)
   if (data.type === 'session_stats_updated') {
-    const {groupId, messageCount} = data.data ?? {}
-    if (typeof groupId !== 'string' || !Number.isSafeInteger(messageCount) || messageCount < 0) return
-    const count = Math.max(messageCounts.get(groupId) || 0, messageCount)
-    messageCounts.set(groupId, count)
-    const group = groups.value.find(item => sessionKey(item) === groupId)
+    const {sessionId, messageCount} = data.data ?? {}
+    if (typeof sessionId !== 'string' || !Number.isSafeInteger(messageCount) || messageCount < 0) return
+    const count = Math.max(messageCounts.get(sessionId) || 0, messageCount)
+    messageCounts.set(sessionId, count)
+    const group = groups.value.find(item => sessionKey(item) === sessionId)
     if (group) group.messageCount = Math.max(group.messageCount || 0, count)
   }
-  if (data.type === 'new_message' && data.groupId === selectedGroup.value) {
+  if (data.type === 'new_message' && data.sessionId === selectedGroup.value) {
     chatRecords.value.push({...data.data, clientKey: `realtime-${++nextRealtimeMessageKey}`})
     nextTick(scrollToBottom)
   }
 }, {
   onConnected(socket) {
     void loadGroups()
-    if (selectedGroup.value) socket.send(JSON.stringify({action: 'subscribe', groupId: selectedGroup.value}))
+    if (selectedGroup.value) socket.send(JSON.stringify({action: 'subscribe', sessionId: selectedGroup.value}))
   },
   onDisconnected(socket) {
     if (selectedGroup.value && socket.readyState === WebSocket.OPEN)
-      socket.send(JSON.stringify({action: 'unsubscribe', groupId: selectedGroup.value}))
+      socket.send(JSON.stringify({action: 'unsubscribe', sessionId: selectedGroup.value}))
   }
 })
 
@@ -760,7 +760,7 @@ onUnmounted(() => {
           <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
             <label for="session-search" class="form-label">搜索会话</label>
             <input id="session-search" v-model="searchKeyword" aria-label="搜索会话" class="form-input"
-                   placeholder="搜索名称、群号或 QQ 号" type="search" style="width: 240px; max-width: 100%;">
+                   placeholder="搜索名称、群号或用户 ID" type="search" style="width: 240px; max-width: 100%;">
             <div class="filter-tabs">
               <button :class="{ active: typeFilter === 'all' }" class="filter-tab"
                       @click="typeFilter = 'all'">全部
@@ -788,7 +788,7 @@ onUnmounted(() => {
           <template v-else-if="!groupsError && filteredGroups.length === 0">
             <div class="empty-state">
               <div class="empty-icon" aria-hidden="true"><NavIcon name="admins"/></div>
-              <p>{{ groups.length ? '没有符合筛选条件的会话' : '暂无会话，可点击“添加会话”输入群号或 QQ 号' }}</p>
+              <p>{{ groups.length ? '没有符合筛选条件的会话' : '暂无会话，可点击“添加会话”输入群号或用户 ID' }}</p>
             </div>
           </template>
           <template v-else-if="filteredGroups.length > 0">
@@ -797,7 +797,7 @@ onUnmounted(() => {
               <tr>
                 <th style="width: 132px;">启用会话</th>
                 <th>会话</th>
-                <th style="width: 120px;">群号/QQ号</th>
+                <th style="width: 120px;">群号/用户 ID</th>
                 <th style="width: 70px;">消息</th>
                 <th style="width: 90px;">发送群名片</th>
                 <th style="width: 90px;">自动回复</th>
@@ -816,12 +816,12 @@ onUnmounted(() => {
                                  @update:model-value="toggleGroup(group, $event)" />
                 </td>
                 <td>
-                  <strong v-if="isPrivateSession(group)">{{ group.groupName || '私聊' }}</strong>
-                  <strong v-else-if="group.groupName">{{ group.groupName }}</strong>
-                  <span v-else style="color: var(--text-light)">群 {{ group.groupId }}</span>
+                  <strong v-if="isPrivateSession(group)">{{ group.sessionName || '私聊' }}</strong>
+                  <strong v-else-if="group.sessionName">{{ group.sessionName }}</strong>
+                  <span v-else style="color: var(--text-light)">群 {{ group.targetId }}</span>
                 </td>
-                <td><code :title="isPrivateSession(group) ? `QQ ${group.userId}` : ''">{{
-                    isPrivateSession(group) ? group.userId : group.groupId
+                <td><code :title="isPrivateSession(group) ? `用户 ID ${group.targetId}` : ''">{{
+                    isPrivateSession(group) ? group.targetId : group.targetId
                   }}</code></td>
                 <td>{{ group.messageCount || 0 }}</td>
                 <td @click.stop>
@@ -951,8 +951,8 @@ onUnmounted(() => {
           </fieldset>
           <label for="new-session-id" class="form-label">{{ newSessionIdLabel }}</label>
           <input v-bind="sessionForm.fieldAttrs('new-session-id', 'new-session-id-hint')" v-model="newSessionId" :disabled="addingSession" class="form-input"
-                 inputmode="numeric" autocomplete="off"
-                 :placeholder="newSessionType === 'private' ? '输入对方的 QQ 号' : '输入机器人已加入的群号'" required>
+                  autocomplete="off"
+                 :placeholder="newSessionType === 'private' ? '输入对方的用户 ID' : '输入机器人已加入的群号'" required>
           <FieldError field="new-session-id" :message="sessionForm.errors.value['new-session-id']"/>
           <p id="new-session-id-hint" class="form-hint">{{ newSessionType === 'private'
               ? '无需已有聊天记录，添加后立即启用该私聊；对方后续发来的消息将按私聊处理。'
@@ -1078,7 +1078,7 @@ onUnmounted(() => {
               v-if="!memoryError && !memoryLoading" id="session-aliases"
               v-model="groupMemory"
               class="memory-editor"
-              placeholder='{"aliases": [{"qq": "123456", "names": ["外号"]}]}'
+              placeholder='{"aliases": [{"user_id": "123456", "names": ["外号"]}]}'
           ></textarea>
         </div>
         <div class="modal-footer">

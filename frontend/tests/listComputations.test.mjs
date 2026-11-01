@@ -52,53 +52,51 @@ function setup(page, fetch = () => { throw new Error('Unexpected request') }) {
   }
 }
 
-test('700+ people retain search and numeric ordering while searches reuse cached sorting', () => {
+test('700+ people retain search and string identity ordering while searches reuse cached sorting', () => {
   const view = setup('conversation/PeopleManager')
   try {
     const people = Array.from({length: 700}, (_, i) => ({
-      qq: String(9007199254740000n + BigInt(699 - i) * 2n), name: `Person ${i}`,
+      user_id: String(9007199254740000n + BigInt(699 - i) * 2n), name: `Person ${i}`,
       affinity: i % 11 - 5, name_pending: false, pending_count: 0, updated_at: ''
     }))
-    people.push(...['10', '2'].map(qq => ({...people[0], qq})))
-    const originalOrder = people.map(person => person.qq)
+    people.push(...['10', '2', '0010', 'user:alpha', '用户'].map(user_id => ({...people[0], user_id})))
+    const originalOrder = people.map(person => person.user_id)
     view.state.people = people
     const expected = () => people.filter(person =>
-      `${person.qq} ${person.name}`.toLowerCase().includes(view.state.search.trim().toLowerCase()))
+      `${person.user_id} ${person.name}`.toLowerCase().includes(view.state.search.trim().toLowerCase()))
       .sort((a, b) => (view.state.ascending ? a.affinity - b.affinity : b.affinity - a.affinity) ||
-        (BigInt(a.qq) < BigInt(b.qq) ? -1 : BigInt(a.qq) > BigInt(b.qq) ? 1 : 0))
-      .map(person => person.qq)
+        (a.user_id < b.user_id ? -1 : a.user_id > b.user_id ? 1 : 0))
+      .map(person => person.user_id)
     for (const ascending of [false, true]) {
       view.state.ascending = ascending
       for (const search of ['', 'person 2', '  PERSON 12  ', '900719925474', 'none']) {
         view.state.search = search
-        assert.deepEqual(view.state.filtered.map(person => person.qq), expected())
+        assert.deepEqual(view.state.filtered.map(person => person.user_id), expected())
       }
     }
     assert.equal(view.runs('sortedPeople'), 2)
-    assert.equal(view.runs('indexedPeople'), 1)
-    assert.equal(view.conversions(), people.length)
-    assert.deepEqual(people.map(person => person.qq), originalOrder)
+    assert.equal(view.conversions(), 0)
+    assert.deepEqual(people.map(person => person.user_id), originalOrder)
 
     const person = view.state.people[0]
     person.name = 'Renamed'
     view.state.search = 'renamed'
     assert.equal(view.state.filtered[0], person)
     assert.equal(view.runs('sortedPeople'), 2)
-    assert.equal(view.conversions(), people.length)
+    assert.equal(view.conversions(), 0)
     person.affinity = 100
     view.state.search = ''
     assert.equal(view.state.filtered.at(-1), person)
     assert.equal(view.runs('sortedPeople'), 3)
-    assert.equal(view.conversions(), people.length)
+    assert.equal(view.conversions(), 0)
 
-    person.qq = '9007199254740993'
-    assert.deepEqual(view.state.filtered.map(person => person.qq), expected())
-    assert.equal(view.runs('indexedPeople'), 2)
-    assert.equal(view.conversions(), people.length * 2)
+    person.user_id = '9007199254740993'
+    assert.deepEqual(view.state.filtered.map(person => person.user_id), expected())
+    assert.equal(view.conversions(), 0)
     view.state.people = []
     assert.deepEqual(view.state.filtered, [])
-    view.state.people = [{...people[0], qq: '7'}]
-    assert.equal(view.state.filtered[0].qq, '7')
+    view.state.people = [{...people[0], user_id: '7'}]
+    assert.equal(view.state.filtered[0].user_id, '7')
   } finally { view.dispose() }
 })
 
@@ -239,47 +237,39 @@ test('usage totals, cache rates and merged role data are unchanged after removin
   } finally { view.dispose() }
 })
 
-test('session helpers preserve large IDs and each page keeps its own fallback labels', () => {
+test('session helpers preserve typed string identities on each page', () => {
   const groupView = setup('conversation/GroupManager')
   const logView = setup('diagnostics/LogViewer')
   const requestView = setup('diagnostics/RequestDebug')
   const peopleView = setup('conversation/PeopleManager')
   try {
-    const group = {groupId: 123, groupName: 'Named group'}
-    const privateSession = {groupId: 0, groupIdStr: '9223372036854775931',
-      groupName: 'Alice', sessionType: 'private', userId: 123}
-    assert.equal(groupView.state.sessionKey(privateSession), privateSession.groupIdStr)
-    assert.equal(groupView.state.sessionKey(group), '123')
+    const group = {sessionId: 'group:123', sessionType: 'group', targetId: '123', sessionName: 'Named group'}
+    const privateSession = {sessionId: 'private:123', sessionType: 'private', targetId: '123', sessionName: 'Alice'}
+    assert.equal(groupView.state.sessionKey(privateSession), 'private:123')
+    assert.equal(groupView.state.sessionKey(group), 'group:123')
     assert.equal(groupView.state.isPrivateSession(privateSession), true)
     assert.equal(groupView.state.isPrivateSession(group), false)
     for (const view of [groupView, logView]) {
       assert.equal(view.state.sessionLabel(group), 'Named group')
-      assert.equal(view.state.sessionLabel({...group, groupName: ''}), '群 123')
+      assert.equal(view.state.sessionLabel({...group, sessionName: ''}), '群 123')
       assert.equal(view.state.sessionLabel(privateSession), 'Alice (123)')
-      assert.equal(view.state.sessionLabel({...privateSession, groupName: ''}), '私聊 123')
-      assert.equal(view.state.sessionLabel({groupId: 0, sessionType: 'private'}), '私聊 ')
+      assert.equal(view.state.sessionLabel({...privateSession, sessionName: ''}), '私聊 123')
     }
     logView.state.groups = [privateSession]
-    assert.equal(logView.state.groupTag(privateSession.groupIdStr), 'Alice (123)')
-    for (const [id, user] of [['9223372036854775808', '0'], ['9223372036854775931', '123'],
-      ['18446744073709551615', '9223372036854775807']]) {
-      logView.state.groups = []
-      assert.equal(logView.state.groupTag(id), `私聊 ${user}`)
-      assert.equal(requestView.state.sessionLabel(id), `私聊 ${user}`)
-      assert.equal(peopleView.state.sourceLabel(id), `私聊 ${user}`)
-    }
-    for (const id of ['0', '123', '9007199254740993']) {
-      assert.equal(logView.state.groupTag(id), `群 ${id}`)
-      assert.equal(requestView.state.sessionLabel(id), `群 ${id}`)
-      assert.equal(peopleView.state.sourceLabel(id), id === '0' ? '历史记忆迁移' : `群聊 ${id}`)
+    assert.equal(logView.state.groupTag('private:123'), 'Alice (123)')
+    logView.state.groups = []
+    for (const [id, label] of [['private:0', '私聊 0'], ['private:00123', '私聊 00123'],
+      ['private:some-user', '私聊 some-user'], ['group:9007199254740993', '群 9007199254740993'],
+      ['group:a%3Ab%2F%25', '群 a:b/%']]) {
+      assert.equal(logView.state.groupTag(id), label)
+      assert.equal(requestView.state.sessionLabel(id), label)
+      assert.equal(peopleView.state.sourceLabel(id), label)
     }
     for (const id of [null, undefined, '']) assert.equal(requestView.state.sessionLabel(id), '系统请求')
+    assert.equal(logView.state.groupTag(null), '系统')
     assert.equal(requestView.state.sessionLabel('invalid'), 'invalid')
-    assert.equal(logView.state.groupTag('invalid'), '群 invalid')
-    assert.throws(() => peopleView.state.sourceLabel('invalid'), SyntaxError)
-  } finally {
-    for (const view of [groupView, logView, requestView, peopleView]) view.dispose()
-  }
+    assert.equal(peopleView.state.sourceLabel('invalid'), 'invalid')
+  } finally { for (const view of [groupView, logView, requestView, peopleView]) view.dispose() }
 })
 
 test('opening a new custom tool restores all defaults without replacing the reactive draft', async () => {

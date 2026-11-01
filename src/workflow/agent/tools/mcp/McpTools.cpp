@@ -3,12 +3,13 @@
 #include <set>
 #include <utility>
 
-#include <workflow/agent/tools/ToolRegistry.hpp>
-#include <workflow/agent/tools/mcp/McpTools.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/http/HttpTrace.hpp>
 #include <infrastructure/http/HttpUtil.hpp>
 #include <infrastructure/logging/Logger.hpp>
+#include <workflow/agent/tools/ToolRegistry.hpp>
+#include <workflow/agent/tools/mcp/McpTools.hpp>
 
 namespace insoulforge {
     namespace {
@@ -48,8 +49,8 @@ namespace insoulforge {
             return value.is_discarded() ? std::string{body} : HttpUtil::redactImagePayloads(value).dump();
         }
 
-        void attachTrace(
-          drogonmcp::ClientOptions &options, std::string serverName, std::optional<u64> sessionId = std::nullopt) {
+        void attachTrace(drogonmcp::ClientOptions &options, std::string serverName,
+          std::optional<SessionId> sessionId = std::nullopt) {
             options.onHttpTrace = [url = options.endpoint, tag = "MCP:" + serverName, sessionId](
                                     drogon::HttpMethod method, std::string_view request, i32 status,
                                     std::string_view response) {
@@ -66,7 +67,7 @@ namespace insoulforge {
         }
 
         /// 关闭失败不能覆盖已成功执行的工具结果；异常也只记录为清理警告。
-        auto closeSession(drogonmcp::Client &client, u64 sessionId) -> drogon::Task<> {
+        auto closeSession(drogonmcp::Client &client, std::optional<SessionId> sessionId) -> drogon::Task<> {
             try {
                 auto closed = co_await client.close();
                 if (!closed)
@@ -274,7 +275,7 @@ namespace insoulforge {
         } catch (const std::exception &error) {
             tools = std::unexpected(drogonmcp::Error{drogonmcp::ErrorKind::Protocol, error.what()});
         }
-        co_await closeSession(client, 0);
+        co_await closeSession(client, std::nullopt);
         if (!tools)
             co_return std::unexpected(describeError(tools.error()));
 
@@ -315,7 +316,8 @@ namespace insoulforge {
         if (!registered)
             co_return std::unexpected("MCP 工具注册失败，原有工具未被覆盖");
         server->catalog = std::make_shared<Catalog>(Catalog{.version = version, .tools = std::move(toolDefinitions)});
-        Logger::info(0, "MCP", fmt::format("服务 {} 工具加载完成 | count={}", server->name, definitions.size()));
+        Logger::info(
+          std::nullopt, "MCP", fmt::format("服务 {} 工具加载完成 | count={}", server->name, definitions.size()));
         co_return std::expected<void, std::string>{};
     }
 
@@ -330,7 +332,7 @@ namespace insoulforge {
         for (const auto &server: snapshot) {
             auto result = co_await loadServer(server);
             if (!result)
-                Logger::warn(0, "MCP", "服务 " + server->name + " 工具加载失败：" + result.error());
+                Logger::warn(std::nullopt, "MCP", "服务 " + server->name + " 工具加载失败：" + result.error());
         }
     }
 

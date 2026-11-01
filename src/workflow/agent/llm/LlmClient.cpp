@@ -4,6 +4,7 @@
 
 #include <admin/events/WebSocketManager.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/http/HttpUtil.hpp>
 #include <infrastructure/logging/Logger.hpp>
@@ -20,8 +21,7 @@ namespace insoulforge {
 
         /// @brief 通用 API 请求函数
         auto requestStr(json messages, const LLMApiConfig api, const LLMModelParams params, const std::string role,
-          const std::optional<u64> sessionId,
-          const std::shared_ptr<LlmClient::MaintenanceRequestControl> control)
+          const std::optional<SessionId> sessionId, const std::shared_ptr<LlmClient::MaintenanceRequestControl> control)
           -> drogon::Task<std::optional<std::string>> {
             if (control && control->isCancelled())
                 co_return std::nullopt;
@@ -29,7 +29,7 @@ namespace insoulforge {
                 if (sessionId) {
                     Logger::warn(*sessionId, "LLM", fmt::format("未配置服务地址、请求路径或模型名，跳过请求"));
                 } else {
-                    Logger::warn(0, "LLM", fmt::format("未配置服务地址、请求路径或模型名，跳过请求"));
+                    Logger::warn(std::nullopt, "LLM", fmt::format("未配置服务地址、请求路径或模型名，跳过请求"));
                 }
                 co_return std::nullopt;
             }
@@ -45,8 +45,8 @@ namespace insoulforge {
                     Logger::error(*sessionId, "LLM",
                       fmt::format("请求出错: status={}", static_cast<i32>((*resp)->getStatusCode())));
                 } else {
-                    Logger::error(
-                      0, "LLM", fmt::format("请求出错: status={}", static_cast<i32>((*resp)->getStatusCode())));
+                    Logger::error(std::nullopt, "LLM",
+                      fmt::format("请求出错: status={}", static_cast<i32>((*resp)->getStatusCode())));
                 }
                 co_return std::nullopt;
             }
@@ -76,7 +76,7 @@ namespace insoulforge {
         }
 
         auto MaintenanceRequestControl::recordUsage(const json &response, const std::string &model,
-          const std::string &role, const std::optional<u64> sessionId) -> bool {
+          const std::string &role, const std::optional<SessionId> sessionId) -> bool {
             std::lock_guard lock(m_mutex);
             if (m_cancelled)
                 return false;
@@ -115,9 +115,8 @@ namespace insoulforge {
             return parsed;
         }
 
-        auto sendModelRequest(std::string label, LLMApiConfig api, json body,
-          const std::optional<u64> sessionId, const bool traceResponse,
-          std::shared_ptr<MaintenanceRequestControl> control)
+        auto sendModelRequest(std::string label, LLMApiConfig api, json body, const std::optional<SessionId> sessionId,
+          const bool traceResponse, std::shared_ptr<MaintenanceRequestControl> control)
           -> drogon::Task<std::expected<drogon::HttpResponsePtr, std::string>> {
             for (i32 attempt = 0;; ++attempt) {
                 if (control && control->isCancelled())
@@ -129,15 +128,13 @@ namespace insoulforge {
                 if (attempt >= api.maxRetries ||
                     (response && !isRetryableStatus(static_cast<i32>((*response)->getStatusCode()))))
                     co_return response;
-                Logger::warn(sessionId.value_or(0), label,
-                  fmt::format("请求失败，第 {}/{} 次重试", attempt + 1, api.maxRetries));
+                Logger::warn(sessionId, label, fmt::format("请求失败，第 {}/{} 次重试", attempt + 1, api.maxRetries));
                 co_await drogon::sleepCoro(drogon::app().getLoop(), std::chrono::seconds{1});
             }
         }
 
-        auto requestChat(std::string label, std::string usageRole, LLMApiConfig apiConfig,
-          LLMModelParams params, json messages, json tools, const u64 sessionId)
-          -> drogon::Task<std::optional<json>> {
+        auto requestChat(std::string label, std::string usageRole, LLMApiConfig apiConfig, LLMModelParams params,
+          json messages, json tools, const std::optional<SessionId> sessionId) -> drogon::Task<std::optional<json>> {
             if (!isConfigured(apiConfig)) {
                 Logger::warn(sessionId, label, "未配置服务地址、请求路径或模型名，跳过请求");
                 co_return std::nullopt;
@@ -158,7 +155,7 @@ namespace insoulforge {
         }
     } // namespace LlmClient
 
-    auto LlmClient::requestMaintenance(json messages, const u64 sessionId, std::string usageRole,
+    auto LlmClient::requestMaintenance(json messages, const std::optional<SessionId> sessionId, std::string usageRole,
       const std::optional<i32> maxTokens, std::shared_ptr<MaintenanceRequestControl> control)
       -> drogon::Task<std::optional<std::string>> {
         const auto &config = Config::instance();
@@ -170,11 +167,11 @@ namespace insoulforge {
           std::move(messages), config.memory, params, std::move(usageRole), sessionId, std::move(control));
     }
 
-    auto LlmClient::requestEmbedding(std::string text, const std::optional<u64> sessionId)
+    auto LlmClient::requestEmbedding(std::string text, const std::optional<SessionId> sessionId)
       -> drogon::Task<std::optional<std::vector<f32>>> {
         const auto config = Config::instance().embedding;
         if (!isConfigured(config)) {
-            Logger::debug(0, "LLM", fmt::format("Embedding 未配置，跳过向量化"));
+            Logger::debug(std::nullopt, "LLM", fmt::format("Embedding 未配置，跳过向量化"));
             co_return std::nullopt;
         }
 
@@ -195,8 +192,8 @@ namespace insoulforge {
                 Logger::error(*sessionId, "Embedding",
                   fmt::format("请求出错: status={}", static_cast<i32>((*resp)->getStatusCode())));
             } else {
-                Logger::error(
-                  0, "Embedding", fmt::format("请求出错: status={}", static_cast<i32>((*resp)->getStatusCode())));
+                Logger::error(std::nullopt, "Embedding",
+                  fmt::format("请求出错: status={}", static_cast<i32>((*resp)->getStatusCode())));
             }
             co_return std::nullopt;
         }
@@ -213,8 +210,8 @@ namespace insoulforge {
         co_return embedding;
     }
 
-    void LlmClient::logUsage(
-      const json &responseJson, const std::string &model, const std::string &role, const std::optional<u64> sessionId) {
+    void LlmClient::logUsage(const json &responseJson, const std::string &model, const std::string &role,
+      const std::optional<SessionId> sessionId) {
         if (!responseJson.contains("usage"))
             return;
         const json &usage = responseJson["usage"];
@@ -237,7 +234,7 @@ namespace insoulforge {
             }
         }
 
-        const u64 logSessionId = sessionId.value_or(0);
+        const auto logSessionId = sessionId;
         if (promptTokens > 0) {
             f32 hitRate = static_cast<f32>(cachedTokens) / static_cast<f32>(promptTokens) * 100.0f;
             Logger::info(logSessionId, "Usage",
@@ -259,7 +256,7 @@ namespace insoulforge {
         evt["role"] = role;
         evt["model"] = model;
         if (sessionId.has_value()) {
-            evt["groupId"] = *sessionId;
+            evt["sessionId"] = *sessionId;
         }
         WebSocketManager::instance().broadcastEvent("usage_updated", evt);
     }

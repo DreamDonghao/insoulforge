@@ -12,6 +12,7 @@
 #include <vector>
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 
 namespace insoulforge {
     /// @brief 会话配置结构
@@ -30,82 +31,83 @@ namespace insoulforge {
     namespace SessionStore {
         inline constexpr size_t kMaxAdditionalPromptBytes = 16000;
         /// @brief 首次创建会话配置；新私聊按默认值登记启用状态，已有配置或手动状态不变。
-        void initializeSession(u64 sessionId, bool defaultPrivateEnabled);
+        void initializeSession(const SessionId &sessionId, bool defaultPrivateEnabled);
         /// @brief 保存本群附加提示词，空字符串清空设置，超长文本抛出 invalid_argument。
-        void setAdditionalPrompt(u64 sessionId, std::string_view prompt);
+        void setAdditionalPrompt(const SessionId &sessionId, std::string_view prompt);
         /// @brief 单独保存群名片开关，不改变消息统计或会话启用状态。
-        void setSendGroupCard(u64 sessionId, bool enabled);
+        void setSendGroupCard(const SessionId &sessionId, bool enabled);
         /// @brief 单独保存自动回复开关，不影响其他群设置或消息统计。
-        void setAutoReply(u64 sessionId, bool enabled);
+        void setAutoReply(const SessionId &sessionId, bool enabled);
         /// @brief 单独保存群命令解析开关，不影响其他设置。
-        void setCommandEnabled(u64 sessionId, bool enabled);
+        void setCommandEnabled(const SessionId &sessionId, bool enabled);
         /// @brief 单独保存群聊或私聊的共享开关，不改变会话启用状态。
-        void setCrossSessionSharing(u64 sessionId, bool enabled);
+        void setCrossSessionSharing(const SessionId &sessionId, bool enabled);
         /// @brief 仅当接收会话启用且参与共享时，返回其他启用且参与共享的会话及名称。
-        [[nodiscard]] auto getSharedSessions(u64 receiverId) -> std::vector<std::pair<u64, std::string>>;
+        [[nodiscard]] auto getSharedSessions(const SessionId &receiverId)
+          -> std::vector<std::pair<SessionId, std::string>>;
         /// @brief 获取会话的消息统计及群设置
         /// @param sessionId 统一会话 ID
         /// @return 已保存的配置；不存在时消息数为 0，群名片关闭，自动回复及命令解析开启
-        [[nodiscard]] auto getSessionConfig(u64 sessionId) -> SessionConfig;
+        [[nodiscard]] auto getSessionConfig(const SessionId &sessionId) -> SessionConfig;
 
         /// @brief 覆盖保存会话的消息统计及群设置
         /// @param sessionId 统一会话 ID
         /// @param config 待保存的消息数、群设置开关及附加提示词
-        void saveSessionConfig(u64 sessionId, const SessionConfig &config);
+        void saveSessionConfig(const SessionId &sessionId, const SessionConfig &config);
 
         /// @brief 原子递增会话消息数
         /// @param sessionId 统一会话 ID
         /// @details 配置行不存在时自动以当前消息创建初始统计。
-        void incrementMessageCount(u64 sessionId);
+        void incrementMessageCount(const SessionId &sessionId);
 
         /// @brief 检查会话是否已有统计配置
         /// @param sessionId 统一会话 ID
         /// @return 存在 `group_config` 记录时返回 true
-        [[nodiscard]] auto hasSessionConfig(u64 sessionId) -> bool;
+        [[nodiscard]] auto hasSessionConfig(const SessionId &sessionId) -> bool;
 
         /// @brief 检查会话是否启用常规消息处理
         /// @param sessionId 统一会话 ID
         /// @return 启用记录存在且 `enabled` 为 true 时返回 true
-        [[nodiscard]] auto isSessionEnabled(u64 sessionId) -> bool;
+        [[nodiscard]] auto isSessionEnabled(const SessionId &sessionId) -> bool;
 
         /// @brief 启用会话的常规消息处理
         /// @param sessionId 统一会话 ID
         /// @details 会重建同一会话的启用状态记录；已有显示名称会被清空。
-        void enableSession(u64 sessionId);
+        void enableSession(const SessionId &sessionId);
 
         /// @brief 禁用会话的常规消息处理
         /// @param sessionId 统一会话 ID
         /// @details 删除启用状态记录；聊天记录和消息统计不会受影响。
-        void disableSession(u64 sessionId);
+        void disableSession(const SessionId &sessionId);
 
         /// @brief 获取所有已启用的会话 ID
         /// @return `enabled_groups` 中 `enabled` 为 true 的会话 ID 列表
-        [[nodiscard]] auto getEnabledGroups() -> std::vector<u64>;
+        [[nodiscard]] auto getEnabledSessions() -> std::vector<SessionId>;
 
         /// @brief 获取所有存在聊天记录的会话摘要
         /// @return 元组列表 `{sessionId, sessionName, recordCount}`，按记录数降序排列
         /// @details 会话未设置名称时 `sessionName` 为空字符串。
-        [[nodiscard]] auto getSessionsWithChatRecords() -> std::vector<std::tuple<u64, std::string, i32>>;
+        [[nodiscard]] auto getSessionsWithChatRecords() -> std::vector<std::tuple<SessionId, std::string, i32>>;
 
         /// @brief 获取所有已登记启用状态的会话摘要
         /// @return 元组列表 `{sessionId, sessionName, enabled, recordCount}`，优先返回已启用会话
         /// @details 仅返回 `enabled_groups` 中的记录；从未启用且没有名称的会话不在结果中。
-        [[nodiscard]] auto getAllSessionsWithStatus() -> std::vector<std::tuple<u64, std::string, bool, i32>>;
+        [[nodiscard]] auto getAllSessionsWithStatus() -> std::vector<std::tuple<SessionId, std::string, bool, i32>>;
 
         /// @brief 切换已有会话的启用状态
         /// @param sessionId 统一会话 ID
         /// @details 不存在启用状态记录时不会创建记录。
-        void toggleSessionStatus(u64 sessionId);
+        void toggleSessionStatus(const SessionId &sessionId);
 
         /// @brief 更新会话显示名称
         /// @param sessionId 统一会话 ID
         /// @param name 待保存的显示名称
         /// @details 不存在启用状态记录时不会创建记录。
-        void updateSessionName(u64 sessionId, const std::string &name);
+        void updateSessionName(const SessionId &sessionId, const std::string &name);
 
         /// @brief 获取会话显示名称
         /// @param sessionId 统一会话 ID
         /// @return 已保存的显示名称；未设置或记录不存在时返回空字符串
-        [[nodiscard]] auto getSessionName(u64 sessionId) -> std::string;
+        [[nodiscard]] auto getSessionName(const SessionId &sessionId) -> std::string;
     } // namespace SessionStore
 } // namespace insoulforge

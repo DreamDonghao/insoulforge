@@ -169,9 +169,26 @@ namespace insoulforge {
         }
 
         try {
+            std::optional<SessionId> identity;
+            if (*sessionId != "-" && *sessionId != "0") {
+                if (auto parsed = SessionId::parse(*sessionId); parsed)
+                    identity = *parsed;
+                else {
+                    // 历史日志只在恢复时解码旧整数，不在正常业务路径兼容。
+                    if (!std::ranges::all_of(*sessionId, [](char c) { return c >= '0' && c <= '9'; }))
+                        return std::nullopt;
+                    size_t end{};
+                    const auto old = std::stoull(*sessionId, &end);
+                    if (end != sessionId->size())
+                        return std::nullopt;
+                    constexpr u64 flag = 1ULL << 63;
+                    identity =
+                      old & flag ? SessionId::privateChat(UserId{old & ~flag}) : SessionId::group(std::to_string(old));
+                }
+            }
             return LogEntry{.timestamp = line.substr(1, kTimestampWidth),
               .level = std::move(normalizedLevel),
-              .sessionId = std::stoull(*sessionId),
+              .sessionId = std::move(identity),
               .source = *source,
               .content = line.substr(cursor + 1, line.size() - cursor - 2)};
         } catch (const std::exception &) {
@@ -180,6 +197,8 @@ namespace insoulforge {
     }
 
     auto LogBuffer::matches(const LogEntry &entry, const LogQuery &query) -> bool {
+        if (query.systemOnly && entry.sessionId)
+            return false;
         if (query.sessionId.has_value() && entry.sessionId != *query.sessionId) {
             return false;
         }

@@ -190,7 +190,7 @@ test('conversation editors require discard confirmation and are clean after savi
   await state.saveMemory()
   state.closeMemory()
   assert.equal(state.memoryGroupId, null)
-  await state.openPrompt({groupId: '42'})
+  await state.openPrompt({sessionId: 'group:42', sessionType: 'group', targetId: '42'})
   state.promptDraft = 'changed prompt'
   state.closePrompt()
   assert.ok(state.promptGroup)

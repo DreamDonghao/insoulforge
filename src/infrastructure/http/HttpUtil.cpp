@@ -2,6 +2,7 @@
 /// @brief HTTP 请求工具 - 实现
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <infrastructure/http/HttpTrace.hpp>
 #include <infrastructure/http/HttpUtil.hpp>
 #include <infrastructure/logging/Logger.hpp>
@@ -97,8 +98,8 @@ namespace insoulforge::HttpUtil {
     }
 
     auto send(const std::string_view tag, std::string baseUrl, std::string path, const drogon::HttpMethod method,
-      json body, std::string bearerToken, const f64 timeout, std::optional<u64> sessionId, const bool traceResponse)
-      -> drogon::Task<std::expected<drogon::HttpResponsePtr, std::string>> {
+      json body, std::string bearerToken, const f64 timeout, std::optional<SessionId> sessionId,
+      const bool traceResponse) -> drogon::Task<std::expected<drogon::HttpResponsePtr, std::string>> {
         normalizeTarget(baseUrl, path);
         // 实际请求保留原始 JSON；调试记录只省略其中的图片数据。
         auto bodyText = body.is_null() ? std::string{} : dumpJson(body);
@@ -118,7 +119,7 @@ namespace insoulforge::HttpUtil {
         try {
             client = drogon::HttpClient::newHttpClient(baseUrl);
         } catch (const std::exception &e) {
-            Logger::error(sessionId.value_or(0), tag,
+            Logger::error(sessionId, tag,
               fmt::format(
                 "HTTP 创建客户端失败: {} ({} {}{}) body={}", e.what(), methodName(method), baseUrl, path, bodyLog));
             trace.status = 0;
@@ -147,7 +148,7 @@ namespace insoulforge::HttpUtil {
         try {
             resp = co_await client->sendRequestCoro(req, timeout);
         } catch (const std::exception &e) {
-            Logger::error(sessionId.value_or(0), tag,
+            Logger::error(sessionId, tag,
               fmt::format("HTTP 请求异常: {} ({} {}{}) body={}", e.what(), methodName(method), baseUrl, path, bodyLog));
             finishTrace(0, e.what());
             co_return std::unexpected(std::string(e.what()));
@@ -160,7 +161,7 @@ namespace insoulforge::HttpUtil {
 
         // HTTP 错误带上目标地址；DNS 和连接异常在前面的异常分支处理。
         if (resp->getStatusCode() >= drogon::k400BadRequest) {
-            Logger::warn(sessionId.value_or(0), tag,
+            Logger::warn(sessionId, tag,
               fmt::format("HTTP 响应异常: status={} ({} {}{})", static_cast<i32>(resp->getStatusCode()),
                 methodName(method), baseUrl, path));
         }

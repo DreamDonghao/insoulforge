@@ -4,7 +4,9 @@
 #include <cassert>
 
 #include <admin/events/WebSocketManager.hpp>
+#include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
@@ -21,26 +23,24 @@
 #include <workflow/message/MessageContentEnricher.hpp>
 #include <workflow/message/MessageRecord.hpp>
 #include <workflow/message/MessageService.hpp>
-#include <workflow/message/SessionId.hpp>
 #include <workflow/message/image/ImageDescriptionStore.hpp>
 #include <workflow/session/SessionConfigManager.hpp>
 
 namespace insoulforge {
     namespace {
         /// @brief 判断已有回复任务时是否保留该消息作为下一轮触发目标
-        [[nodiscard]] auto shouldQueueWhileReplying(
-          const u64 sessionId, const json &message, const Config &config) -> bool {
-            return SessionId::isPrivate(sessionId) || MessageRecord::isSystem(message) ||
-                   MessageRecord::mentions(message, config.selfQQNumber);
+        [[nodiscard]] auto shouldQueueWhileReplying(const SessionId &sessionId, const json &message) -> bool {
+            return sessionId.isPrivate() || MessageRecord::isSystem(message) ||
+                   MessageRecord::mentions(message, UserId{"self"});
         }
 
         /// @brief 记录已完成主处理消息的会话统计
-        void recordMessageProcessingStats(const u64 sessionId) {
+        void recordMessageProcessingStats(const SessionId &sessionId) {
             try {
                 SessionConfigManager::incrementMessageCount(sessionId);
-                WebSocketManager::instance().broadcastEvent("session_stats_updated",
-                  {{"groupId", std::to_string(sessionId)},
-                    {"messageCount", SessionConfigManager::getConfig(sessionId).allMesCount}});
+                WebSocketManager::instance().broadcastEvent(
+                  "session_stats_updated", {{"sessionId", sessionId.toString()},
+                                             {"messageCount", SessionConfigManager::getConfig(sessionId).allMesCount}});
             } catch (const std::exception &error) {
                 Logger::error(sessionId, "Workflow", fmt::format("会话统计更新失败: {}", error.what()));
             } catch (...) {
@@ -51,7 +51,7 @@ namespace insoulforge {
         /// @brief 将已插入的完整消息记录推送至管理后台，推送失败不得影响消息工作流
         /// @param sessionId 所属会话 ID
         /// @param message 已写入消息列表的完整消息
-        void pushRecordedMessage(const u64 sessionId, const json &message) {
+        void pushRecordedMessage(const SessionId &sessionId, const json &message) {
             try {
                 const auto role = MessageRecord::isAssistant(message) ? "assistant" : "user";
                 WebSocketManager::instance().pushMessage(sessionId, role, dumpJson(message));
@@ -64,7 +64,7 @@ namespace insoulforge {
 
         /// @brief 预留一个内存批次并启动后台维护，成功后删除对应数量的队首消息
         void scheduleMemoryMaintenance(
-          const Database &database, const u64 sessionId, const std::shared_ptr<MessageList> &messageList) {
+          const Database &database, const SessionId &sessionId, const std::shared_ptr<MessageList> &messageList) {
             auto batch = messageList->createSummaryBatch();
             if (!batch) {
                 return;
@@ -117,10 +117,11 @@ namespace insoulforge {
         try {
             // 在接收消息前清理超过十天未使用的图片描述缓存。
             const auto expiredImageCount = u64{ImageDescriptionStore::purgeExpired()};
-            Logger::info(0, "Media", fmt::format("过期图片描述缓存清理完成 | deleted={}", expiredImageCount));
+            Logger::info(
+              std::nullopt, "Media", fmt::format("过期图片描述缓存清理完成 | deleted={}", expiredImageCount));
 
-            std::unordered_map<u64, std::shared_ptr<SessionWorkflowState>> sessions;
-            for (const auto sessionId: ChatRecordStore::getSessionIds(database)) {
+            std::unordered_map<SessionId, std::shared_ptr<SessionWorkflowState>> sessions;
+            for (const auto &sessionId: ChatRecordStore::getSessionIds(database)) {
                 sessions.emplace(sessionId, std::make_shared<SessionWorkflowState>(sessionId, database, config));
             }
             {
@@ -129,7 +130,7 @@ namespace insoulforge {
                 m_dependencies.emplace(Dependencies{.database = database, .config = config, .agent = agent});
             }
             m_initialized.store(true, std::memory_order_release);
-            Logger::info(0, "Workflow", "事件工作流初始化完成");
+            Logger::info(std::nullopt, "Workflow", "事件工作流初始化完成");
             return {};
         } catch (const DbError &error) {
             m_initialized.store(false, std::memory_order_release);
@@ -153,7 +154,7 @@ namespace insoulforge {
         }
     }
 
-    void OneBotEventWorkflow::appendDeliveredAssistantMessage(const u64 sessionId, json message) {
+    void OneBotEventWorkflow::appendDeliveredAssistantMessage(const SessionId &sessionId, json message) {
         const auto sessionState = getOrCreateSessionState(sessionId);
         const auto update = sessionState->messageList()->append(std::move(message));
         if (!update) {
@@ -162,11 +163,11 @@ namespace insoulforge {
         pushRecordedMessage(sessionId, update->back());
     }
 
-    void OneBotEventWorkflow::appendAssistantExecutionRecord(const u64 sessionId, json message) {
+    void OneBotEventWorkflow::appendAssistantExecutionRecord(const SessionId &sessionId, json message) {
         appendSystemStatusMessage(sessionId, std::move(message));
     }
 
-    void OneBotEventWorkflow::appendSystemStatusMessage(const u64 sessionId, json message) {
+    void OneBotEventWorkflow::appendSystemStatusMessage(const SessionId &sessionId, json message) {
         const auto sessionState = getOrCreateSessionState(sessionId);
         const auto update = sessionState->messageList()->append(std::move(message));
         if (!update) {
@@ -175,7 +176,7 @@ namespace insoulforge {
         pushRecordedMessage(sessionId, update->back());
     }
 
-    auto OneBotEventWorkflow::getSessionMessages(const u64 sessionId) -> std::optional<json> {
+    auto OneBotEventWorkflow::getSessionMessages(const SessionId &sessionId) -> std::optional<json> {
         std::shared_ptr<SessionWorkflowState> sessionState;
         {
             std::lock_guard lock(m_sessionsMutex);
@@ -189,7 +190,7 @@ namespace insoulforge {
     }
 
     auto OneBotEventWorkflow::getSharedSessionMessages(
-      const u64 sessionId, const size_t limit, const std::string &earliest, const std::string &latest) -> json {
+      const SessionId &sessionId, const size_t limit, const std::string &earliest, const std::string &latest) -> json {
         std::shared_ptr<SessionWorkflowState> state;
         {
             std::lock_guard lock(m_sessionsMutex);
@@ -202,7 +203,7 @@ namespace insoulforge {
         return state->messageList()->sharedSnapshot(limit, earliest, latest);
     }
 
-    void OneBotEventWorkflow::clearSessionMessages(const u64 sessionId) {
+    void OneBotEventWorkflow::clearSessionMessages(const SessionId &sessionId) {
         std::lock_guard lock(m_sessionsMutex);
         if (const auto found = m_sessions.find(sessionId); found != m_sessions.end()) {
             found->second->messageList()->clear();
@@ -211,7 +212,8 @@ namespace insoulforge {
         }
     }
 
-    auto OneBotEventWorkflow::getOrCreateSessionState(const u64 sessionId) -> std::shared_ptr<SessionWorkflowState> {
+    auto OneBotEventWorkflow::getOrCreateSessionState(const SessionId &sessionId)
+      -> std::shared_ptr<SessionWorkflowState> {
         std::lock_guard lock(m_sessionsMutex);
         if (const auto found = m_sessions.find(sessionId); found != m_sessions.end()) {
             return found->second;
@@ -224,7 +226,7 @@ namespace insoulforge {
     }
 
     auto OneBotEventWorkflow::executeCommand(const json &message) -> drogon::Task<> {
-        const auto sessionId = getUInt(message, "session_id");
+        const auto sessionId = MessageRecord::getSessionId(message);
         const auto sessionState = getOrCreateSessionState(sessionId);
         const auto update = sessionState->messageList()->append(message);
         if (!update) {
@@ -234,11 +236,7 @@ namespace insoulforge {
 
         try {
             const auto response = co_await CommandProcessor::execute(message);
-            if (SessionId::isPrivate(sessionId)) {
-                co_await MessageService::sendPrivateMsg(SessionId::privateUserId(sessionId), response);
-            } else {
-                co_await MessageService::sendGroupMsg(sessionId, response);
-            }
+            co_await MessageService::sendToSession(sessionId, response);
         } catch (const std::exception &error) {
             Logger::error(sessionId, "Workflow", fmt::format("命令执行或回复失败: {}", error.what()));
         } catch (...) {
@@ -248,26 +246,36 @@ namespace insoulforge {
     }
 
     void OneBotEventWorkflow::enqueueOneBotEvent(const json &body) {
-        if (!m_initialized.load(std::memory_order_acquire)) {
+        if (!m_initialized.load(std::memory_order_acquire))
             return;
-        }
-        // 将上报转换为统一消息，再按会话进入预处理队列。
-        auto normalizedMessage = OneBotEventNormalizer::normalize(body);
-        if (!normalizedMessage || MessageRecord::isAssistant(*normalizedMessage) || !m_dependencies->agent.isReady()) {
+        if (auto message = OneBotEventNormalizer::normalize(body))
+            enqueueNormalizedMessage(std::move(*message));
+    }
+
+    void OneBotEventWorkflow::enqueueSystemMessage(
+      const SessionId &sessionId, std::string text, std::string senderName) {
+        static std::atomic<u64> next{0};
+        enqueueNormalizedMessage({{"session_id", sessionId.toString()}, {"time", currentDateTime()},
+          {"message_id", fmt::format("{}", 9000000000ULL + next.fetch_add(1))},
+          {"sender", {{"user_id", "system"}, {"name", std::move(senderName)}}},
+          {"segments", {{{"type", "text"}, {"text", std::move(text)}}}}});
+    }
+
+    void OneBotEventWorkflow::enqueueNormalizedMessage(json message) {
+        if (!m_initialized.load(std::memory_order_acquire) || !m_dependencies->agent.isReady() ||
+            MessageRecord::isAssistant(message))
             return;
-        }
-        if (BlacklistStore::contains(getUInt(atOrNull(*normalizedMessage, "sender"), "qq"))) {
+        const auto sender = UserId::parse(getStr(atOrNull(message, "sender"), "user_id"));
+        if (!sender || BlacklistStore::contains(*sender))
             return;
-        }
-        const auto sessionId = MessageRecord::getSessionId(*normalizedMessage);
+        const auto sessionId = MessageRecord::getSessionId(message);
         const auto sessionState = getOrCreateSessionState(sessionId);
-        if (!sessionState->enqueuePreparation(std::move(*normalizedMessage))) {
+        if (!sessionState->enqueuePreparation(std::move(message)))
             return;
-        }
         drogon::async_run([this, sessionId]() -> drogon::Task<> { co_await processPreparationQueue(sessionId); });
     }
 
-    auto OneBotEventWorkflow::processPreparationQueue(const u64 sessionId) -> drogon::Task<> {
+    auto OneBotEventWorkflow::processPreparationQueue(const SessionId sessionId) -> drogon::Task<> {
         const auto sessionState = getOrCreateSessionState(sessionId);
         while (true) {
             auto nextMessage = sessionState->takePreparationMessage();
@@ -305,7 +313,7 @@ namespace insoulforge {
                     pushRecordedMessage(sessionId, update->back());
 
                     const auto triggerMessageId = getStr(update->back(), "message_id");
-                    bool mayWait = shouldQueueWhileReplying(sessionId, update->back(), m_dependencies->config);
+                    bool mayWait = shouldQueueWhileReplying(sessionId, update->back());
                     std::optional<RouterDecision> decision;
                     if (!mayWait && m_dependencies->config.execution.routeWhileReplying.load(std::memory_order_relaxed) &&
                         sessionState->isReplyProcessing()) {
@@ -341,7 +349,7 @@ namespace insoulforge {
         }
     }
 
-    auto OneBotEventWorkflow::processReplyWorkflow(u64 sessionId, ReplyRequest request) -> drogon::Task<> {
+    auto OneBotEventWorkflow::processReplyWorkflow(SessionId sessionId, ReplyRequest request) -> drogon::Task<> {
         const auto sessionState = getOrCreateSessionState(sessionId);
         bool isInitialReply = true;
         while (true) {
@@ -353,7 +361,7 @@ namespace insoulforge {
                     Logger::warn(sessionId, "Workflow", "回复任务跳过：Agent 不可用");
                 } else {
                     auto routerDecision = std::move(request.decision);
-                    if (SessionId::isPrivate(sessionId)) {
+                    if (sessionId.isPrivate()) {
                         Logger::info(sessionId, "Workflow", "私聊直接执行，跳过 Router");
                     } else {
                         if (!routerDecision) {
@@ -372,13 +380,8 @@ namespace insoulforge {
                         const auto replyDecision =
                           co_await ExecutorAgent::execute(records, memory, std::move(routerDecision));
                         if (replyDecision && replyDecision->shouldReply && !replyDecision->content.empty()) {
-                            if (SessionId::isPrivate(sessionId)) {
-                                co_await MessageService::sendPrivateMsg(SessionId::privateUserId(sessionId),
-                                  replyDecision->content, std::nullopt, replyDecision->toolHistory);
-                            } else {
-                                co_await MessageService::sendGroupMsg(
-                                  sessionId, replyDecision->content, std::nullopt, replyDecision->toolHistory);
-                            }
+                            co_await MessageService::sendToSession(
+                              sessionId, replyDecision->content, std::nullopt, replyDecision->toolHistory);
                         } else {
                             Logger::info(sessionId, "Executor", "未生成可发送的回复");
                             if (replyDecision) {

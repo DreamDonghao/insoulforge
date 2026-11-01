@@ -61,7 +61,7 @@ export interface ExecutionConfig {
 
 export interface LongTermMemoryEntry {
     id: number
-    groupId: string
+    sessionId: string
     content: string
     createdAt: string
 }
@@ -84,18 +84,18 @@ export interface Emoji {
 }
 
 export interface Admin {
-    qq: string
+    user_id: string
 }
 
 export interface BlacklistEntry {
-    qq: string
+    user_id: string
 }
 
-export interface Group {
-    groupId: number
-    /** 会话 ID 的字符串形式（私聊会话 ID 带标志位，超过 Number 安全范围） */
-    groupIdStr?: string
-    groupName: string
+export interface SessionSummary {
+    sessionId: string
+    sessionType: 'group' | 'private'
+    targetId: string
+    sessionName: string
     messageCount: number
     sendGroupCard?: boolean
     autoReply?: boolean
@@ -103,8 +103,6 @@ export interface Group {
     crossSessionSharing?: boolean
     hasAdditionalPrompt?: boolean
     enabled?: boolean
-    sessionType?: 'private'
-    userId?: number
 }
 
 export interface ChatMessage {
@@ -114,8 +112,8 @@ export interface ChatMessage {
 }
 
 export interface AffinityEntry {
-    /** QQ 号字符串（大数安全） */
-    qq: string
+    /** 用户 ID 字符串（大数安全） */
+    user_id: string
     /** 昵称（运行时映射缺失且 OneBot 查询失败时缺省） */
     name?: string
     affinity: number
@@ -140,7 +138,7 @@ export interface LogEntry {
     id: number
     timestamp: string
     level: string
-    /** 会话 ID 的字符串形式（私聊会话 ID 带标志位） */
+    /** 规范会话 ID，形如 group:123 或 private:some-user */
     sessionId: string
     /** 日志来源，例如 Executor、OneBot 或 Config */
     source: string
@@ -167,8 +165,8 @@ export interface HttpTraceEntry {
     url: string
     /** 0 表示请求未得到响应（超时/异常） */
     status: number
-    /** 会话 ID 的字符串形式（私聊会话 ID 带标志位），null 表示系统级请求 */
-    groupId?: string | null
+    /** 规范会话 ID，形如 group:123 或 private:some-user，null 表示系统级请求 */
+    sessionId?: string | null
     requestBody?: string | null
     responseBody?: string | null
 }

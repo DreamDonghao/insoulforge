@@ -4,16 +4,18 @@
 
 #pragma once
 
+#include <optional>
 #include <string>
 #include <vector>
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 
 namespace insoulforge {
     /// @brief 长期记忆条目（管理端展示用）
     struct LongTermMemoryEntry {
         i64 id;
-        u64 groupId;
+        SessionId sessionId;
         std::string content;
         std::string createdAt;
     };
@@ -29,14 +31,15 @@ namespace insoulforge {
     namespace LongTermMemoryStore {
         /// @brief 暴力余弦检索 topK 条相似记忆
         /// @return (id, 内容, 余弦相似度)，按相似度降序；维度不匹配的行跳过
-        [[nodiscard]] auto searchSimilar(u64 groupId, const std::vector<f32> &query, i32 topK)
+        [[nodiscard]] auto searchSimilar(const SessionId &sessionId, const std::vector<f32> &query, i32 topK)
           -> std::vector<SimilarMemory>;
 
-        /// @brief 分页列出长期记忆（新→旧）；sessionId 为 0 时列出全部会话
-        [[nodiscard]] auto listMemories(u64 sessionId, i32 limit, i32 offset) -> std::vector<LongTermMemoryEntry>;
+        /// @brief 分页列出长期记忆（新→旧）；未指定 sessionId 时列出全部会话
+        [[nodiscard]] auto listMemories(std::optional<SessionId> sessionId, i32 limit, i32 offset)
+          -> std::vector<LongTermMemoryEntry>;
 
-        /// @brief 统计长期记忆条数；sessionId 为 0 时统计全部会话
-        [[nodiscard]] auto countMemories(u64 sessionId) -> i64;
+        /// @brief 统计长期记忆条数；未指定 sessionId 时统计全部会话
+        [[nodiscard]] auto countMemories(std::optional<SessionId> sessionId) -> i64;
 
         /// @brief 删除一条长期记忆
         /// @return 是否删除成功（id 不存在返回 false）

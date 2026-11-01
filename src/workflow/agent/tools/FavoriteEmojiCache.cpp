@@ -3,6 +3,7 @@
 
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <onebot/transport/OneBotClient.hpp>
 #include <workflow/agent/tools/ToolRuntime.hpp>
 
@@ -25,7 +26,7 @@ namespace insoulforge {
         }
     } // namespace
 
-    auto ToolRuntime::fetchFavoriteEmojis(const std::optional<u64> sessionId) -> drogon::Task<json> {
+    auto ToolRuntime::fetchFavoriteEmojis(const std::optional<SessionId> sessionId) -> drogon::Task<json> {
         {
             std::lock_guard lock(favoriteEmojiCacheMutex);
             if (!favoriteEmojiCache.is_null() &&
@@ -62,7 +63,7 @@ namespace insoulforge {
         co_return result;
     }
 
-    auto ToolRuntime::findFavoriteEmoji(const std::string name, const std::optional<u64> sessionId)
+    auto ToolRuntime::findFavoriteEmoji(const std::string name, const std::optional<SessionId> sessionId)
       -> drogon::Task<json> {
         for (const json emojis = co_await fetchFavoriteEmojis(sessionId); const auto &emoji: emojis) {
             if (getStr(emoji, "name") == name || getStr(emoji, "summary") == name) {

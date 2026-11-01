@@ -7,6 +7,7 @@
 
 #include <admin/http/PersonNameResolver.hpp>
 #include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/UserId.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <onebot/transport/OneBotClient.hpp>
 #include <workflow/session/QQNameDirectory.hpp>
@@ -25,15 +26,15 @@ namespace insoulforge {
         return resolver;
     }
 
-    auto PersonNameResolver::lookup(const u64 qq, const Clock::time_point now) -> Name {
+    auto PersonNameResolver::lookup(const UserId &userId, const Clock::time_point now) -> Name {
         std::lock_guard lock(m_mutex);
-        auto name = QQNameDirectory::getName(qq);
-        if (m_stopping || qq == 0 || isKnownName(name))
+        auto name = QQNameDirectory::getName(userId);
+        if (m_stopping || isKnownName(name))
             return {std::move(name), false};
-        auto &state = m_states[qq];
+        auto &state = m_states[userId];
         if (!state.pending && now >= state.retryAfter) {
             state.pending = true;
-            m_queue.push_back(qq);
+            m_queue.push_back(userId);
             // 不在 HTTP 响应路径上启动网络请求，锁释放后由事件循环推进。
             drogon::app().getLoop()->queueInLoop([this] { pump(); });
         }
@@ -41,7 +42,7 @@ namespace insoulforge {
     }
 
     void PersonNameResolver::pump() {
-        std::vector<u64> ready;
+        std::vector<UserId> ready;
         {
             std::lock_guard lock(m_mutex);
             while (!m_stopping && m_active < kMaxConcurrentQueries && !m_queue.empty()) {
@@ -50,35 +51,35 @@ namespace insoulforge {
                 ++m_active;
             }
         }
-        for (const auto qq: ready)
-            drogon::async_run([this, qq] { return query(qq); });
+        for (const auto userId: ready)
+            drogon::async_run([this, userId] { return query(userId); });
     }
 
-    auto PersonNameResolver::query(const u64 qq) -> drogon::Task<> {
+    auto PersonNameResolver::query(const UserId userId) -> drogon::Task<> {
         std::string name;
         try {
             bool shouldQuery;
             {
                 std::lock_guard lock(m_mutex);
-                name = QQNameDirectory::getName(qq);
+                name = QQNameDirectory::getName(userId);
                 shouldQuery = !m_stopping && !isKnownName(name);
             }
             if (shouldQuery) {
-                const auto response = co_await OneBotClient::getStrangerInfo(qq, std::nullopt, kQueryTimeoutSeconds);
+                const auto response = co_await OneBotClient::getStrangerInfo(userId, std::nullopt, kQueryTimeoutSeconds);
                 name = getStr(atOrNull(response, "data"), "nickname");
             }
         } catch (const std::exception &error) {
-            Logger::warn(0, "Admin", fmt::format("查询人物昵称失败: qq={}, {}", qq, error.what()));
+            Logger::warn(std::nullopt, "Admin", fmt::format("查询人物昵称失败: userId={}, {}", userId, error.what()));
         }
         {
             std::lock_guard lock(m_mutex);
             --m_active;
             if (!m_stopping) {
                 if (isKnownName(name)) {
-                    QQNameDirectory::recordName(qq, std::move(name));
-                    m_states.erase(qq);
+                    QQNameDirectory::recordName(userId, std::move(name));
+                    m_states.erase(userId);
                 } else {
-                    m_states[qq] = {false, Clock::now() + kFailureCooldown};
+                    m_states[userId] = {false, Clock::now() + kFailureCooldown};
                 }
             }
         }

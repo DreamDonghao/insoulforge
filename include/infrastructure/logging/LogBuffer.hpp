@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 
 namespace insoulforge {
     /// @brief 一条供后台查询和实时推送的结构化日志
@@ -17,14 +18,15 @@ namespace insoulforge {
         u64 id = 0;
         std::string timestamp;
         std::string level;
-        u64 sessionId = 0;
+        std::optional<SessionId> sessionId = std::nullopt;
         std::string source;
         std::string content;
     };
 
     /// @brief 日志查询条件；afterId 与 beforeId 用于向不同方向翻页
     struct LogQuery {
-        std::optional<u64> sessionId;
+        bool systemOnly = false;
+        std::optional<SessionId> sessionId;
         std::optional<std::string> level;
         std::string keyword;
         u64 afterId = 0;

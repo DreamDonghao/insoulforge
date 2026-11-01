@@ -15,14 +15,18 @@ const template = compileTemplate({source: descriptor.template.content, filename:
   id: 'people-test', compilerOptions: {mode: 'function'}})
 assert.deepEqual(template.errors, [])
 const render = new Function('Vue', template.code)(vue)
-const person = () => ({qq: '42', name: '测试人物', affinity: 7, profile: ['喜欢飞钓'],
+const sessionModule = {exports: {}}
+const sessionCode = ts.transpileModule(readFileSync(new URL('../src/utils/session.ts', import.meta.url), 'utf8'),
+  {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020}}).outputText
+new Function('module', 'exports', sessionCode)(sessionModule, sessionModule.exports)
+const person = () => ({user_id: '42', name: '测试人物', affinity: 7, profile: ['喜欢飞钓'],
   relationship: ['经常闲聊'], recent_interactions: [], pending_entries: [], name_pending: false})
 
 function page(post, settings = {affinityEnabled: true}) {
   const requests = [], module = {exports: {}}
   const require = name => name === 'vue' ? {...vue, onMounted() {}, onUnmounted() {}} :
     name.includes('useUnsavedChanges') ? {useUnsavedChanges() {}, confirmDiscard: () => true} :
-    name.includes('session') ? {privateSessionUserId: () => null} :
+    name.includes('session') ? sessionModule.exports :
       Object.fromEntries(['ArrowDownWideNarrow', 'ArrowUpNarrowWide', 'Pencil', 'Trash2'].map(key => [key, () => null]))
   new Function('require', 'module', 'exports', 'fetch', outputText)(require, module, module.exports,
     async (url, options = {}) => {
@@ -84,7 +88,7 @@ test('manual consolidation errors preserve displayed memory and show the backend
     assert.equal(view.state.editError, '人物整理正在进行，请稍后重试')
     assert.equal(view.state.consolidating, false)
     assert.deepEqual(view.state.detail.profile, ['喜欢飞钓'])
-    assert.equal(view.state.sourceLabel('0'), '历史记忆迁移')
+    assert.equal(view.state.sourceLabel('group:0'), '群 0')
     assert.equal(view.requests.length, 1)
   } finally { view.dispose() }
 })
@@ -92,8 +96,8 @@ test('manual consolidation errors preserve displayed memory and show the backend
 test('disabled affinity hides scores and sorting, edits only memory and orders numerically by QQ', async () => {
   const view = page(async () => ({status: 200, body: {success: true}}), {affinityEnabled: false})
   try {
-    view.state.people = [{...person(), qq: '42', affinity: 100}, {...person(), qq: '2', affinity: -100}]
-    assert.deepEqual(view.state.sortedPeople.map(person => person.qq), ['2', '42'])
+    view.state.people = [{...person(), user_id: '42', affinity: 100}, {...person(), user_id: '2', affinity: -100}]
+    assert.deepEqual(view.state.sortedPeople.map(person => person.user_id), ['2', '42'])
     const html = await view.html()
     assert.equal(html.includes('全局好感度'), false)
     assert.equal(html.includes('好感度：'), false)

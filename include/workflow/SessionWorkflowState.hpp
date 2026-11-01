@@ -8,10 +8,10 @@
 #include <optional>
 #include <queue>
 
+#include <infrastructure/JsonUtil.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <workflow/MessageList.hpp>
 #include <workflow/agent/runtime/AgentTypes.hpp>
-#include <infrastructure/JsonUtil.hpp>
-#include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
     /// @brief 下一轮的触发消息及可复用的路由结果；没有结果时在执行前正常路由。
@@ -29,7 +29,7 @@ namespace insoulforge {
         /// @param sessionId 会话 ID
         /// @param database 传递给消息列表的数据库，必须覆盖会话状态的生命周期。
         /// @param config 传递给消息列表的运行时配置。
-        SessionWorkflowState(u64 sessionId, const Database &database, const Config &config);
+        SessionWorkflowState(const SessionId &sessionId, const Database &database, const Config &config);
 
         /// @brief 取得当前会话的完整消息列表
         /// @return 仅在构造时创建的消息列表实例

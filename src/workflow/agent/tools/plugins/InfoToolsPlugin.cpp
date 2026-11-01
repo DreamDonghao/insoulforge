@@ -2,7 +2,7 @@
 /// @brief 信息工具插件实现（INFORMATION，查询数据、获取答案，不产生副作用）
 
 #include <infrastructure/CommonUtil.hpp>
-#include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <workflow/OneBotEventWorkflow.hpp>
@@ -14,7 +14,6 @@
 #include <workflow/agent/tools/image/ImageReferences.hpp>
 #include <workflow/agent/tools/plugins/InfoToolsPlugin.hpp>
 #include <workflow/history/SharedConversationContext.hpp>
-#include <workflow/message/SessionId.hpp>
 #include <workflow/message/image/ImageDescriptionService.hpp>
 #include <workflow/scheduling/TaskStore.hpp>
 #include <workflow/session/SessionStore.hpp>
@@ -62,7 +61,7 @@ namespace insoulforge {
                 auto urls = ImageReferences::resolve(images, ctx);
                 if (!urls) co_return urls.error();
                 const auto result = co_await ImageDescriptionService::ask(
-                    question.get<std::string>(), std::move(*urls), ctx.sessionId);
+                  question.get<std::string>(), std::move(*urls), ctx.requireSession());
                 co_return result ? "【原图问答结果】\n" + *result : result.error();
             }}, ToolCategory::INFORMATION);
 
@@ -93,7 +92,7 @@ namespace insoulforge {
                             messages.push_back(std::move(*projected));
                     }
                 }
-                const json result = {{"session", {{"type", "group"}, {"group_id", *groupId},
+                const json result = {{"session", {{"type", "group"}, {"group_id", groupId->targetId()},
                                                    {"group_name", SessionStore::getSessionName(*groupId)}}},
                   {"messages", std::move(messages)}};
                 co_return dumpJson(result);
@@ -108,7 +107,7 @@ namespace insoulforge {
             .description = "获取QQ收藏表情中所有可用的表情名称列表。",
             .parameters = json(),
             .handler = [](json, const ToolCallContext ctx) -> drogon::Task<std::string> {
-                const auto sessionId = ctx.sessionId;
+                const auto &sessionId = ctx.requireSession();
                 const json emojis = co_await ToolRuntime::fetchFavoriteEmojis(sessionId);
                 if (emojis.empty()) {
                     co_return std::string("表情库为空（QQ收藏表情列表获取失败或没有收藏表情）");
@@ -148,7 +147,7 @@ namespace insoulforge {
                 if (query.empty())
                     co_return std::string("请提供回忆关键词");
 
-                const u64 sessionId = ctx.sessionId;
+                const SessionId &sessionId = ctx.requireSession();
                 const auto result = co_await LongTermMemory::searchMemory(query, 3, sessionId);
                 if (!result || result->empty()) {
                     co_return "想不起来了，没有找到相关记忆";
@@ -178,7 +177,7 @@ namespace insoulforge {
                            "拿到答案后据此组织回复。简单闲聊、日常对话禁止调用。",
             .parameters = thinkParams,
             .handler = [](json args, ToolCallContext ctx) -> drogon::Task<std::string> {
-                const u64 sessionId = ctx.sessionId;
+                const SessionId &sessionId = ctx.requireSession();
                 const auto &value = atOrNull(args, "question");
                 if (!value.is_string() || trim(value.get<std::string>()).empty()) {
                     co_return std::string("deep_think 需要非空 question，请提供完整问题、必要条件和相关资料");
@@ -223,11 +222,8 @@ namespace insoulforge {
                            "时使用。返回任务编号、触发时间和备忘内容。",
             .parameters = json(),
             .handler = [](json, const ToolCallContext ctx) -> drogon::Task<std::string> {
-                const u64 sessionId = ctx.sessionId;
-                if (sessionId == 0)
-                    co_return std::string("会话上下文缺失，无法查询定时任务");
-                const auto [sessionType, targetId] = SessionId::toStorageTarget(sessionId);
-                const auto tasks = TaskStore::getPendingScheduledTasksByTarget(sessionType, targetId);
+                const SessionId &sessionId = ctx.requireSession();
+                const auto tasks = TaskStore::getPendingScheduledTasksBySession(sessionId);
                 if (tasks.empty()) {
                     co_return std::string("当前会话没有待触发的定时任务");
                 }

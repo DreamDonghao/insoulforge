@@ -10,6 +10,7 @@
 
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 
 
 namespace insoulforge {
@@ -19,39 +20,41 @@ namespace insoulforge {
 /// @brief 聊天记录存储
 namespace insoulforge::ChatRecordStore {
     /// @brief 使用指定数据库恢复和保存会话记录；调用方保证数据库已初始化。
-    [[nodiscard]] auto getSessionIds(const Database &db) -> std::vector<u64>;
-    [[nodiscard]] auto getChatRecords(const Database &db, u64 sessionId, i32 limit = 50) -> std::vector<json>;
-    void addChatRecord(const Database &db, u64 sessionId, const std::string &role, const std::string &content);
-    void clearSessionChatRecords(const Database &db, u64 sessionId);
+    [[nodiscard]] auto getSessionIds(const Database &db) -> std::vector<SessionId>;
+    [[nodiscard]] auto getChatRecords(const Database &db, const SessionId &sessionId, i32 limit = 50)
+      -> std::vector<json>;
+    void addChatRecord(
+      const Database &db, const SessionId &sessionId, const std::string &role, const std::string &content);
+    void clearSessionChatRecords(const Database &db, const SessionId &sessionId);
 
     /// @brief 原子替换会话恢复快照；messages 为按时间从早到晚排列的完整消息数组。
     /// @details 空数组清空该会话；失败回滚、保留旧记录并抛出异常，不影响其他会话。
-    void replaceSessionChatRecords(const Database &db, u64 sessionId, const json &messages);
+    void replaceSessionChatRecords(const Database &db, const SessionId &sessionId, const json &messages);
 
     /// @brief 追加一条会话记录
     /// @param sessionId 统一会话 ID
     /// @param role user 或 assistant
     /// @param content 完整消息的 JSON 字符串
-    void addChatRecord(u64 sessionId, const std::string &role, const std::string &content);
+    void addChatRecord(const SessionId &sessionId, const std::string &role, const std::string &content);
 
     /// @brief 获取最近的会话记录
     /// @return 最多 limit 条，按写入时间从早到晚排列；每条包含 role 和 content
-    [[nodiscard]] auto getChatRecords(u64 sessionId, i32 limit = 50) -> std::vector<json>;
+    [[nodiscard]] auto getChatRecords(const SessionId &sessionId, i32 limit = 50) -> std::vector<json>;
 
     /// @brief 获取带数据库记录 ID 的最近会话记录
     /// @return 最多 limit 条，按写入时间从晚到早排列；每条包含 id、role 和 content
-    [[nodiscard]] auto getChatRecordsWithIds(u64 sessionId, i32 limit = 50) -> std::vector<json>;
+    [[nodiscard]] auto getChatRecordsWithIds(const SessionId &sessionId, i32 limit = 50) -> std::vector<json>;
 
     /// @brief 获取存在聊天记录的全部会话 ID
     /// @return 去重后的会话 ID 列表
-    [[nodiscard]] auto getSessionIds() -> std::vector<u64>;
+    [[nodiscard]] auto getSessionIds() -> std::vector<SessionId>;
 
     /// @brief 按 OneBot 消息 ID 查找指定会话中的聊天记录内容
     /// @param sessionId 统一会话 ID
     /// @param messageId OneBot 消息 ID
     /// @return 匹配记录的 content JSON 字符串；找不到时返回空值
     /// @details 逐条解析内容以兼容未使用 SQLite JSON 扩展的部署环境。
-    [[nodiscard]] auto findContentByMessageId(u64 sessionId, u64 messageId) -> std::optional<std::string>;
+    [[nodiscard]] auto findContentByMessageId(const SessionId &sessionId, u64 messageId) -> std::optional<std::string>;
 
     /// @brief 更新聊天记录内容
     void updateChatRecord(i32 recordId, const std::string &content);
@@ -60,5 +63,5 @@ namespace insoulforge::ChatRecordStore {
     void deleteChatRecord(i32 recordId);
 
     /// @brief 清空指定会话的所有聊天记录
-    void clearSessionChatRecords(u64 sessionId);
+    void clearSessionChatRecords(const SessionId &sessionId);
 } // namespace insoulforge::ChatRecordStore

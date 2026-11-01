@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 
 namespace insoulforge {
     struct HttpTraceEntry {
@@ -20,7 +21,7 @@ namespace insoulforge {
         std::string requestBody;
         i32 status = 0;
         std::string responseBody;
-        std::optional<u64> sessionId;
+        std::optional<SessionId> sessionId;
     };
 
     /// @brief 保存最近 50 条 HttpUtil 和 MCP 请求及响应，供后台调试

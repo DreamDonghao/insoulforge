@@ -13,12 +13,14 @@
 
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <infrastructure/logging/LogBuffer.hpp>
 
 namespace insoulforge {
     /// @brief 一个日志连接的过滤条件；空值表示不过滤该字段
     struct LogSubscription {
-        std::optional<u64> sessionId;
+        std::optional<SessionId> sessionId;
+        bool systemOnly = false;
         std::optional<std::string> level;
         std::string keyword;
     };

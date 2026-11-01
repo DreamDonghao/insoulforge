@@ -33,7 +33,7 @@ namespace insoulforge::ConfigStore {
     /// @brief 获取指定角色的模型配置；角色不存在时返回 null JSON
     [[nodiscard]] auto getLLMConfig(const std::string &name) -> json;
 
-    /// @brief 保存指定角色的模型配置，并兼容旧字段 top_P
+    /// @brief 保存指定角色的当前模型配置
     [[nodiscard]] auto saveLLMConfig(const std::string &name, const json &config, const ConfigValidator &validate)
       -> std::expected<void, ConfigError>;
 

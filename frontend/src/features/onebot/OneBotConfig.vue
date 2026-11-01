@@ -44,7 +44,7 @@ const refreshActiveTransport = async (): Promise<void> => {
 }
 
 const {errors, fieldAttrs, validateForm} = useFormValidation(() => {
-  const result: Record<string, string> = {'bot-qq': identifierError(qqConfig!.selfQQNumber, 'Bot QQ 号', true)}
+  const result: Record<string, string> = {'bot-qq': identifierError(qqConfig!.selfQQNumber, 'Bot 用户 ID', true)}
   const http = qqConfig!.oneBotTransport === 'http'
   const value = http ? qqConfig!.qqHttpHost : qqConfig!.qqWebSocketHost
   try {
@@ -102,10 +102,10 @@ onMounted(() => {
         <h3 class="section-title">机器人身份</h3>
         <div class="form-row">
           <div class="form-group">
-            <label for="bot-qq" class="form-label">Bot QQ 号</label>
+            <label for="bot-qq" class="form-label">Bot 用户 ID</label>
             <input v-model="qqConfig!.selfQQNumber" v-bind="fieldAttrs('bot-qq', 'bot-qq-hint')" class="form-input" type="text" inputmode="numeric" autocomplete="off" :disabled="saving">
             <FieldError field="bot-qq" :message="errors['bot-qq']"/>
-            <p id="bot-qq-hint" class="form-hint">机器人自身的 QQ 号，0 表示尚未配置。</p>
+            <p id="bot-qq-hint" class="form-hint">机器人自身的用户 ID，0 表示尚未配置。</p>
           </div>
           <div class="form-group">
             <label for="bot-name" class="form-label">Bot 名称</label>

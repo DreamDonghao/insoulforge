@@ -340,17 +340,17 @@ test('manual session creation preserves identifiers, supports private chats and 
   view.state.typeFilter = 'private'
   view.state.openAddSession()
   assert.equal(view.state.newSessionType, 'private')
-  view.state.newSessionId = 'invalid'
+  view.state.newSessionId = ''
   await view.state.addSession()
   assert.equal(submitted.length, 0)
-  assert.match(view.state.sessionForm.errors.value['new-session-id'], /QQ/)
+  assert.match(view.state.sessionForm.errors.value['new-session-id'], /用户 ID/)
 
   view.state.newSessionId = ' 9007199254740993 '
   const first = view.state.addSession()
   await view.state.addSession()
   view.state.closeAddSession()
   assert.equal(view.state.showAddSession, true)
-  assert.deepEqual(submitted, [{sessionType: 'private', userId: '9007199254740993'}])
+  assert.deepEqual(submitted, [{sessionType: 'private', userId: ' 9007199254740993 '}])
   pending({ok: false, json: async () => ({error: '添加失败'})})
   await first
   assert.equal(view.state.newSessionId, ' 9007199254740993 ')
@@ -360,7 +360,7 @@ test('manual session creation preserves identifiers, supports private chats and 
   pending(response({success: true}))
   await retry
   assert.equal(view.state.showAddSession, false)
-  assert.equal(view.state.searchKeyword, '9007199254740993')
+  assert.equal(view.state.searchKeyword, ' 9007199254740993 ')
   assert.equal(view.state.typeFilter, 'private')
 
   view.state.typeFilter = 'group'
@@ -409,19 +409,19 @@ test('conversation summaries handle empty data, failures and stale responses aft
 test('group counts use absolute statistics, preserve chat subscriptions and catch up on reconnect', async () => {
   let count = 5
   globalThis.fetch = async path => response(path === '/admin/api/groups'
-    ? [{groupIdStr: '123', groupId: 123, groupName: 'Test', messageCount: count}] : [])
+    ? [{sessionId: 'group:123', sessionType: 'group', targetId: '123', sessionName: 'Test', messageCount: count}] : [])
   const view = mount(groupComponent())
   await flush()
   assert.equal(view.state.groups[0].messageCount, 5)
-  socket.emit({type: 'session_stats_updated', data: {groupId: '123', messageCount: 6}})
-  socket.emit({type: 'session_stats_updated', data: {groupId: '123', messageCount: 6}})
-  socket.emit({type: 'session_stats_updated', data: {groupId: '123', messageCount: 4}})
+  socket.emit({type: 'session_stats_updated', data: {sessionId: 'group:123', messageCount: 6}})
+  socket.emit({type: 'session_stats_updated', data: {sessionId: 'group:123', messageCount: 6}})
+  socket.emit({type: 'session_stats_updated', data: {sessionId: 'group:123', messageCount: 4}})
   assert.equal(view.state.groups[0].messageCount, 6)
-  await view.state.selectGroup('123', 'Test')
-  socket.emit({type: 'session_stats_updated', data: {groupId: '123', messageCount: 7}})
+  await view.state.selectGroup('group:123', 'Test')
+  socket.emit({type: 'session_stats_updated', data: {sessionId: 'group:123', messageCount: 7}})
   assert.equal(view.state.groups[0].messageCount, 7)
   assert.equal(view.state.chatRecords.length, 0)
-  socket.emit({type: 'new_message', groupId: '123', data: {role: 'assistant', content: 'reply'}})
+  socket.emit({type: 'new_message', sessionId: 'group:123', data: {role: 'assistant', content: 'reply'}})
   assert.equal(view.state.groups[0].messageCount, 7)
   assert.equal(view.state.chatRecords.length, 1)
   connected.value = false
@@ -430,15 +430,15 @@ test('group counts use absolute statistics, preserve chat subscriptions and catc
   connected.value = true
   await flush()
   assert.equal(view.state.groups[0].messageCount, 10)
-  assert.deepEqual(socket.sent, [{action: 'subscribe', groupId: '123'}])
+  assert.deepEqual(socket.sent, [{action: 'subscribe', sessionId: 'group:123'}])
 })
 
 test('group list snapshot cannot overwrite statistics received while loading', async () => {
   let complete
   globalThis.fetch = () => new Promise(resolve => { complete = resolve })
   const view = mount(groupComponent())
-  socket.emit({type: 'session_stats_updated', data: {groupId: '123', messageCount: 12}})
-  complete(response([{groupIdStr: '123', groupId: 123, messageCount: 9}]))
+  socket.emit({type: 'session_stats_updated', data: {sessionId: 'group:123', messageCount: 12}})
+  complete(response([{sessionId: 'group:123', sessionType: 'group', targetId: '123', sessionName: '', messageCount: 9}]))
   await flush()
   assert.equal(view.state.groups[0].messageCount, 12)
   assert.equal(view.state.loading, false)
@@ -448,12 +448,12 @@ test('repeated group page visits do not retain old message handlers', async () =
   for (let i = 0; i < 3; i++) {
     const view = mount(groupComponent())
     await flush()
-    await view.state.selectGroup('123', 'Test')
-    socket.emit({type: 'new_message', groupId: '123', data: {role: 'user', content: 'test'}})
+    await view.state.selectGroup('group:123', 'Test')
+    socket.emit({type: 'new_message', sessionId: 'group:123', data: {role: 'user', content: 'test'}})
     assert.equal(view.state.chatRecords.length, 1)
     view.unmount()
     assert.equal(socket.listeners.size, 0)
-    socket.emit({type: 'new_message', groupId: '123', data: {role: 'user', content: 'late'}})
+    socket.emit({type: 'new_message', sessionId: 'group:123', data: {role: 'user', content: 'late'}})
     assert.equal(view.state.chatRecords.length, 1)
   }
 })
@@ -463,9 +463,9 @@ test('group subscriptions resume after reconnect and stop on return or unmount',
   await flush()
   assert.equal(socket.listeners.size, 1)
   assert.deepEqual(socket.sent, [])
-  await view.state.selectGroup('123', 'Test')
-  assert.deepEqual(socket.sent, [{action: 'subscribe', groupId: '123'}])
-  const event = {type: 'new_message', groupId: '123', data: {role: 'user', content: 'test'}}
+  await view.state.selectGroup('group:123', 'Test')
+  assert.deepEqual(socket.sent, [{action: 'subscribe', sessionId: 'group:123'}])
+  const event = {type: 'new_message', sessionId: 'group:123', data: {role: 'user', content: 'test'}}
   socket.emit(event)
   assert.equal(view.state.chatRecords.length, 1)
   const previous = socket
@@ -473,19 +473,19 @@ test('group subscriptions resume after reconnect and stop on return or unmount',
   previous.readyState = Socket.CLOSED
   socket = new Socket()
   connected.value = true
-  assert.deepEqual(socket.sent, [{action: 'subscribe', groupId: '123'}])
+  assert.deepEqual(socket.sent, [{action: 'subscribe', sessionId: 'group:123'}])
   previous.emit(event)
   socket.emit(event)
   assert.equal(view.state.chatRecords.length, 2)
   view.state.backToList()
-  assert.deepEqual(socket.sent.at(-1), {action: 'unsubscribe', groupId: '123'})
+  assert.deepEqual(socket.sent.at(-1), {action: 'unsubscribe', sessionId: 'group:123'})
   connected.value = false
   socket = new Socket()
   connected.value = true
   assert.deepEqual(socket.sent, [])
-  await view.state.selectGroup('456', 'Next')
+  await view.state.selectGroup('group:456', 'Next')
   view.unmount()
-  assert.deepEqual(socket.sent.at(-1), {action: 'unsubscribe', groupId: '456'})
+  assert.deepEqual(socket.sent.at(-1), {action: 'unsubscribe', sessionId: 'group:456'})
   assert.equal(socket.listeners.size, 0)
 })
 
@@ -494,12 +494,12 @@ test('group unsubscribe preserves large session IDs and skips empty or closed co
   await flush()
   view.state.backToList()
   assert.deepEqual(socket.sent, [])
-  const sessionId = '9223372037529350142'
+  const sessionId = 'private:user%3Aalpha'
   await view.state.selectGroup(sessionId, 'Private')
   view.state.backToList()
   assert.deepEqual(socket.sent, [
-    {action: 'subscribe', groupId: sessionId},
-    {action: 'unsubscribe', groupId: sessionId}
+    {action: 'subscribe', sessionId: sessionId},
+    {action: 'unsubscribe', sessionId: sessionId}
   ])
   await view.state.selectGroup(sessionId, 'Private')
   const sentCount = socket.sent.length
@@ -527,7 +527,7 @@ test('late chat snapshots never resubscribe after leaving the page or list', asy
     const view = mount(groupComponent())
     await flush()
     globalThis.fetch = () => new Promise(resolve => { finish = resolve })
-    const pending = view.state.selectGroup('123', 'Test')
+    const pending = view.state.selectGroup('group:123', 'Test')
     if (leavePage) view.unmount()
     else view.state.backToList()
     socket.sent = []

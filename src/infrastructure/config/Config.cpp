@@ -19,7 +19,7 @@ namespace insoulforge {
                   ConfigError{.type = ConfigErrorType::InvalidArgument, .message = "配置必须是 JSON 对象"});
             }
             for (const auto &[key, field]: value.items()) {
-                constexpr std::array floatFields{"temperature", "topP", "top_P", "minConfidence",
+                constexpr std::array floatFields{"temperature", "topP", "minConfidence",
                   "longTermRecallThreshold", "longTermInjectThreshold"};
                 constexpr std::array stringFields{"apiKey", "baseUrl", "path", "model", "reasoningEffort",
                   "accessToken", "oneBotTransport", "qqHttpHost", "qqWebSocketHost", "botName"};
@@ -75,7 +75,7 @@ namespace insoulforge {
                     }
                     if (const auto number = field.get<f64>();
                       (key == "temperature" && (number < 0.0 || number > 2.0)) ||
-                      ((key == "topP" || key == "top_P" || key == "minConfidence") && (number < 0.0 || number > 1.0))) {
+                      ((key == "topP" || key == "minConfidence") && (number < 0.0 || number > 1.0))) {
                         return std::unexpected(
                           ConfigError{.type = ConfigErrorType::InvalidArgument, .message = key + " 超出允许范围"});
                     }
@@ -89,6 +89,7 @@ namespace insoulforge {
             return {};
         }
         /// @brief 从已经校验的模型配置 JSON 加载单个角色。
+        /// @param llm 已校验的完整模型配置对象。
         /// @param name 配置名（router/executor/executorThinking/image/memory 等）
         /// @param apiConfig 输出的 API 配置
         /// @param modelParams 模型参数（可为 nullptr，表示不加载）
@@ -111,7 +112,7 @@ namespace insoulforge {
             if (modelParams) {
                 modelParams->maxTokens = getInt(cfg, "maxTokens");
                 modelParams->temperature = getDouble(cfg, "temperature");
-                modelParams->topP = getDouble(cfg, "topP", getDouble(cfg, "top_P"));
+                modelParams->topP = getDouble(cfg, "topP");
             }
         }
     } // namespace
@@ -323,7 +324,7 @@ namespace insoulforge {
             return next.loadValues(value);
         }).transform([this, &next] -> void {
             applyValues(next);
-            Logger::info(0, "Config", "配置读取和运行时加载完成");
+            Logger::info(std::nullopt, "Config", "配置读取和运行时加载完成");
         });
     }
 
@@ -361,7 +362,7 @@ namespace insoulforge {
     auto Config::saveQQConfig(const json &value) -> std::expected<void, ConfigError> {
         std::scoped_lock lock(m_updateMutex);
         auto normalized = value;
-        // 管理界面以十进制字符串提交 QQ 号，存储与运行时继续使用 u64。
+        // 管理界面以十进制字符串提交 用户 ID，存储与运行时继续使用 u64。
         if (normalized.is_object() && normalized.contains("selfQQNumber") && normalized["selfQQNumber"].is_string()) {
             const auto number = tryParseUInt64(normalized["selfQQNumber"].get<std::string>());
             if (!number) {

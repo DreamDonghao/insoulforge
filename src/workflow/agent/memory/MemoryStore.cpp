@@ -7,28 +7,31 @@
 
 #include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
+#include <infrastructure/UserId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 #include <workflow/agent/memory/MemoryStore.hpp>
-#include <workflow/message/SessionId.hpp>
 
 namespace insoulforge::MemoryStore {
     auto normalizeSessionMemory(const json &value) -> std::optional<json> {
         if (!value.is_object() || !atOrNull(value, "aliases").is_array() ||
-            (value.contains("recent_events") && !value["recent_events"].is_array()) ||
-            (value.contains("legacy_entries") && !value["legacy_entries"].is_array()))
+            std::ranges::any_of(value.items(), [](const auto &entry) {
+                return entry.key() != "aliases" && entry.key() != "pending_entries" &&
+                       entry.key() != "conversation_summaries";
+            }))
             return std::nullopt;
         json result = {{"aliases", json::array()}};
-        std::unordered_map<u64, size_t> aliasIndices;
+        std::unordered_map<UserId, size_t> aliasIndices;
         for (const auto &alias: value["aliases"]) {
-            const auto qq = parseUInt64(getStr(alias, "qq"));
-            if (!alias.is_object() || qq == 0 || qq == SessionId::kSystemAccountId || SessionId::isPrivate(qq) ||
+            const auto userId = UserId::parse(getStr(alias, "user_id"));
+            if (!alias.is_object() || !userId || userId->toString() == "self" || userId->toString() == "system" ||
                 !atOrNull(alias, "names").is_array())
                 return std::nullopt;
-            auto [it, inserted] = aliasIndices.try_emplace(qq, result["aliases"].size());
+            auto [it, inserted] = aliasIndices.try_emplace(*userId, result["aliases"].size());
             if (inserted)
-                result["aliases"].push_back({{"qq", std::to_string(qq)}, {"names", json::array()}});
+                result["aliases"].push_back({{"user_id", userId->toString()}, {"names", json::array()}});
             auto &names = result["aliases"][it->second]["names"];
             for (const auto &name: alias["names"]) {
                 if (!name.is_string())
@@ -40,17 +43,18 @@ namespace insoulforge::MemoryStore {
                     names.push_back(std::move(text));
             }
         }
-        for (const auto *key: {"recent_events", "legacy_entries"}) {
-            if (!value.contains(key))
-                continue;
-            result[key] = json::array();
+        if (value.contains("pending_entries")) {
+            const auto &entries = value["pending_entries"];
+            if (!entries.is_array())
+                return std::nullopt;
+            auto &pending = result["pending_entries"] = json::array();
             std::unordered_set<std::string> seen;
-            for (const auto &entry: atOrNull(value, key)) {
+            for (const auto &entry: entries) {
                 if (!entry.is_string())
                     return std::nullopt;
                 auto text = trim(entry.get<std::string>());
                 if (!text.empty() && seen.insert(text).second)
-                    result[key].push_back(std::move(text));
+                    pending.push_back(std::move(text));
             }
         }
         if (value.contains("conversation_summaries")) {
@@ -94,52 +98,30 @@ namespace insoulforge::MemoryStore {
         return {{"aliases", json::array()}};
     }
 
-    auto pendingLegacyEntries(const std::string &memory) -> std::vector<std::string> {
-        std::vector<std::string> lines;
-        std::unordered_set<std::string> seen;
-        const auto append = [&](const std::string &text) {
-            auto value = trim(text);
-            if (!value.empty() && seen.insert(value).second)
-                lines.push_back(std::move(value));
-        };
+    auto pendingEntries(const std::string &memory) -> std::vector<std::string> {
         json parsed;
-        if (tryParseJson(memory, parsed)) {
-            if (auto structured = normalizeSessionMemory(parsed)) {
-                for (const auto *key: {"recent_events", "legacy_entries"})
-                    for (const auto &entry: atOrNull(*structured, key))
-                        append(entry.get<std::string>());
-                return lines;
-            }
-            if (parsed.is_array() && std::ranges::all_of(parsed, [](const json &entry) { return entry.is_string(); })) {
-                for (const auto &entry: parsed)
-                    append(entry.get<std::string>());
-                return lines;
-            }
-        }
-        for (size_t start = 0; start < memory.size();) {
-            const auto end = memory.find('\n', start);
-            const auto stop = end == std::string::npos ? memory.size() : end;
-            append(memory.substr(start, stop - start));
-            start = stop + 1;
-        }
-        return lines;
+        if (!tryParseJson(memory, parsed))
+            return {};
+        const auto normalized = normalizeSessionMemory(parsed);
+        return normalized && normalized->contains("pending_entries")
+          ? (*normalized)["pending_entries"].get<std::vector<std::string>>() : std::vector<std::string>{};
     }
 
-    auto getShortTermMemory(const u64 sessionId) -> std::string {
+    auto getShortTermMemory(const SessionId &sessionId) -> std::string {
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
-        const Statement stmt(db.handle(), "SELECT memory_content FROM short_term_memory WHERE group_id = ?");
-        stmt.bind(1, sessionId);
+        const Statement stmt(db.handle(), "SELECT memory_content FROM short_term_memory WHERE session_id = ?");
+        stmt.bind(1, sessionId.toString());
         return stmt.step() ? stmt.getText(0) : "";
     }
 
-    void updateShortTermMemory(const u64 sessionId, const std::string &memory) {
+    void updateShortTermMemory(const SessionId &sessionId, const std::string &memory) {
         const auto &db = Database::instance();
         std::unique_lock lock(db.mutex());
-        const Statement stmt(db.handle(), "INSERT INTO short_term_memory (group_id, memory_content) VALUES (?, ?) "
-                                          "ON CONFLICT(group_id) DO UPDATE SET memory_content = "
+        const Statement stmt(db.handle(), "INSERT INTO short_term_memory (session_id, memory_content) VALUES (?, ?) "
+                                          "ON CONFLICT(session_id) DO UPDATE SET memory_content = "
                                           "excluded.memory_content, updated_at = CURRENT_TIMESTAMP");
-        stmt.bind(1, sessionId);
+        stmt.bind(1, sessionId.toString());
         stmt.bind(2, memory);
         stmt.exec();
     }

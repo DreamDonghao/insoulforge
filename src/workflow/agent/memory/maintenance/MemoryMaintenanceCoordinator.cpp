@@ -1,14 +1,15 @@
 /// @file MemoryMaintenanceCoordinator.cpp
 /// @brief 记忆维护批次计算与统一提交
 
-#include <infrastructure/logging/Logger.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
+#include <infrastructure/logging/Logger.hpp>
 #include <workflow/agent/memory/maintenance/MemoryMaintenanceCoordinator.hpp>
 #include <workflow/agent/memory/maintenance/MemoryMaintenanceService.hpp>
 #include <workflow/agent/memory/maintenance/MemoryMaintenanceStore.hpp>
 
 namespace insoulforge::MemoryMaintenanceCoordinator {
-    auto process(const Database &database, const u64 sessionId, json messages, json contextMessages)
+    auto process(const Database &database, const SessionId sessionId, json messages, json contextMessages)
       -> drogon::Task<bool> {
         const auto memory =
           co_await MemoryMaintenanceService::prepare(sessionId, std::move(messages), std::move(contextMessages));

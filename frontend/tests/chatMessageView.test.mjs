@@ -124,30 +124,30 @@ test('plain text, invalid JSON, and non-object JSON keep their original display'
   }
 })
 
-test('message segments and old image descriptions retain their existing rendering', () => {
+test('canonical message segments and image descriptions retain their rendering', () => {
   const cases = [
-    [{}, '[空消息]'], [{text: 'fallback'}, 'fallback'],
+    [{}, '[空消息]'], [{segments: [{type: 'text', text: 'fallback'}]}, 'fallback'],
     [{segments: [null, 'invalid', {type: 'text', text: 'text'}]}, 'text'],
     [{segments: [{type: 'at', target: {kind: 'all'}}]}, '@全体成员'],
-    [{segments: [{type: 'at', qq: '0'}]}, '@全体成员'],
-    [{segments: [{type: 'at', target: {name: 'Alice', qq: '123'}}]}, '@Alice'],
-    [{segments: [{type: 'at', name: 'Legacy'}]}, '@Legacy'],
-    [{segments: [{type: 'at', qq: '123'}]}, '@123'],
+    [{segments: [{type: 'at', target: {kind: 'all'}}]}, '@全体成员'],
+    [{segments: [{type: 'at', target: {name: 'Alice', user_id: '123'}}]}, '@Alice'],
+    [{segments: [{type: 'at', target: {name: 'Alice'}}]}, '@Alice'],
+    [{segments: [{type: 'at', target: {user_id: '123'}}]}, '@123'],
     [{segments: [{type: 'at'}]}, '@成员'],
     [{segments: [{type: 'image', description: 'direct'}]}, '[图片] direct'],
     [{segments: [{type: 'image', image_index: 0}], assets: {images: [{description: 'asset'}]}}, '[图片] asset'],
-    [{segments: [{type: 'image', image_index: 0}], images: [{description: 'old'}]}, '[图片] old'],
+    [{segments: [{type: 'image', image_index: 0}], assets: {images: [{description: 'asset-two'}]}}, '[图片] asset-two'],
     [{segments: [{type: 'image', image_index: 9}]}, '[图片]'],
     [{segments: [{type: 'face', label: '笑'}]}, '[QQ 表情：笑]'],
     [{segments: [{type: 'face'}]}, '[QQ 表情]'],
     [{segments: [{type: 'sticker', name: 'Cat'}]}, '[表情包：Cat]'],
     [{segments: [{type: 'sticker'}]}, '[表情包：未命名]'],
     [{segments: [{type: 'poke', target: {name: 'Alice'}}]}, '[拍一拍：Alice]'],
-    [{segments: [{type: 'poke', target_name: 'Old'}]}, '[拍一拍：Old]'],
+    [{segments: [{type: 'poke', target: {name: 'Bob'}}]}, '[拍一拍：Bob]'],
     [{segments: [{type: 'poke'}]}, '[拍一拍]'],
-    [{segments: [{type: 'notification', action: 'join'}]}, '[成员事件：join]'],
-    [{segments: [{type: 'member_event', kind: 'leave'}]}, '[成员事件：leave]'],
-    [{segments: [{type: 'notification'}]}, '[成员事件]'],
+    [{segments: [{type: 'member_event', action: 'join'}]}, '[成员事件：join]'],
+    [{segments: [{type: 'member_event', action: 'leave'}]}, '[成员事件：leave]'],
+    [{segments: [{type: 'member_event'}]}, '[成员事件]'],
     [{segments: [{type: 'unsupported', segment_type: 'video'}]}, '[video]'],
     [{segments: [{type: 'unknown'}]}, '[unknown]'],
     [{segments: [{}]}, '[未知消息]']

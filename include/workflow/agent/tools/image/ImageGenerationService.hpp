@@ -11,6 +11,7 @@
 
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 
 namespace insoulforge::ImageGenerationService {
     struct GeneratedImage {
@@ -24,6 +25,6 @@ namespace insoulforge::ImageGenerationService {
 
     /// @brief 按指定尺寸生成或编辑一张图片，按顺序附加所有参考图。
     /// @details 失败时抛出异常供后台任务统一处理。
-    auto generate(std::string prompt, std::string size, u64 sessionId,
+    auto generate(std::string prompt, std::string size, SessionId sessionId,
       std::vector<std::string> referenceDataUrls = {}) -> drogon::Task<GeneratedImage>;
 } // namespace insoulforge::ImageGenerationService

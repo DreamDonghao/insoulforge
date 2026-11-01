@@ -48,7 +48,7 @@ namespace insoulforge {
             return std::unexpected("已有数据库连接仍被使用，无法替换");
         }
         m_db = connection.release();
-        Logger::info(0, "Storage", fmt::format("数据库初始化完成"));
+        Logger::info(std::nullopt, "Storage", fmt::format("数据库初始化完成"));
         return {};
     }
 
@@ -57,7 +57,7 @@ namespace insoulforge {
         if (m_db) {
             sqlite3_close(m_db);
             m_db = nullptr;
-            Logger::info(0, "Storage", fmt::format("数据库已关闭"));
+            Logger::info(std::nullopt, "Storage", fmt::format("数据库已关闭"));
         }
     }
 } // namespace insoulforge

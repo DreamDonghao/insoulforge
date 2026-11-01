@@ -2,13 +2,14 @@
 /// @brief Agent 会话记录快照适配器实现
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <workflow/history/ChatRecordManager.hpp>
 
 namespace insoulforge {
-    ChatRecordManager::ChatRecordManager(const u64 sessionId, json records) :
+    ChatRecordManager::ChatRecordManager(const SessionId sessionId, json records) :
         m_sessionId(sessionId), m_records(std::move(records)) {}
 
-    auto ChatRecordManager::getSessionId() const -> u64 { return m_sessionId; }
+    auto ChatRecordManager::getSessionId() const -> SessionId { return m_sessionId; }
 
     auto ChatRecordManager::getRecords() const -> const json & { return m_records; }
 } // namespace insoulforge

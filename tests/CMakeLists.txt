@@ -9,7 +9,10 @@ add_test(NAME process_metrics COMMAND insoulforge_process_metrics_tests)
 
 add_executable(insoulforge_log_buffer_tests EXCLUDE_FROM_ALL
         LogBufferTests.cpp
+        ${PROJECT_SOURCE_DIR}/src/infrastructure/UserId.cpp
+        ${PROJECT_SOURCE_DIR}/src/infrastructure/SessionId.cpp
         ${PROJECT_SOURCE_DIR}/src/infrastructure/logging/LogBuffer.cpp)
+target_compile_features(insoulforge_log_buffer_tests PRIVATE cxx_std_23)
 target_include_directories(insoulforge_log_buffer_tests PRIVATE ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(insoulforge_log_buffer_tests PRIVATE fmt::fmt-header-only)
 add_test(NAME log_buffer COMMAND insoulforge_log_buffer_tests)

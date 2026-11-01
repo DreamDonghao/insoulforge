@@ -4,6 +4,7 @@
 #include <algorithm>
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <workflow/agent/llm/JevClient.hpp>
@@ -23,7 +24,7 @@ namespace insoulforge::JevClient {
         return !api.baseUrl.empty() && !api.path.empty() && !api.model.empty() && !api.apiKey.empty();
     }
 
-    auto requestSystemOne(LLMApiConfig api, json state, json questions, const u64 sessionId)
+    auto requestSystemOne(LLMApiConfig api, json state, json questions, const std::optional<SessionId> sessionId)
       -> drogon::Task<std::optional<json>> {
         if (!isConfigured(api)) {
             Logger::warn(sessionId, "Jev", "未配置服务地址、请求路径、模型名或密钥，跳过请求");

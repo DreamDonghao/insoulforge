@@ -7,9 +7,10 @@
 
 #include <drogon/utils/coroutine.h>
 
-#include <workflow/agent/runtime/AgentTypes.hpp>
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
+#include <workflow/agent/runtime/AgentTypes.hpp>
 
 namespace insoulforge::MessageRouter {
     /// @brief 判断是否应回复指定触发消息并生成回复策略
@@ -19,7 +20,7 @@ namespace insoulforge::MessageRouter {
     /// @return Router 决策；找不到触发消息或快照为空时返回跳过决策
     /// @details 触发消息决定硬规则，完整快照仅提供上下文，允许其末条为机器人已经发送的消息。
     ///          群自动回复关闭时跳过普通消息；系统消息、@ 机器人和私聊不受影响。
-    [[nodiscard]] auto route(u64 sessionId, std::string_view triggerMessageId, const json &snapshot)
+    [[nodiscard]] auto route(SessionId sessionId, std::string_view triggerMessageId, const json &snapshot)
       -> drogon::Task<RouterDecision>;
 
     /// @brief 把 Jev action choice 的胜出 label 映射为路由动作

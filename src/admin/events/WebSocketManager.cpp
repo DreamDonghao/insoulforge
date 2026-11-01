@@ -3,7 +3,7 @@
 
 #include <admin/events/WebSocketManager.hpp>
 #include <infrastructure/CommonUtil.hpp>
-#include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <infrastructure/logging/Logger.hpp>
 
 namespace insoulforge {
@@ -15,7 +15,7 @@ namespace insoulforge {
     void WebSocketManager::addConnection(const drogon::WebSocketConnectionPtr &conn) {
         std::lock_guard lock(m_mutex);
         m_connections.insert(conn);
-        Logger::info(0, "Admin", fmt::format("WebSocket连接已建立，当前连接数: {}", m_connections.size()));
+        Logger::info(std::nullopt, "Admin", fmt::format("WebSocket连接已建立，当前连接数: {}", m_connections.size()));
     }
 
     void WebSocketManager::removeConnection(const drogon::WebSocketConnectionPtr &conn) {
@@ -25,29 +25,30 @@ namespace insoulforge {
         for (auto &subscribers: m_subscriptions | std::views::values) {
             subscribers.erase(conn);
         }
-        Logger::info(0, "Admin", fmt::format("WebSocket连接已断开，当前连接数: {}", m_connections.size()));
+        Logger::info(std::nullopt, "Admin", fmt::format("WebSocket连接已断开，当前连接数: {}", m_connections.size()));
     }
 
-    void WebSocketManager::subscribeSession(const drogon::WebSocketConnectionPtr &conn, u64 sessionId) {
+    void WebSocketManager::subscribeSession(const drogon::WebSocketConnectionPtr &conn, const SessionId &sessionId) {
         std::lock_guard lock(m_mutex);
         m_subscriptions[sessionId].insert(conn);
-        Logger::info(0, "Admin", fmt::format("WebSocket订阅会话: {}", sessionId));
+        Logger::info(std::nullopt, "Admin", fmt::format("WebSocket订阅会话: {}", sessionId));
     }
 
-    void WebSocketManager::unsubscribeSession(const drogon::WebSocketConnectionPtr &conn, const u64 sessionId) {
+    void WebSocketManager::unsubscribeSession(const drogon::WebSocketConnectionPtr &conn, const SessionId &sessionId) {
         std::lock_guard lock(m_mutex);
         if (m_subscriptions.contains(sessionId)) {
             m_subscriptions[sessionId].erase(conn);
         }
     }
 
-    void WebSocketManager::pushMessage(const u64 sessionId, const std::string &role, const std::string &content) {
+    void WebSocketManager::pushMessage(
+      const SessionId &sessionId, const std::string &role, const std::string &content) {
         std::lock_guard lock(m_mutex);
 
         json msg;
         msg["type"] = "new_message";
-        // 字符串形式：会话 ID 可能带私聊标志位，超出 JS Number 安全整数范围
-        msg["groupId"] = std::to_string(sessionId);
+        // 会话 ID 使用带类型的规范字符串
+        msg["sessionId"] = sessionId.toString();
         msg["data"]["role"] = role;
         msg["data"]["content"] = content;
         msg["data"]["timestamp"] = currentDateTime();

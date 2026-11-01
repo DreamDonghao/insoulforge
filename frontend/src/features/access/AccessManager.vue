@@ -1,12 +1,12 @@
 <script lang="ts" setup>
 /**
  * @file AccessManager.vue
- * @brief 管理机器人管理员与全局 QQ 黑名单
+ * @brief 管理机器人管理员与全局用户黑名单
  */
 import {inject, onMounted, reactive, ref, type Ref} from 'vue'
 import FieldError from '../../components/FieldError.vue'
 import {useFormValidation} from '../../composables/useFormValidation'
-import {identifierError} from '../../utils/validation'
+import {userIdError} from '../../utils/validation'
 import RequestError from '../../components/RequestError.vue'
 import {requestJson, requestError} from '../../utils/api'
 import type {Admin, ApiResponse, BlacklistEntry} from '../../vite-env'
@@ -35,7 +35,7 @@ const loadAdmins = async (): Promise<void> => {
   try {
     const data = await requestJson<Admin[]>('/admin/api/admins')
     if (!Array.isArray(data)) throw new Error('管理员列表数据无效')
-    admins.value = data.map(item => ({...item, qq: String(item.qq)}))
+    admins.value = data.map(item => ({...item, user_id: String(item.user_id)}))
     adminsLoaded.value = true
     adminError.value = ''
   } catch (cause) {
@@ -51,7 +51,7 @@ const loadBlacklist = async (): Promise<void> => {
   try {
     const data = await requestJson<BlacklistEntry[]>('/admin/api/blacklist')
     if (!Array.isArray(data)) throw new Error('黑名单数据无效')
-    blacklist.value = data.map(item => ({...item, qq: String(item.qq)}))
+    blacklist.value = data.map(item => ({...item, user_id: String(item.user_id)}))
     blacklistLoaded.value = true
     blacklistError.value = ''
   } catch (cause) {
@@ -61,8 +61,8 @@ const loadBlacklist = async (): Promise<void> => {
   }
 }
 
-const adminForm = useFormValidation(() => ({'admin-qq': identifierError(newAdminQQ.value, 'QQ 号')}))
-const blacklistForm = useFormValidation(() => ({'blacklist-qq': identifierError(newBlacklistQQ.value, 'QQ 号')}))
+const adminForm = useFormValidation(() => ({'admin-user-id': userIdError(newAdminQQ.value)}))
+const blacklistForm = useFormValidation(() => ({'blacklist-user-id': userIdError(newBlacklistQQ.value)}))
 const addAdmin = async (): Promise<void> => {
   if (saving.value) return
   if (!adminForm.validateForm()) return
@@ -71,7 +71,7 @@ const addAdmin = async (): Promise<void> => {
     const resp = await fetch('/admin/api/admin', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({qq: newAdminQQ.value.trim()})
+      body: JSON.stringify({user_id: newAdminQQ.value})
     })
     const data: ApiResponse = await resp.json()
     if (resp.ok && data.success) {
@@ -89,17 +89,17 @@ const addAdmin = async (): Promise<void> => {
   }
 }
 
-const removeAdmin = async (qq: string): Promise<void> => {
-  if (removingAdmins.has(qq)) return
-  removingAdmins.add(qq)
+const removeAdmin = async (user_id: string): Promise<void> => {
+  if (removingAdmins.has(user_id)) return
+  removingAdmins.add(user_id)
   try {
-    await requestJson<ApiResponse>(`/admin/api/admin/${qq}`, {method: 'DELETE'})
+    await requestJson<ApiResponse>(`/admin/api/admin/${encodeURIComponent(user_id)}`, {method: 'DELETE'})
     showToast!('移除管理员成功')
     await loadAdmins()
   } catch (cause) {
     showToast!(requestError(cause, '移除管理员失败'), true)
   } finally {
-    removingAdmins.delete(qq)
+    removingAdmins.delete(user_id)
   }
 }
 
@@ -111,7 +111,7 @@ const addBlacklistEntry = async (): Promise<void> => {
     const resp = await fetch('/admin/api/blacklist', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({qq: newBlacklistQQ.value.trim()})
+      body: JSON.stringify({user_id: newBlacklistQQ.value})
     })
     const data: ApiResponse = await resp.json()
     if (resp.ok && data.success) {
@@ -129,17 +129,17 @@ const addBlacklistEntry = async (): Promise<void> => {
   }
 }
 
-const removeBlacklistEntry = async (qq: string): Promise<void> => {
-  if (removingBlacklist.has(qq)) return
-  removingBlacklist.add(qq)
+const removeBlacklistEntry = async (user_id: string): Promise<void> => {
+  if (removingBlacklist.has(user_id)) return
+  removingBlacklist.add(user_id)
   try {
-    await requestJson<ApiResponse>(`/admin/api/blacklist/${qq}`, {method: 'DELETE'})
+    await requestJson<ApiResponse>(`/admin/api/blacklist/${encodeURIComponent(user_id)}`, {method: 'DELETE'})
     showToast!('移出黑名单成功')
     await loadBlacklist()
   } catch (cause) {
     showToast!(requestError(cause, '移出黑名单失败'), true)
   } finally {
-    removingBlacklist.delete(qq)
+    removingBlacklist.delete(user_id)
   }
 }
 
@@ -150,7 +150,7 @@ onMounted(() => void Promise.all([loadAdmins(), loadBlacklist()]))
   <div>
     <div class="page-header">
       <h1 class="page-title">访问管理</h1>
-      <p class="page-subtitle">管理机器人管理员与全局 QQ 黑名单</p>
+      <p class="page-subtitle">管理机器人管理员与全局用户黑名单</p>
     </div>
 
     <div class="access-grid">
@@ -161,9 +161,9 @@ onMounted(() => void Promise.all([loadAdmins(), loadBlacklist()]))
           </div>
           <form class="access-form-row" novalidate @submit.prevent="addAdmin">
             <div class="form-group access-form-group">
-              <label for="admin-qq" class="form-label access-form-label">QQ号</label>
-              <input v-model="newAdminQQ" v-bind="adminForm.fieldAttrs('admin-qq')" :disabled="saving" class="form-input access-input" placeholder="输入 QQ 号" type="text" inputmode="numeric" autocomplete="off">
-              <FieldError field="admin-qq" :message="adminForm.errors.value['admin-qq']"/>
+              <label for="admin-user-id" class="form-label access-form-label">用户 ID</label>
+              <input v-model="newAdminQQ" v-bind="adminForm.fieldAttrs('admin-user-id')" :disabled="saving" class="form-input access-input" placeholder="输入 用户 ID" type="text" autocomplete="off">
+              <FieldError field="admin-user-id" :message="adminForm.errors.value['admin-user-id']"/>
             </div>
             <button :disabled="saving" class="btn btn-primary access-submit" type="submit">
               {{ saving ? '添加中...' : '添加管理员' }}
@@ -188,15 +188,15 @@ onMounted(() => void Promise.all([loadAdmins(), loadBlacklist()]))
               <table>
                 <thead>
                 <tr>
-                  <th>QQ号</th>
+                  <th>用户 ID</th>
                   <th class="action-column">操作</th>
                 </tr>
                 </thead>
                 <tbody>
-                <tr v-for="admin in admins" :key="admin.qq">
-                  <td><code>{{ admin.qq }}</code></td>
+                <tr v-for="admin in admins" :key="admin.user_id">
+                  <td><code>{{ admin.user_id }}</code></td>
                   <td>
-                    <button :disabled="removingAdmins.has(admin.qq)" class="btn btn-danger btn-sm" @click="removeAdmin(admin.qq)">{{ removingAdmins.has(admin.qq) ? '移除中…' : '移除' }}</button>
+                    <button :disabled="removingAdmins.has(admin.user_id)" class="btn btn-danger btn-sm" @click="removeAdmin(admin.user_id)">{{ removingAdmins.has(admin.user_id) ? '移除中…' : '移除' }}</button>
                   </td>
                 </tr>
                 </tbody>
@@ -213,9 +213,9 @@ onMounted(() => void Promise.all([loadAdmins(), loadBlacklist()]))
           </div>
           <form class="access-form-row" novalidate @submit.prevent="addBlacklistEntry">
             <div class="form-group access-form-group">
-              <label for="blacklist-qq" class="form-label access-form-label">QQ号</label>
-              <input v-model="newBlacklistQQ" v-bind="blacklistForm.fieldAttrs('blacklist-qq')" :disabled="blacklistSaving" class="form-input access-input" placeholder="输入 QQ 号" type="text" inputmode="numeric" autocomplete="off">
-              <FieldError field="blacklist-qq" :message="blacklistForm.errors.value['blacklist-qq']"/>
+              <label for="blacklist-user-id" class="form-label access-form-label">用户 ID</label>
+              <input v-model="newBlacklistQQ" v-bind="blacklistForm.fieldAttrs('blacklist-user-id')" :disabled="blacklistSaving" class="form-input access-input" placeholder="输入 用户 ID" type="text" autocomplete="off">
+              <FieldError field="blacklist-user-id" :message="blacklistForm.errors.value['blacklist-user-id']"/>
             </div>
             <button :disabled="blacklistSaving" class="btn btn-danger access-submit" type="submit">
               {{ blacklistSaving ? '添加中...' : '加入黑名单' }}
@@ -240,15 +240,15 @@ onMounted(() => void Promise.all([loadAdmins(), loadBlacklist()]))
               <table>
                 <thead>
                 <tr>
-                  <th>QQ号</th>
+                  <th>用户 ID</th>
                   <th class="action-column">操作</th>
                 </tr>
                 </thead>
                 <tbody>
-                <tr v-for="entry in blacklist" :key="entry.qq">
-                  <td><code>{{ entry.qq }}</code></td>
+                <tr v-for="entry in blacklist" :key="entry.user_id">
+                  <td><code>{{ entry.user_id }}</code></td>
                   <td>
-                    <button :disabled="removingBlacklist.has(entry.qq)" class="btn btn-danger btn-sm" @click="removeBlacklistEntry(entry.qq)">{{ removingBlacklist.has(entry.qq) ? '移除中…' : '移除' }}</button>
+                    <button :disabled="removingBlacklist.has(entry.user_id)" class="btn btn-danger btn-sm" @click="removeBlacklistEntry(entry.user_id)">{{ removingBlacklist.has(entry.user_id) ? '移除中…' : '移除' }}</button>
                   </td>
                 </tr>
                 </tbody>

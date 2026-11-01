@@ -24,11 +24,14 @@ namespace insoulforge {
         auto nameToQQ = QQNameDirectory::nameToQQMap();
 
         // 按昵称长度降序排序，避免短昵称先匹配
-        std::vector<std::pair<std::string, u64>> sortedNames(nameToQQ.begin(), nameToQQ.end());
+        std::vector<std::pair<std::string, UserId>> sortedNames(nameToQQ.begin(), nameToQQ.end());
         std::ranges::sort(
           sortedNames, [](const auto &a, const auto &b) -> auto { return a.first.length() > b.first.length(); });
 
         for (const auto &[name, qq]: sortedNames) {
+            const auto number = qq.toU64();
+            if (!number || *number == 0)
+                continue;
             const std::string mention = "@" + name;
             size_t pos = 0;
             while ((pos = result.find(mention, pos)) != std::string::npos) {
@@ -43,7 +46,7 @@ namespace insoulforge {
                         pos = endPos;
                         continue;
                     }
-                    std::string cqCode = fmt::format("[CQ:at,qq={}]", qq);
+                    std::string cqCode = fmt::format("[CQ:at,qq={}]", *number);
                     result.replace(pos, mention.length(), cqCode);
                     pos += cqCode.length();
                 } else {

@@ -12,6 +12,7 @@
 #include <drogon/utils/coroutine.h>
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 
 namespace insoulforge {
     /// @brief 管理进程内的耗时任务，每个会话同时只允许一个任务运行
@@ -37,13 +38,13 @@ namespace insoulforge {
         static auto instance() -> AsyncTaskManager &;
 
         /// @brief 以会话为单位原子检查并启动任务；其他会话不受影响
-        /// @param sessionId 统一会话 ID，群号或带私聊标志的用户 QQ 号
+        /// @param sessionId 统一会话 ID，带类型的群聊或私聊会话身份
         /// @param description 写入上下文的任务描述，不会单独发送给用户
         /// @param handler 后台处理器；返回可由 MessageService 发送的文本或 CQ 码
         /// @return Started 返回新编号；Busy 返回现有编号；Stopping 拒绝启动且编号为空
-        /// @throws std::invalid_argument 会话 ID 为 0 或处理器为空
+        /// @throws std::invalid_argument 处理器为空
         /// @note 线程安全。启动状态直接写入 MessageList，不经过 Router；结果由后台协程发送。
-        [[nodiscard]] auto start(u64 sessionId, std::string description, Handler handler) -> StartResult;
+        [[nodiscard]] auto start(const SessionId &sessionId, std::string description, Handler handler) -> StartResult;
 
         /// @brief 拒绝新任务，并把尚未完成的任务标记为因退出中断
         /// @note 不等待或恢复处理器；应在消息列表持久化之前调用，且不可与服务继续运行并发使用。
@@ -52,11 +53,11 @@ namespace insoulforge {
     private:
         AsyncTaskManager() = default;
 
-        auto run(u64 sessionId, std::string taskId, Handler handler) -> drogon::Task<>;
-        void release(u64 sessionId, const std::string &taskId);
+        auto run(SessionId sessionId, std::string taskId, Handler handler) -> drogon::Task<>;
+        void release(const SessionId &sessionId, const std::string &taskId);
 
         std::mutex m_mutex; ///< 保护会话占用和退出状态
-        std::unordered_map<u64, std::string> m_active; ///< 会话 ID 到当前任务编号
+        std::unordered_map<SessionId, std::string> m_active; ///< 会话 ID 到当前任务编号
         bool m_stopping = false;
     };
 } // namespace insoulforge

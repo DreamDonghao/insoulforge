@@ -28,7 +28,7 @@ namespace insoulforge {
         void stop();
 
         /// @brief 创建定时任务（先落库再入堆）
-        /// @param task 任务内容（sessionType/targetId/remindTime/content/isDaily 需已填充）
+        /// @param task 任务内容（sessionId/remindTime/content/isDaily 需已填充）
         /// @return 任务 ID；数据库写入失败抛出异常
         auto schedule(TaskStore::ScheduledTask task) -> i64;
 

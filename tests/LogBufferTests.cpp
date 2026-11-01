@@ -1,10 +1,11 @@
 /// @file LogBufferTests.cpp
 /// @brief Verify log eviction, ordering, filtering and pagination.
 
-#include <iostream>
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <stdexcept>
 #include <string>
 
@@ -27,7 +28,7 @@ auto main() -> int {
         for (i32 index = 0; index < 5010; ++index) {
             const auto entry = buffer.append({
               .level = index % 2 == 0 ? "info" : "error",
-              .sessionId = static_cast<u64>(index % 2),
+              .sessionId = index % 2 ? std::optional{SessionId::group("1")} : std::nullopt,
               .source = "fixture",
               .content = std::to_string(index),
             });
@@ -51,7 +52,7 @@ auto main() -> int {
         require(newer.nextBeforeId == latest.nextBeforeId && newer.nextAfterId == latest.nextAfterId,
           "forward pagination must recover the latest page");
         const auto filtered = buffer.query({
-          .sessionId = 1,
+          .sessionId = insoulforge::SessionId::group("1"),
           .level = "error",
           .keyword = "fixture",
           .limit = 3,
@@ -88,19 +89,33 @@ auto main() -> int {
             std::ofstream current(directory / "bot.log");
             current << "[2026-10-31 12:00:00.000] [info][0][Admin][" << loginUrl << "]\n";
             current << "[2026-10-31 12:00:01.000] [info][0][Main][ordinary history]\n";
+            current << "[2026-10-31 12:00:02.000] [info][9223372036854775819][Main][old private identity]\n";
+            current << "[2026-10-31 12:00:03.000] [info][private:a%3Ab%2F%25][Main][new private identity]\n";
+            current << "[2026-10-31 12:00:04.000] [info][-][Main][new global identity]\n";
             std::ofstream rotated(directory / "bot.1.log");
             rotated << "[2026-10-31 11:00:00.000] [info][0][Admin][管理后台访问令牌（重启后失效）: " << secret << "]\n";
             rotated << "[2026-10-31 11:00:01.000] [info] 管理后台访问令牌（重启后失效）: " << secret << "\n";
         }
         buffer.loadFromDirectory(directory.string());
         const auto history = buffer.query({});
-        require(history.entries.size() == 4 && history.entries.back().content == "ordinary history",
+        require(history.entries.size() == 7 && history.entries.back().content == "new global identity",
           "redaction must preserve structured and legacy history, ordering and ordinary messages");
         for (const auto &entry: history.entries) {
             require(entry.content.find(secret) == std::string::npos,
               "restored current and rotated history must not expose previous startup credentials");
         }
         require(buffer.query({.keyword = secret}).entries.empty(), "restored tokens must not be searchable");
+        const auto oldPrivate = buffer.query({.keyword = "old private identity"});
+        const auto newPrivate = buffer.query({.keyword = "new private identity"});
+        require(oldPrivate.entries.size() == 1 &&
+                  oldPrivate.entries[0].sessionId == SessionId::privateChat(UserId{11}) &&
+                  newPrivate.entries.size() == 1 &&
+                  newPrivate.entries[0].sessionId == SessionId::privateChat(UserId{"a:b/%"}),
+          "history decoder must preserve legacy flags and new escaped identities");
+        const auto global = buffer.query({.systemOnly = true});
+        require(global.entries.size() == 5 &&
+                  std::ranges::all_of(global.entries, [](const auto &entry) { return !entry.sessionId; }),
+          "global filter must select absent ownership without a zero session sentinel");
         std::cout << "Log buffer tests passed\n";
         return 0;
     } catch (const std::exception &error) {

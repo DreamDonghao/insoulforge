@@ -1,34 +1,35 @@
-#include <workflow/session/SessionConfigManager.hpp>
-#include <infrastructure/CommonUtil.hpp>
 #include <charconv>
+
 #include <admin/access/AdminAccessToken.hpp>
-#include <workflow/access/AdminStore.hpp>
-#include <workflow/access/BlacklistStore.hpp>
 #include <admin/http/AdminController.hpp>
 #include <admin/http/AdminResponse.hpp>
 #include <admin/http/PersonNameResolver.hpp>
+#include <infrastructure/CommonUtil.hpp>
+#include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
+#include <infrastructure/config/Config.hpp>
+#include <infrastructure/http/HttpTrace.hpp>
+#include <infrastructure/logging/Logger.hpp>
+#include <infrastructure/monitoring/ProcessMetrics.hpp>
+#include <onebot/transport/OneBotClient.hpp>
+#include <onebot/transport/OneBotWebSocketClient.hpp>
+#include <workflow/OneBotEventWorkflow.hpp>
+#include <workflow/access/AdminStore.hpp>
+#include <workflow/access/BlacklistStore.hpp>
+#include <workflow/agent/llm/usage/UsageStore.hpp>
 #include <workflow/agent/memory/LongTermMemoryStore.hpp>
 #include <workflow/agent/memory/MemoryStore.hpp>
-#include <workflow/agent/memory/affinity/AffinityStore.hpp>
 #include <workflow/agent/memory/PersonMemoryStore.hpp>
+#include <workflow/agent/memory/affinity/AffinityStore.hpp>
 #include <workflow/agent/memory/maintenance/PersonMemoryConsolidator.hpp>
 #include <workflow/agent/runtime/AgentSystem.hpp>
 #include <workflow/agent/tools/ToolRuntime.hpp>
 #include <workflow/history/ChatRecordStore.hpp>
 #include <workflow/message/MessageRecord.hpp>
-#include <workflow/message/SessionId.hpp>
-#include <workflow/session/QQNameDirectory.hpp>
-#include <workflow/session/SessionStore.hpp>
-#include <workflow/OneBotEventWorkflow.hpp>
 #include <workflow/scheduling/TaskScheduler.hpp>
-#include <infrastructure/NumericTypes.hpp>
-#include <infrastructure/config/Config.hpp>
-#include <infrastructure/http/HttpTrace.hpp>
-#include <infrastructure/logging/Logger.hpp>
-#include <infrastructure/monitoring/ProcessMetrics.hpp>
-#include <workflow/agent/llm/usage/UsageStore.hpp>
-#include <onebot/transport/OneBotClient.hpp>
-#include <onebot/transport/OneBotWebSocketClient.hpp>
+#include <workflow/session/QQNameDirectory.hpp>
+#include <workflow/session/SessionConfigManager.hpp>
+#include <workflow/session/SessionStore.hpp>
 
 using namespace insoulforge;
 using namespace drogon;
@@ -38,7 +39,7 @@ namespace {
     const auto g_processStartTime = std::chrono::system_clock::now();
 
     void addPersonName(json &person) {
-        const auto name = PersonNameResolver::instance().lookup(parseUInt64(getStr(person, "qq")));
+        const auto name = PersonNameResolver::instance().lookup(UserId{getStr(person, "user_id")});
         person["name"] = name.value;
         person["name_pending"] = name.pending;
     }
@@ -56,17 +57,10 @@ namespace {
         return value.empty() ? fallback : parseUInt64(value, fallback);
     }
 
-    /// @brief 会话列表项的公共头部字段（会话 ID 数值+字符串形式，私聊附带类型与 QQ 号）
-    auto sessionItemHeader(const u64 sessionId) -> json {
-        json item;
-        // 会话 ID 可能带私聊标志位（超过 JS Number 安全范围），同步提供字符串形式
-        item["groupId"] = sessionId;
-        item["groupIdStr"] = std::to_string(sessionId);
-        if (SessionId::isPrivate(sessionId)) {
-            item["sessionType"] = "private";
-            item["userId"] = SessionId::privateUserId(sessionId);
-        }
-        return item;
+    /// @brief 返回统一会话身份；真实目标保持字符串，不与会话编码混用。
+    auto sessionItemHeader(const SessionId &sessionId) -> json {
+        return {{"sessionId", sessionId.toString()}, {"sessionType", sessionId.typeName()},
+          {"targetId", sessionId.targetId()}};
     }
 } // namespace
 
@@ -107,12 +101,17 @@ auto AdminController::getLogs(HttpRequestPtr req, std::function<void(const HttpR
   -> Task<> {
     LogQuery query;
 
-    // 线上参数沿用 "groupId"（内部语义为 sessionId）
-    if (const std::string groupIdParam = req->getParameter("groupId"); !groupIdParam.empty()) {
+    // sessionId 传规范字符串；system 仅作为全局日志的筛选值
+    if (const std::string groupIdParam = req->getParameter("sessionId"); !groupIdParam.empty()) {
         if (groupIdParam == "system") {
-            query.sessionId = 0;
+            query.systemOnly = true;
         } else {
-            query.sessionId = parseUInt64(groupIdParam);
+            const auto parsed = SessionId::parse(groupIdParam);
+            if (!parsed) {
+                callback(jsonResponse(AdminResponse::errorJson(parsed.error())));
+                co_return;
+            }
+            query.sessionId = *parsed;
         }
     }
 
@@ -134,8 +133,8 @@ auto AdminController::getLogs(HttpRequestPtr req, std::function<void(const HttpR
         item["id"] = id;
         item["timestamp"] = timestamp;
         item["level"] = level;
-        // 字符串形式：会话 ID 可能带私聊标志位，超过 JS 安全整数范围。
-        item["sessionId"] = std::to_string(sessionId);
+        // 会话 ID 使用带类型的规范字符串。
+        item["sessionId"] = sessionId ? json(*sessionId) : json(nullptr);
         item["source"] = source;
         item["content"] = content;
         resp["entries"].push_back(item);
@@ -170,11 +169,11 @@ auto AdminController::getHttpTraces(HttpRequestPtr req, std::function<void(const
         item["method"] = method;
         item["url"] = url;
         item["status"] = status;
-        // 字符串形式：会话 ID 可能带私聊标志位，超过 JS 安全整数范围
+        // 会话 ID 使用带类型的规范字符串
         if (sessionId.has_value()) {
-            item["groupId"] = std::to_string(*sessionId);
+            item["sessionId"] = sessionId->toString();
         } else {
-            item["groupId"] = nullptr;
+            item["sessionId"] = nullptr;
         }
         item["requestBody"] = requestBody;
         item["responseBody"] = responseBody;
@@ -187,7 +186,7 @@ auto AdminController::getHttpTraces(HttpRequestPtr req, std::function<void(const
 auto AdminController::downloadHttpTrace(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
   -> Task<> {
     const auto id = tryParseUInt64(req->getParameter("id"));
-    if (!id || *id == 0) {
+    if (!id) {
         auto response = jsonResponse(AdminResponse::failJson("无效的请求记录 ID"));
         response->setStatusCode(k400BadRequest);
         callback(response);
@@ -205,7 +204,7 @@ auto AdminController::downloadHttpTrace(HttpRequestPtr req, std::function<void(c
     const json document = {{"id", entry->id}, {"timestamp", entry->timestamp}, {"tag", entry->tag},
       {"method", entry->method}, {"url", entry->url}, {"status", entry->status}, {"requestBody", entry->requestBody},
       {"responseBody", entry->responseBody},
-      {"sessionId", entry->sessionId ? json(std::to_string(*entry->sessionId)) : json(nullptr)}};
+      {"sessionId", entry->sessionId ? json(entry->sessionId->toString()) : json(nullptr)}};
     auto response = jsonResponse(document);
     response->addHeader("Content-Disposition", "attachment; filename=\"http-trace-" + std::to_string(*id) + ".json\"");
     callback(response);
@@ -293,7 +292,7 @@ auto AdminController::setBotStatus(HttpRequestPtr req, std::function<void(const 
 
     const bool running = (*body)["running"].get<bool>();
     AgentSystem::instance().setRunning(running);
-    Logger::warn(0, "Admin", fmt::format("管理后台{}机器人", running ? "打开" : "暂停"));
+    Logger::warn(std::nullopt, "Admin", fmt::format("管理后台{}机器人", running ? "打开" : "暂停"));
 
     json resp = AdminResponse::okJson(running ? "机器人已打开" : "机器人已暂停");
     resp["running"] = running;
@@ -326,7 +325,7 @@ auto AdminController::updateEmojiDesc(HttpRequestPtr req, std::function<void(con
     }
 
     ToolRuntime::invalidateFavoriteEmojiCache();
-    Logger::info(0, "Admin", fmt::format("已修改表情描述: res_id={} desc={}", resId, desc));
+    Logger::info(std::nullopt, "Admin", fmt::format("已修改表情描述: res_id={} desc={}", resId, desc));
 
     callback(jsonResponse(AdminResponse::okJson("描述已修改")));
     co_return;
@@ -353,9 +352,9 @@ auto AdminController::getAdmins(HttpRequestPtr req, std::function<void(const Htt
     const auto admins = AdminStore::getAdmins();
 
     json result(json::array());
-    for (const u64 qq: admins) {
+    for (const auto &userId: admins) {
         json admin;
-        admin["qq"] = std::to_string(qq);
+        admin["user_id"] = userId.toString();
         result.push_back(admin);
     }
     callback(jsonResponse(result));
@@ -365,26 +364,30 @@ auto AdminController::getAdmins(HttpRequestPtr req, std::function<void(const Htt
 auto AdminController::addAdmin(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
   -> Task<> {
     const auto body = parseJsonBody(req);
-    if (!body || !body->contains("qq")) {
-        callback(jsonResponse(AdminResponse::errorJson("缺少qq字段")));
+    if (!body || !body->contains("user_id")) {
+        callback(jsonResponse(AdminResponse::errorJson("缺少 user_id 字段")));
         co_return;
     }
 
-    const auto qq = jsonToUInt64((*body)["qq"]);
-    if (qq == 0) {
-        callback(jsonResponse(AdminResponse::errorJson("缺少有效的 qq 字段")));
+    const auto userId = UserId::parse(getStr(*body, "user_id"));
+    if (!userId) {
+        callback(jsonResponse(AdminResponse::errorJson("缺少有效的 user_id 字段")));
         co_return;
     }
-    AdminStore::addAdmin(qq);
+    AdminStore::addAdmin(*userId);
 
     callback(jsonResponse(AdminResponse::okJson("管理员已添加")));
     co_return;
 }
 
 auto AdminController::removeAdmin(
-  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &qq) const -> Task<> {
-    const u64 qqNum = std::stoull(qq);
-    AdminStore::removeAdmin(qqNum);
+  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &userId) const -> Task<> {
+    const auto id = UserId::parse(userId);
+    if (!id) {
+        callback(jsonResponse(AdminResponse::errorJson(id.error())));
+        co_return;
+    }
+    AdminStore::removeAdmin(*id);
 
     callback(jsonResponse(AdminResponse::okJson("管理员已删除")));
     co_return;
@@ -393,8 +396,8 @@ auto AdminController::removeAdmin(
 auto AdminController::getBlacklist(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
   -> Task<> {
     json result = json::array();
-    for (const u64 qq: BlacklistStore::getAll()) {
-        result.push_back({{"qq", std::to_string(qq)}});
+    for (const auto &userId: BlacklistStore::getAll()) {
+        result.push_back({{"user_id", userId.toString()}});
     }
     callback(jsonResponse(result));
     co_return;
@@ -403,22 +406,22 @@ auto AdminController::getBlacklist(HttpRequestPtr req, std::function<void(const 
 auto AdminController::addBlacklistEntry(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
   -> Task<> {
     const auto body = parseJsonBody(req);
-    const u64 qq = body && body->contains("qq") ? jsonToUInt64((*body)["qq"]) : 0;
-    if (qq == 0) {
-        callback(jsonResponse(AdminResponse::errorJson("缺少有效的 qq 字段")));
+    const auto userId = UserId::parse(body ? getStr(*body, "user_id") : "");
+    if (!userId) {
+        callback(jsonResponse(AdminResponse::errorJson("缺少有效的 user_id 字段")));
         co_return;
     }
 
-    BlacklistStore::add(qq);
+    BlacklistStore::add(*userId);
     callback(jsonResponse(AdminResponse::okJson("黑名单已添加")));
     co_return;
 }
 
 auto AdminController::removeBlacklistEntry(
-  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &qq) const -> Task<> {
-    const auto parsedQq = tryParseUInt64(qq);
-    if (!parsedQq || *parsedQq == 0) {
-        callback(jsonResponse(AdminResponse::errorJson("无效的 QQ 号")));
+  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &userId) const -> Task<> {
+    const auto parsedQq = UserId::parse(userId);
+    if (!parsedQq) {
+        callback(jsonResponse(AdminResponse::errorJson("无效的用户 ID")));
         co_return;
     }
 
@@ -437,14 +440,14 @@ auto AdminController::getGroups(HttpRequestPtr req, std::function<void(const Htt
     for (const auto &[sessionId, groupName, enabled, messageCount]: groups) {
         const auto config = SessionStore::getSessionConfig(sessionId);
         json group = sessionItemHeader(sessionId);
-        group["groupName"] = groupName;
+        group["sessionName"] = groupName;
         group["enabled"] = enabled;
-        group["sendGroupCard"] = !SessionId::isPrivate(sessionId) && config.sendGroupCard;
+        group["sendGroupCard"] = !sessionId.isPrivate() && config.sendGroupCard;
         group["messageCount"] = messageCount;
         group["autoReply"] = config.autoReply;
         group["commandEnabled"] = config.commandEnabled;
         group["crossSessionSharing"] = config.crossSessionSharing;
-        group["hasAdditionalPrompt"] = !SessionId::isPrivate(sessionId) && !config.additionalPrompt.empty();
+        group["hasAdditionalPrompt"] = !sessionId.isPrivate() && !config.additionalPrompt.empty();
         result.push_back(group);
     }
     callback(jsonResponse(result));
@@ -459,38 +462,29 @@ auto AdminController::enableSession(HttpRequestPtr req, std::function<void(const
         co_return;
     }
 
-    u64 sessionId = 0;
-    if (getStr(*body, "sessionType") == "private") {
-        // 私聊会话 ID 带标志位，由后端按 QQ 号构造（前端无法安全表示超出 JS 精度的大数）
-        const u64 userId = jsonToUInt64(atOrNull(*body, "userId"));
-        if (userId == 0) {
-            callback(jsonResponse(AdminResponse::errorJson("QQ号无效")));
-            co_return;
-        }
-        sessionId = SessionId::fromPrivateUser(userId);
-    } else {
-        // 前端以字符串传递（避免 JS 大数精度丢失），需安全解析而非 asUInt64()
-        sessionId = jsonToUInt64(atOrNull(*body, "groupId"));
-        if (sessionId == 0 || SessionId::isPrivate(sessionId)) {
-            callback(jsonResponse(AdminResponse::errorJson("群号无效")));
-            co_return;
-        }
+    const auto kind = getStr(*body, "sessionType", "group");
+    const auto raw = getStr(*body, kind == "private" ? "userId" : "groupId");
+    const auto user = UserId::parse(raw);
+    if ((kind != "private" && kind != "group") || !user) {
+        callback(jsonResponse(AdminResponse::errorJson("需要有效的会话类型和字符串目标 ID")));
+        co_return;
     }
+    const auto sessionId = kind == "private" ? SessionId::privateChat(*user) : SessionId::group(raw);
     SessionStore::enableSession(sessionId);
 
     // 自动获取会话名称（群聊为群名，私聊为 QQ 昵称）
     std::string groupName = co_await SessionConfigManager::fetchAndUpdateSessionName(sessionId);
 
-    json resp = AdminResponse::okJson(SessionId::isPrivate(sessionId) ? "私聊已启用" : "群已启用");
-    resp["groupName"] = groupName;
+    json resp = AdminResponse::okJson(sessionId.isPrivate() ? "私聊已启用" : "群已启用");
+    resp["sessionName"] = groupName;
     callback(jsonResponse(resp));
     co_return;
 }
 
 auto AdminController::getGroupPrompt(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
   const std::string &sessionId) const -> Task<> {
-    const auto id = tryParseUInt64(sessionId);
-    if (!id || *id == 0 || SessionId::isPrivate(*id)) {
+    const auto id = SessionId::parse(sessionId);
+    if (!id || id->isPrivate()) {
         auto response = jsonResponse(AdminResponse::errorJson("群号无效"));
         response->setStatusCode(drogon::k400BadRequest);
         callback(response);
@@ -502,9 +496,9 @@ auto AdminController::getGroupPrompt(HttpRequestPtr req, std::function<void(cons
 
 auto AdminController::saveGroupPrompt(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
   const std::string &sessionId) const -> Task<> {
-    const auto id = tryParseUInt64(sessionId);
+    const auto id = SessionId::parse(sessionId);
     const auto body = parseJsonBody(req);
-    if (!id || *id == 0 || SessionId::isPrivate(*id) || !body || !atOrNull(*body, "additionalPrompt").is_string()) {
+    if (!id || id->isPrivate() || !body || !atOrNull(*body, "additionalPrompt").is_string()) {
         auto response = jsonResponse(AdminResponse::errorJson("需要有效群号及字符串类型 additionalPrompt"));
         response->setStatusCode(drogon::k400BadRequest);
         callback(response);
@@ -524,9 +518,9 @@ auto AdminController::saveGroupPrompt(HttpRequestPtr req, std::function<void(con
 
 auto AdminController::saveGroupAutoReply(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
   const std::string &sessionId) const -> Task<> {
-    const auto id = tryParseUInt64(sessionId);
+    const auto id = SessionId::parse(sessionId);
     const auto body = parseJsonBody(req);
-    if (!id || *id == 0 || SessionId::isPrivate(*id) || !body || !atOrNull(*body, "autoReply").is_boolean()) {
+    if (!id || id->isPrivate() || !body || !atOrNull(*body, "autoReply").is_boolean()) {
         auto response = jsonResponse(AdminResponse::errorJson("需要有效群号及布尔类型 autoReply"));
         response->setStatusCode(drogon::k400BadRequest);
         callback(response);
@@ -539,9 +533,9 @@ auto AdminController::saveGroupAutoReply(HttpRequestPtr req, std::function<void(
 
 auto AdminController::saveGroupCommandEnabled(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
   const std::string &sessionId) const -> Task<> {
-    const auto id = tryParseUInt64(sessionId);
+    const auto id = SessionId::parse(sessionId);
     const auto body = parseJsonBody(req);
-    if (!id || *id == 0 || SessionId::isPrivate(*id) || !body || !atOrNull(*body, "commandEnabled").is_boolean()) {
+    if (!id || id->isPrivate() || !body || !atOrNull(*body, "commandEnabled").is_boolean()) {
         auto response = jsonResponse(AdminResponse::errorJson("需要有效群号及布尔类型 commandEnabled"));
         response->setStatusCode(drogon::k400BadRequest);
         callback(response);
@@ -554,10 +548,9 @@ auto AdminController::saveGroupCommandEnabled(HttpRequestPtr req, std::function<
 
 auto AdminController::saveSessionSharing(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
   const std::string &sessionId) const -> Task<> {
-    const auto id = tryParseUInt64(sessionId);
+    const auto id = SessionId::parse(sessionId);
     const auto body = parseJsonBody(req);
-    if (!id || *id == 0 || (SessionId::isPrivate(*id) && SessionId::privateUserId(*id) == 0) ||
-        !body || !atOrNull(*body, "crossSessionSharing").is_boolean()) {
+    if (!id || !body || !atOrNull(*body, "crossSessionSharing").is_boolean()) {
         auto response = jsonResponse(AdminResponse::errorJson("需要有效会话 ID 及布尔类型 crossSessionSharing"));
         response->setStatusCode(drogon::k400BadRequest);
         callback(response);
@@ -570,9 +563,9 @@ auto AdminController::saveSessionSharing(HttpRequestPtr req, std::function<void(
 
 auto AdminController::saveGroupCard(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
   const std::string &sessionId) const -> Task<> {
-    const auto id = tryParseUInt64(sessionId);
+    const auto id = SessionId::parse(sessionId);
     const auto body = parseJsonBody(req);
-    if (!id || *id == 0 || SessionId::isPrivate(*id) || !body || !atOrNull(*body, "sendGroupCard").is_boolean()) {
+    if (!id || id->isPrivate() || !body || !atOrNull(*body, "sendGroupCard").is_boolean()) {
         auto response = jsonResponse(AdminResponse::errorJson("需要有效群号及布尔类型 sendGroupCard"));
         response->setStatusCode(drogon::k400BadRequest);
         callback(response);
@@ -585,7 +578,14 @@ auto AdminController::saveGroupCard(HttpRequestPtr req, std::function<void(const
 
 auto AdminController::toggleSession(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
   const std::string &sessionId) const -> Task<> {
-    const u64 gid = std::stoull(sessionId);
+    const auto parsedSession = SessionId::parse(sessionId);
+    if (!parsedSession) {
+        auto response = jsonResponse(AdminResponse::errorJson(parsedSession.error()));
+        response->setStatusCode(drogon::k400BadRequest);
+        callback(response);
+        co_return;
+    }
+    const auto gid = *parsedSession;
     SessionStore::toggleSessionStatus(gid);
 
     callback(jsonResponse(AdminResponse::okJson("群状态已切换")));
@@ -594,7 +594,14 @@ auto AdminController::toggleSession(HttpRequestPtr req, std::function<void(const
 
 auto AdminController::removeSession(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
   const std::string &sessionId) const -> Task<> {
-    const u64 gid = std::stoull(sessionId);
+    const auto parsedSession = SessionId::parse(sessionId);
+    if (!parsedSession) {
+        auto response = jsonResponse(AdminResponse::errorJson(parsedSession.error()));
+        response->setStatusCode(drogon::k400BadRequest);
+        callback(response);
+        co_return;
+    }
+    const auto gid = *parsedSession;
     SessionStore::disableSession(gid);
 
     callback(jsonResponse(AdminResponse::okJson("群已删除")));
@@ -603,11 +610,18 @@ auto AdminController::removeSession(HttpRequestPtr req, std::function<void(const
 
 auto AdminController::refreshSessionName(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
   const std::string &sessionId) const -> Task<> {
-    const u64 gid = std::stoull(sessionId);
+    const auto parsedSession = SessionId::parse(sessionId);
+    if (!parsedSession) {
+        auto response = jsonResponse(AdminResponse::errorJson(parsedSession.error()));
+        response->setStatusCode(drogon::k400BadRequest);
+        callback(response);
+        co_return;
+    }
+    const auto gid = *parsedSession;
     const auto groupName = co_await SessionConfigManager::fetchAndUpdateSessionName(gid);
 
     json resp = AdminResponse::okJson();
-    resp["groupName"] = groupName;
+    resp["sessionName"] = groupName;
     callback(jsonResponse(resp));
     co_return;
 }
@@ -633,7 +647,7 @@ auto AdminController::getChatSessions(HttpRequestPtr req, std::function<void(con
     json result(json::array());
     for (const auto &[sessionId, groupName, messageCount]: groups) {
         json group = sessionItemHeader(sessionId);
-        group["groupName"] = groupName;
+        group["sessionName"] = groupName;
         group["messageCount"] = messageCount;
         result.push_back(group);
     }
@@ -643,7 +657,14 @@ auto AdminController::getChatSessions(HttpRequestPtr req, std::function<void(con
 
 auto AdminController::getChatRecords(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
   const std::string &sessionId) const -> Task<> {
-    const u64 gid = std::stoull(sessionId);
+    const auto parsedSession = SessionId::parse(sessionId);
+    if (!parsedSession) {
+        auto response = jsonResponse(AdminResponse::errorJson(parsedSession.error()));
+        response->setStatusCode(drogon::k400BadRequest);
+        callback(response);
+        co_return;
+    }
+    const auto gid = *parsedSession;
 
     // 支持limit参数
     i32 limit = 50;
@@ -704,7 +725,14 @@ auto AdminController::deleteChatRecord(HttpRequestPtr req, std::function<void(co
 
 auto AdminController::clearSessionChatRecords(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
   const std::string &sessionId) const -> Task<> {
-    const u64 gid = std::stoull(sessionId);
+    const auto parsedSession = SessionId::parse(sessionId);
+    if (!parsedSession) {
+        auto response = jsonResponse(AdminResponse::errorJson(parsedSession.error()));
+        response->setStatusCode(drogon::k400BadRequest);
+        callback(response);
+        co_return;
+    }
+    const auto gid = *parsedSession;
     OneBotEventWorkflow::instance().clearSessionMessages(gid);
 
     callback(jsonResponse(AdminResponse::okJson("聊天记录已清空")));
@@ -715,9 +743,14 @@ auto AdminController::clearSessionChatRecords(HttpRequestPtr req, std::function<
 
 auto AdminController::getLongTermMemories(
   HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const -> Task<> {
-    u64 sessionId = 0;
+    std::optional<SessionId> sessionId = std::nullopt;
     if (const std::string sessionParam = req->getParameter("sessionId"); !sessionParam.empty()) {
-        sessionId = std::stoull(sessionParam);
+        const auto parsed = SessionId::parse(sessionParam);
+        if (!parsed) {
+            callback(jsonResponse(AdminResponse::errorJson(parsed.error())));
+            co_return;
+        }
+        sessionId = *parsed;
     }
 
     i32 limit = 20;
@@ -734,8 +767,8 @@ auto AdminController::getLongTermMemories(
     for (const auto &[id, groupId, content, createdAt]: LongTermMemoryStore::listMemories(sessionId, limit, offset)) {
         json item;
         item["id"] = id;
-        // 会话 ID（私聊带标志位）可能超出 JS 安全整数范围，统一以字符串输出
-        item["groupId"] = std::to_string(groupId);
+        // 带类型的会话 ID可能超出 JS 安全整数范围，统一以字符串输出
+        item["sessionId"] = groupId.toString();
         item["content"] = content;
         item["createdAt"] = createdAt;
         items.push_back(item);
@@ -764,14 +797,21 @@ auto AdminController::deleteLongTermMemory(
 
 auto AdminController::getSessionMemory(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
   const std::string &sessionId) const -> Task<> {
-    const u64 gid = std::stoull(sessionId);
+    const auto parsedSession = SessionId::parse(sessionId);
+    if (!parsedSession) {
+        auto response = jsonResponse(AdminResponse::errorJson(parsedSession.error()));
+        response->setStatusCode(drogon::k400BadRequest);
+        callback(response);
+        co_return;
+    }
+    const auto gid = *parsedSession;
     std::string memory = MemoryStore::getShortTermMemory(gid);
     if (json parsed; tryParseJson(memory, parsed)) {
         if (auto structured = MemoryStore::normalizeSessionMemory(parsed)) memory = dumpJson(*structured, true, 2);
     }
 
     json resp;
-    resp["groupId"] = gid;
+    resp["sessionId"] = gid;
     resp["memory"] = memory;
     resp["conversationSummaries"] = MemoryStore::conversationSummaries(memory);
     callback(jsonResponse(resp));
@@ -786,13 +826,20 @@ auto AdminController::updateSessionMemory(HttpRequestPtr req, std::function<void
         co_return;
     }
 
-    const u64 gid = std::stoull(sessionId);
+    const auto parsedSession = SessionId::parse(sessionId);
+    if (!parsedSession) {
+        auto response = jsonResponse(AdminResponse::errorJson(parsedSession.error()));
+        response->setStatusCode(drogon::k400BadRequest);
+        callback(response);
+        co_return;
+    }
+    const auto gid = *parsedSession;
     std::string memory = getStr(*body, "memory");
     if (trim(memory).starts_with("{")) {
         json parsed;
         const auto structured = tryParseJson(memory, parsed) ? MemoryStore::normalizeSessionMemory(parsed) : std::nullopt;
         if (!structured) {
-            auto response = jsonResponse(AdminResponse::errorJson("会话外号 JSON 需要有效的 aliases 数组；历史 recent_events、legacy_entries 如存在也必须为字符串数组"));
+            auto response = jsonResponse(AdminResponse::errorJson("会话记忆 JSON 需要有效的 aliases 数组；pending_entries 如存在必须为字符串数组，仅接受当前格式"));
             response->setStatusCode(drogon::k400BadRequest);
             callback(response);
             co_return;
@@ -817,13 +864,13 @@ auto AdminController::getPeople(HttpRequestPtr req, std::function<void(const Htt
 }
 
 auto AdminController::getPerson(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
-  const std::string &qq) const -> Task<> {
-    const auto id = parseUInt64(qq);
-    if (id == 0 || SessionId::isPrivate(id) || id == SessionId::kSystemAccountId) {
-        callback(jsonResponse(AdminResponse::errorJson("无效的 QQ 号")));
+  const std::string &userId) const -> Task<> {
+    const auto id = UserId::parse(userId);
+    if (!id || id->toString() == "self" || id->toString() == "system") {
+        callback(jsonResponse(AdminResponse::errorJson("无效的用户 ID")));
         co_return;
     }
-    auto person = PersonMemoryStore::getPerson(id);
+    auto person = PersonMemoryStore::getPerson(*id);
     if (person.is_null()) {
         callback(jsonResponse(AdminResponse::errorJson("没有该人物的记录")));
         co_return;
@@ -834,17 +881,17 @@ auto AdminController::getPerson(HttpRequestPtr req, std::function<void(const Htt
 }
 
 auto AdminController::consolidatePerson(HttpRequestPtr req,
-  std::function<void(const HttpResponsePtr &)> callback, const std::string &qq) const -> Task<> {
+  std::function<void(const HttpResponsePtr &)> callback, const std::string &userId) const -> Task<> {
     auto status = drogon::k400BadRequest;
-    std::string message = "无效的 QQ 号";
-    const auto id = parseUInt64(qq);
-    if (id && !SessionId::isPrivate(id) && id != SessionId::kSystemAccountId) {
-        if (PersonMemoryStore::getPerson(id).is_null()) {
+    std::string message = "无效的用户 ID";
+    const auto id = UserId::parse(userId);
+    if (id && id->toString() != "self" && id->toString() != "system") {
+        if (PersonMemoryStore::getPerson(*id).is_null()) {
             status = drogon::k404NotFound;
             message = "没有该人物的记录";
         } else {
             using Result = PersonMemoryConsolidator::Result;
-            const auto result = co_await PersonMemoryConsolidator::instance().runPerson(id);
+            const auto result = co_await PersonMemoryConsolidator::instance().runPerson(*id);
             switch (result) {
             case Result::Updated:
                 status = drogon::k200OK;
@@ -910,15 +957,15 @@ namespace {
 }
 
 auto AdminController::updatePerson(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
-  const std::string &qq) const -> Task<> {
-    const auto id = parseUInt64(qq);
+  const std::string &userId) const -> Task<> {
+    const auto id = UserId::parse(userId);
     const auto body = parseJsonBody(req);
     auto status = drogon::k400BadRequest;
     std::string message = Config::instance().affinityEnabled.load(std::memory_order_relaxed)
       ? "人物数据无效：好感度须为 -100～100 的整数，记忆须为非空文本"
       : "人物数据无效：记忆须为非空文本";
-    if (id && !SessionId::isPrivate(id) && id != SessionId::kSystemAccountId && body && validPersonEdit(*body)) {
-        const bool saved = PersonMemoryStore::updatePerson(id, body->at("expected"), body->at("replacement"));
+    if (id && id->toString() != "self" && id->toString() != "system" && body && validPersonEdit(*body)) {
+        const bool saved = PersonMemoryStore::updatePerson(*id, body->at("expected"), body->at("replacement"));
         status = saved ? drogon::k200OK : drogon::k409Conflict;
         message = saved ? "人物信息已保存" : "人物信息已变化，请重新读取后编辑；当前草稿已保留";
     }
@@ -929,13 +976,14 @@ auto AdminController::updatePerson(HttpRequestPtr req, std::function<void(const 
 }
 
 auto AdminController::deletePerson(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
-  const std::string &qq) const -> Task<> {
-    const auto id = parseUInt64(qq);
+  const std::string &userId) const -> Task<> {
+    const auto id = UserId::parse(userId);
     const auto body = parseJsonBody(req);
     auto status = drogon::k400BadRequest;
     std::string message = "无效的人物删除请求";
-    if (id && !SessionId::isPrivate(id) && id != SessionId::kSystemAccountId && body && body->contains("expected") && body->at("expected").is_object()) {
-        const bool removed = PersonMemoryStore::deletePerson(id, body->at("expected"));
+    if (id && id->toString() != "self" && id->toString() != "system" && body && body->contains("expected") &&
+        body->at("expected").is_object()) {
+        const bool removed = PersonMemoryStore::deletePerson(*id, body->at("expected"));
         status = removed ? drogon::k200OK : drogon::k409Conflict;
         message = removed ? "人物已删除" : "人物信息已变化，请刷新后重试";
     }
@@ -953,21 +1001,28 @@ auto AdminController::getSessionAffinity(HttpRequestPtr req, std::function<void(
         callback(response);
         co_return;
     }
-    const u64 gid = std::stoull(sessionId);
+    const auto parsedSession = SessionId::parse(sessionId);
+    if (!parsedSession) {
+        auto response = jsonResponse(AdminResponse::errorJson(parsedSession.error()));
+        response->setStatusCode(drogon::k400BadRequest);
+        callback(response);
+        co_return;
+    }
+    const auto gid = *parsedSession;
     auto affinityMap = AffinityStore::getAffinityMap();
 
-    std::vector<std::pair<u64, i32>> entries(affinityMap.begin(), affinityMap.end());
+    std::vector<std::pair<UserId, i32>> entries(affinityMap.begin(), affinityMap.end());
     std::ranges::sort(entries, [](const auto &a, const auto &b) -> auto { return a.second > b.second; });
 
     json list(json::array());
-    for (const auto &[qq, affinity]: entries) {
+    for (const auto &[userId, affinity]: entries) {
         json item;
-        // QQ 号以字符串返回（超过 JS Number 安全范围）
-        item["qq"] = std::to_string(qq);
+        // 用户 ID以字符串返回（超过 JS Number 安全范围）
+        item["user_id"] = userId.toString();
         // 昵称优先取运行时映射（含自定义昵称），缺失时回退 OneBot 实时查询
-        std::string name(QQNameDirectory::getName(qq));
+        std::string name(QQNameDirectory::getName(userId));
         if (name.empty() || name == "未知") {
-            if (const auto info = co_await OneBotClient::getStrangerInfo(qq, gid);
+            if (const auto info = co_await OneBotClient::getStrangerInfo(userId, gid);
               atOrNull(info, "data").contains("nickname")) {
                 name = getStr(atOrNull(info, "data"), "nickname");
             }
@@ -980,7 +1035,7 @@ auto AdminController::getSessionAffinity(HttpRequestPtr req, std::function<void(
     }
 
     json resp;
-    resp["groupIdStr"] = std::to_string(gid);
+    resp["sessionId"] = gid.toString();
     resp["scope"] = "global";
     resp["affinities"] = list;
     callback(jsonResponse(resp));
@@ -991,15 +1046,15 @@ auto AdminController::getSessionAffinity(HttpRequestPtr req, std::function<void(
 
 auto AdminController::getScheduledTasks(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
   const std::string &sessionId) const -> Task<> {
-    const u64 sid = parseUInt64(sessionId);
-    if (sid == 0) {
-        callback(jsonResponse(AdminResponse::errorJson("无效的会话 ID")));
+    const auto parsed = SessionId::parse(sessionId);
+    if (!parsed) {
+        callback(jsonResponse(AdminResponse::errorJson(parsed.error())));
         co_return;
     }
+    const auto sid = *parsed;
 
-    const auto [sessionType, targetId] = SessionId::toStorageTarget(sid);
     json list(json::array());
-    for (const auto &task: TaskStore::getPendingScheduledTasksByTarget(sessionType, targetId)) {
+    for (const auto &task: TaskStore::getPendingScheduledTasksBySession(sid)) {
         json item;
         item["id"] = task.id;
         item["remindTime"] = task.remindTime;
@@ -1024,7 +1079,7 @@ auto AdminController::cancelScheduledTask(
 
     if (TaskScheduler::instance().cancel(static_cast<i64>(taskId))) {
         json resp = AdminResponse::okJson(fmt::format("定时任务 #{} 已取消", taskId));
-        Logger::info(0, "Admin", fmt::format("已取消定时任务 #{}", taskId));
+        Logger::info(std::nullopt, "Admin", fmt::format("已取消定时任务 #{}", taskId));
         callback(jsonResponse(resp));
     } else {
         callback(jsonResponse(AdminResponse::failJson("任务不存在或已触发/已取消")));
@@ -1052,7 +1107,7 @@ auto AdminController::saveMemoryConfig(HttpRequestPtr req, std::function<void(co
     }
 
     if (auto result = Config::instance().saveMemoryConfig(*body); !result) {
-        Logger::error(0, "Config", result.error().message);
+        Logger::error(std::nullopt, "Config", result.error().message);
         callback(AdminResponse::configErrorResponse(result.error()));
         co_return;
     }
@@ -1082,14 +1137,14 @@ auto AdminController::saveQQConfig(HttpRequestPtr req, std::function<void(const 
 
     const auto previousConfig = Config::instance().getQQConfig();
     if (auto result = Config::instance().saveQQConfig(*body); !result) {
-        Logger::error(0, "Config", result.error().message);
+        Logger::error(std::nullopt, "Config", result.error().message);
         callback(AdminResponse::configErrorResponse(result.error()));
         co_return;
     }
     const auto &config = Config::instance();
 
     // 更新机器人自己的自定义昵称
-    QQNameDirectory::setCustomName(config.selfQQNumber, config.botName + "(我)");
+    QQNameDirectory::setCustomName(UserId{config.selfQQNumber}, config.botName + "(我)");
     const auto savedConfig = config.getQQConfig();
     // 名称和私聊默认状态不影响连接，不应中断正在等待的 OneBot 动作。
     if (previousConfig["oneBotTransport"] != savedConfig["oneBotTransport"] ||

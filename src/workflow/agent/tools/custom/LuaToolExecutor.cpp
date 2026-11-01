@@ -16,10 +16,10 @@
 #include <drogon/utils/Utilities.h>
 #include <lua.hpp>
 
+#include <infrastructure/SessionId.hpp>
 #include <workflow/agent/ability/AsyncTaskManager.hpp>
 #include <workflow/agent/tools/custom/LuaToolExecutor.hpp>
 #include <workflow/message/MessageService.hpp>
-#include <workflow/message/SessionId.hpp>
 
 namespace insoulforge::LuaToolExecutor {
     namespace {
@@ -298,8 +298,9 @@ namespace insoulforge::LuaToolExecutor {
             lua_State *m_state;
         };
 
-        [[nodiscard]] auto contextJson(const u64 sessionId) -> json {
-            return {{"session_id", std::to_string(sessionId)}, {"is_private", SessionId::isPrivate(sessionId)}};
+        [[nodiscard]] auto contextJson(const std::optional<SessionId> &sessionId) -> json {
+            return {{"session_id", sessionId ? json(*sessionId) : json(nullptr)},
+              {"is_private", (sessionId && sessionId->isPrivate())}};
         }
 
         /// @brief 保留原始请求体；网络等待交给 Drogon，HTTP 错误状态仍返回响应内容。
@@ -408,8 +409,8 @@ namespace insoulforge::LuaToolExecutor {
         }
     }
 
-    auto execute(std::string source, json args, const u64 sessionId, const bool background, const bool testMode)
-      -> drogon::Task<std::string> {
+    auto execute(std::string source, json args, const std::optional<SessionId> sessionId, const bool background,
+      const bool testMode) -> drogon::Task<std::string> {
         LuaState vm;
         vm.load(source);
         const char *entry = background ? "background" : "run";
@@ -482,13 +483,10 @@ namespace insoulforge::LuaToolExecutor {
                     response = {{"ok", false}, {"error", "消息内容为空"}};
                 } else if (testMode) {
                     response = {{"ok", true}, {"message_id", "test-message"}};
-                } else if (sessionId == 0) {
+                } else if (!sessionId) {
                     response = {{"ok", false}, {"error", "会话 ID 无效"}};
                 } else {
-                    const auto sent =
-                      SessionId::isPrivate(sessionId)
-                        ? co_await MessageService::sendPrivateMsg(SessionId::privateUserId(sessionId), text)
-                        : co_await MessageService::sendGroupMsg(sessionId, text);
+                    const auto sent = co_await MessageService::sendToSession(*sessionId, text);
                     response = sent ? json{{"ok", true}, {"message_id", std::to_string(*sent)}}
                                     : json{{"ok", false}, {"error", sent.error()}};
                 }
@@ -500,7 +498,7 @@ namespace insoulforge::LuaToolExecutor {
                 } else if (testMode) {
                     response = {{"status", "started"}, {"task_id", "test-task"}};
                 } else {
-                    const auto result = AsyncTaskManager::instance().start(sessionId, description,
+                    const auto result = AsyncTaskManager::instance().start(*sessionId, description,
                       [script = source, payload = request.value("payload", json::object()),
                         sessionId]() mutable -> drogon::Task<AsyncTaskManager::Result> {
                           auto content = co_await execute(std::move(script), std::move(payload), sessionId, true);

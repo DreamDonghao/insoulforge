@@ -8,6 +8,7 @@
 #include <cstring>
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 #include <workflow/agent/memory/LongTermMemoryStore.hpp>
@@ -27,11 +28,12 @@ namespace insoulforge::LongTermMemoryStore {
         }
     } // namespace
 
-    auto searchSimilar(const u64 groupId, const std::vector<f32> &query, const i32 topK) -> std::vector<SimilarMemory> {
+    auto searchSimilar(const SessionId &sessionId, const std::vector<f32> &query, const i32 topK)
+      -> std::vector<SimilarMemory> {
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
-        const Statement stmt(db.handle(), "SELECT id, content, embedding FROM long_term_memory WHERE group_id = ?");
-        stmt.bind(1, groupId);
+        const Statement stmt(db.handle(), "SELECT id, content, embedding FROM long_term_memory WHERE session_id = ?");
+        stmt.bind(1, sessionId.toString());
 
         std::vector<SimilarMemory> scored;
         while (stmt.step()) {
@@ -60,33 +62,46 @@ namespace insoulforge::LongTermMemoryStore {
         return scored;
     }
 
-    auto listMemories(const u64 sessionId, const i32 limit, const i32 offset) -> std::vector<LongTermMemoryEntry> {
+    auto listMemories(const std::optional<SessionId> sessionId, const i32 limit, const i32 offset)
+      -> std::vector<LongTermMemoryEntry> {
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
         const Statement stmt(db.handle(),
-          "SELECT id, group_id, content, created_at FROM long_term_memory WHERE (? = 0 OR group_id = ?) "
+          "SELECT id, session_id, content, created_at FROM long_term_memory WHERE (? IS NULL OR session_id = ?) "
           "ORDER BY id DESC LIMIT ? OFFSET ?");
-        stmt.bind(1, sessionId);
-        stmt.bind(2, sessionId);
+        if (sessionId)
+            stmt.bind(1, *sessionId);
+        else
+            stmt.bindNull(1);
+        if (sessionId)
+            stmt.bind(2, *sessionId);
+        else
+            stmt.bindNull(2);
         stmt.bind(3, limit);
         stmt.bind(4, offset);
 
         std::vector<LongTermMemoryEntry> entries;
         while (stmt.step()) {
             entries.push_back({.id = stmt.getInt64(0),
-              .groupId = static_cast<u64>(stmt.getInt64(1)),
+              .sessionId = SessionId::parse(stmt.getText(1)).value(),
               .content = stmt.getText(2),
               .createdAt = stmt.getText(3)});
         }
         return entries;
     }
 
-    auto countMemories(const u64 sessionId) -> i64 {
+    auto countMemories(const std::optional<SessionId> sessionId) -> i64 {
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
-        const Statement stmt(db.handle(), "SELECT COUNT(*) FROM long_term_memory WHERE (? = 0 OR group_id = ?)");
-        stmt.bind(1, sessionId);
-        stmt.bind(2, sessionId);
+        const Statement stmt(db.handle(), "SELECT COUNT(*) FROM long_term_memory WHERE (? IS NULL OR session_id = ?)");
+        if (sessionId)
+            stmt.bind(1, *sessionId);
+        else
+            stmt.bindNull(1);
+        if (sessionId)
+            stmt.bind(2, *sessionId);
+        else
+            stmt.bindNull(2);
         return stmt.step() ? stmt.getInt64(0) : 0;
     }
 

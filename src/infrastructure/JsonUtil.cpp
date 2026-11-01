@@ -13,7 +13,7 @@ namespace insoulforge {
     auto parseJson(const std::string &jsonStr) -> json {
         json parsed = json::parse(jsonStr, nullptr, false);
         if (parsed.is_discarded()) {
-            Logger::warn(0, "Json", fmt::format("解析失败: {}", jsonStr.substr(0, 100)));
+            Logger::warn(std::nullopt, "Json", fmt::format("解析失败: {}", jsonStr.substr(0, 100)));
             return {};
         }
         return parsed;

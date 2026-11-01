@@ -2,13 +2,14 @@
 /// @brief 长期记忆服务 - 实现
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <workflow/agent/llm/LlmClient.hpp>
 #include <workflow/agent/memory/LongTermMemory.hpp>
 #include <workflow/agent/memory/LongTermMemoryStore.hpp>
 
 namespace insoulforge {
-    auto LongTermMemory::searchMemory(std::string query, const i32 topK, const u64 sessionId)
+    auto LongTermMemory::searchMemory(std::string query, const i32 topK, const SessionId sessionId)
       -> drogon::Task<std::optional<std::string>> {
         const auto embedding = co_await LlmClient::requestEmbedding(std::move(query), sessionId);
         if (!embedding) {

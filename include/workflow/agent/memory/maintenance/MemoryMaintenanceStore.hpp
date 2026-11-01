@@ -9,6 +9,8 @@
 #include <vector>
 
 #include <infrastructure/NumericTypes.hpp>
+#include <infrastructure/SessionId.hpp>
+#include <infrastructure/UserId.hpp>
 
 namespace insoulforge {
     class Database;
@@ -20,11 +22,11 @@ namespace insoulforge {
     };
 
     struct PersonMemoryEntry {
-        u64 qq;
+        UserId userId;
         std::string content;
     };
 
-    using AffinityDeltas = std::vector<std::pair<u64, i32>>;
+    using AffinityDeltas = std::vector<std::pair<UserId, i32>>;
 
     /// @brief 聊天记忆计算结果；shortTerm 复用旧列保存外号和独立聊天摘要，为空值时保留原内容
     struct MemoryMaintenanceResult {
@@ -40,6 +42,6 @@ namespace insoulforge {
     namespace MemoryMaintenanceStore {
         /// @brief 在同一事务中保存聊天记忆与好感度；任何写入失败时全部回滚
         /// @note 调用前完成所有模型请求，事务内不执行网络操作。
-        void apply(const Database &database, u64 sessionId, const MemoryMaintenanceResult &memory);
+        void apply(const Database &database, const SessionId &sessionId, const MemoryMaintenanceResult &memory);
     } // namespace MemoryMaintenanceStore
 } // namespace insoulforge
