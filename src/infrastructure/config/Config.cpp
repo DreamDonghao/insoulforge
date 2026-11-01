@@ -89,6 +89,7 @@ namespace insoulforge {
             return {};
         }
         /// @brief 从已经校验的模型配置 JSON 加载单个角色。
+        /// @param llm 已校验的完整模型配置对象。
         /// @param name 配置名（router/executor/executorThinking/image/memory 等）
         /// @param apiConfig 输出的 API 配置
         /// @param modelParams 模型参数（可为 nullptr，表示不加载）

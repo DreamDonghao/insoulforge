@@ -39,7 +39,7 @@ namespace insoulforge::MessageRouter {
               .isPriority = priority};
         }
 
-        [[nodiscard]] auto applySessionType(RouterDecision decision, const SessionId sessionId) -> RouterDecision {
+        [[nodiscard]] auto applySessionType(RouterDecision decision, const SessionId &sessionId) -> RouterDecision {
             decision.isPrivate = sessionId.isPrivate();
             return decision;
         }
@@ -155,7 +155,7 @@ namespace insoulforge::MessageRouter {
 
         /// @brief 使用独立的最近 N 条滑动窗口构建 Jev 状态。
         [[nodiscard]] auto buildJevState(
-          const SessionId sessionId, const std::string_view triggerMessageId, const json &snapshot) -> json {
+          const SessionId &sessionId, const std::string_view triggerMessageId, const json &snapshot) -> json {
             const bool includeGroupCard =
               !sessionId.isPrivate() && SessionStore::getSessionConfig(sessionId).sendGroupCard;
             const auto windowSize = static_cast<size_t>(
@@ -216,7 +216,7 @@ namespace insoulforge::MessageRouter {
         }
 
         [[nodiscard]] auto buildPrompt(
-          const SessionId sessionId, const std::string_view triggerMessageId, const json &snapshot) -> json {
+          const SessionId &sessionId, const std::string_view triggerMessageId, const json &snapshot) -> json {
             const bool includeGroupCard =
               !sessionId.isPrivate() && SessionStore::getSessionConfig(sessionId).sendGroupCard;
             const size_t startIndex = windowStartIndex(snapshot.size());
@@ -323,7 +323,7 @@ namespace insoulforge::MessageRouter {
             co_return applySessionType(
               makeDecision(RouterDecision::Action::REPLY, "系统消息触发", 100, true), sessionId);
         }
-        if (MessageRecord::mentions(*trigger, UserId{Config::instance().selfQQNumber})) {
+        if (MessageRecord::mentions(*trigger, UserId{"self"})) {
             co_return applySessionType(
               makeDecision(RouterDecision::Action::REPLY, "用户@提及", std::nullopt, true), sessionId);
         }

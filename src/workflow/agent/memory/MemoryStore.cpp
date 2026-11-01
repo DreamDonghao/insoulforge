@@ -26,7 +26,7 @@ namespace insoulforge::MemoryStore {
         std::unordered_map<UserId, size_t> aliasIndices;
         for (const auto &alias: value["aliases"]) {
             const auto userId = UserId::parse(getStr(alias, "user_id"));
-            if (!alias.is_object() || !userId || userId->toString() == "self" || *userId == UserId{kSystemUserId} ||
+            if (!alias.is_object() || !userId || userId->toString() == "self" || userId->toString() == "system" ||
                 !atOrNull(alias, "names").is_array())
                 return std::nullopt;
             auto [it, inserted] = aliasIndices.try_emplace(*userId, result["aliases"].size());
@@ -107,7 +107,7 @@ namespace insoulforge::MemoryStore {
           ? (*normalized)["pending_entries"].get<std::vector<std::string>>() : std::vector<std::string>{};
     }
 
-    auto getShortTermMemory(const SessionId sessionId) -> std::string {
+    auto getShortTermMemory(const SessionId &sessionId) -> std::string {
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
         const Statement stmt(db.handle(), "SELECT memory_content FROM short_term_memory WHERE session_id = ?");
@@ -115,7 +115,7 @@ namespace insoulforge::MemoryStore {
         return stmt.step() ? stmt.getText(0) : "";
     }
 
-    void updateShortTermMemory(const SessionId sessionId, const std::string &memory) {
+    void updateShortTermMemory(const SessionId &sessionId, const std::string &memory) {
         const auto &db = Database::instance();
         std::unique_lock lock(db.mutex());
         const Statement stmt(db.handle(), "INSERT INTO short_term_memory (session_id, memory_content) VALUES (?, ?) "

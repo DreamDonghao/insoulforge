@@ -3,7 +3,6 @@
 
 #include <admin/events/WebSocketManager.hpp>
 #include <infrastructure/CommonUtil.hpp>
-#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
 #include <infrastructure/logging/Logger.hpp>
 
@@ -29,20 +28,21 @@ namespace insoulforge {
         Logger::info(std::nullopt, "Admin", fmt::format("WebSocket连接已断开，当前连接数: {}", m_connections.size()));
     }
 
-    void WebSocketManager::subscribeSession(const drogon::WebSocketConnectionPtr &conn, SessionId sessionId) {
+    void WebSocketManager::subscribeSession(const drogon::WebSocketConnectionPtr &conn, const SessionId &sessionId) {
         std::lock_guard lock(m_mutex);
         m_subscriptions[sessionId].insert(conn);
         Logger::info(std::nullopt, "Admin", fmt::format("WebSocket订阅会话: {}", sessionId));
     }
 
-    void WebSocketManager::unsubscribeSession(const drogon::WebSocketConnectionPtr &conn, const SessionId sessionId) {
+    void WebSocketManager::unsubscribeSession(const drogon::WebSocketConnectionPtr &conn, const SessionId &sessionId) {
         std::lock_guard lock(m_mutex);
         if (m_subscriptions.contains(sessionId)) {
             m_subscriptions[sessionId].erase(conn);
         }
     }
 
-    void WebSocketManager::pushMessage(const SessionId sessionId, const std::string &role, const std::string &content) {
+    void WebSocketManager::pushMessage(
+      const SessionId &sessionId, const std::string &role, const std::string &content) {
         std::lock_guard lock(m_mutex);
 
         json msg;

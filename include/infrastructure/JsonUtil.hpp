@@ -26,7 +26,7 @@ namespace insoulforge {
     using json = nlohmann::ordered_json;
     inline void to_json(json &value, const SessionId &session) { value = session.toString(); }
     inline void from_json(const json &value, SessionId &session) {
-        session = SessionId::parse(value.get<std::string>()).value();
+        session = SessionId::parse(value.get_ref<const std::string &>()).value();
     }
 
 

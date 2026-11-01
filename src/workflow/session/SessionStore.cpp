@@ -13,7 +13,7 @@
 #include <workflow/session/SessionStore.hpp>
 
 namespace insoulforge::SessionStore {
-    void initializeSession(const SessionId sessionId, const bool defaultPrivateEnabled) {
+    void initializeSession(const SessionId &sessionId, const bool defaultPrivateEnabled) {
         const auto &db = Database::instance();
         std::unique_lock lock(db.mutex());
         {
@@ -41,7 +41,7 @@ namespace insoulforge::SessionStore {
         }
     }
 
-    auto getSessionConfig(const SessionId sessionId) -> SessionConfig {
+    auto getSessionConfig(const SessionId &sessionId) -> SessionConfig {
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
         SessionConfig config;
@@ -60,7 +60,7 @@ namespace insoulforge::SessionStore {
         return config;
     }
 
-    void saveSessionConfig(const SessionId sessionId, const SessionConfig &config) {
+    void saveSessionConfig(const SessionId &sessionId, const SessionConfig &config) {
         const auto &db = Database::instance();
         std::unique_lock lock(db.mutex());
         const Statement stmt(db.handle(),
@@ -77,7 +77,7 @@ namespace insoulforge::SessionStore {
         stmt.exec();
     }
 
-    void setSendGroupCard(const SessionId sessionId, const bool enabled) {
+    void setSendGroupCard(const SessionId &sessionId, const bool enabled) {
         const auto &db = Database::instance();
         std::unique_lock lock(db.mutex());
         const Statement stmt(db.handle(),
@@ -88,7 +88,7 @@ namespace insoulforge::SessionStore {
         stmt.exec();
     }
 
-    void setAdditionalPrompt(const SessionId sessionId, const std::string_view prompt) {
+    void setAdditionalPrompt(const SessionId &sessionId, const std::string_view prompt) {
         if (prompt.size() > kMaxAdditionalPromptBytes)
             throw std::invalid_argument("群附加提示词不能超过 16000 字节");
         const auto &db = Database::instance();
@@ -101,7 +101,7 @@ namespace insoulforge::SessionStore {
         stmt.exec();
     }
 
-    void setAutoReply(const SessionId sessionId, const bool enabled) {
+    void setAutoReply(const SessionId &sessionId, const bool enabled) {
         const auto &db = Database::instance();
         std::unique_lock lock(db.mutex());
         const Statement stmt(db.handle(), "INSERT INTO group_config (session_id, auto_reply) VALUES (?, ?) "
@@ -111,7 +111,7 @@ namespace insoulforge::SessionStore {
         stmt.exec();
     }
 
-    void setCommandEnabled(const SessionId sessionId, const bool enabled) {
+    void setCommandEnabled(const SessionId &sessionId, const bool enabled) {
         const auto &db = Database::instance();
         std::unique_lock lock(db.mutex());
         const Statement stmt(db.handle(),
@@ -122,7 +122,7 @@ namespace insoulforge::SessionStore {
         stmt.exec();
     }
 
-    void setCrossSessionSharing(const SessionId sessionId, const bool enabled) {
+    void setCrossSessionSharing(const SessionId &sessionId, const bool enabled) {
         const auto &db = Database::instance();
         std::unique_lock lock(db.mutex());
         const Statement stmt(db.handle(),
@@ -133,7 +133,7 @@ namespace insoulforge::SessionStore {
         stmt.exec();
     }
 
-    auto getSharedSessions(const SessionId receiverId) -> std::vector<std::pair<SessionId, std::string>> {
+    auto getSharedSessions(const SessionId &receiverId) -> std::vector<std::pair<SessionId, std::string>> {
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
         const Statement stmt(db.handle(),
@@ -153,7 +153,7 @@ namespace insoulforge::SessionStore {
         return result;
     }
 
-    void incrementMessageCount(const SessionId sessionId) {
+    void incrementMessageCount(const SessionId &sessionId) {
         const auto &db = Database::instance();
         std::unique_lock lock(db.mutex());
 
@@ -172,7 +172,7 @@ namespace insoulforge::SessionStore {
         }
     }
 
-    auto hasSessionConfig(const SessionId sessionId) -> bool {
+    auto hasSessionConfig(const SessionId &sessionId) -> bool {
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
         const Statement stmt(db.handle(), "SELECT 1 FROM group_config WHERE session_id = ?");
@@ -180,7 +180,7 @@ namespace insoulforge::SessionStore {
         return stmt.step();
     }
 
-    auto isSessionEnabled(const SessionId sessionId) -> bool {
+    auto isSessionEnabled(const SessionId &sessionId) -> bool {
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
         const Statement stmt(db.handle(), "SELECT enabled FROM enabled_groups WHERE session_id = ?");
@@ -188,7 +188,7 @@ namespace insoulforge::SessionStore {
         return stmt.step() && stmt.getInt(0) == 1;
     }
 
-    void enableSession(const SessionId sessionId) {
+    void enableSession(const SessionId &sessionId) {
         const auto &db = Database::instance();
         std::unique_lock lock(db.mutex());
         const Statement stmt(db.handle(), "INSERT OR REPLACE INTO enabled_groups (session_id, enabled) VALUES (?, 1)");
@@ -197,7 +197,7 @@ namespace insoulforge::SessionStore {
         Logger::info(sessionId, "Session", "已启用");
     }
 
-    void disableSession(const SessionId sessionId) {
+    void disableSession(const SessionId &sessionId) {
         const auto &db = Database::instance();
         std::unique_lock lock(db.mutex());
         const Statement stmt(db.handle(), "DELETE FROM enabled_groups WHERE session_id = ?");
@@ -247,7 +247,7 @@ namespace insoulforge::SessionStore {
         return groups;
     }
 
-    void toggleSessionStatus(const SessionId sessionId) {
+    void toggleSessionStatus(const SessionId &sessionId) {
         const auto &db = Database::instance();
         std::unique_lock lock(db.mutex());
         const Statement stmt(db.handle(), "UPDATE enabled_groups SET enabled = NOT enabled WHERE session_id = ?");
@@ -255,7 +255,7 @@ namespace insoulforge::SessionStore {
         stmt.exec();
     }
 
-    void updateSessionName(const SessionId sessionId, const std::string &name) {
+    void updateSessionName(const SessionId &sessionId, const std::string &name) {
         const auto &db = Database::instance();
         std::unique_lock lock(db.mutex());
         const Statement stmt(db.handle(), "UPDATE enabled_groups SET group_name = ? WHERE session_id = ?");
@@ -265,7 +265,7 @@ namespace insoulforge::SessionStore {
         Logger::info(sessionId, "Session", fmt::format("名称已更新: {}", name));
     }
 
-    auto getSessionName(const SessionId sessionId) -> std::string {
+    auto getSessionName(const SessionId &sessionId) -> std::string {
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
         const Statement stmt(db.handle(), "SELECT group_name FROM enabled_groups WHERE session_id = ?");

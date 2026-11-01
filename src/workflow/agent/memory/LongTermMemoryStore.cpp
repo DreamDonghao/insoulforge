@@ -28,7 +28,7 @@ namespace insoulforge::LongTermMemoryStore {
         }
     } // namespace
 
-    auto searchSimilar(const SessionId sessionId, const std::vector<f32> &query, const i32 topK)
+    auto searchSimilar(const SessionId &sessionId, const std::vector<f32> &query, const i32 topK)
       -> std::vector<SimilarMemory> {
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());

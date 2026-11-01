@@ -3,7 +3,6 @@
 
 #include <shared_mutex>
 
-#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/UserId.hpp>
 #include <workflow/session/QQNameDirectory.hpp>
 

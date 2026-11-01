@@ -1,25 +1,24 @@
 /// @file SessionConfigManager.cpp
 /// @brief 会话消息统计与显示名称管理的实现
 
-#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
 #include <onebot/transport/OneBotClient.hpp>
 #include <workflow/session/SessionConfigManager.hpp>
 
 namespace insoulforge {
-    auto SessionConfigManager::getConfig(const SessionId sessionId) -> SessionConfig {
+    auto SessionConfigManager::getConfig(const SessionId &sessionId) -> SessionConfig {
         return SessionStore::getSessionConfig(sessionId);
     }
 
-    auto SessionConfigManager::contains(const SessionId sessionId) -> bool {
+    auto SessionConfigManager::contains(const SessionId &sessionId) -> bool {
         return SessionStore::hasSessionConfig(sessionId);
     }
 
-    void SessionConfigManager::addConfig(const SessionId sessionId, const SessionConfig &config) {
+    void SessionConfigManager::addConfig(const SessionId &sessionId, const SessionConfig &config) {
         SessionStore::saveSessionConfig(sessionId, config);
     }
 
-    void SessionConfigManager::incrementMessageCount(const SessionId sessionId) {
+    void SessionConfigManager::incrementMessageCount(const SessionId &sessionId) {
         SessionStore::incrementMessageCount(sessionId);
     }
     auto SessionConfigManager::fetchAndUpdateSessionName(const SessionId sessionId) -> drogon::Task<std::string> {

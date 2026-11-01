@@ -271,11 +271,13 @@ namespace insoulforge {
             Logger::info(std::nullopt, "Memory",
               fmt::format("人物每日整理开始: date={}, people={}", state.runningDay, people.size()));
             size_t completed = 0;
-            for (const auto userId: people) {
-                if (control->isCancelled())
+            for (const auto &userId: people) {
+                if (control->isCancelled()) {
                     co_return;
-                if (co_await consolidatePerson(userId, control) == Result::Updated)
+                }
+                if (co_await consolidatePerson(userId, control) == Result::Updated) {
                     ++completed;
+                }
             }
             {
                 std::lock_guard lock(m_mutex);

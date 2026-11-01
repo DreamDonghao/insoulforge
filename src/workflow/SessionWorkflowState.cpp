@@ -6,7 +6,7 @@
 #include <workflow/SessionWorkflowState.hpp>
 
 namespace insoulforge {
-    SessionWorkflowState::SessionWorkflowState(const SessionId sessionId, const Database &database,
+    SessionWorkflowState::SessionWorkflowState(const SessionId &sessionId, const Database &database,
       const Config &config) : m_messageList(std::make_shared<MessageList>(sessionId, database, config)) {}
 
     auto SessionWorkflowState::messageList() const noexcept -> const std::shared_ptr<MessageList> & {
@@ -49,7 +49,7 @@ namespace insoulforge {
             return std::nullopt;
         }
         m_isReplyProcessing = true;
-        return ReplyRequest{std::move(triggerMessageId), std::move(decision)};
+        return ReplyRequest{.messageId = std::move(triggerMessageId), .decision = std::move(decision)};
     }
 
     auto SessionWorkflowState::completeReplyProcessing() -> std::optional<ReplyRequest> {

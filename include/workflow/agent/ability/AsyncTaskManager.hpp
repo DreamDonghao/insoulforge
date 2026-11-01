@@ -44,7 +44,7 @@ namespace insoulforge {
         /// @return Started 返回新编号；Busy 返回现有编号；Stopping 拒绝启动且编号为空
         /// @throws std::invalid_argument 处理器为空
         /// @note 线程安全。启动状态直接写入 MessageList，不经过 Router；结果由后台协程发送。
-        [[nodiscard]] auto start(SessionId sessionId, std::string description, Handler handler) -> StartResult;
+        [[nodiscard]] auto start(const SessionId &sessionId, std::string description, Handler handler) -> StartResult;
 
         /// @brief 拒绝新任务，并把尚未完成的任务标记为因退出中断
         /// @note 不等待或恢复处理器；应在消息列表持久化之前调用，且不可与服务继续运行并发使用。
@@ -54,7 +54,7 @@ namespace insoulforge {
         AsyncTaskManager() = default;
 
         auto run(SessionId sessionId, std::string taskId, Handler handler) -> drogon::Task<>;
-        void release(SessionId sessionId, const std::string &taskId);
+        void release(const SessionId &sessionId, const std::string &taskId);
 
         std::mutex m_mutex; ///< 保护会话占用和退出状态
         std::unordered_map<SessionId, std::string> m_active; ///< 会话 ID 到当前任务编号

@@ -9,7 +9,6 @@
 #include <string>
 
 #include <infrastructure/JsonUtil.hpp>
-#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
 
 namespace insoulforge {
@@ -30,7 +29,7 @@ namespace insoulforge {
         /// @param sessionId 带类型的群聊或私聊会话身份
         /// @param database 已成功初始化的数据库，供恢复和持久化使用。
         /// @param config 消息窗口与总结参数；两个依赖必须覆盖消息列表的生命周期。
-        MessageList(SessionId sessionId, const Database &database, const Config &config);
+        MessageList(const SessionId &sessionId, const Database &database, const Config &config);
 
         /// @brief 追加完整消息并生成冻结快照
         /// @param message 完整消息 JSON；内部不会保留工作流专用 `session_id`

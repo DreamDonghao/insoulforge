@@ -151,6 +151,7 @@ namespace {
         check((*record)["reply_to"] == "6", "reply ID is extracted", kTestName);
         check((*record)["segments"].size() == 3, "reply is not a content segment", kTestName);
         check((*record)["segments"][0]["type"] == "at", "at keeps segment order", kTestName);
+        check((*record)["segments"][0]["target"]["user_id"] == "self", "bot mention uses self", kTestName);
         check((*record)["segments"][2]["image_index"] == 0, "image references asset by index", kTestName);
         check((*record)["assets"]["images"].size() == 1, "image source has one asset entry", kTestName);
         check((*record)["assets"]["images"][0]["source"]["url"] == "https://example.com/cat.jpg",
@@ -228,7 +229,7 @@ namespace {
             check((*poke)["sender"]["user_id"] == "11", "poke actor becomes sender", kTestName);
             check((*poke)["session_id"] == "private:11", "private poke has private session ID", kTestName);
             check((*poke)["segments"][0]["type"] == "poke", "poke has semantic segment", kTestName);
-            check((*poke)["segments"][0]["target"]["user_id"] == "42", "poke target is retained", kTestName);
+            check((*poke)["segments"][0]["target"]["user_id"] == "self", "poke target uses self", kTestName);
             check((*poke)["segments"][0]["direction"] == "inbound", "poke direction is normalized", kTestName);
         }
 
@@ -244,6 +245,58 @@ namespace {
         }
     }
 
+    void testSelfIdentityNormalization() {
+        using namespace insoulforge;
+        constexpr std::string_view kTestName = "self identity normalization";
+        auto &config = Config::instance();
+        const auto originalSelf = config.selfQQNumber;
+        config.selfQQNumber = 42;
+        json record;
+        record["session_id"] = "private:42";
+        record["sender"] = {{"user_id", "42"}, {"name", "42"}};
+        record["segments"] = json::array(
+          {{{"type", "at"}, {"target", {{"user_id", "42"}}}}, {{"type", "poke"}, {"target", {{"user_id", "42"}}}},
+            {{"type", "member_event"}, {"operator", {{"user_id", "42"}}}},
+            {{"type", "at"}, {"target", {{"user_id", "43"}}}}, {{"type", "text"}, {"text", "42"}},
+            {{"type", "unsupported"}, {"target", {{"user_id", "42"}}}}});
+        record["tool_history"] = json::array({{{"arguments", {{"user_id", "42"}}}}});
+        check(MessageRecord::normalizeSelfReferences(record, UserId{42}) && record["sender"]["user_id"] == "self" &&
+                record["segments"][0]["target"]["user_id"] == "self" &&
+                record["segments"][1]["target"]["user_id"] == "self" &&
+                record["segments"][2]["operator"]["user_id"] == "self",
+          "all supported identity positions normalize", kTestName);
+        check(record["session_id"] == "private:42" && record["sender"]["name"] == "42" &&
+                record["segments"][3]["target"]["user_id"] == "43" && record["segments"][4]["text"] == "42" &&
+                record["segments"][5]["target"]["user_id"] == "42" &&
+                record["tool_history"][0]["arguments"]["user_id"] == "42" &&
+                !MessageRecord::normalizeSelfReferences(record, UserId{42}),
+          "normalization is idempotent and leaves unrelated fields untouched", kTestName);
+        json event = {{"post_type", "message"}, {"message_type", "group"}, {"group_id", 100}, {"message_id", 1},
+          {"sender", {{"user_id", 42}}}, {"message", json::array({{{"type", "at"}, {"data", {{"qq", "42"}}}}})}};
+        const auto fallback = OneBotEventNormalizer::normalize(event);
+        check(fallback && MessageRecord::isAssistant(*fallback) && MessageRecord::mentions(*fallback, UserId{"self"}),
+          "missing self_id uses the configured account", kTestName);
+        event["self_id"] = 43;
+        const auto reported = OneBotEventNormalizer::normalize(event);
+        check(reported && !MessageRecord::isAssistant(*reported) && MessageRecord::mentions(*reported, UserId{42}),
+          "reported self_id overrides the configured account", kTestName);
+        config.selfQQNumber = 0;
+        event.erase("self_id");
+        const auto unknown = OneBotEventNormalizer::normalize(event);
+        check(unknown && !MessageRecord::isAssistant(*unknown) && MessageRecord::mentions(*unknown, UserId{42}),
+          "unknown bot identity is never guessed", kTestName);
+        config.selfQQNumber = 42;
+        const auto outgoing = MessageRecord::createAssistantRecord("bot", 10, "[CQ:at,qq=42]");
+        check(
+          MessageRecord::mentions(outgoing, UserId{"self"}), "sent CQ targets use self in stored records", kTestName);
+        const auto membership = OneBotEventNormalizer::normalize(
+          {{"notice_type", "group_decrease"}, {"group_id", 100}, {"user_id", 42}, {"operator_id", 42}});
+        check(membership && MessageRecord::isAssistant(*membership) &&
+                (*membership)["segments"][0]["operator"]["user_id"] == "self",
+          "member notice sender and operator both normalize", kTestName);
+        config.selfQQNumber = originalSelf;
+    }
+
     void testNewWorkflowDetectsCommands() {
         constexpr std::string_view kTestName = "new workflow command detection";
         auto &db = insoulforge::Database::instance();
@@ -253,7 +306,8 @@ namespace {
         config.selfQQNumber = 42;
 
         const insoulforge::json groupCommand = {{"session_id", "group:100"},
-          {"segments", {{{"type", "at"}, {"target", {{"user_id", "42"}}}}, {{"type", "text"}, {"text", " /status"}}}}};
+          {"segments",
+            {{{"type", "at"}, {"target", {{"user_id", "self"}}}}, {{"type", "text"}, {"text", " /status"}}}}};
         check(insoulforge::CommandProcessor::isCommand(groupCommand), "bot mention enables group command", kTestName);
 
         const insoulforge::json groupMessage = {
@@ -401,7 +455,7 @@ namespace {
                          {{{"type", "at"}, {"target", {{"user_id", "42"}}}}, {{"type", "text"}, {"text", "hello"}}})},
         };
         const insoulforge::json legacyMention = {
-          {"sender", {{"user_id", std::string(insoulforge::kSystemUserId)}}},
+          {"sender", {{"user_id", "system"}}},
           {"text", "legacy text"},
           {"segments", insoulforge::json::array({{{"type", "at"}, {"user_id", "42"}}})},
         };
@@ -433,8 +487,8 @@ namespace {
 
         const insoulforge::json mentionSnapshot =
           insoulforge::json::array({{{"message_id", "mention"}, {"sender", {{"user_id", "11"}}},
-            {"segments", insoulforge::json::array(
-                           {{{"type", "at"}, {"target", {{"user_id", "42"}}}}, {{"type", "text"}, {"text", "在吗"}}})}}});
+            {"segments", insoulforge::json::array({{{"type", "at"}, {"target", {{"user_id", "self"}}}},
+                           {{"type", "text"}, {"text", "在吗"}}})}}});
         const auto mention = drogon::sync_wait(
           insoulforge::MessageRouter::route(insoulforge::SessionId::group("100"), "mention", mentionSnapshot));
         check(mention.shouldReply, "bot mention replies without LLM", kTestName);
@@ -448,27 +502,16 @@ namespace {
           insoulforge::MessageRouter::route(insoulforge::SessionId::group("100"), "mention", assistantAfterMention));
         check(queuedMention.shouldReply, "queued bot mention replies despite trailing assistant message", kTestName);
 
-        const auto systemEvent = insoulforge::OneBotEventNormalizer::normalize({{"post_type", "message"},
-          {"message_type", "group"}, {"group_id", 100}, {"self_id", 42}, {"message_id", 1'790'000'000'000'001LL},
-          {"sender", {{"user_id", insoulforge::kSystemUserId}, {"nickname", "系统异步任务"}}},
-          {"message", insoulforge::json::array({{{"type", "text"}, {"data", {{"text", "任务完成"}}}}})}});
-        check(systemEvent && insoulforge::MessageRecord::isSystem(*systemEvent),
-          "async task event normalizes as a system message", kTestName);
-        if (systemEvent) {
-            const auto systemSnapshot = insoulforge::json::array({*systemEvent});
-            const auto systemDecision = drogon::sync_wait(insoulforge::MessageRouter::route(
-              insoulforge::SessionId::group("100"), "1790000000000001", systemSnapshot));
-            check(systemDecision.shouldReply && systemDecision.isPriority,
-              "async task result triggers a priority reply", kTestName);
-            check(systemDecision.maxLength == 100, "system message keeps its reply length", kTestName);
-        }
-        const auto privateSystemEvent = insoulforge::OneBotEventNormalizer::normalize({{"post_type", "message"},
-          {"message_type", "private"}, {"user_id", 11}, {"self_id", 42}, {"message_id", 1'790'000'000'000'002LL},
-          {"sender", {{"user_id", insoulforge::kSystemUserId}, {"nickname", "系统异步任务"}}},
-          {"message", insoulforge::json::array({{{"type", "text"}, {"data", {{"text", "任务失败"}}}}})}});
-        check(privateSystemEvent &&
-                (*privateSystemEvent)["session_id"] == insoulforge::SessionId::privateChat(insoulforge::UserId{11}),
-          "async task result reaches the original private session", kTestName);
+        // 内部任务直接产生统一记录，不再伪造数字发送者并经过 OneBot 事件转换。
+        const insoulforge::json systemEvent = {{"session_id", "group:100"}, {"message_id", "1790000000000001"},
+          {"sender", {{"user_id", "system"}, {"name", "系统异步任务"}}},
+          {"segments", insoulforge::json::array({{{"type", "text"}, {"text", "任务完成"}}})}};
+        check(insoulforge::MessageRecord::isSystem(systemEvent), "internal task uses the system sender", kTestName);
+        const auto systemDecision = drogon::sync_wait(insoulforge::MessageRouter::route(
+          insoulforge::SessionId::group("100"), "1790000000000001", insoulforge::json::array({systemEvent})));
+        check(systemDecision.shouldReply && systemDecision.isPriority, "async task result triggers a priority reply",
+          kTestName);
+        check(systemDecision.maxLength == 100, "system message keeps its reply length", kTestName);
 
         config.selfQQNumber = originalSelfId;
         database.close();
@@ -1059,6 +1102,92 @@ namespace {
         SchemaMigrator::migrate(db.handle());
         check(TaskStore::getPendingScheduledTasks().size() == 2, "repeated startup does not duplicate data", kTestName);
         db.close();
+    }
+
+    void testSystemSenderMigration() {
+        using namespace insoulforge;
+        constexpr std::string_view kTestName = "system sender migration";
+        sqlite3 *db = nullptr;
+        check(sqlite3_open(":memory:", &db) == SQLITE_OK, "opens fixture", kTestName);
+        if (!db)
+            return;
+        SchemaMigrator::migrate(db);
+        json content;
+        content["sender"] = {{"user_id", "10000000000"}, {"name", "系统任务"}};
+        content["segments"] = json::array({{{"type", "text"}, {"text", "10000000000"}}});
+        content["tool_history"] = json::array({{{"args", {{"user_id", "10000000000"}}}}});
+        const Statement insert(db, "INSERT INTO chat_records(session_id,role,content) VALUES('group:42','user',?)");
+        for (const auto &sender:
+          {json("10000000000"), json(10000000000ULL), json("person"), json("system"), json("self")}) {
+            auto record = content;
+            record["sender"]["user_id"] = sender;
+            insert.bind(1, dumpJson(record));
+            insert.execOrThrow();
+            insert.reset();
+        }
+        json knownSelf = {{"self_id", 42}, {"sender", {{"user_id", "person"}}},
+          {"segments",
+            json::array(
+              {{{"type", "at"}, {"target", {{"user_id", "42"}}}}, {{"type", "poke"}, {"target", {{"user_id", "42"}}}},
+                {{"type", "member_event"}, {"operator", {{"user_id", "42"}}}}, {{"type", "text"}, {"text", "42"}}})}};
+        auto assistant = knownSelf;
+        assistant.erase("self_id");
+        assistant["sender"]["user_id"] = "42";
+        auto unknownSelf = knownSelf;
+        unknownSelf.erase("self_id");
+        for (const auto &record: {knownSelf, assistant, unknownSelf}) {
+            insert.bind(1, dumpJson(record));
+            insert.execOrThrow();
+            insert.reset();
+        }
+        Statement(db, "UPDATE chat_records SET role='assistant' WHERE id=7").execOrThrow();
+        const auto read = [db](i32 id) {
+            const Statement query(db, "SELECT content FROM chat_records WHERE id=?");
+            query.bind(1, id);
+            return query.step() ? json::parse(query.getText(0)) : json{};
+        };
+        Statement(db, "PRAGMA user_version=27").execOrThrow();
+        Statement(db, "CREATE TRIGGER reject_system_update BEFORE UPDATE ON chat_records WHEN OLD.id=2 "
+                      "BEGIN SELECT RAISE(ABORT,'test rollback'); END")
+          .execOrThrow();
+        bool failed = false;
+        try {
+            SchemaMigrator::migrate(db);
+        } catch (const DbError &) {
+            failed = true;
+        }
+        {
+            const Statement version(db, "PRAGMA user_version");
+            check(failed && version.step() && version.getInt(0) == 27 && read(1) == content,
+              "failed conversion rolls back both records and schema version", kTestName);
+        }
+        Statement(db, "DROP TRIGGER reject_system_update").execOrThrow();
+        SchemaMigrator::migrate(db);
+        auto expected = content;
+        expected["sender"]["user_id"] = "system";
+        check(read(1) == expected && read(2) == expected,
+          "string and numeric legacy senders convert without modifying text or tool arguments", kTestName);
+        check(read(3)["sender"]["user_id"] == "person" && read(4) == expected &&
+                read(5)["sender"]["user_id"] == "self" && MessageRecord::isSystem(read(1)) &&
+                !MessageRecord::isSystem(content),
+          "runtime recognizes only system and preserves other identities", kTestName);
+        check(read(6)["segments"][0]["target"]["user_id"] == "self" &&
+                read(6)["segments"][1]["target"]["user_id"] == "self" &&
+                read(6)["segments"][2]["operator"]["user_id"] == "self" && read(6)["segments"][3]["text"] == "42" &&
+                read(7)["sender"]["user_id"] == "self" && read(7)["segments"][0]["target"]["user_id"] == "self" &&
+                read(8) == unknownSelf,
+          "confirmed historical self references convert while unknown identities and text are preserved", kTestName);
+        SchemaMigrator::migrate(db);
+        check(read(1) == expected, "repeated startup preserves converted messages", kTestName);
+        insert.bind(1, dumpJson(knownSelf));
+        insert.execOrThrow();
+        insert.reset();
+        Statement(db, "PRAGMA user_version=28").execOrThrow();
+        SchemaMigrator::migrate(db);
+        check(read(9)["segments"][0]["target"]["user_id"] == "self",
+          "databases already at v28 also migrate self references", kTestName);
+        // Statements 必须先析构；close_v2 允许其在离开作用域时完成清理。
+        sqlite3_close_v2(db);
     }
 
     void testSchemaMigration() {
@@ -1983,8 +2112,8 @@ namespace {
         MemoryMaintenanceStore::apply(db, privateId,
           {.personEntries = {{insoulforge::UserId{11}, "准备比赛"}}, .affinity = {{insoulforge::UserId{11}, -1}}});
         const auto senders = json::array({{{"sender", {{"user_id", "11"}}}}, {{"sender", {{"user_id", "11"}}}},
-          {{"sender", {{"user_id", "self"}}}}, {{"sender", {{"user_id", std::string(kSystemUserId)}}}},
-          {{"sender", {{"user_id", "33"}}}}, {{"segments", {{{"type", "at"}, {"target", {{"user_id", "22"}}}}}}}});
+          {{"sender", {{"user_id", "self"}}}}, {{"sender", {{"user_id", "system"}}}}, {{"sender", {{"user_id", "33"}}}},
+          {{"segments", {{{"type", "at"}, {"target", {{"user_id", "22"}}}}}}}});
         const auto profiles = PersonMemoryStore::getForSenders(senders);
         check(profiles.size() == 1 && profiles[0]["user_id"] == "11" && profiles[0]["pending_entries"].size() == 2 &&
                 profiles[0]["pending_entries"][1]["source_session"] == privateId.toString() &&
@@ -2739,10 +2868,10 @@ namespace {
         message["segments"].push_back({{"type", "at"}, {"target", {{"user_id", "99"}}}});
         check(route().action == insoulforge::RouterDecision::Action::SKIP, "mentioning another user still skips",
           kTestName);
-        message["segments"].back()["target"]["user_id"] = "42";
+        message["segments"].back()["target"]["user_id"] = "self";
         check(route().action == insoulforge::RouterDecision::Action::REPLY, "bot mention still replies", kTestName);
         message["segments"].erase(1);
-        message["sender"]["user_id"] = std::string(insoulforge::kSystemUserId);
+        message["sender"]["user_id"] = "system";
         check(route().action == insoulforge::RouterDecision::Action::REPLY, "system tasks still reply", kTestName);
         message["sender"]["user_id"] = "11";
         const auto privateId = insoulforge::SessionId::privateChat(insoulforge::UserId{11});
@@ -2979,7 +3108,7 @@ namespace {
         check(cut && (*cut)["truncated"] == true &&
                 (*cut)["segments"][0]["text"] == std::string(199, 'a') + "😀",
           "truncation preserves four-byte Unicode characters", kTestName);
-        exact["sender"]["user_id"] = std::string(insoulforge::kSystemUserId);
+        exact["sender"]["user_id"] = "system";
         check(!insoulforge::SharedConversationContext::projectMessage(exact),
           "internal system messages are not shared", kTestName);
         db.close();
@@ -3726,6 +3855,7 @@ auto main() -> int {
     testOneBotMessageFormatter();
     testNewWorkflowNormalizesOneBotEvent();
     testNewWorkflowNormalizesOneBotNotices();
+    testSelfIdentityNormalization();
     testNewWorkflowDetectsCommands();
     testDefaultPrivateSessionState();
     testSessionReplyCoalescing();
@@ -3741,6 +3871,7 @@ auto main() -> int {
     testSchemaMigration();
     testSessionIdentity();
     testSessionIdentityMigration();
+    testSystemSenderMigration();
     testStringUserId();
     testTextUserIdMigration();
     testFileToolStore();

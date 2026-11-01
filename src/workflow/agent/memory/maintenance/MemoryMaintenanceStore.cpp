@@ -34,7 +34,7 @@ namespace insoulforge::MemoryMaintenanceStore {
         }
     } // namespace
 
-    void apply(const Database &database, const SessionId sessionId, const MemoryMaintenanceResult &result) {
+    void apply(const Database &database, const SessionId &sessionId, const MemoryMaintenanceResult &result) {
         std::unique_lock lock(database.mutex());
         sqlite3 *handle = database.handle();
         execOrThrow(handle, "BEGIN IMMEDIATE");
@@ -49,12 +49,12 @@ namespace insoulforge::MemoryMaintenanceStore {
                 statement.execOrThrow();
             }
 
-            for (const PreparedLongTermMemory &memory: result.longTerm) {
+            for (const auto &[content, embedding]: result.longTerm) {
                 const Statement statement(
                   handle, "INSERT INTO long_term_memory (session_id, content, embedding) VALUES (?, ?, ?)");
                 statement.bind(1, sessionId.toString());
-                statement.bind(2, memory.content);
-                statement.bind(3, toBytes(memory.embedding));
+                statement.bind(2, content);
+                statement.bind(3, toBytes(embedding));
                 statement.execOrThrow();
             }
             const std::unordered_set<i64> replacedIds(result.replacedLongTermIds.begin(), result.replacedLongTermIds.end());

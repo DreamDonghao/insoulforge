@@ -125,8 +125,8 @@ namespace insoulforge {
                 if (registered.tool.mcpManagement && !query.mcpManagement)
                     continue;
                 if (registered.tool.mcpVersion != 0) {
-                    const auto selected = query.mcpTools.find(registered.tool.name);
-                    if (selected == query.mcpTools.end() || selected->second != registered.tool.mcpVersion)
+                    if (const auto selected = query.mcpTools.find(registered.tool.name);
+                      selected == query.mcpTools.end() || selected->second != registered.tool.mcpVersion)
                         continue;
                 }
             }
@@ -170,8 +170,8 @@ namespace insoulforge {
                     Logger::warn(ctx.sessionId, "Tool", fmt::format("最后一轮拒绝非回复工具: {}", name));
                     co_return "最后一轮只允许回复类工具，未执行: " + name;
                 }
-                const auto offered = ctx.offeredMcpTools.find(name);
-                if (it->second.tool.mcpVersion != 0 || offered != ctx.offeredMcpTools.end()) {
+                if (const auto offered = ctx.offeredMcpTools.find(name);
+                  it->second.tool.mcpVersion != 0 || offered != ctx.offeredMcpTools.end()) {
                     if (offered == ctx.offeredMcpTools.end() || offered->second != it->second.tool.mcpVersion)
                         co_return "MCP 工具未在本轮开放或定义已更新，请查询并启用后在下一轮调用：" + name;
                 }
@@ -241,15 +241,17 @@ namespace insoulforge {
                 return std::unexpected("不支持的工具配置字段: " + key);
         }
         std::unique_lock lock(m_mutex);
-        const auto it = m_tools.find(name);
-        if (it == m_tools.end() || !it->second.pluginId.starts_with("builtin."))
+        if (const auto it = m_tools.find(name); it == m_tools.end() || !it->second.pluginId.starts_with("builtin.")) {
             return std::unexpected("内置工具不存在: " + name);
+        }
         auto next = m_builtinConfig;
-        if (!next.contains(name))
+        if (!next.contains(name)) {
             next[name] = {{"enabled", true}, {"description", nullptr}};
+        }
         next[name].update(patch);
-        if (const auto saved = Config::instance().saveBuiltinToolsConfig(next); !saved)
+        if (const auto saved = Config::instance().saveBuiltinToolsConfig(next); !saved) {
             return std::unexpected(saved.error().message);
+        }
         m_builtinConfig = std::move(next);
         return {};
     }

@@ -31,7 +31,7 @@ namespace insoulforge {
     namespace LongTermMemoryStore {
         /// @brief 暴力余弦检索 topK 条相似记忆
         /// @return (id, 内容, 余弦相似度)，按相似度降序；维度不匹配的行跳过
-        [[nodiscard]] auto searchSimilar(SessionId sessionId, const std::vector<f32> &query, i32 topK)
+        [[nodiscard]] auto searchSimilar(const SessionId &sessionId, const std::vector<f32> &query, i32 topK)
           -> std::vector<SimilarMemory>;
 
         /// @brief 分页列出长期记忆（新→旧）；未指定 sessionId 时列出全部会话

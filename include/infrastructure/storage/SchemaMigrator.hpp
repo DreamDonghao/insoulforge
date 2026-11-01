@@ -19,7 +19,7 @@ namespace insoulforge::SchemaMigrator {
     inline constexpr i32 kMinimumSupportedVersion = 24;
 
     /// @brief 当前代码对应的最新 Schema 版本号
-    inline constexpr i32 kLatestVersion = 27;
+    inline constexpr i32 kLatestVersion = 29;
 
     /// @brief 执行迁移：检查当前版本并按序应用所有待执行步骤
     /// @throws DbError 数据库版本不受支持，或建库/迁移失败（已回滚）。

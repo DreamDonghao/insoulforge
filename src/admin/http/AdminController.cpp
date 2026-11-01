@@ -866,7 +866,7 @@ auto AdminController::getPeople(HttpRequestPtr req, std::function<void(const Htt
 auto AdminController::getPerson(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
   const std::string &userId) const -> Task<> {
     const auto id = UserId::parse(userId);
-    if (!id || id->toString() == "self" || *id == UserId{kSystemUserId}) {
+    if (!id || id->toString() == "self" || id->toString() == "system") {
         callback(jsonResponse(AdminResponse::errorJson("无效的用户 ID")));
         co_return;
     }
@@ -885,7 +885,7 @@ auto AdminController::consolidatePerson(HttpRequestPtr req,
     auto status = drogon::k400BadRequest;
     std::string message = "无效的用户 ID";
     const auto id = UserId::parse(userId);
-    if (id && id->toString() != "self" && *id != UserId{kSystemUserId}) {
+    if (id && id->toString() != "self" && id->toString() != "system") {
         if (PersonMemoryStore::getPerson(*id).is_null()) {
             status = drogon::k404NotFound;
             message = "没有该人物的记录";
@@ -964,7 +964,7 @@ auto AdminController::updatePerson(HttpRequestPtr req, std::function<void(const 
     std::string message = Config::instance().affinityEnabled.load(std::memory_order_relaxed)
       ? "人物数据无效：好感度须为 -100～100 的整数，记忆须为非空文本"
       : "人物数据无效：记忆须为非空文本";
-    if (id && id->toString() != "self" && *id != UserId{kSystemUserId} && body && validPersonEdit(*body)) {
+    if (id && id->toString() != "self" && id->toString() != "system" && body && validPersonEdit(*body)) {
         const bool saved = PersonMemoryStore::updatePerson(*id, body->at("expected"), body->at("replacement"));
         status = saved ? drogon::k200OK : drogon::k409Conflict;
         message = saved ? "人物信息已保存" : "人物信息已变化，请重新读取后编辑；当前草稿已保留";
@@ -981,7 +981,7 @@ auto AdminController::deletePerson(HttpRequestPtr req, std::function<void(const 
     const auto body = parseJsonBody(req);
     auto status = drogon::k400BadRequest;
     std::string message = "无效的人物删除请求";
-    if (id && id->toString() != "self" && *id != UserId{kSystemUserId} && body && body->contains("expected") &&
+    if (id && id->toString() != "self" && id->toString() != "system" && body && body->contains("expected") &&
         body->at("expected").is_object()) {
         const bool removed = PersonMemoryStore::deletePerson(*id, body->at("expected"));
         status = removed ? drogon::k200OK : drogon::k409Conflict;

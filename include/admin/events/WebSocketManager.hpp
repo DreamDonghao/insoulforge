@@ -34,18 +34,18 @@ namespace insoulforge {
         /// @brief 订阅指定会话的消息
         /// @param conn WebSocket 连接指针
         /// @param sessionId 带类型的会话 ID
-        void subscribeSession(const drogon::WebSocketConnectionPtr &conn, SessionId sessionId);
+        void subscribeSession(const drogon::WebSocketConnectionPtr &conn, const SessionId &sessionId);
 
         /// @brief 取消订阅指定会话
         /// @param conn WebSocket 连接指针
         /// @param sessionId 带类型的会话 ID
-        void unsubscribeSession(const drogon::WebSocketConnectionPtr &conn, SessionId sessionId);
+        void unsubscribeSession(const drogon::WebSocketConnectionPtr &conn, const SessionId &sessionId);
 
         /// @brief 向订阅该会话或未设置订阅的连接推送新消息
         /// @param sessionId 带类型的会话 ID
         /// @param role 角色（user/assistant）
         /// @param content 消息内容
-        void pushMessage(SessionId sessionId, const std::string &role, const std::string &content);
+        void pushMessage(const SessionId &sessionId, const std::string &role, const std::string &content);
 
         /// @brief 广播事件到所有连接
         /// @param type 事件类型

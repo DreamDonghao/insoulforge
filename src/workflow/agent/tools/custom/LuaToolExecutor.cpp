@@ -298,7 +298,7 @@ namespace insoulforge::LuaToolExecutor {
             lua_State *m_state;
         };
 
-        [[nodiscard]] auto contextJson(const std::optional<SessionId> sessionId) -> json {
+        [[nodiscard]] auto contextJson(const std::optional<SessionId> &sessionId) -> json {
             return {{"session_id", sessionId ? json(*sessionId) : json(nullptr)},
               {"is_private", (sessionId && sessionId->isPrivate())}};
         }
@@ -486,9 +486,7 @@ namespace insoulforge::LuaToolExecutor {
                 } else if (!sessionId) {
                     response = {{"ok", false}, {"error", "会话 ID 无效"}};
                 } else {
-                    const auto sent = (sessionId && sessionId->isPrivate())
-                                        ? co_await MessageService::sendPrivateMsg(UserId{sessionId->targetId()}, text)
-                                        : co_await MessageService::sendGroupMsg(*sessionId, text);
+                    const auto sent = co_await MessageService::sendToSession(*sessionId, text);
                     response = sent ? json{{"ok", true}, {"message_id", std::to_string(*sent)}}
                                     : json{{"ok", false}, {"error", sent.error()}};
                 }

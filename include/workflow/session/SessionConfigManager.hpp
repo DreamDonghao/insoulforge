@@ -8,7 +8,6 @@
 
 #include <drogon/utils/coroutine.h>
 
-#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
 #include <workflow/session/SessionStore.hpp>
 
@@ -17,21 +16,21 @@ namespace insoulforge::SessionConfigManager {
     /// @brief 获取会话统计
     /// @param sessionId 带类型的会话 ID
     /// @return 已保存的统计信息；不存在时消息数为 0
-    [[nodiscard]] auto getConfig(SessionId sessionId) -> SessionConfig;
+    [[nodiscard]] auto getConfig(const SessionId &sessionId) -> SessionConfig;
 
     /// @brief 检查会话统计记录是否存在
     /// @param sessionId 带类型的会话 ID
     /// @return 是否存在
-    [[nodiscard]] auto contains(SessionId sessionId) -> bool;
+    [[nodiscard]] auto contains(const SessionId &sessionId) -> bool;
 
     /// @brief 保存会话统计
     /// @param sessionId 带类型的会话 ID
     /// @param config 待保存的统计信息
-    void addConfig(SessionId sessionId, const SessionConfig &config = SessionConfig());
+    void addConfig(const SessionId &sessionId, const SessionConfig &config = SessionConfig());
 
     /// @brief 增加消息计数
     /// @param sessionId 带类型的会话 ID
-    void incrementMessageCount(SessionId sessionId);
+    void incrementMessageCount(const SessionId &sessionId);
 
     /// @brief 查询 OneBot 并更新会话名称（群聊为群名，私聊为 QQ 昵称）
     /// @param sessionId 带类型的会话 ID

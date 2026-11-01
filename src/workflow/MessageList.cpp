@@ -10,7 +10,7 @@
 #include <workflow/history/SharedConversationContext.hpp>
 
 namespace insoulforge {
-    MessageList::MessageList(const SessionId sessionId, const Database &database, const Config &config) :
+    MessageList::MessageList(const SessionId &sessionId, const Database &database, const Config &config) :
         m_sessionId(sessionId), m_database(database), m_config(config) {
         // 总结任务完成前不能丢失其待删除前缀；模型可见范围由 snapshotLocked 单独限制。
         for (const json &record:

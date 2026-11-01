@@ -2,7 +2,6 @@
 /// @brief 信息工具插件实现（INFORMATION，查询数据、获取答案，不产生副作用）
 
 #include <infrastructure/CommonUtil.hpp>
-#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
@@ -108,7 +107,7 @@ namespace insoulforge {
             .description = "获取QQ收藏表情中所有可用的表情名称列表。",
             .parameters = json(),
             .handler = [](json, const ToolCallContext ctx) -> drogon::Task<std::string> {
-                const auto sessionId = ctx.requireSession();
+                const auto &sessionId = ctx.requireSession();
                 const json emojis = co_await ToolRuntime::fetchFavoriteEmojis(sessionId);
                 if (emojis.empty()) {
                     co_return std::string("表情库为空（QQ收藏表情列表获取失败或没有收藏表情）");
@@ -148,7 +147,7 @@ namespace insoulforge {
                 if (query.empty())
                     co_return std::string("请提供回忆关键词");
 
-                const SessionId sessionId = ctx.requireSession();
+                const SessionId &sessionId = ctx.requireSession();
                 const auto result = co_await LongTermMemory::searchMemory(query, 3, sessionId);
                 if (!result || result->empty()) {
                     co_return "想不起来了，没有找到相关记忆";
@@ -178,7 +177,7 @@ namespace insoulforge {
                            "拿到答案后据此组织回复。简单闲聊、日常对话禁止调用。",
             .parameters = thinkParams,
             .handler = [](json args, ToolCallContext ctx) -> drogon::Task<std::string> {
-                const SessionId sessionId = ctx.requireSession();
+                const SessionId &sessionId = ctx.requireSession();
                 const auto &value = atOrNull(args, "question");
                 if (!value.is_string() || trim(value.get<std::string>()).empty()) {
                     co_return std::string("deep_think 需要非空 question，请提供完整问题、必要条件和相关资料");
@@ -223,9 +222,7 @@ namespace insoulforge {
                            "时使用。返回任务编号、触发时间和备忘内容。",
             .parameters = json(),
             .handler = [](json, const ToolCallContext ctx) -> drogon::Task<std::string> {
-                const SessionId sessionId = ctx.requireSession();
-                const auto &targetId = sessionId.targetId();
-                const auto sessionType = sessionId.typeName();
+                const SessionId &sessionId = ctx.requireSession();
                 const auto tasks = TaskStore::getPendingScheduledTasksBySession(sessionId);
                 if (tasks.empty()) {
                     co_return std::string("当前会话没有待触发的定时任务");

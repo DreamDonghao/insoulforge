@@ -16,9 +16,6 @@
 #include <infrastructure/NumericTypes.hpp>
 
 namespace insoulforge {
-    /// @brief 内部系统消息的虚拟发送者，不能作为真实用户操作。
-    inline constexpr std::string_view kSystemUserId = "10000000000";
-
     /// @brief 按原始字符串保存的用户身份，不要求 ID 为数字。
     /// @note 不裁剪空白、不改变大小写、不移除前导零；例如 "01" 与 "1" 是不同身份。
     /// 不提供默认构造或隐式类型转换；协议层的数字限制由调用方单独校验。

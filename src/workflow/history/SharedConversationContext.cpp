@@ -3,8 +3,6 @@
 
 #include <algorithm>
 
-#include <ctime>
-
 #include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/SessionId.hpp>
 #include <workflow/OneBotEventWorkflow.hpp>
@@ -72,7 +70,7 @@ namespace insoulforge::SharedConversationContext {
         return result;
     }
 
-    auto build(const SessionId receiverId, const i32 messagesPerSession) -> json {
+    auto build(const SessionId &receiverId, const i32 messagesPerSession) -> json {
         json result = json::array();
         const auto now = std::time(nullptr);
         const auto earliest = formatUnixTime(now - 3 * 24 * 60 * 60);

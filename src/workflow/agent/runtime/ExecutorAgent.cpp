@@ -25,7 +25,7 @@
 namespace insoulforge::ExecutorAgent {
     namespace {
         /// @brief 获取系统提示词（私聊与群聊使用各自的人设提示词，差异行按会话类型拼接）
-        auto getSystemPrompt(const SessionId sessionId) -> std::string {
+        auto getSystemPrompt(const SessionId &sessionId) -> std::string {
             std::string prompt = sessionId.isPrivate() ? PromptService::getExecutorPrivateSystemPrompt()
                                                        : PromptService::getExecutorSystemPrompt();
             prompt +=
@@ -109,6 +109,7 @@ execution_status=no_reply 表示当时选择不回复；failed/send_failed 表�
   字段说明：
 
   - sender.user_id 为 "self" 的记录是我自己发出的消息（name 形如「昵称(我)」）
+  - target.user_id 或 operator.user_id 为 "self" 表示 @、拍一拍或成员事件的对象是我；"system" 是内部系统任务身份，不是真实用户。
   - segments 是消息内容和顺序的唯一来源：text、at、image、face、sticker、poke、member_event 都以类型化段表示
   - image 段的 image_index 从 0 开始；图片来源不会出现在上下文。用户要求保存图片为表情时，save_sticker 传该消息的 message_id、image_index 和名称
   - 需要引用回复某条消息时，把该记录的 message_id 传给 reply_with_quote
@@ -605,11 +606,11 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
 
     } // namespace
 
-    auto buildSystemPrompt(const SessionId sessionId) -> std::string {
+    auto buildSystemPrompt(const SessionId &sessionId) -> std::string {
         return buildSystemPrompt(sessionId, McpTools::instance().directory());
     }
 
-    auto buildSystemPrompt(const SessionId sessionId, const json &mcpDirectory) -> std::string {
+    auto buildSystemPrompt(const SessionId &sessionId, const json &mcpDirectory) -> std::string {
         auto prompt = getSystemPrompt(sessionId);
         if (!sessionId.isPrivate()) {
             if (const auto additional = SessionStore::getSessionConfig(sessionId).additionalPrompt;

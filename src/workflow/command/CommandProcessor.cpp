@@ -2,7 +2,6 @@
 /// @brief 消息工作流的管理命令处理实现
 
 #include <infrastructure/CommonUtil.hpp>
-#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <onebot/transport/OneBotClient.hpp>
@@ -37,8 +36,8 @@ namespace insoulforge::CommandProcessor {
         const auto parsedSession = SessionId::parse(getStr(message, "session_id"));
         if (!parsedSession)
             return false;
-        const auto sessionId = *parsedSession;
-        if (sessionId.isPrivate() || !MessageRecord::mentions(message, UserId{Config::instance().selfQQNumber})) {
+        const auto &sessionId = *parsedSession;
+        if (sessionId.isPrivate() || !MessageRecord::mentions(message, UserId{"self"})) {
             return false;
         }
         if (commandText(message).empty())
@@ -47,7 +46,7 @@ namespace insoulforge::CommandProcessor {
     }
 
     auto execute(const json &message) -> drogon::Task<std::string> {
-        const SessionId sessionId = SessionId::parse(getStr(message, "session_id")).value();
+        const auto sessionId = MessageRecord::getSessionId(message);
         const auto sender = UserId::parse(getStr(atOrNull(message, "sender"), "user_id"));
         const bool hasPermission = sender && AdminStore::isAdmin(*sender);
 

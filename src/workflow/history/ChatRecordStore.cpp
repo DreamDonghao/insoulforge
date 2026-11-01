@@ -10,7 +10,7 @@
 #include <workflow/history/ChatRecordStore.hpp>
 
 namespace insoulforge::ChatRecordStore {
-    void replaceSessionChatRecords(const Database &db, const SessionId sessionId, const json &messages) {
+    void replaceSessionChatRecords(const Database &db, const SessionId &sessionId, const json &messages) {
         std::unique_lock lock(db.mutex());
         auto *handle = db.handle();
         Statement(handle, "BEGIN IMMEDIATE").execOrThrow();
@@ -35,7 +35,7 @@ namespace insoulforge::ChatRecordStore {
     }
 
     void addChatRecord(
-      const Database &db, const SessionId sessionId, const std::string &role, const std::string &content) {
+      const Database &db, const SessionId &sessionId, const std::string &role, const std::string &content) {
         std::unique_lock lock(db.mutex());
         const Statement stmt(db.handle(), "INSERT INTO chat_records (session_id, role, content) VALUES (?, ?, ?)");
         stmt.bind(1, sessionId.toString());
@@ -44,7 +44,7 @@ namespace insoulforge::ChatRecordStore {
         stmt.exec();
     }
 
-    auto getChatRecords(const Database &db, const SessionId sessionId, const i32 limit) -> std::vector<json> {
+    auto getChatRecords(const Database &db, const SessionId &sessionId, const i32 limit) -> std::vector<json> {
         std::shared_lock lock(db.mutex());
         std::vector<json> records;
 
@@ -64,7 +64,7 @@ namespace insoulforge::ChatRecordStore {
         return records;
     }
 
-    auto getChatRecordsWithIds(const SessionId sessionId, const i32 limit) -> std::vector<json> {
+    auto getChatRecordsWithIds(const SessionId &sessionId, const i32 limit) -> std::vector<json> {
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
         std::vector<json> records;
@@ -95,7 +95,7 @@ namespace insoulforge::ChatRecordStore {
         return sessionIds;
     }
 
-    auto findContentByMessageId(const SessionId sessionId, const u64 messageId) -> std::optional<std::string> {
+    auto findContentByMessageId(const SessionId &sessionId, const u64 messageId) -> std::optional<std::string> {
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
         const Statement stmt(db.handle(), "SELECT content FROM chat_records WHERE session_id = ? ORDER BY id DESC");
@@ -126,7 +126,7 @@ namespace insoulforge::ChatRecordStore {
         stmt.exec();
     }
 
-    void clearSessionChatRecords(const Database &db, const SessionId sessionId) {
+    void clearSessionChatRecords(const Database &db, const SessionId &sessionId) {
         std::unique_lock lock(db.mutex());
         const Statement stmt(db.handle(), "DELETE FROM chat_records WHERE session_id = ?");
         stmt.bind(1, sessionId.toString());
@@ -134,14 +134,14 @@ namespace insoulforge::ChatRecordStore {
         Logger::info(sessionId, "History", "聊天记录已清空");
     }
 
-    void addChatRecord(const SessionId sessionId, const std::string &role, const std::string &content) {
+    void addChatRecord(const SessionId &sessionId, const std::string &role, const std::string &content) {
         addChatRecord(Database::instance(), sessionId, role, content);
     }
-    auto getChatRecords(const SessionId sessionId, const i32 limit) -> std::vector<json> {
+    auto getChatRecords(const SessionId &sessionId, const i32 limit) -> std::vector<json> {
         return getChatRecords(Database::instance(), sessionId, limit);
     }
     auto getSessionIds() -> std::vector<SessionId> { return getSessionIds(Database::instance()); }
-    void clearSessionChatRecords(const SessionId sessionId) {
+    void clearSessionChatRecords(const SessionId &sessionId) {
         clearSessionChatRecords(Database::instance(), sessionId);
     }
 } // namespace insoulforge::ChatRecordStore

@@ -3,7 +3,6 @@
 
 #include <fmt/format.h>
 
-#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/UserId.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>

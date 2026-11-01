@@ -168,6 +168,8 @@ insoulforge/
 
 `workflow/message/MessageService` 组织发送流程并将发送成功或失败记录写入上下文，
 通过 `onebot/messaging/MessageFormatter` 转换文本，再调用 `OneBotClient` 发送。
+工作流、工具与后台任务统一调用 `MessageService::sendToSession`，直接传入 `SessionId`；
+群聊和私聊的接口选择集中在发送层，调用方无需拆解会话或重新构造用户身份。
 会话名称查询与保存由 `workflow/session/SessionConfigManager` 负责。
 
 ## 架构
@@ -620,6 +622,8 @@ OneBot 11 的数字要求仅保留在协议适配层，目标无法转换时不�
 - 格式化使用 `.clang-format`（Google 风格，4 空格缩进，120 列），提交前建议运行 clang-format 与 clang-tidy
 - 单例统一 `static ClassName& instance()` + 私有构造
 
-用户身份统一使用 `user_id`：聊天记录的 `sender`、提及/拍一拍的 `target`、成员事件的 `operator`、人物记忆、会话外号、管理员及黑名单接口和内置工具均遵循这一命名。JSON 中使用原始字符串；机器人自身记录继续使用 `"self"`。数据库 v25 自动重命名身份列，并转换历史聊天记录与会话外号，保留原始正文和自定义工具参数。数据库 v26 将用户身份列改为文本，业务层不再要求数字身份。OneBot 原始 CQ 码的 `qq` 参数与既有连接配置键（如 `selfQQNumber`）保持兼容。
+用户身份统一使用 `user_id`：聊天记录的 `sender`、提及/拍一拍的 `target`、成员事件的 `operator`、人物记忆、会话外号、管理员及黑名单接口和内置工具均遵循这一命名。真实用户使用原始字符串；机器人自身在发送者、提及/拍一拍目标和成员事件操作者位置均使用 `"self"`。实时事件优先按上报的 `self_id` 转换，缺失时使用配置中的机器人账号，两者均不可用时保留原值。Router、命令解析和回复期间的排队判断直接识别 `self`。数据库 v25 自动重命名身份列，并转换历史聊天记录与会话外号，保留原始正文和自定义工具参数。数据库 v26 将用户身份列改为文本，业务层不再要求数字身份。OneBot 原始 CQ 码的 `qq` 参数与既有连接配置键（如 `selfQQNumber`）保持兼容。
 
-定时任务和异步任务通过 `enqueueSystemMessage` 直接构造内部消息，不伪造 OneBot 事件，系统发送者标记独立于会话类型。工作流和工具中存在真实会话时必须使用 `SessionId`；只有全局日志、网络请求归属和后台工具测试等允许缺省的边界使用 `std::optional<SessionId>`。
+定时任务和异步任务通过 `enqueueSystemMessage` 直接构造内部消息，不伪造 OneBot 事件；系统发送者使用 `"system"`，不再占用数字用户 ID。数据库 v28 转换历史系统发送者，v29 仅按记录自身的 `self_id` 或助手真实发送者身份转换历史 `self` 引用；缺少依据时保留原值，不用当前账号猜测历史身份，不改正文、工具参数或会话目标。工作流和工具中存在真实会话时必须使用 `SessionId`；只有全局日志、网络请求归属和后台工具测试等允许缺省的边界使用 `std::optional<SessionId>`。
+
+`at_user(user_id="self")` 返回内部 CQ 提及，发送时由 OneBot 适配层还原配置中的真实账号；账号未配置时返回发送失败并保留失败记录，不发送无效请求。返回的助手记录仍使用 `self`。禁言、拉黑、私聊目标等工具继续拒绝 `self`；配置、原始协议数据和会话目标保持真实 ID，正文与工具原始参数不做全局替换。

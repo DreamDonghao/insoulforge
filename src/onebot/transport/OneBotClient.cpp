@@ -1,6 +1,10 @@
 /// @file OneBotClient.cpp
 /// @brief OneBot API 客户端实现
 
+#include <charconv>
+
+#include <regex>
+
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
 #include <infrastructure/UserId.hpp>
@@ -12,6 +16,18 @@
 
 namespace insoulforge::OneBotClient {
     namespace {
+        /// @brief 仅在 OneBot 11 边界将群目标解析为非零数字，不借用用户身份类型。
+        auto numericGroupId(const SessionId &sessionId) -> std::optional<u64> {
+            if (!sessionId.isGroup())
+                return std::nullopt;
+            const auto &target = sessionId.targetId();
+            u64 number{};
+            const auto [end, error] = std::from_chars(target.data(), target.data() + target.size(), number);
+            if (error != std::errc{} || end != target.data() + target.size() || number == 0)
+                return std::nullopt;
+            return number;
+        }
+
         /// @brief 通用 API 调用
         /// @param tag 日志前缀，如 "[Msg]"、"[Sticker]"
         /// @param api API 名称，如 "send_group_msg"（内部补 "/" 前缀）
@@ -63,6 +79,14 @@ namespace insoulforge::OneBotClient {
         auto sendMessage(std::string api, const std::string targetKey, const u64 targetId, std::string message,
           const std::optional<SessionId> sessionId) -> drogon::Task<std::expected<u64, std::string>> {
             const bool isBase64Image = message.starts_with("[CQ:image,file=base64://");
+            // 内部 CQ 提及可以使用 self；仅在协议请求体中还原真实账号。
+            static const std::regex selfMention(R"(\[CQ:at,qq=self(?=[,\]]))");
+            if (!isBase64Image && std::regex_search(message, selfMention)) {
+                const auto selfId = Config::instance().selfQQNumber;
+                if (selfId == 0)
+                    co_return std::unexpected("未配置机器人账号，无法将 self 提及转换为 OneBot 用户 ID");
+                message = std::regex_replace(message, selfMention, fmt::format("[CQ:at,qq={}", selfId));
+            }
             json params;
             params[targetKey] = targetId;
             params["message"] = message;
@@ -101,8 +125,8 @@ namespace insoulforge::OneBotClient {
     }
 
     auto sendGroupMsg(const SessionId groupId, std::string message) -> drogon::Task<std::expected<u64, std::string>> {
-        const auto number = UserId{groupId.targetId()}.toU64();
-        if (!groupId.isGroup() || !number || *number == 0)
+        const auto number = numericGroupId(groupId);
+        if (!number)
             co_return std::unexpected("OneBot 11 要求有效的数字群 ID");
         co_return co_await sendMessage("send_group_msg", "group_id", *number, std::move(message), groupId);
     }
@@ -121,8 +145,8 @@ namespace insoulforge::OneBotClient {
             Logger::warn(groupId, "OneBot", "OneBot 11 要求非零数字用户 ID");
             co_return false;
         }
-        const auto groupNumber = UserId{groupId.targetId()}.toU64();
-        if (!groupId.isGroup() || !groupNumber || *groupNumber == 0) {
+        const auto groupNumber = numericGroupId(groupId);
+        if (!groupNumber) {
             Logger::warn(groupId, "OneBot", "OneBot 11 要求有效的数字群 ID");
             co_return false;
         }
@@ -139,8 +163,8 @@ namespace insoulforge::OneBotClient {
     }
 
     auto getGroupInfo(const SessionId groupId) -> drogon::Task<json> {
-        const auto groupNumber = UserId{groupId.targetId()}.toU64();
-        if (!groupId.isGroup() || !groupNumber || *groupNumber == 0) {
+        const auto groupNumber = numericGroupId(groupId);
+        if (!groupNumber) {
             Logger::warn(groupId, "OneBot", "OneBot 11 要求有效的数字群 ID");
             co_return json{};
         }
@@ -171,8 +195,8 @@ namespace insoulforge::OneBotClient {
             Logger::warn(groupId, "OneBot", "OneBot 11 要求非零数字用户 ID");
             co_return false;
         }
-        const auto groupNumber = UserId{groupId.targetId()}.toU64();
-        if (!groupId.isGroup() || !groupNumber || *groupNumber == 0) {
+        const auto groupNumber = numericGroupId(groupId);
+        if (!groupNumber) {
             Logger::warn(groupId, "OneBot", "OneBot 11 要求有效的数字群 ID");
             co_return false;
         }

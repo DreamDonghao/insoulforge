@@ -58,7 +58,11 @@ namespace insoulforge::MessageRecord {
     /// @details 目标身份读取 `target.user_id`。
     /// @param record 统一聊天记录
     /// @param userId 目标用户 ID
-    [[nodiscard]] auto mentions(const json &record, UserId userId) -> bool;
+    [[nodiscard]] auto mentions(const json &record, const UserId &userId) -> bool;
+
+    /// @brief 将已确认机器人账号对应的发送者、@/拍一拍目标及成员事件操作者规范化为 self。
+    /// @note 只处理结构化身份字段，不修改正文、会话目标或工具历史；返回是否发生修改。
+    [[nodiscard]] auto normalizeSelfReferences(json &record, const UserId &selfId) -> bool;
 
     /// @brief 判断记录是否由机器人发送
     [[nodiscard]] auto isAssistant(const json &record) -> bool;

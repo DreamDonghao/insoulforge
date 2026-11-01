@@ -8,7 +8,6 @@
 #include <vector>
 
 #include <infrastructure/CommonUtil.hpp>
-#include <infrastructure/SessionId.hpp>
 #include <infrastructure/UserId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/storage/Database.hpp>
@@ -42,8 +41,9 @@ namespace insoulforge::PersonMemoryStore {
         std::shared_lock lock(db.mutex());
         const Statement query(db.handle(), "SELECT DISTINCT user_id FROM person_memory_entries ORDER BY user_id");
         std::vector<UserId> people;
-        while (query.step())
-            people.push_back(UserId{query.getText(0)});
+        while (query.step()) {
+            people.emplace_back(query.getText(0));
+        }
         return people;
     }
 
@@ -55,7 +55,7 @@ namespace insoulforge::PersonMemoryStore {
         profile.bind(1, userId.toString());
         if (!profile.step())
             return std::nullopt;
-        PendingSnapshot snapshot{userId, 0, readProfile(userId, profile)};
+        PendingSnapshot snapshot{.userId = userId, .lastEntryId = 0, .profile = readProfile(userId, profile)};
         const Statement entries(db.handle(),
           "SELECT id, content, source_session, created_at FROM person_memory_entries WHERE user_id = ? ORDER BY id");
         entries.bind(1, userId.toString());
@@ -66,8 +66,9 @@ namespace insoulforge::PersonMemoryStore {
             snapshot.profile["pending_entries"].push_back(std::move(entry));
         }
         const bool hasMemory = !snapshot.profile["profile"].empty() || !snapshot.profile["relationship"].empty() ||
-          !snapshot.profile["recent_interactions"].empty();
-        return snapshot.lastEntryId || (includeExisting && hasMemory) ? std::optional{std::move(snapshot)} : std::nullopt;
+                               !snapshot.profile["recent_interactions"].empty();
+        return snapshot.lastEntryId || (includeExisting && hasMemory) ? std::optional{std::move(snapshot)}
+                                                                      : std::nullopt;
     }
 
     void applyConsolidation(const PendingSnapshot &snapshot, const json &profile) {
@@ -113,7 +114,8 @@ namespace insoulforge::PersonMemoryStore {
         std::shared_lock lock(db.mutex());
         const Statement query(
           db.handle(), "SELECT completed_day, running_day FROM person_memory_daily_state WHERE id = 1");
-        return query.step() ? DailyState{query.getText(0), query.getText(1)} : DailyState{};
+        return query.step() ? DailyState{.completedDay = query.getText(0), .runningDay = query.getText(1)}
+                            : DailyState{};
     }
 
     void saveDailyState(const DailyState &state) {
@@ -185,11 +187,14 @@ namespace insoulforge::PersonMemoryStore {
         auto matches(const json &current, const json &expected, const bool affinityEnabled) -> bool {
             if (current.is_null() || !expected.is_object())
                 return false;
-            for (const auto key: {"user_id", "affinity", "profile", "relationship", "recent_interactions", "pending_entries"}) {
-                if (std::string_view(key) == "affinity" && !affinityEnabled)
+            for (const auto key:
+              {"user_id", "affinity", "profile", "relationship", "recent_interactions", "pending_entries"}) {
+                if (std::string_view(key) == "affinity" && !affinityEnabled) {
                     continue;
-                if (!expected.contains(key) || current.at(key) != expected.at(key))
+                }
+                if (!expected.contains(key) || current.at(key) != expected.at(key)) {
                     return false;
+                }
             }
             return true;
         }
@@ -218,8 +223,9 @@ namespace insoulforge::PersonMemoryStore {
                     profile.bind(4, replacement->at("recent_interactions").dump());
                     profile.execOrThrow();
                     if (affinityEnabled && Config::instance().affinityEnabled.load(std::memory_order_relaxed)) {
-                        const Statement score(handle, "INSERT INTO person_affinity (user_id, affinity) VALUES (?, ?) ON "
-                                                      "CONFLICT(user_id) DO UPDATE SET affinity=excluded.affinity");
+                        const Statement score(handle,
+                          "INSERT INTO person_affinity (user_id, affinity) VALUES (?, ?) ON "
+                          "CONFLICT(user_id) DO UPDATE SET affinity=excluded.affinity");
                         score.bind(1, userId.toString());
                         score.bind(2, replacement->at("affinity").get<i32>());
                         score.execOrThrow();
@@ -269,10 +275,10 @@ namespace insoulforge::PersonMemoryStore {
         std::vector<UserId> senders;
         std::unordered_set<UserId> seen;
         for (const auto &record: recentConversation) {
-            const auto userId = UserId::parse(getStr(atOrNull(record, "sender"), "user_id"));
-            if (userId && userId->toString() != "self" && *userId != UserId{kSystemUserId} &&
-                seen.insert(*userId).second)
+            if (const auto userId = UserId::parse(getStr(atOrNull(record, "sender"), "user_id"));
+              userId && userId->toString() != "self" && userId->toString() != "system" && seen.insert(*userId).second) {
                 senders.push_back(*userId);
+            }
         }
         json result = json::array();
         if (senders.empty())
@@ -285,12 +291,12 @@ namespace insoulforge::PersonMemoryStore {
         }
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
-        const Statement query(db.handle(),
-          "SELECT p.user_id, p.profile, p.relationship, p.recent_interactions, "
-          "e.id, e.content, e.source_session, e.created_at "
-          "FROM person_memories p LEFT JOIN person_memory_entries e ON e.user_id = p.user_id "
-          "WHERE p.user_id IN (" +
-            placeholders + ") ORDER BY p.user_id, e.id");
+        const Statement query(
+          db.handle(), "SELECT p.user_id, p.profile, p.relationship, p.recent_interactions, "
+                       "e.id, e.content, e.source_session, e.created_at "
+                       "FROM person_memories p LEFT JOIN person_memory_entries e ON e.user_id = p.user_id "
+                       "WHERE p.user_id IN (" +
+                         placeholders + ") ORDER BY p.user_id, e.id");
         for (size_t index = 0; index < senders.size(); ++index)
             query.bind(static_cast<i32>(index + 1), senders[index].toString());
         std::map<UserId, json> profiles;

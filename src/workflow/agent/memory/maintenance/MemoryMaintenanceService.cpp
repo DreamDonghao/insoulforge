@@ -21,7 +21,7 @@ namespace insoulforge {
         constexpr i32 kRecallPerMemory = 2;
         constexpr size_t kMaxRecalledEntries = 20;
         [[nodiscard]] auto parseLlmJson(const std::optional<std::string> &result, const std::string_view tag,
-          const SessionId sessionId) -> std::optional<json> {
+          const SessionId &sessionId) -> std::optional<json> {
             if (!result) {
                 Logger::error(sessionId, "Memory", fmt::format("{}: API 请求失败", tag));
                 return std::nullopt;
@@ -44,7 +44,7 @@ namespace insoulforge {
             std::unordered_set<UserId> participants;
             for (const auto &record: records) {
                 if (const auto userId = UserId::parse(getStr(atOrNull(record, "sender"), "user_id"));
-                  userId && userId->toString() != "self" && *userId != UserId{kSystemUserId})
+                  userId && userId->toString() != "self" && userId->toString() != "system")
                     participants.insert(*userId);
             }
             const bool affinityEnabled = Config::instance().affinityEnabled.load(std::memory_order_relaxed);

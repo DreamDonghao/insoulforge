@@ -4,7 +4,9 @@
 #include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
+#include <infrastructure/config/Config.hpp>
 #include <onebot/incoming/OneBotEventNormalizer.hpp>
+#include <workflow/message/MessageRecord.hpp>
 #include <workflow/session/QQNameDirectory.hpp>
 
 namespace insoulforge::OneBotEventNormalizer {
@@ -13,6 +15,12 @@ namespace insoulforge::OneBotEventNormalizer {
 
         /// @brief 为缺少消息 ID 的通知事件生成进程内唯一 ID
         [[nodiscard]] auto makeSyntheticMessageId() -> i64 { return nextSyntheticMessageId.fetch_add(1); }
+
+        // 上报身份优先于本地配置；未配置且上报缺失时不猜测机器人账号。
+        [[nodiscard]] auto selfId(const json &body) -> u64 {
+            const auto reported = getUInt(body, "self_id");
+            return reported != 0 ? reported : Config::instance().selfQQNumber;
+        }
 
         /// @brief 将 OneBot Unix 时间戳转换为统一记录的本地时间字符串
         [[nodiscard]] auto normalizeTime(const json &body) -> std::string {
@@ -135,12 +143,9 @@ namespace insoulforge::OneBotEventNormalizer {
             json record = createRecord(body, senderId, senderName, messageId);
             json images = json::array();
             std::optional<std::string> replyTo;
-            const u64 selfId = getUInt(body, "self_id");
-            if (senderId == selfId && selfId != 0) {
-                record["sender"]["user_id"] = "self";
-            }
+            const u64 botId = selfId(body);
             for (const json &segment: atOrNull(body, "message")) {
-                if (const auto replyId = appendMessageSegment(segment, record["segments"], images, selfId)) {
+                if (const auto replyId = appendMessageSegment(segment, record["segments"], images, botId)) {
                     replyTo = *replyId;
                 }
             }
@@ -164,12 +169,9 @@ namespace insoulforge::OneBotEventNormalizer {
             const std::string senderName = displayName(atOrNull(body, "sender"));
             QQNameDirectory::recordName(UserId{actorId}, senderName);
             json record = createRecord(body, actorId, senderName, makeSyntheticMessageId());
-            if (actorId == getUInt(body, "self_id")) {
-                record["sender"]["user_id"] = "self";
-            }
             json target{{"user_id", std::to_string(targetId)}};
             record["segments"].push_back({{"type", "poke"}, {"target", std::move(target)},
-              {"direction", actorId == getUInt(body, "self_id") ? "outbound" : "inbound"}});
+              {"direction", actorId == selfId(body) ? "outbound" : "inbound"}});
             return record;
         }
 
@@ -218,6 +220,8 @@ namespace insoulforge::OneBotEventNormalizer {
             return std::nullopt;
         }
         (*record)["session_id"] = *sessionId;
+        if (const auto botId = selfId(body); botId != 0)
+            (void) MessageRecord::normalizeSelfReferences(*record, UserId{botId});
         return record;
     }
 } // namespace insoulforge::OneBotEventNormalizer

@@ -7,6 +7,7 @@
 #include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
+#include <infrastructure/config/Config.hpp>
 #include <infrastructure/http/HttpUtil.hpp>
 #include <workflow/message/MessageRecord.hpp>
 #include <workflow/session/QQNameDirectory.hpp>
@@ -193,6 +194,8 @@ namespace insoulforge::MessageRecord {
         if (replyTo) {
             record["reply_to"] = std::move(*replyTo);
         }
+        if (const auto selfId = Config::instance().selfQQNumber; selfId != 0)
+            (void) normalizeSelfReferences(record, UserId{selfId});
         return record;
     }
 
@@ -241,18 +244,40 @@ namespace insoulforge::MessageRecord {
           [type](const json &segment) -> bool { return getStr(segment, "type") == type; });
     }
 
-    auto mentions(const json &record, const UserId userId) -> bool {
-        return std::ranges::any_of(atOrNull(record, "segments"), [userId](const json &segment) -> bool {
+    auto mentions(const json &record, const UserId &userId) -> bool {
+        return std::ranges::any_of(atOrNull(record, "segments"), [&userId](const json &segment) -> bool {
             return getStr(segment, "type") == "at" &&
                    getStr(atOrNull(segment, "target"), "user_id") == userId.toString();
         });
     }
 
+    auto normalizeSelfReferences(json &record, const UserId &selfId) -> bool {
+        bool changed = false;
+        const auto normalize = [&selfId, &changed](json &identity) {
+            if (identity.is_object() && getStr(identity, "user_id") == selfId.toString()) {
+                identity["user_id"] = "self";
+                changed = true;
+            }
+        };
+        if (!record.is_object())
+            return false;
+        if (record.contains("sender"))
+            normalize(record["sender"]);
+        if (record.contains("segments") && record["segments"].is_array()) {
+            for (auto &segment: record["segments"]) {
+                const auto type = getStr(segment, "type");
+                if ((type == "at" || type == "poke") && segment.contains("target"))
+                    normalize(segment["target"]);
+                if (type == "member_event" && segment.contains("operator"))
+                    normalize(segment["operator"]);
+            }
+        }
+        return changed;
+    }
+
     auto isAssistant(const json &record) -> bool { return getStr(atOrNull(record, "sender"), "user_id") == "self"; }
 
-    auto isSystem(const json &record) -> bool {
-        return getStr(atOrNull(record, "sender"), "user_id") == std::string(kSystemUserId);
-    }
+    auto isSystem(const json &record) -> bool { return getStr(atOrNull(record, "sender"), "user_id") == "system"; }
 
     auto projectForAgent(const json &record, const bool includeToolHistory, const bool includeGroupCard) -> json {
         if (!record.is_object()) {

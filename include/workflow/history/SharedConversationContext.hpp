@@ -14,5 +14,5 @@ namespace insoulforge::SharedConversationContext {
     [[nodiscard]] auto projectMessage(const json &record) -> std::optional<json>;
 
     /// @brief 读取其他参与共享会话的三天内近期消息；接收会话未参与共享时返回空数组。
-    [[nodiscard]] auto build(SessionId receiverId, i32 messagesPerSession) -> json;
+    [[nodiscard]] auto build(const SessionId &receiverId, i32 messagesPerSession) -> json;
 } // namespace insoulforge::SharedConversationContext

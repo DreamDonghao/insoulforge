@@ -35,7 +35,7 @@
 
 namespace insoulforge {
     namespace {
-        auto messageTarget(const json &args, const SessionId currentSession) -> std::expected<SessionId, std::string> {
+        auto messageTarget(const json &args, const SessionId &currentSession) -> std::expected<SessionId, std::string> {
             const bool privateTarget = args.contains("user_id");
             if (privateTarget && args.contains("group_id"))
                 return std::unexpected("group_id 和 user_id 不能同时指定，请只选择一个发送目标");
@@ -60,19 +60,12 @@ namespace insoulforge {
             return *target;
         }
 
-        auto messageDestination(const json &args, const SessionId target) -> std::string {
+        auto messageDestination(const json &args, const SessionId &target) -> std::string {
             if (args.contains("user_id"))
                 return fmt::format("目标私聊 {}：", target.targetId());
             if (args.contains("group_id"))
                 return fmt::format("目标群 {}：", target.targetId());
             return {};
-        }
-
-        auto sendToSession(const SessionId sessionId, std::string content)
-          -> drogon::Task<std::expected<u64, std::string>> {
-            if (sessionId.isPrivate())
-                co_return co_await MessageService::sendPrivateMsg(UserId{sessionId.targetId()}, std::move(content));
-            co_return co_await MessageService::sendGroupMsg(sessionId, std::move(content));
         }
 
         auto requestedImageSize(const json &args) -> std::optional<std::string> {
@@ -84,7 +77,7 @@ namespace insoulforge {
             return std::regex_match(size, sizePattern) ? std::optional{std::move(size)} : std::nullopt;
         }
 
-        auto startImageTask(const SessionId sessionId, std::string prompt, std::string size,
+        auto startImageTask(const SessionId &sessionId, std::string prompt, std::string size,
           std::vector<std::string> referenceUrls, std::optional<std::string> characterDataUrl) -> std::string {
             const auto [status, taskId] =
               AsyncTaskManager::instance().start(sessionId, "生成图片",
@@ -163,8 +156,7 @@ namespace insoulforge {
                     co_return std::string("ugc_right 必须为 1（所有人）、4（好友）或 64（仅自己）。");
                 }
                 json params = {{"content", content}, {"ugc_right", right.is_null() ? json(1) : right}};
-                const auto &images = atOrNull(args, "images");
-                if (!images.is_null()) {
+                if (const auto &images = atOrNull(args, "images"); !images.is_null()) {
                     if (!images.is_array() || images.size() > 9) {
                         co_return std::string("images 必须为数组，最多 9 张图片。");
                     }
@@ -173,10 +165,10 @@ namespace insoulforge {
                             co_return std::string("图片地址必须为 HTTP/HTTPS URL。");
                         }
                         const auto &url = image.get_ref<const std::string &>();
-                        const auto hostStart = url.find("://") + 3;
-                        if ((!url.starts_with("http://") && !url.starts_with("https://")) ||
-                            url.find_first_of(" \t\r\n\\") != std::string::npos ||
-                            url.find_first_of("/?#", hostStart) == hostStart || url.size() == hostStart) {
+                        if (const auto hostStart = url.find("://") + 3;
+                          (!url.starts_with("http://") && !url.starts_with("https://")) ||
+                          url.find_first_of(" \t\r\n\\") != std::string::npos ||
+                          url.find_first_of("/?#", hostStart) == hostStart || url.size() == hostStart) {
                             co_return std::string("图片地址必须为包含主机名的 HTTP/HTTPS URL。");
                         }
                     }
@@ -379,8 +371,8 @@ namespace insoulforge {
                 }
 
                 // 消息由 MessageService 记入目标会话，当前调用方通过工具结果获知发送状态。
-                const auto messageId = co_await sendToSession(*target, std::move(cqCode));
-                if (!messageId) {
+                if (const auto messageId = co_await MessageService::sendToSession(*target, std::move(cqCode));
+                  !messageId) {
                     co_return fmt::format("{}表情发送未确认成功：{}。不要自动重发。", destination, messageId.error());
                 }
                 co_return fmt::format("{}已发送表情「{}」", destination, name);
@@ -430,8 +422,7 @@ namespace insoulforge {
                 if (!target)
                     co_return target.error();
                 const auto destination = messageDestination(args, *target);
-                const auto messageId = co_await sendToSession(*target, content);
-                if (!messageId) {
+                if (const auto messageId = co_await MessageService::sendToSession(*target, content); !messageId) {
                     co_return fmt::format("{}消息发送未确认成功：{}。请继续处理，不要认为该消息已送达，不要自动重发。",
                       destination, messageId.error());
                 }
@@ -531,8 +522,8 @@ namespace insoulforge {
                 // 记录已有表情的 res_id，以便保存后找出新表情。
                 ToolRuntime::invalidateFavoriteEmojiCache();
                 std::set<std::string> beforeIds;
-                const auto beforeEmojis = co_await ToolRuntime::fetchFavoriteEmojis(sessionId);
-                for (const auto &e: beforeEmojis) {
+                for (const auto beforeEmojis = co_await ToolRuntime::fetchFavoriteEmojis(sessionId);
+                  const auto &e: beforeEmojis) {
                     if (const std::string rid = getStr(e, "res_id"); !rid.empty()) {
                         beforeIds.insert(rid);
                     }
@@ -546,8 +537,8 @@ namespace insoulforge {
                 // 找到新增的表情并设置描述。
                 ToolRuntime::invalidateFavoriteEmojiCache();
                 json newItem;
-                const auto afterEmojis = co_await ToolRuntime::fetchFavoriteEmojis(sessionId);
-                for (const auto &e: afterEmojis) {
+                for (const auto afterEmojis = co_await ToolRuntime::fetchFavoriteEmojis(sessionId);
+                  const auto &e: afterEmojis) {
                     if (const std::string rid = getStr(e, "res_id"); !rid.empty() && !beforeIds.contains(rid)) {
                         newItem = e;
                         break;
@@ -601,7 +592,7 @@ namespace insoulforge {
                 if (newName.empty())
                     co_return std::string("请提供新名称(new_name)");
 
-                const auto sessionId = ctx.requireSession();
+                const auto &sessionId = ctx.requireSession();
                 const json emoji = co_await ToolRuntime::findFavoriteEmoji(name, sessionId);
                 if (emoji.is_null()) {
                     co_return fmt::format("表情'{}'不存在，先调list_stickers查看可用表情", name);
@@ -642,7 +633,7 @@ namespace insoulforge {
                 if (name.empty())
                     co_return std::string("请提供表情名称(name)");
 
-                const auto sessionId = ctx.requireSession();
+                const auto &sessionId = ctx.requireSession();
                 const json emoji = co_await ToolRuntime::findFavoriteEmoji(name, sessionId);
                 if (emoji.is_null()) {
                     co_return fmt::format("表情'{}'不存在，先调list_stickers查看可用表情", name);
@@ -675,7 +666,7 @@ namespace insoulforge {
             .name = "at_user",
             .description =
               "@某人。返回CQ码嵌入reply的content中。聊天记录格式为JSON：{\"sender\":{\"name\":\"小明\","
-              "\"user_id\":\"123456\"}}，用 at_user(user_id=\"123456\") 来@他。@全体成员用 at_user(user_id=\"all\")",
+              "\"user_id\":\"123456\"}}，用 at_user(user_id=\"123456\") 来@他。@自己用 self，@全体成员用 all。",
             .parameters = atParams,
             .handler = [](const json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
                 if (ctx.requireSession().isPrivate()) {
@@ -687,6 +678,8 @@ namespace insoulforge {
                 if (userId == "all") {
                     co_return std::string("[CQ:at,qq=all]");
                 }
+                if (userId == "self")
+                    co_return std::string("[CQ:at,qq=self]");
                 const auto id = UserId::parse(userId);
                 if (!id)
                     co_return id.error();
@@ -721,7 +714,7 @@ namespace insoulforge {
                            "偶尔骂人)60-300秒，中度(持续刷屏骂人)600-1800秒，重度(恶意骚扰)3600秒+",
             .parameters = banParams,
             .handler = [](const json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
-                const SessionId sessionId = ctx.requireSession();
+                const SessionId &sessionId = ctx.requireSession();
                 if (sessionId.isPrivate())
                     co_return std::string("私聊中无法禁言");
 
@@ -729,6 +722,8 @@ namespace insoulforge {
                 const u64 duration = getUInt(args, "duration", 600);
                 if (!userId)
                     co_return std::string("禁言失败: 请提供有效的用户 ID");
+                if (*userId == UserId{Config::instance().selfQQNumber})
+                    co_return std::string("禁言失败: 不能禁言机器人自身");
 
                 const bool success = co_await OneBotClient::setGroupBan(sessionId, *userId, duration);
                 co_return success ? fmt::format("已禁言用户 {} {}秒", *userId, duration)
@@ -807,7 +802,7 @@ namespace insoulforge {
               "用 send_poke(user_id=\"123456\") 来拍他。",
             .parameters = pokeParams,
             .handler = [](const json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
-                const SessionId sessionId = ctx.requireSession();
+                const SessionId &sessionId = ctx.requireSession();
                 if (sessionId.isPrivate()) {
                     co_return std::string("私聊中不支持拍一拍，直接回复即可");
                 }
@@ -862,7 +857,7 @@ namespace insoulforge {
                 if (messageId == 0)
                     co_return std::string("撤回失败: 请提供有效的消息ID");
 
-                const auto sessionId = ctx.requireSession();
+                const auto &sessionId = ctx.requireSession();
                 const bool success = co_await OneBotClient::deleteMsg(messageId, sessionId);
                 co_return success ? fmt::format("已撤回消息 {}", messageId) : "撤回失败: 消息可能已超过2分钟或权限不足";
             },
@@ -921,10 +916,8 @@ namespace insoulforge {
                     co_return std::string("时间过早远：不允许设置超过一年后的提醒");
                 }
 
-                const SessionId sessionId = ctx.requireSession();
+                const SessionId &sessionId = ctx.requireSession();
                 const bool isPrivateSession = sessionId.isPrivate();
-                const auto &targetId = sessionId.targetId();
-                const auto sessionType = sessionId.typeName();
                 const bool isDaily = getBool(args, "daily");
 
                 TaskStore::ScheduledTask task{.sessionId = sessionId};

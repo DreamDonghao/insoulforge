@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <charconv>
 #include <string>
 
 #include <expected>
@@ -25,7 +24,7 @@ namespace insoulforge {
         if (!value.is_string())
             return std::unexpected("user_id 必须是字符串用户 ID");
         const auto id = UserId::parse(value.get_ref<const std::string &>());
-        if (!id || id->toString() == "self" || *id == UserId{kSystemUserId})
+        if (!id || id->toString() == "self" || id->toString() == "system")
             return std::unexpected("user_id 必须是有效的用户 ID，不能使用机器人或系统身份");
         return id;
     }

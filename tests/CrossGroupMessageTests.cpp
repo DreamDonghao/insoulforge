@@ -23,6 +23,7 @@
 #include <workflow/agent/tools/image/ImageGenerationService.hpp>
 #include <workflow/history/ChatRecordStore.hpp>
 #include <workflow/history/SharedConversationContext.hpp>
+#include <workflow/message/MessageService.hpp>
 #include <workflow/message/image/ImageDescriptionService.hpp>
 #include <workflow/session/SessionStore.hpp>
 
@@ -315,7 +316,7 @@ namespace {
         const auto sentBefore = fixture.messages().size();
         const auto stickerQueriesBefore = fixture.stickerQueries.load();
         const auto invalidIds = json::array({nullptr, false, 702, "", " ", "0", "-1", "+702", "702x", "702.0",
-          "18446744073709551616", target.toString(), std::string(kSystemUserId), "700", "701", "200"});
+          "18446744073709551616", target.toString(), "system", "700", "701", "200"});
         for (const auto *tool : {"reply_and_continue", "send_sticker"}) {
             for (const auto &id : invalidIds) {
                 const json args = {{"content", "test"}, {"name", "fixture"}, {"user_id", id}};
@@ -414,7 +415,7 @@ namespace {
         const auto rawRecords = *workflow.getSessionMessages(insoulforge::SessionId::group("400"));
         auto excluded = rawRecords[1];
         excluded["message_id"] = "2001";
-        excluded["sender"]["user_id"] = std::string(kSystemUserId);
+        excluded["sender"]["user_id"] = "system";
         workflow.appendSystemStatusMessage(insoulforge::SessionId::group("400"), excluded);
         excluded = rawRecords[1];
         excluded["message_id"] = "2002";
@@ -480,6 +481,39 @@ namespace {
         config.contextWindowLimit = oldWindow;
     }
 
+    auto testSelfReferences(const std::string endpoint) -> drogon::Task<> {
+        auto &config = Config::instance();
+        const auto previousSelf = config.selfQQNumber;
+        config.selfQQNumber = 42;
+        config.oneBotTransport = "http";
+        config.qqHttpHost = endpoint;
+        const auto session = SessionId::group("990");
+        auto &registry = ToolRegistry::instance();
+        const auto mention = co_await registry.executeTool("at_user", {{"user_id", "self"}}, {.sessionId = session});
+        require(mention == "[CQ:at,qq=self]", "at_user did not preserve symbolic self");
+        const auto sent = co_await MessageService::sendToSession(session, "42 self " + mention + " [CQ:at,qq=43]");
+        require(sent && fixture.messages().back()["message"] == "42 self [CQ:at,qq=42] [CQ:at,qq=43]" &&
+                  fixture.messages().back()["group_id"] == 990,
+          "OneBot boundary failed to resolve only the self mention");
+        const auto records = OneBotEventWorkflow::instance().getSessionMessages(session);
+        require(records && records->back()["sender"]["user_id"] == "self" &&
+                  records->back()["segments"][1]["target"]["user_id"] == "self" &&
+                  records->back()["segments"][3]["target"]["user_id"] == "43",
+          "outgoing record leaked the numeric bot identity or changed another user");
+        const auto before = fixture.messages().size();
+        for (const auto &id: {"self", "42"}) {
+            const auto denied = co_await registry.executeTool("ban_user", {{"user_id", id}}, {.sessionId = session});
+            require(denied.contains("失败"), "ban_user accepted the bot identity");
+        }
+        config.selfQQNumber = 0;
+        const auto unknown = co_await MessageService::sendToSession(session, mention);
+        require(!unknown && unknown.error().find("self") != std::string::npos && fixture.messages().size() == before,
+          "unknown self identity was guessed or sent to OneBot");
+        const auto failed = OneBotEventWorkflow::instance().getSessionMessages(session);
+        require(failed && failed->back().contains("send_error"), "unresolved self send was not recorded as failed");
+        config.selfQQNumber = previousSelf;
+    }
+
     auto runTests(const std::string endpoint, i32 &exitCode) -> drogon::Task<> {
         try {
             auto &db = Database::instance();
@@ -526,7 +560,7 @@ namespace {
               "HTTP route changed a canonical ID containing escaped delimiters");
             const auto invalidIds =
               json::array({nullptr, false, 200, "", " ", "0", "-1", "+200", "200x", "200.0", "18446744073709551616",
-                SessionId::privateChat(insoulforge::UserId{200}).toString(), std::string(kSystemUserId), "201", "999"});
+                SessionId::privateChat(insoulforge::UserId{200}).toString(), "system", "201", "999"});
             for (const auto *tool : {"reply_and_continue", "send_sticker", "get_group_messages"}) {
                 for (const auto &id : invalidIds) {
                     const json args = {{"content", "test"}, {"name", "fixture"}, {"group_id", id}};
@@ -613,6 +647,7 @@ namespace {
             co_await testPrivateTargets();
             co_await testImageGeneration(endpoint);
             co_await testImageQuestions(endpoint);
+            co_await testSelfReferences(endpoint);
             exitCode = 0;
             std::cout << "All cross-group message tests passed\n";
         } catch (const std::exception &error) {
