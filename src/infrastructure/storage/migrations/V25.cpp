@@ -326,6 +326,9 @@ namespace insoulforge::SchemaMigrator {
                     source ? "source_session TEXT" : "session_id TEXT");
                 body = std::regex_replace(
                   body, std::regex(R"(session_id TEXT PRIMARY KEY)"), "session_id TEXT NOT NULL PRIMARY KEY");
+                // 旧安装可能保留表级外键；同时更新本表列和 REFERENCES 中的目标列。
+                if (!source)
+                    body = std::regex_replace(body, std::regex(R"(\bgroup_id\b)"), "session_id");
             }
             std::optional<i64> sequence;
             if (body.find("AUTOINCREMENT") != std::string::npos) {
@@ -381,6 +384,13 @@ namespace insoulforge::SchemaMigrator {
             for (const std::string table:
               {"group_config", "enabled_groups", "chat_records", "short_term_memory", "long_term_memory"})
                 rebuild(db, table, false, false);
+            // 更早版本遗留的记忆表仍可能引用 group_config，保留数据并同步转换其外键与会话键。
+            const bool hasLegacyMemory = [&] {
+                const Statement legacy(db, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_items'");
+                return legacy.step();
+            }();
+            if (hasLegacyMemory)
+                rebuild(db, "memory_items", false, false);
             rebuild(db, "person_memory_entries", false, true);
             rebuild(db, "scheduled_tasks", true, false);
             const Statement records(db, "SELECT id,content FROM chat_records");

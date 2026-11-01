@@ -1056,6 +1056,41 @@ namespace {
         const auto taskId =
           TaskStore::addScheduledTask({.sessionId = direct, .remindTime = 123, .content = "恢复任务", .isDaily = true});
         prepareV24Schema(db.handle());
+        // 早期安装升级到 v24 后仍保留这些外键，新安装的 v24 没有，二者都必须可升级。
+        Statement(db.handle(), R"(CREATE TABLE chat_records_with_fk (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id INTEGER NOT NULL,
+            role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+            content TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (group_id) REFERENCES group_config(group_id)
+        ))")
+          .execOrThrow();
+        Statement(db.handle(), "INSERT INTO chat_records_with_fk SELECT * FROM chat_records").execOrThrow();
+        Statement(db.handle(), "DROP TABLE chat_records").execOrThrow();
+        Statement(db.handle(), "ALTER TABLE chat_records_with_fk RENAME TO chat_records").execOrThrow();
+        Statement(db.handle(), "CREATE INDEX idx_chat_records_group ON chat_records(group_id)").execOrThrow();
+        Statement(db.handle(), R"(CREATE TABLE short_term_memory_with_fk (
+            group_id INTEGER PRIMARY KEY,
+            memory_content TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (group_id) REFERENCES group_config(group_id)
+        ))")
+          .execOrThrow();
+        Statement(db.handle(), "INSERT INTO short_term_memory_with_fk SELECT * FROM short_term_memory").execOrThrow();
+        Statement(db.handle(), "DROP TABLE short_term_memory").execOrThrow();
+        Statement(db.handle(), "ALTER TABLE short_term_memory_with_fk RENAME TO short_term_memory").execOrThrow();
+        Statement(db.handle(), R"(CREATE TABLE memory_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            FOREIGN KEY (group_id) REFERENCES group_config(group_id)
+        ))")
+          .execOrThrow();
+        Statement(db.handle(), "INSERT INTO memory_items(group_id,content) "
+                               "SELECT group_id,'保留历史记忆' FROM group_config")
+          .execOrThrow();
+        Statement(db.handle(), "CREATE INDEX idx_memory_items_group ON memory_items(group_id)").execOrThrow();
         Statement(db.handle(), "UPDATE sqlite_sequence SET seq=100 WHERE name IN "
                                "('scheduled_tasks','chat_records','person_memory_entries','long_term_memory')")
           .execOrThrow();
@@ -1081,6 +1116,22 @@ namespace {
               "failed rebuild rolls back earlier tables and version", kTestName);
         }
         SchemaMigrator::migrate(db.handle());
+        for (const auto *table: {"chat_records", "short_term_memory", "memory_items"}) {
+            const Statement foreignKey(db.handle(), fmt::format("PRAGMA foreign_key_list({})", table));
+            check(foreignKey.step() && foreignKey.getText(2) == "group_config" &&
+                    foreignKey.getText(3) == "session_id" && foreignKey.getText(4) == "session_id",
+              "converts both sides of legacy foreign keys", kTestName);
+        }
+        {
+            const Statement violations(db.handle(), "PRAGMA foreign_key_check");
+            check(!violations.step(), "migration preserves foreign key integrity", kTestName);
+            const Statement legacy(db.handle(), "SELECT session_id,content FROM memory_items ORDER BY session_id");
+            check(legacy.step() && legacy.getText(0) == group.toString() && legacy.getText(1) == "保留历史记忆" &&
+                    legacy.step() && legacy.getText(0) == direct.toString() && !legacy.step(),
+              "preserves legacy memory rows and separates group and private sessions", kTestName);
+            const Statement index(db.handle(), "SELECT name FROM pragma_index_info('idx_memory_items_group')");
+            check(index.step() && index.getText(0) == "session_id", "preserves legacy memory index", kTestName);
+        }
         const auto restored = json::parse(ChatRecordStore::getChatRecords(direct)[0]["content"].get<std::string>());
         check(restored["session_id"] == direct.toString() && restored["segments"] == record["segments"] &&
                 restored["tool_history"] == record["tool_history"],
