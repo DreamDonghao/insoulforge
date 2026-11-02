@@ -14,7 +14,7 @@
 #include <openssl/crypto.h>
 
 #include <infrastructure/config/Config.hpp>
-#include <infrastructure/http/HttpUtil.hpp>
+#include <infrastructure/http/HttpTrace.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <workflow/OneBotEventWorkflow.hpp>
 #include <workflow/activity/ActivityManager.hpp>
@@ -24,11 +24,6 @@ namespace insoulforge {
         auto now() -> i64 {
             return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch())
               .count();
-        }
-        auto validUrl(const std::string &url) -> bool {
-            return (url.starts_with("http://") || url.starts_with("https://")) &&
-                   url.size() > (url.starts_with("https://") ? 8U : 7U) &&
-                   url.find_first_of("\r\n\t @?#") == std::string::npos;
         }
         auto validOrigin(const json &origin) -> bool {
             return origin.is_object() && SessionId::parse(getStr(origin, "session_id")).has_value() &&
@@ -40,9 +35,8 @@ namespace insoulforge {
         }
         auto failure(const std::string &message) -> json { return {{"success", false}, {"error", message}}; }
         auto serviceDefinition(const json &value) -> json {
-            return {{"name", getStr(value, "name")}, {"url", getStr(value, "url")},
-              {"description", getStr(value, "description")}, {"enabled", atOrNull(value, "enabled")},
-              {"token", getStr(value, "token")}};
+            return {{"name", getStr(value, "name")}, {"description", getStr(value, "description")},
+              {"enabled", atOrNull(value, "enabled")}};
         }
     } // namespace
 
@@ -59,25 +53,21 @@ namespace insoulforge {
     }
 
     auto ActivityManager::validateConfiguration(const json &config) -> std::expected<void, std::string> {
-        if (!config.is_object() || !atOrNull(config, "servers").is_array() ||
-            !atOrNull(config, "callbackUrl").is_string())
-            return std::unexpected("活动配置需要 callbackUrl 和 servers 数组");
-        const auto callback = getStr(config, "callbackUrl");
-        if (!callback.empty() && !validUrl(callback))
-            return std::unexpected("回调地址必须是无凭据、查询参数或片段的 HTTP(S) URL");
+        if (!config.is_object() || !atOrNull(config, "servers").is_array())
+            return std::unexpected("活动配置需要 servers 数组");
+        const auto token = getStr(config, "token");
+        if ((config.contains("token") && !config["token"].is_string()) ||
+            (!token.empty() && (token.size() < 16 || token.find_first_of("\r\n") != std::string::npos)))
+            return std::unexpected("接入 Token 至少需要 16 个字符且不能包含换行");
         auto names = std::set<std::string>{};
         for (const auto &server: config["servers"]) {
             const auto name = getStr(server, "name");
             if (!server.is_object() || name.empty() || name.size() > 80 ||
                 std::ranges::any_of(name, [](unsigned char c) { return c < 32; }) || !names.insert(name).second)
                 return std::unexpected("活动名称必须非空、唯一且不含控制字符（最多 80 字节）");
-            if (!validUrl(getStr(server, "url")) || !atOrNull(server, "description").is_string() ||
-                !atOrNull(server, "enabled").is_boolean() || !atOrNull(server, "token").is_string() ||
-                getStr(server, "token").size() < 16 || getStr(server, "description").size() > 4096 ||
-                getStr(server, "token").find_first_of("\r\n") != std::string::npos)
-                return std::unexpected("活动需要有效地址、描述、启用状态和至少 16 字符的共享密钥");
-            if (getBool(server, "enabled") && callback.empty())
-                return std::unexpected("启用活动服务前需要设置 action 能访问的完整回调地址");
+            if (!atOrNull(server, "description").is_string() || !atOrNull(server, "enabled").is_boolean() ||
+                getStr(server, "description").size() > 4096)
+                return std::unexpected("活动需要描述和启用状态，描述最多 4096 字节");
         }
         return {};
     }
@@ -113,7 +103,7 @@ namespace insoulforge {
                 services.emplace(name, std::move(service));
             }
             m_services = std::move(services);
-            m_callbackUrl = getStr(config, "callbackUrl");
+            m_token = getStr(config, "token");
             m_stopping = false;
             return {};
         } catch (const std::exception &) {
@@ -128,61 +118,94 @@ namespace insoulforge {
             auto item = service->config;
             item["running"] = getBool(service->runtime, "running");
             item["status"] = getStr(service->runtime, "status");
-            item["reachable"] = service->reachable;
+            item["connected"] = service->connection && service->connection->connected();
             item["synchronized"] = service->synchronized;
             item["busy"] = service->busy;
             item["updatedAt"] = service->runtime.value("updated_at", i64{0});
             servers.push_back(std::move(item));
         }
-        return {{"callbackUrl", m_callbackUrl}, {"servers", std::move(servers)}};
+        return {{"token", m_token}, {"servers", std::move(servers)}};
     }
 
-    auto ActivityManager::saveConfiguration(json config, Config &store) -> std::expected<void, std::string> {
+    auto ActivityManager::configurationLocked() const -> json {
+        auto servers = json::array();
+        for (const auto &[name, service]: m_services)
+            servers.push_back(service->config);
+        return {{"token", m_token}, {"servers", std::move(servers)}};
+    }
+
+    auto ActivityManager::saveToken(std::string token, Config &store) -> std::expected<void, std::string> {
+        if (!token.empty() && (token.size() < 16 || token.find_first_of("\r\n") != std::string::npos))
+            return std::unexpected("接入 Token 至少需要 16 个字符且不能包含换行");
+        std::vector<drogon::WebSocketConnectionPtr> connections;
+        {
+            std::lock_guard lock(m_mutex);
+            auto previous = std::exchange(m_token, std::move(token));
+            if (auto saved = store.saveActivitiesConfig(configurationLocked()); !saved) {
+                m_token = std::move(previous);
+                return std::unexpected(saved.error().message);
+            }
+            if (previous == m_token)
+                return {};
+            ++m_authGeneration;
+            for (const auto &[connection, registration]: m_connections)
+                connections.push_back(connection);
+            // 在释放锁前撤销旧连接的写入与请求权限，避免关闭回调到达前仍接受操作。
+            for (const auto &[name, service]: m_services) {
+                service->connection.reset();
+                service->synchronized = service->busy = false;
+            }
+        }
+        for (const auto &connection: connections) {
+            disconnect(connection);
+            connection->shutdown();
+        }
+        return {};
+    }
+
+    auto ActivityManager::setEnabled(const std::string &name, bool enabled, Config &store)
+      -> std::expected<void, std::string> {
         std::lock_guard lock(m_mutex);
-        if (!atOrNull(config, "servers").is_array())
-            return std::unexpected("servers 必须是数组");
-        // 空密钥仍表示沿用；运行中或正在同步的服务不允许换地址、删除或停用。
-        auto next = Services{};
-        for (auto &definition: config["servers"]) {
-            if (!definition.is_object())
-                return std::unexpected("无效的活动服务");
-            const auto name = getStr(definition, "name");
-            const auto old = m_services.find(name);
-            auto token = getStr(definition, "token");
-            if (token.empty() && old != m_services.end())
-                token = getStr(old->second->config, "token");
-            definition["token"] = token;
-            definition = serviceDefinition(definition);
-            if (old != m_services.end())
-                next.emplace(name, old->second);
-            else
-                next.emplace(name, std::make_shared<Service>());
+        const auto found = m_services.find(name);
+        if (found == m_services.end())
+            return std::unexpected("活动服务不存在");
+        auto &service = *found->second;
+        const auto previous = getBool(service.config, "enabled");
+        if (previous == enabled)
+            return {};
+        if (service.busy || getBool(service.runtime, "running"))
+            return std::unexpected("请先确认活动结束及请求处理完成，再修改启用状态");
+        service.config["enabled"] = enabled;
+        if (auto saved = store.saveActivitiesConfig(configurationLocked()); !saved) {
+            service.config["enabled"] = previous;
+            return std::unexpected(saved.error().message);
         }
-        if (auto valid = validateConfiguration(config); !valid)
-            return valid;
-        for (const auto &[name, service]: m_services) {
-            if (service->busy || getBool(service->runtime, "running")) {
-                const auto found =
-                  std::ranges::find_if(config["servers"], [&](const json &s) { return getStr(s, "name") == name; });
-                if (found == config["servers"].end() || *found != service->config ||
-                    getStr(config, "callbackUrl") != m_callbackUrl)
-                    return std::unexpected("请先确认活动结束及服务同步完成，再修改或删除其配置");
-            }
+        return {};
+    }
+
+    auto ActivityManager::removeService(const std::string &name, Config &store, bool force)
+      -> std::expected<void, std::string> {
+        std::unique_lock lock(m_mutex);
+        const auto found = m_services.find(name);
+        if (found == m_services.end())
+            return std::unexpected("活动服务不存在");
+        const auto service = found->second;
+        if (!force && (service->connection || service->busy || getBool(service->runtime, "running")))
+            return std::unexpected("只能删除离线且已经结束的活动服务");
+        m_services.erase(found);
+        if (auto saved = store.saveActivitiesConfig(configurationLocked()); !saved) {
+            m_services.emplace(name, service);
+            return std::unexpected(saved.error().message);
         }
-        if (auto result = store.saveActivitiesConfig(config); !result)
-            return std::unexpected(result.error().message);
-        for (const auto &definition: config["servers"]) {
-            auto &service = *next.at(getStr(definition, "name"));
-            if (service.config != definition) {
-                service.synchronized = false;
-                service.reachable = false;
-                service.nextSync = 0;
-            }
-            service.config = definition;
+        const auto connection = std::exchange(service->connection, {});
+        service->synchronized = service->busy = false;
+        const auto saved = persistLocked();
+        lock.unlock();
+        if (connection) {
+            disconnect(connection);
+            connection->shutdown();
         }
-        m_services = std::move(next);
-        m_callbackUrl = getStr(config, "callbackUrl");
-        return persistLocked();
+        return saved;
     }
 
     auto ActivityManager::directory() const -> json {
@@ -198,10 +221,10 @@ namespace insoulforge {
         std::lock_guard lock(m_mutex);
         auto result = json::array();
         for (const auto &[name, service]: m_services) {
-            if (!getBool(service->runtime, "running"))
+            if (!getBool(service->config, "enabled") || !getBool(service->runtime, "running"))
                 continue;
             auto status = getStr(service->runtime, "status");
-            if (!service->reachable || now() - service->runtime.value("updated_at", i64{0}) > 90)
+            if (!service->connection || !service->connection->connected() || !service->synchronized)
                 status += "（状态未确认，最近更新时间 Unix 秒：" +
                           std::to_string(service->runtime.value("updated_at", i64{0})) + "）";
             result.push_back({{"name", name}, {"status", status}});
@@ -232,14 +255,14 @@ namespace insoulforge {
         }
     }
 
-    auto ActivityManager::applySnapshotLocked(Service &service, const json &snapshot, const bool callback)
+    auto ActivityManager::applySnapshotLocked(Service &service, const json &snapshot, const bool fromEvent)
       -> std::expected<void, std::string> {
         if (!snapshot.is_object() || !atOrNull(snapshot, "running").is_boolean())
             return std::unexpected("活动响应缺少 running 布尔字段");
         const auto running = getBool(snapshot, "running");
         const auto runId = getStr(snapshot, "run_id");
         auto currentId = getStr(service.runtime, "run_id");
-        if (runId.empty() && !running && !callback) {
+        if (runId.empty() && !running && !fromEvent) {
             // 从未启动的服务可返回简单空闲状态；已运行时必须明确报告对应运行已结束。
             if (getBool(service.runtime, "running")) {
                 if (!getBool(service.runtime, "starting"))
@@ -251,7 +274,7 @@ namespace insoulforge {
                 confirmed["status"] = "服务确认活动未启动";
                 return applySnapshotLocked(service, confirmed, false);
             }
-            service.synchronized = service.reachable = true;
+            service.synchronized = true;
             return {};
         }
         if (runId.empty() || !atOrNull(snapshot, "sequence").is_number_integer() ||
@@ -265,20 +288,20 @@ namespace insoulforge {
         }
         if (sequence < 0)
             return std::unexpected("sequence 必须非负");
-        // 多个主程序竞争同一外部服务时，以启动后的权威查询恢复已存在实例；回调不能切换实例。
-        if (!callback && currentId != runId && getBool(service.runtime, "starting"))
+        // 多个主程序竞争同一外部服务时，以启动后的权威查询恢复已存在实例；事件不能切换实例。
+        if (!fromEvent && currentId != runId && getBool(service.runtime, "starting"))
             currentId.clear();
         if (!currentId.empty() && currentId != runId)
             return std::unexpected("活动启动标识不匹配");
-        if (callback && currentId.empty())
+        if (fromEvent && currentId.empty())
             return std::unexpected("尚未恢复该活动，请等待状态同步");
         const auto currentSequence = service.runtime.value("sequence", i64{-1});
         if (currentId == runId && sequence <= currentSequence) {
             if (sequence == currentSequence && (running != getBool(service.runtime, "running") ||
                                                  getStr(snapshot, "status") != getStr(service.runtime, "status")))
                 return std::unexpected("同一活动序号的状态不能改变");
-            if (!callback) {
-                service.synchronized = service.reachable = true;
+            if (!fromEvent) {
+                service.synchronized = true;
                 service.runtime["updated_at"] = now();
             }
             return {};
@@ -296,69 +319,310 @@ namespace insoulforge {
             service.runtime = std::move(previous);
             return std::unexpected(saved.error());
         }
-        service.synchronized = service.reachable = true;
-        service.failures = 0;
-        service.nextSync = now() + 30;
+        service.synchronized = true;
         return {};
     }
 
-    auto ActivityManager::request(json config, std::string operation, json body) -> drogon::Task<json> {
-        const auto response = co_await HttpUtil::send("Activity", getStr(config, "url"), "/" + operation, drogon::Post,
-          std::move(body), getStr(config, "token"), 10);
-        if (!response)
-            throw std::runtime_error("活动服务请求失败或超时，结果尚未确认");
-        if ((*response)->statusCode() < 200 || (*response)->statusCode() >= 300)
-            throw std::runtime_error("活动服务返回 HTTP " + std::to_string((*response)->statusCode()));
-        auto result = json{};
-        if ((*response)->body().size() > 1024 * 1024 || !tryParseJson((*response)->body(), result) ||
-            !result.is_object())
-            throw std::runtime_error("活动服务响应必须是最多 1 MiB 的 JSON 对象");
-        co_return result;
+    auto ActivityManager::authorized(const std::string &token) const -> bool {
+        std::lock_guard lock(m_mutex);
+        return !m_stopping && sameToken(m_token, token);
     }
 
-    auto ActivityManager::synchronize(std::string name) -> drogon::Task<> {
-        std::shared_ptr<Service> service;
-        json config;
+    auto ActivityManager::connect(const std::string &token, drogon::WebSocketConnectionPtr connection) -> bool {
+        std::lock_guard lock(m_mutex);
+        if (m_stopping || !sameToken(m_token, token))
+            return false;
+        connection->disablePing();
+        auto *loop = m_loop ? m_loop : drogon::app().getLoop();
+        const auto timer = loop->runAfter(10, [this, connection] {
+            bool expired;
+            {
+                std::lock_guard lock(m_mutex);
+                const auto found = m_connections.find(connection);
+                expired = found != m_connections.end() && found->second.name.empty();
+            }
+            if (expired) {
+                disconnect(connection);
+                connection->shutdown(drogon::CloseCode::kViolation, "Activity registration timeout");
+            }
+        });
+        m_connections.emplace(connection, Registration{"", m_authGeneration, loop, timer});
+        return true;
+    }
+
+    auto ActivityManager::registerService(const drogon::WebSocketConnectionPtr &connection, const json &message)
+      -> std::expected<void, std::string> {
+        const auto name = getStr(message, "name");
+        auto definition = json{{"name", name}, {"description", atOrNull(message, "description")}, {"enabled", true}};
+        if (auto valid = validateConfiguration({{"servers", json::array({definition})}}); !valid)
+            return valid;
+        drogon::WebSocketConnectionPtr previous;
+        {
+            std::lock_guard lock(m_mutex);
+            const auto registration = m_connections.find(connection);
+            if (m_stopping || registration == m_connections.end() || !registration->second.name.empty() ||
+                registration->second.generation != m_authGeneration)
+                return std::unexpected("活动连接无法注册");
+            const auto found = m_services.find(name);
+            const auto isNew = found == m_services.end();
+            auto service = isNew ? std::make_shared<Service>() : found->second;
+            const auto previousDefinition = service->config;
+            if (!isNew)
+                definition["enabled"] = getBool(service->config, "enabled");
+            service->config = definition;
+            m_services[name] = service;
+            if (auto saved = Config::instance().saveActivitiesConfig(configurationLocked()); !saved) {
+                if (isNew)
+                    m_services.erase(name);
+                else
+                    service->config = previousDefinition;
+                return std::unexpected(saved.error().message);
+            }
+            registration->second.name = name;
+            registration->second.loop->invalidateTimer(registration->second.timer);
+            previous = std::exchange(service->connection, connection);
+            service->synchronized = service->busy = false;
+            service->lastSeen = std::chrono::steady_clock::now();
+        }
+        if (previous) {
+            disconnect(previous);
+            previous->shutdown();
+        }
+        drogon::async_run(
+          [this, name, connection]() -> drogon::Task<> { co_await synchronize(name, connection, SyncMode::Recovery); });
+        return {};
+    }
+
+    ActivityManager::ResponseAwaiter::ResponseAwaiter(ActivityManager &manager, std::string name,
+      drogon::WebSocketConnectionPtr connection, std::string operation, json body) :
+        m_manager(manager), m_name(std::move(name)), m_connection(std::move(connection)),
+        m_operation(std::move(operation)), m_body(std::move(body)) {}
+
+    auto ActivityManager::ResponseAwaiter::await_suspend(std::coroutine_handle<> continuation) -> bool {
+        auto *loop = trantor::EventLoop::getEventLoopOfCurrentThread();
+        if (!loop)
+            loop = drogon::app().getLoop();
+        // 先挂起再发送，所有完成路径都回到调用协程的事件循环，避免同步完成和跨线程恢复竞态。
+        loop->queueInLoop([this, loop, continuation] {
+            m_manager.sendRequest(std::move(m_name), std::move(m_connection), std::move(m_operation), std::move(m_body),
+              loop, [this, continuation](json value) {
+                  setValue(std::move(value));
+                  continuation.resume();
+              });
+        });
+        return true;
+    }
+
+    void ActivityManager::sendRequest(std::string name, drogon::WebSocketConnectionPtr connection,
+      std::string operation, json body, trantor::EventLoop *loop, std::function<void(json)> callback) {
+        const auto id = drogon::utils::getUuid();
+        auto message =
+          json{{"type", "request"}, {"request_id", id}, {"operation", operation}, {"body", std::move(body)}};
         {
             std::lock_guard lock(m_mutex);
             const auto found = m_services.find(name);
-            if (m_stopping || found == m_services.end() || found->second->busy ||
-                !getBool(found->second->config, "enabled"))
-                co_return;
+            if (m_stopping || found == m_services.end() || found->second->connection != connection ||
+                !connection->connected()) {
+                loop->queueInLoop(
+                  [callback = std::move(callback)] { callback(failure("活动连接已断开，结果未确认")); });
+                return;
+            }
+            const auto timer = loop->runAfter(
+              10, [this, id, connection] { completeRequest(id, connection, failure("活动请求超时，结果未确认")); });
+            m_pending.emplace(id, Pending{connection, loop, timer, std::move(callback), name, message});
+        }
+        try {
+            connection->send(dumpJson(message));
+        } catch (const std::exception &) {
+            completeRequest(id, connection, failure("活动请求发送失败，结果未确认"));
+        }
+    }
+
+    void ActivityManager::completeRequest(
+      const std::string &id, const drogon::WebSocketConnectionPtr &connection, json response) {
+        std::optional<Pending> pending;
+        {
+            std::lock_guard lock(m_mutex);
+            const auto found = m_pending.find(id);
+            if (found == m_pending.end() || found->second.connection != connection)
+                return;
+            pending = std::move(found->second);
+            m_pending.erase(found);
+        }
+        pending->loop->invalidateTimer(pending->timer);
+        HttpTrace::instance().append({.tag = "Activity",
+          .method = "WS",
+          .url = "/activities/ws?name=" + drogon::utils::urlEncodeComponent(pending->name) + "#" +
+                 getStr(pending->message, "operation"),
+          .requestBody = dumpJson(pending->message),
+          .status = getBool(response, "success") ? 200 : 0,
+          .responseBody = dumpJson(response)});
+        pending->loop->queueInLoop([callback = std::move(pending->callback), response = std::move(response)]() mutable {
+            callback(std::move(response));
+        });
+    }
+
+    auto ActivityManager::request(std::string name, drogon::WebSocketConnectionPtr connection, std::string operation,
+      json body) -> drogon::Task<json> {
+        auto response = co_await ResponseAwaiter(
+          *this, std::move(name), std::move(connection), std::move(operation), std::move(body));
+        if (!getBool(response, "success"))
+            throw std::runtime_error(getStr(response, "error", "活动服务请求失败，结果未确认"));
+        if (!atOrNull(response, "result").is_object())
+            throw std::runtime_error("活动服务 result 必须为 JSON 对象");
+        co_return std::move(response["result"]);
+    }
+
+    auto ActivityManager::refresh(std::string name) -> drogon::Task<std::expected<void, std::string>> {
+        drogon::WebSocketConnectionPtr connection;
+        {
+            std::lock_guard lock(m_mutex);
+            const auto found = m_services.find(name);
+            if (m_stopping || found == m_services.end())
+                co_return std::unexpected("活动服务不存在或管理器已停止");
+            connection = found->second->connection;
+            if (!connection || !connection->connected())
+                co_return std::unexpected("服务未连接，无法同步状态");
+            if (!found->second->synchronized)
+                co_return std::unexpected("请等待连接恢复完成后再同步");
+        }
+        co_return co_await synchronize(name, std::move(connection), SyncMode::Check);
+    }
+
+    auto ActivityManager::synchronize(std::string name, drogon::WebSocketConnectionPtr connection, SyncMode mode)
+      -> drogon::Task<std::expected<void, std::string>> {
+        std::shared_ptr<Service> service;
+        {
+            std::lock_guard lock(m_mutex);
+            const auto found = m_services.find(name);
+            if (m_stopping || found == m_services.end() || found->second->connection != connection)
+                co_return std::unexpected("活动连接已断开或更换");
+            // 工具确认沿用 invoke 的占用，其他同步独立取得占用。
+            if (mode != SyncMode::AfterOperation && found->second->busy)
+                co_return std::unexpected("活动正在处理请求，请稍后同步");
             service = found->second;
             service->busy = true;
-            config = service->config;
+            service->lastCheck = std::chrono::steady_clock::now();
         }
-        auto error = std::string{};
+        std::string error;
         try {
-            auto snapshot = co_await request(std::move(config), "status", json::object());
+            auto snapshot = co_await request(name, connection, "status", json::object());
             std::lock_guard lock(m_mutex);
-            if (!m_stopping) {
-                const auto result = applySnapshotLocked(*service, snapshot, false);
-                if (!result)
+            if (!m_stopping && service->connection == connection) {
+                if (auto result = applySnapshotLocked(*service, snapshot, false); !result)
                     error = result.error();
             }
         } catch (const std::exception &e) {
             error = e.what();
         }
-        std::lock_guard lock(m_mutex);
-        service->busy = false;
+        {
+            std::lock_guard lock(m_mutex);
+            if (m_stopping || service->connection != connection)
+                co_return std::unexpected("活动连接已断开或更换");
+            service->busy = false;
+            if (!error.empty())
+                service->synchronized = false;
+        }
         if (!error.empty()) {
-            service->reachable = false;
-            ++service->failures;
-        } else
-            service->failures = 0;
-        const auto delay = error.empty() ? 30 : std::min<i64>(300, 5LL << std::min<size_t>(service->failures - 1, 6));
-        service->nextSync = now() + delay;
-        // 状态在后台可见；重复失联不逐轮刷日志。
-        if (!error.empty() && service->failures == 1)
-            Logger::warn(std::nullopt, "Activity", "活动服务失联或状态无效，将后台重试: " + name);
+            Logger::warn(std::nullopt, "Activity", "活动状态同步失败，等待服务重新连接: " + name);
+            disconnect(connection);
+            connection->shutdown();
+            co_return std::unexpected(error);
+        } else if (mode == SyncMode::Recovery)
+            connection->send(dumpJson(json{{"type", "ready"}}));
+        co_return std::expected<void, std::string>{};
+    }
+
+    void ActivityManager::disconnect(const drogon::WebSocketConnectionPtr &connection) {
+        std::vector<std::string> pending;
+        {
+            std::lock_guard lock(m_mutex);
+            const auto registration = m_connections.find(connection);
+            if (registration == m_connections.end())
+                return;
+            const auto name = registration->second.name;
+            registration->second.loop->invalidateTimer(registration->second.timer);
+            m_connections.erase(registration);
+            const auto found = m_services.find(name);
+            if (found != m_services.end() && found->second->connection == connection) {
+                found->second->connection.reset();
+                found->second->synchronized = found->second->busy = false;
+            }
+            for (const auto &[id, request]: m_pending)
+                if (request.connection == connection)
+                    pending.push_back(id);
+        }
+        for (const auto &id: pending)
+            completeRequest(id, connection, failure("活动连接已断开或更换，结果未确认"));
+    }
+
+    void ActivityManager::receive(
+      const drogon::WebSocketConnectionPtr &connection, const std::string &message, drogon::WebSocketMessageType type) {
+        std::string name;
+        {
+            std::lock_guard lock(m_mutex);
+            const auto registration = m_connections.find(connection);
+            if (m_stopping || registration == m_connections.end() ||
+                registration->second.generation != m_authGeneration)
+                return;
+            name = registration->second.name;
+            if (!name.empty()) {
+                const auto found = m_services.find(name);
+                if (found == m_services.end() || found->second->connection != connection)
+                    return;
+                found->second->lastSeen = std::chrono::steady_clock::now();
+            }
+        }
+        if (type == drogon::WebSocketMessageType::Ping || type == drogon::WebSocketMessageType::Pong ||
+            type == drogon::WebSocketMessageType::Close)
+            return;
+        json value;
+        if (type != drogon::WebSocketMessageType::Text || message.size() > 1024 * 1024 ||
+            !tryParseJson(message, value) || !value.is_object()) {
+            disconnect(connection);
+            connection->shutdown(drogon::CloseCode::kViolation, "Invalid activity message");
+            return;
+        }
+        if (name.empty()) {
+            const auto registered = getStr(value, "type") == "register" && message.size() <= 128 * 1024
+                                      ? registerService(connection, value)
+                                      : std::expected<void, std::string>{std::unexpected("首条消息必须为 register")};
+            if (!registered) {
+                disconnect(connection);
+                connection->shutdown(drogon::CloseCode::kViolation, "Invalid activity registration");
+            }
+            return;
+        }
+        if (getStr(value, "type") == "response" && !getStr(value, "request_id").empty() &&
+            atOrNull(value, "success").is_boolean()) {
+            const auto id = getStr(value, "request_id");
+            completeRequest(id, connection, std::move(value));
+        } else if (getStr(value, "type") == "event" && atOrNull(value, "event").is_object()) {
+            const auto &event = value["event"];
+            const auto result = message.size() <= 128 * 1024
+                                  ? receiveEvent(name, connection, event)
+                                  : std::expected<void, std::string>{std::unexpected("活动事件过大")};
+            auto ack = json{{"type", "event_ack"}, {"run_id", getStr(event, "run_id")},
+              {"sequence", atOrNull(event, "sequence")}, {"success", result.has_value()}};
+            if (!result)
+                ack["error"] = result.error();
+            connection->send(dumpJson(ack));
+            HttpTrace::instance().append({.tag = "Activity",
+              .method = "WS",
+              .url = "/activities/ws?name=" + drogon::utils::urlEncodeComponent(name) + "#event",
+              .requestBody = message,
+              .status = result ? 200 : 400,
+              .responseBody = dumpJson(ack)});
+        } else {
+            disconnect(connection);
+            connection->shutdown(drogon::CloseCode::kViolation, "Unknown activity message");
+        }
     }
 
     auto ActivityManager::invoke(std::string operation, std::string name, json arguments, json origin)
       -> drogon::Task<json> {
         std::shared_ptr<Service> service;
-        json config;
+        drogon::WebSocketConnectionPtr connection;
         json body;
         {
             std::lock_guard lock(m_mutex);
@@ -372,8 +636,8 @@ namespace insoulforge {
                 co_return failure("缺少可信的调用来源");
             if (operation != "start" && operation != "command" && operation != "stop" && operation != "details")
                 co_return failure("未知活动操作");
-            if (operation != "details" && (!service->synchronized || !service->reachable))
-                co_return failure("活动服务状态尚未确认，请等待后台同步");
+            if (!service->synchronized || !service->connection)
+                co_return failure("活动服务状态尚未确认，请等待服务连接并同步");
             if (operation == "start") {
                 if (getBool(service->runtime, "running"))
                     co_return failure("活动已在全局运行：" + getStr(service->runtime, "status"));
@@ -387,17 +651,18 @@ namespace insoulforge {
             } else if (!getBool(service->runtime, "running"))
                 co_return failure("活动当前没有运行");
             body = {{"run_id", getStr(service->runtime, "run_id")}, {"origin", service->runtime["origin"]},
-              {"caller", std::move(origin)}, {"arguments", std::move(arguments)}, {"callback_url", m_callbackUrl},
-              {"name", name}};
+              {"caller", std::move(origin)}, {"arguments", std::move(arguments)}};
             service->busy = true;
-            config = service->config;
+            connection = service->connection;
         }
         json result;
         auto error = std::string{};
         try {
-            result = co_await request(std::move(config), operation, std::move(body));
+            result = co_await request(name, connection, operation, std::move(body));
             if (result.contains("snapshot")) {
                 std::lock_guard lock(m_mutex);
+                if (m_stopping || service->connection != connection)
+                    co_return failure("活动连接已更换，操作结果未确认");
                 const auto applied = applySnapshotLocked(*service, result["snapshot"], false);
                 if (!applied)
                     error = applied.error();
@@ -407,27 +672,29 @@ namespace insoulforge {
         }
         {
             std::lock_guard lock(m_mutex);
-            service->busy = false;
-            service->nextSync = 0;
+            if (m_stopping || service->connection != connection)
+                co_return failure("活动连接已断开或更换，操作结果未确认");
             if (!error.empty())
-                service->reachable = false;
+                service->synchronized = false;
         }
         // 无论响应是否完整，都确认真实状态；超时不会自动重发有副作用的请求。
-        co_await synchronize(name);
+        const auto synchronized = co_await synchronize(name, connection, SyncMode::AfterOperation);
+        if (!synchronized && error.empty())
+            error = synchronized.error();
         if (!error.empty())
             co_return failure(error + "；请查询活动状态，不要直接重复启动");
         co_return result;
     }
 
-    auto ActivityManager::receiveEvent(const std::string &name, const std::string &token, const json &event)
-      -> std::expected<void, std::string> {
+    auto ActivityManager::receiveEvent(const std::string &name, const drogon::WebSocketConnectionPtr &connection,
+      const json &event) -> std::expected<void, std::string> {
         std::optional<Event> notification;
         {
             std::lock_guard lock(m_mutex);
             const auto found = m_services.find(name);
-            if (m_stopping || found == m_services.end() || !getBool(found->second->config, "enabled") ||
-                !sameToken(getStr(found->second->config, "token"), token))
-                return std::unexpected("活动认证失败");
+            if (m_stopping || found == m_services.end() || !found->second->synchronized ||
+                found->second->connection != connection)
+                return std::unexpected("活动连接未就绪或已经更换");
             auto &service = *found->second;
             const auto mode = getStr(event, "mode", "silent");
             if (event.contains("mode") && !event["mode"].is_string())
@@ -448,7 +715,7 @@ namespace insoulforge {
                 return std::unexpected(applied.error());
             auto &runtime = service.runtime;
             const auto sequence = event.at("sequence").get<i64>();
-            // 查询/工具响应可先同步状态；同序号的回调仍有一次通知机会。旧事件不反向覆盖新进展。
+            // 查询/工具响应可先同步状态；同序号的事件仍有一次通知机会。旧事件不反向覆盖新进展。
             if (sequence < runtime.value("sequence", i64{-1}) || sequence <= runtime.value("event_sequence", i64{-1}))
                 return {};
             const auto previousEvent = runtime.value("event_sequence", i64{-1});
@@ -457,7 +724,7 @@ namespace insoulforge {
                 runtime["event_sequence"] = previousEvent;
                 return std::unexpected(saved.error());
             }
-            if (!text.empty())
+            if (!text.empty() && getBool(service.config, "enabled"))
                 notification = Event{*session, name, text, mode, runtime.at("origin")};
         }
         if (notification && m_sink) {
@@ -471,35 +738,57 @@ namespace insoulforge {
     }
 
     void ActivityManager::tick() {
-        auto due = std::vector<std::string>{};
+        std::vector<drogon::WebSocketConnectionPtr> expired;
+        std::vector<std::pair<std::string, drogon::WebSocketConnectionPtr>> due;
         {
             std::lock_guard lock(m_mutex);
             if (m_stopping)
                 return;
-            for (const auto &[name, service]: m_services)
-                if (!service->busy && getBool(service->config, "enabled") && service->nextSync <= now())
-                    due.push_back(name);
+            const auto current = std::chrono::steady_clock::now();
+            for (const auto &[name, service]: m_services) {
+                if (!service->connection)
+                    continue;
+                if (current - service->lastSeen > std::chrono::seconds(45))
+                    expired.push_back(service->connection);
+                else if (service->synchronized && !service->busy && current - service->lastCheck >= m_checkInterval)
+                    due.emplace_back(name, service->connection);
+            }
         }
-        for (const auto &name: due)
-            drogon::async_run([this, name]() -> drogon::Task<> { return synchronize(name); });
+        for (const auto &connection: expired) {
+            disconnect(connection);
+            connection->shutdown();
+        }
+        for (const auto &[name, connection]: due)
+            drogon::async_run([this, name, connection]() -> drogon::Task<> {
+                co_await synchronize(name, connection, SyncMode::Check);
+            });
     }
 
-    void ActivityManager::start(trantor::EventLoop &loop) {
+    void ActivityManager::start(trantor::EventLoop &loop, std::chrono::seconds checkInterval) {
+        std::lock_guard lock(m_mutex);
         if (m_loop)
             return;
+        m_stopping = false;
         m_loop = &loop;
-        m_timer = loop.runEvery(5, [this] { tick(); });
-        loop.queueInLoop([this] { tick(); });
+        m_checkInterval = std::max(checkInterval, std::chrono::seconds{1});
+        m_timer = loop.runEvery(std::min(5.0, static_cast<double>(m_checkInterval.count())), [this] { tick(); });
     }
 
     void ActivityManager::stop() {
+        std::vector<drogon::WebSocketConnectionPtr> connections;
         {
             std::lock_guard lock(m_mutex);
             m_stopping = true;
+            if (m_loop) {
+                m_loop->invalidateTimer(m_timer);
+                m_loop = nullptr;
+            }
+            for (const auto &[connection, registration]: m_connections)
+                connections.push_back(connection);
         }
-        if (m_loop) {
-            m_loop->invalidateTimer(m_timer);
-            m_loop = nullptr;
+        for (const auto &connection: connections) {
+            disconnect(connection);
+            connection->shutdown();
         }
     }
 } // namespace insoulforge

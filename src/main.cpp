@@ -162,6 +162,8 @@ auto main() -> int {
         // 角色形象图允许 8 MiB；为 multipart 边界和表单头预留空间。
         drogon::app().setClientMaxBodySize(10U * 1024U * 1024U);
         drogon::app().setClientMaxMemoryBodySize(10U * 1024U * 1024U);
+        // 活动详情响应允许最多 1 MiB；活动事件仍在协议入口限制为 128 KiB。
+        drogon::app().setClientMaxWebSocketMessageSize(1024U * 1024U);
         // 前端构建产物位于运行目录的 public/，由同一 HTTP 服务提供。
         drogon::app().setDocumentRoot("public");
         Logger::info(std::nullopt, "Main", "HTTP 服务启动 | port=7778");

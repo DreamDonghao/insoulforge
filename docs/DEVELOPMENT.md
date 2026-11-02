@@ -280,9 +280,9 @@ MessageService → OneBot API
   Executor 仅注入目录及查询/启用工具，具体工具在本次回复选中后的下一轮才开放；选择不跨会话或回复共享，
   执行时校验本轮授权和缓存版本。调用使用独立会话，最后一轮禁止 MCP 查询、启用和执行。
   数量限制在“执行配置”页设置。配置方式和当前 SSE 限制见 [MCP.md](./MCP.md)。
-- 全局实时活动由 `workflow/activity/ActivityManager` 管理，独立服务主动上报状态，所有会话共享。
-  生命周期和来源保存在 `data/activity-state.json`；退出不停止远端服务，启动异步核实状态。
-  模型通过独立内置插件调用通用工具，前端“实时活动”管理服务，协议与示例见 [ACTIVITIES.md](./ACTIVITIES.md)。
+- 全局实时活动由 `workflow/activity/ActivityManager` 管理，独立服务使用统一接入 Token 主动连接 `/activities/ws`，上报名称与描述自动登记，所有会话共享。
+  生命周期和来源保存在 `data/activity-state.json`；退出不停止独立服务，每次连接先注册、恢复状态再开放操作；禁用状态保留，服务描述随注册更新；工具请求、状态及通知共用 WS，每 60 秒核对状态，后台支持立即同步。
+  模型通过独立内置插件调用通用工具，前端“实时活动”管理服务，协议与开发要求见 [ACTIVITIES.md](./ACTIVITIES.md)。
 - 拍一拍、撤回、引用回复、表情包收发、定时任务均由上述工具实现，由 Executor 根据上下文自动决策调用；天气、搜索、随机数、时间等能力来自
   `agentTools/` 目录的可导入自定义工具
 

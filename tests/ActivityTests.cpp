@@ -8,11 +8,14 @@
 #include <stdexcept>
 #include <thread>
 
+#include <drogon/WebSocketClient.h>
 #include <drogon/drogon.h>
 #include <trantor/net/EventLoopThread.h>
 
+#include <admin/events/ActivityWebSocket.hpp>
 #include <admin/http/ActivityController.hpp>
 #include <infrastructure/config/Config.hpp>
+#include <infrastructure/http/HttpTrace.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <workflow/OneBotEventWorkflow.hpp>
 #include <workflow/activity/ActivityManager.hpp>
@@ -29,9 +32,11 @@ namespace {
     auto remote = json{{"running", false}};
     auto calls = std::map<std::string, int>{};
     auto lastCommand = json{};
-    bool unavailable = false;
-    bool loseStartResponse = false;
-    bool delayStart = false;
+    std::atomic<bool> unavailable{false};
+    std::atomic<bool> loseStartResponse{false};
+    std::atomic<bool> delayStart{false};
+    std::atomic<bool> delayStatus{false};
+    std::atomic<bool> largeDetails{false};
     std::atomic<bool> startReceived{false};
     std::atomic<int> executorRequests{0};
     std::atomic<int> routerRequests{0};
@@ -44,10 +49,17 @@ namespace {
         if (!condition)
             throw std::runtime_error(message);
     }
-    auto configuration(const std::string &url) -> json {
-        return {{"callbackUrl", "http://127.0.0.1/activities/events"},
-          {"servers", json::array({{{"name", "chess"}, {"description", "一起下棋"}, {"url", url}, {"enabled", true},
-                        {"token", kToken}}})}};
+    auto configuration() -> json { return {{"token", kToken}, {"servers", json::array()}}; }
+    auto callCount(const std::string &operation) -> int {
+        std::lock_guard lock(fixtureMutex);
+        return calls[operation];
+    }
+    auto registered(const std::string &name) -> json {
+        const auto config = ActivityManager::instance().configuration();
+        for (const auto &service: config["servers"])
+            if (getStr(service, "name") == name)
+                return service;
+        return nullptr;
     }
     auto origin(const std::string &session = "group:test-a", const std::string &user = "user-a") -> json {
         return {{"session_id", session}, {"user_id", user}};
@@ -140,201 +152,481 @@ namespace {
         workflow.flushMessageListsToStorage();
         database.close();
     }
+    struct MockService {
+        drogon::WebSocketClientPtr client;
+        std::atomic<bool> ready{false};
+        std::atomic<bool> attempted{false};
+        std::atomic<bool> accepted{false};
+        std::atomic<bool> closed{false};
+        std::atomic<int> acks{0};
+        json lastAck;
+        void close() {
+            auto source = client;
+            source->getLoop()->runInLoop([source] { source->stop(); });
+        }
+        void event(const json &value) {
+            client->getConnection()->send(dumpJson(json{{"type", "event"}, {"event", value}}));
+        }
+    };
+    auto connectService(const std::string &endpoint, const std::string &name = "chess",
+      const std::string &token = kToken, const std::string &description = "一起下棋", bool autoRegister = true)
+      -> std::shared_ptr<MockService> {
+        auto service = std::make_shared<MockService>();
+        auto wsEndpoint = endpoint;
+        wsEndpoint.replace(0, 4, "ws");
+        service->client = drogon::WebSocketClient::newWebSocketClient(wsEndpoint);
+        const auto weak = std::weak_ptr(service);
+        service->client->setConnectionClosedHandler([weak](const auto &source) {
+            if (auto service = weak.lock())
+                service->closed = true;
+            source->stop();
+        });
+        service->client->setMessageHandler([weak](std::string &&text, const auto &source, auto type) {
+            if (type != drogon::WebSocketMessageType::Text)
+                return;
+            auto service = weak.lock();
+            if (!service)
+                return;
+            const auto message = json::parse(text);
+            if (getStr(message, "type") == "ready") {
+                service->ready = true;
+                return;
+            }
+            if (getStr(message, "type") == "event_ack") {
+                std::lock_guard lock(fixtureMutex);
+                service->lastAck = message;
+                ++service->acks;
+                return;
+            }
+            const auto operation = getStr(message, "operation");
+            const auto body = message["body"];
+            json result;
+            bool delayed = false;
+            bool lost = false;
+            {
+                std::lock_guard lock(fixtureMutex);
+                ++calls[operation];
+                if (operation == "status") {
+                    result = remote;
+                    delayed = delayStatus;
+                } else if (operation == "start") {
+                    remote = {{"running", true}, {"run_id", body["run_id"]}, {"sequence", 0}, {"status", "等待开始"},
+                      {"origin", body["origin"]}};
+                    result = {{"snapshot", remote}, {"url", "http://fixture/play"}};
+                    startReceived = true;
+                    delayed = delayStart;
+                    lost = loseStartResponse;
+                } else if (operation == "command") {
+                    lastCommand = body;
+                    if (unavailable)
+                        return; // 测试真正的请求超时，不执行操作，也不发响应。
+                    result = {{"success", true}};
+                } else if (operation == "stop")
+                    result = {{"accepted", true}};
+                else {
+                    result = {{"snapshot", remote}, {"board", {{"turn", "user"}}}};
+                    if (largeDetails)
+                        result["extra"] = std::string(150 * 1024, 'x');
+                }
+            }
+            if (lost) {
+                source->stop(); // 已启动，但响应丢失。
+                return;
+            }
+            const auto response = dumpJson(
+              json{{"type", "response"}, {"request_id", message["request_id"]}, {"success", true}, {"result", result}});
+            if (delayed)
+                source->getLoop()->runAfter(.15, [source, response] { source->getConnection()->send(response); });
+            else
+                source->getConnection()->send(response);
+        });
+        auto request = drogon::HttpRequest::newHttpRequest();
+        request->setPathEncode(false);
+        request->setPath("/activities/ws");
+        request->addHeader("Authorization", "Bearer " + token);
+        service->client->connectToServer(
+          request, [weak, name, description, autoRegister](auto result, const auto &, const auto &source) {
+              if (auto service = weak.lock()) {
+                  service->accepted = result == drogon::ReqResult::Ok;
+                  if (service->accepted && autoRegister)
+                      source->getConnection()->send(
+                        dumpJson(json{{"type", "register"}, {"name", name}, {"description", description}}));
+                  service->attempted = true;
+              }
+          });
+        return service;
+    }
     auto run(const std::string endpoint, const std::filesystem::path root, int &exitCode) -> drogon::Task<> {
+        std::vector<std::shared_ptr<MockService>> clients;
+        auto &manager = ActivityManager::instance();
         try {
-            auto events = std::vector<ActivityManager::Event>{};
-            auto eventMutex = std::mutex{};
-            ActivityManager manager((root / "state.json").string(), [&](ActivityManager::Event event) {
-                std::lock_guard lock(eventMutex);
-                events.push_back(std::move(event));
-            });
-            auto config = configuration(endpoint);
-            require(manager.initialize(config).has_value(), "valid config rejected");
-            auto invalid = config;
-            invalid["servers"].push_back(invalid["servers"][0]);
-            require(!manager.initialize(invalid), "duplicate names accepted");
-            invalid = config;
-            invalid["servers"][0]["token"] = "short";
-            require(!manager.initialize(invalid), "weak or missing callback key accepted");
-            require(
-              manager.directory().size() == 1 && manager.runningActivities().empty(), "initial directory invalid");
-            require(manager.configuration()["servers"][0]["token"] == kToken,
-              "admin editor did not receive configured secret");
-            require(manager.directory().dump().find(kToken) == std::string::npos &&
-                      manager.runningActivities().dump().find(kToken) == std::string::npos,
-              "secret leaked to model context");
-            const auto beforeSync = co_await manager.invoke("start", "chess", json::object(), origin());
-            require(beforeSync.value("success", true) == false, "start before recovery accepted");
-            co_await manager.synchronize("chess");
-            {
-                std::lock_guard lock(fixtureMutex);
-                delayStart = true;
-            }
-            std::atomic<bool> firstDone{false};
-            json firstResult;
-            drogon::async_run([&]() -> drogon::Task<> {
-                firstResult = co_await manager.invoke("start", "chess", json::object(), origin());
-                firstDone = true;
-            });
-            while (!startReceived)
-                co_await drogon::sleepCoro(trantor::EventLoop::getEventLoopOfCurrentThread(), 0.01);
-            const auto duplicate = co_await manager.invoke("start", "chess", json::object(), origin("group:test-b"));
-            require(duplicate.value("success", true) == false, "concurrent global duplicate start accepted");
-            while (!firstDone)
-                co_await drogon::sleepCoro(trantor::EventLoop::getEventLoopOfCurrentThread(), 0.01);
-            require(firstResult["url"] == endpoint + "/play", "participation link lost");
-            require(manager.runningActivities().size() == 1, "started activity absent from context");
-            {
-                std::lock_guard lock(fixtureMutex);
-                require(calls["start"] == 1, "duplicate start reached service");
-                delayStart = false;
-            }
-            auto event = changeSnapshot("等待用户落子");
-            event["text"] = "轮到你了";
-            event["mode"] = "judge";
-            require(!manager.receiveEvent("chess", "wrong", event), "invalid callback auth accepted");
-            require(manager.receiveEvent("chess", kToken, event).has_value(), "valid callback rejected");
-            require(
-              manager.receiveEvent("chess", kToken, event).has_value(), "duplicate callback should be acknowledged");
-            require(events.size() == 1 && events.back().sessionId == SessionId::group("test-a") &&
-                      events.back().mode == "judge",
-              "notification lost or duplicated/default target wrong");
-            require(manager.runningActivities()[0]["status"] == "等待用户落子", "pushed status not visible");
-
-            auto older = event;
-            older["sequence"] = 0;
-            older["status"] = "旧状态";
-            require(manager.receiveEvent("chess", kToken, older).has_value() &&
-                      manager.runningActivities()[0]["status"] == "等待用户落子",
-              "old event overwrote new state");
-            event = changeSnapshot("已暂停");
-            event["mode"] = "silent";
-            event["text"] = "暂停通知";
-            require(manager.receiveEvent("chess", kToken, event).has_value() &&
-                      manager.runningActivities().size() == 1 && events.back().mode == "silent",
-              "pause removed activity");
-
-            auto command = json{{"instruction", "恢复棋局"}, {"parameters", {{"speed", 2}}}};
-            const auto commandResult =
-              co_await manager.invoke("command", "chess", command, origin("private:user-b", "user-b"));
-            require(commandResult.value("success", false), "cross-session command rejected");
-            {
-                std::lock_guard lock(fixtureMutex);
-                require(lastCommand["caller"] == origin("private:user-b", "user-b") &&
-                          lastCommand["origin"] == origin() && lastCommand["arguments"] == command,
-                  "caller overwrote original source or parameters");
-            }
-            const auto details = co_await manager.invoke("details", "chess", json::object(), origin());
-            require(details.contains("board"), "full details not returned");
             auto &store = Config::instance();
             require(store.initialize((root / "config.json").string()).has_value(), "fixture config failed");
-            auto removed = config;
-            removed["servers"] = json::array();
-            require(!manager.saveConfiguration(removed, store), "running activity config removed");
-
-            ActivityManager recovered((root / "state.json").string());
-            require(recovered.initialize(config).has_value() && recovered.runningActivities().size() == 1,
-              "restart discarded active activity");
-            co_await recovered.synchronize("chess");
-            require(recovered.configuration()["servers"][0]["reachable"] == true, "restart failed to reconcile");
-            {
-                std::lock_guard lock(fixtureMutex);
-                unavailable = true;
-            }
-            co_await recovered.synchronize("chess");
-            require(recovered.runningActivities().size() == 1 &&
-                      getStr(recovered.runningActivities()[0], "status").find("状态未确认") != std::string::npos,
-              "disconnect silently removed active activity");
-            {
-                std::lock_guard lock(fixtureMutex);
-                unavailable = false;
-            }
-            co_await recovered.synchronize("chess");
-            const auto stopped = co_await manager.invoke("stop", "chess", json::object(), origin());
-            require(stopped.value("accepted", false) && manager.runningActivities().size() == 1,
-              "stop acceptance falsely treated as finished");
-            event = changeSnapshot("棋局已结束", false);
-            event["text"] = "棋局结果";
-            event["mode"] = "force";
-            event["target_session"] = "private:user-b";
-            co_await manager.synchronize("chess");
-            const auto notificationsBeforeFinish = events.size();
-            require(manager.receiveEvent("chess", kToken, event).has_value() && manager.runningActivities().empty(),
-              "finish did not remove activity");
-            require(events.size() == notificationsBeforeFinish + 1,
-              "status query consumed completion notification before callback arrived");
+            auto config = configuration();
+            ActivityManager legacy((root / "legacy-state.json").string());
             require(
-              events.back().mode == "force" && events.back().sessionId == SessionId::privateChat(UserId{"user-b"}),
-              "force/explicit destination not preserved");
-            auto resurrect = event;
-            resurrect["sequence"] = 1000;
-            resurrect["running"] = true;
-            require(!manager.receiveEvent("chess", kToken, resurrect), "ended run resurrected");
+              legacy
+                  .initialize({{"servers",
+                    json::array({{{"name", "old"}, {"description", "旧描述"}, {"enabled", true}, {"token", kToken}}})}})
+                  .has_value() &&
+                !legacy.authorized(kToken),
+              "legacy key silently became global token");
+            require(!legacy.configuration()["servers"][0].contains("token"), "legacy per-service token retained");
+            require(manager.initialize(config).has_value(), "manager init failed");
+            manager.start(*drogon::app().getLoop());
+            require(!manager.authorized("wrong") && !manager.authorized("") && manager.authorized(kToken),
+              "invalid auth accepted");
+            auto invalid = config;
+            invalid["servers"] = json::array({{{"name", "duplicate"}, {"description", ""}, {"enabled", true}},
+              {{"name", "duplicate"}, {"description", ""}, {"enabled", true}}});
+            require(!manager.initialize(invalid), "duplicate config accepted");
+            require(manager.directory().dump().find(kToken) == std::string::npos, "secret leaked to model");
+            require(!manager.configuration().contains("callbackUrl") && manager.configuration()["servers"].empty(),
+              "HTTP config retained");
+            auto result = co_await manager.invoke("start", "chess", json::object(), origin());
+            require(!getBool(result, "success", true), "disconnected start accepted");
+            auto rejected = connectService(endpoint, "chess", "wrong");
+            clients.push_back(rejected);
+            co_await waitFor([&] { return rejected->attempted.load(); }, "auth handshake did not finish");
+            require(!rejected->accepted, "unauthorized upgrade accepted");
+            auto authRequest = drogon::HttpRequest::newHttpRequest();
+            authRequest->setParameter("name", "chess");
+            drogon::HttpResponsePtr denied;
+            ActivityAuthentication{}.doFilter(authRequest, [&](const auto &response) { denied = response; }, [] {});
+            require(denied && denied->statusCode() == drogon::k401Unauthorized, "auth filter did not return 401");
+            require(!manager.saveToken("short", store), "short access token accepted");
+            auto malformed = connectService(endpoint, "");
+            clients.push_back(malformed);
+            co_await waitFor([&] { return malformed->closed.load(); }, "invalid registration not closed");
+            auto unregistered = connectService(endpoint, "unused", kToken, "", false);
+            clients.push_back(unregistered);
+            // 特殊字符名称的实际管理路由，以及禁用后重连的自动注册行为。
+            const auto alias = std::string("井字棋 /测试");
+            auto extra = connectService(endpoint, alias);
+            clients.push_back(extra);
+            co_await waitFor([&] { return extra->ready.load(); }, "automatic registration failed");
+            require(getBool(registered(alias), "enabled"), "new service not enabled automatically");
+            auto patchRequest = drogon::HttpRequest::newHttpRequest();
+            patchRequest->setMethod(drogon::Patch);
+            patchRequest->setPath("/admin/api/activities");
+            patchRequest->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            patchRequest->setBody(dumpJson(json{{"name", alias}, {"enabled", false}}));
+            const auto httpClient = drogon::HttpClient::newHttpClient(endpoint);
+            const auto patch = co_await httpClient->sendRequestCoro(patchRequest, 3);
+            require(patch && patch->statusCode() == drogon::k200OK && !getBool(registered(alias), "enabled"),
+              "single-service PATCH route failed");
+            extra->close();
+            co_await waitFor([&] { return !getBool(registered(alias), "connected"); }, "alias disconnect missing");
             {
                 std::lock_guard lock(fixtureMutex);
-                loseStartResponse = true;
+                remote = {{"run_id", "disabled-run"}, {"sequence", 0}, {"status", "禁用期间状态"}, {"running", true},
+                  {"origin", origin()}};
             }
-            const auto uncertain = co_await manager.invoke("start", "chess", json::object(), origin());
-            require(uncertain.value("success", true) == false && manager.runningActivities().size() == 1,
-              "lost start response failed to recover running instance");
-            require(!manager.receiveEvent("chess", kToken, event), "old run completion terminated new run");
-            {
-                std::lock_guard lock(fixtureMutex);
-                require(calls["start"] == 2, "uncertain start was retried");
-                loseStartResponse = false;
-            }
-
-            ActivityManager cold((root / "cold-state.json").string());
-            require(cold.initialize(config).has_value(), "cold recovery setup failed");
-            co_await cold.synchronize("chess");
-            require(cold.runningActivities().size() == 1, "remote running activity could not be adopted");
-            const auto plugin = ActivityToolsPlugin{};
-            auto &registry = ToolRegistry::instance();
+            extra = connectService(endpoint, alias, kToken, "服务的新描述");
+            clients.push_back(extra);
+            co_await waitFor([&] { return extra->ready.load(); }, "disabled service cannot register");
             require(
-              registry.registerPlugin(std::string(plugin.id()), [&](ToolRegistry &r) { plugin.registerTools(r); }),
-              "activity tools registration failed");
-            require(registry.hasTool("start_activity") && registry.hasTool("command_activity") &&
-                      registry.hasTool("stop_activity") && registry.hasTool("get_activity_details"),
-              "tools missing");
-            for (const auto &tool: registry.getTools({.isPrivateSession = true, .replyOnly = true}))
-                require(getStr(atOrNull(tool, "function"), "name").find("activity") == std::string::npos,
-                  "activity tools bypassed final reply-only round");
-
-            // 实际 HTTP 回调入口不使用管理员 Cookie，仍严格检查服务密钥。
-            require(ActivityManager::instance().initialize(configuration(endpoint)).has_value(),
-              "callback manager init failed");
-            co_await ActivityManager::instance().synchronize("chess");
-            auto callbackEvent = changeSnapshot("回调测试");
-            auto request = drogon::HttpRequest::newHttpRequest();
-            request->setBody(callbackEvent.dump());
-            auto controller = ActivityController{};
-            drogon::HttpResponsePtr response;
-            controller.event(request, [&](const auto &r) { response = r; });
-            require(response->statusCode() == drogon::k401Unauthorized, "callback without auth accepted");
-            request->addHeader("Authorization", std::string("Bearer ") + kToken);
-            controller.event(request, [&](const auto &r) { response = r; });
-            require(response->statusCode() == drogon::k200OK, "authenticated callback failed");
-            ActivityManager::instance().stop();
+              !getBool(registered(alias), "enabled") && getStr(registered(alias), "description") == "服务的新描述",
+              "reconnect overwrote enabled flag or lost description");
+            ActivityManager disabledRestore((root / "disabled-restore.json").string());
+            require(disabledRestore.initialize(store.getActivitiesConfig()).has_value() &&
+                      disabledRestore.directory().empty(),
+              "disabled registry not persisted");
+            auto staleRequest = drogon::HttpRequest::newHttpRequest();
+            staleRequest->setBody(dumpJson(json{{"token", kToken}, {"servers", json::array()}}));
+            drogon::HttpResponsePtr rejectedSave;
+            ActivityController{}.saveConfig(staleRequest, [&](const auto &response) { rejectedSave = response; });
+            require(rejectedSave->statusCode() == drogon::k400BadRequest && !registered(alias).is_null(),
+              "stale full-list save overwrote registry");
+            auto disabledEvent = json{{"run_id", "disabled-run"}, {"sequence", 1}, {"status", "禁用期间状态"},
+              {"running", true}, {"origin", origin()}, {"mode", "force"}, {"text", "禁用通知"}};
+            extra->event(disabledEvent);
+            co_await waitFor([&] { return extra->acks == 1; }, "disabled state not acknowledged");
+            require(
+              getBool(extra->lastAck, "success") && manager.runningActivities().empty() && manager.directory().empty(),
+              "disabled service exposed to model");
+            disabledEvent["running"] = false;
+            disabledEvent["sequence"] = 2;
+            extra->event(disabledEvent);
+            co_await waitFor([&] { return extra->acks == 2; }, "disabled terminal state missing");
+            extra->close();
+            co_await waitFor([&] { return !getBool(registered(alias), "connected"); }, "alias close missing");
+            require(manager.removeService(alias, store).has_value(), "offline record cleanup failed");
+            {
+                std::lock_guard lock(fixtureMutex);
+                remote = {{"running", false}};
+            }
+            extra = connectService(endpoint, alias);
+            clients.push_back(extra);
+            require(manager.saveToken(kToken, store).has_value(), "token save failed");
+            co_await waitFor([&] { return extra->ready.load(); }, "removed service not rediscovered");
+            require(getBool(registered(alias), "enabled"), "rediscovered service not enabled");
+            require(store.getActivitiesConfig()["servers"].size() == 1, "token save lost auto registration");
+            extra->close();
+            co_await waitFor([&] { return !getBool(registered(alias), "connected"); }, "alias final close missing");
+            require(manager.removeService(alias, store).has_value(), "alias cleanup failed");
+            auto service = connectService(endpoint);
+            clients.push_back(service);
+            co_await waitFor([&] { return service->ready.load(); }, "initial sync failed");
+            require(getBool(registered("chess"), "enabled") && !registered("chess").contains("token"),
+              "service not automatically registered");
+            require(manager.runningActivities().empty(), "idle service in context");
+            require(!(co_await manager.refresh("missing")).has_value(), "unknown service synchronization accepted");
+            delayStart = true;
+            std::atomic<bool> done{false};
+            json first;
+            drogon::async_run([&]() -> drogon::Task<> {
+                first = co_await manager.invoke("start", "chess", json::object(), origin());
+                done = true;
+            });
+            co_await waitFor([&] { return startReceived.load(); }, "start missing");
+            result = co_await manager.invoke("start", "chess", json::object(), origin("private:someone"));
+            require(!getBool(result, "success", true), "concurrent duplicate start accepted");
+            co_await waitFor([&] { return done.load(); }, "start response missing");
+            require(
+              first["url"] == "http://fixture/play" && manager.runningActivities().size() == 1, "start not reflected");
+            require(!manager.removeService("chess", store), "running service removed");
+            require(!manager.setEnabled("chess", false, store), "running service disabled");
+            ActivityManager restored("data/activity-state.json");
+            require(
+              restored.initialize(manager.configuration()).has_value() && restored.runningActivities().size() == 1,
+              "restart lost persistent run");
+            changeSnapshot("漏推送，主动核对");
+            auto syncRequest = drogon::HttpRequest::newHttpRequest();
+            syncRequest->setMethod(drogon::Post);
+            syncRequest->setPath("/admin/api/activities/sync");
+            syncRequest->setBody("{\"name\":\"chess\"}");
+            syncRequest->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            const auto synced = co_await httpClient->sendRequestCoro(syncRequest, 3);
+            require(
+              synced->statusCode() == drogon::k200OK && getStr(registered("chess"), "status") == "漏推送，主动核对",
+              "manual synchronization did not query actual state");
+            delayStart = false;
+            result = co_await manager.invoke("command", "chess",
+              {{"instruction", "暂停"}, {"parameters", {{"cell", 5}}}}, origin("private:caller", "actual-user"));
+            require(getBool(result, "success") && lastCommand["caller"] == origin("private:caller", "actual-user") &&
+                      lastCommand["origin"] == origin(),
+              "caller/origin lost");
+            require(
+              !lastCommand.contains("callback_url") && !lastCommand.contains("name"), "old transport fields leaked");
+            largeDetails = true;
+            result = co_await manager.invoke("details", "chess", json::object(), origin());
+            largeDetails = false;
+            require(
+              result.contains("board") && getStr(result, "extra").size() == 150 * 1024, "large details response lost");
+            delayStatus = true;
+            const auto beforeStatus = callCount("status");
+            done = false;
+            drogon::async_run([&]() -> drogon::Task<> {
+                result = co_await manager.invoke("details", "chess", json::object(), origin());
+                done = true;
+            });
+            co_await waitFor([&] { return callCount("status") > beforeStatus; }, "post-operation status not requested");
+            const auto busy = co_await manager.invoke("command", "chess", json::object(), origin());
+            require(!getBool(busy, "success", true), "operation overlapped status confirmation");
+            require(!(co_await manager.refresh("chess")).has_value(), "manual synchronization overlapped operation");
+            co_await waitFor([&] { return done.load(); }, "delayed confirmation did not finish");
+            delayStatus = false;
+            auto event = changeSnapshot("等待落子");
+            event["mode"] = "silent";
+            service->event(event);
+            co_await waitFor([&] { return service->acks == 1; }, "event ack missing");
+            service->event(event);
+            co_await waitFor([&] { return service->acks == 2; }, "duplicate ack missing");
+            require(getBool(service->lastAck, "success"), "duplicate rejected");
+            auto old = event;
+            old["sequence"] = 0;
+            old["status"] = "旧状态";
+            service->event(old);
+            co_await waitFor([&] { return service->acks == 3; }, "old ack missing");
+            require(manager.runningActivities()[0]["status"] == "等待落子", "old event overwrote state");
+            auto invalidEvent = event;
+            invalidEvent["run_id"] = "another-run";
+            service->event(invalidEvent);
+            co_await waitFor([&] { return service->acks == 4; }, "invalid run ack missing");
+            require(!getBool(service->lastAck, "success"), "mismatched run accepted");
+            invalidEvent = event;
+            invalidEvent["status"] = "同版本篡改";
+            service->event(invalidEvent);
+            co_await waitFor([&] { return service->acks == 5; }, "changed version ack missing");
+            require(!getBool(service->lastAck, "success"), "same-version mutation accepted");
+            service->close();
+            co_await waitFor(
+              [&] { return !getBool(manager.configuration()["servers"][0], "connected"); }, "disconnect not reflected");
+            require(getStr(manager.runningActivities()[0], "status").find("状态未确认") != std::string::npos,
+              "disconnect hid activity");
+            require(!(co_await manager.refresh("chess")).has_value(), "offline synchronization accepted");
+            event = changeSnapshot("断线期间轮到机器人");
+            event["mode"] = "silent";
+            auto replacement = connectService(endpoint);
+            clients.push_back(replacement);
+            co_await waitFor([&] { return replacement->ready.load(); }, "reconnect sync failed");
+            replacement->event(event);
+            co_await waitFor([&] { return replacement->acks == 1; }, "same-sequence recovery event lost");
+            require(getBool(replacement->lastAck, "success"), "recovery rejected");
+            // 新连接主动接管仍在线的旧连接。
+            auto takeover = connectService(endpoint);
+            clients.push_back(takeover);
+            co_await waitFor([&] { return takeover->ready.load(); }, "takeover failed");
+            require(getBool(manager.configuration()["servers"][0], "connected"), "old close cleared replacement");
+            auto stopped = co_await manager.invoke("stop", "chess", json::object(), origin());
+            require(
+              getBool(stopped, "accepted") && !manager.runningActivities().empty(), "accepted stop treated as ended");
+            event = changeSnapshot("已结束", false);
+            event["mode"] = "silent";
+            takeover->event(event);
+            co_await waitFor([&] { return takeover->acks == 1; }, "finish not acknowledged");
+            require(manager.runningActivities().empty(), "ended activity retained");
+            auto resurrected = event;
+            resurrected["running"] = true;
+            resurrected["sequence"] = getInt(event, "sequence") + 1;
+            takeover->event(resurrected);
+            co_await waitFor([&] { return takeover->acks == 2; }, "terminal run ack missing");
+            require(
+              !getBool(takeover->lastAck, "success") && manager.runningActivities().empty(), "ended run reactivated");
+            // 已执行启动而未收到响应：只返回不确定，重连恢复，不重复发送启动。
+            loseStartResponse = true;
+            auto uncertain = co_await manager.invoke("start", "chess", json::object(), origin());
+            require(!getBool(uncertain, "success", true), "lost response returned success");
+            loseStartResponse = false;
+            auto recovered = connectService(endpoint);
+            clients.push_back(recovered);
+            co_await waitFor([&] { return recovered->ready.load(); }, "uncertain start not recovered");
+            require(
+              manager.runningActivities().size() == 1 && callCount("start") == 2, "uncertain start retried or lost");
+            // 超时只查询状态，不重新发送有副作用的指令。
+            unavailable = true;
+            const auto beforeCommand = callCount("command");
+            uncertain = co_await manager.invoke("command", "chess", json::object(), origin());
+            unavailable = false;
+            require(!getBool(uncertain, "success", true) && callCount("command") == beforeCommand + 1,
+              "timeout retried command");
+            co_await waitFor(
+              [&] { return unregistered->closed.load(); }, "registration deadline did not close idle socket");
+            // Token 热更新同时取消已注册及尚未注册连接，不丢失等待操作。
+            auto pendingRegistration = connectService(endpoint, "pending", kToken, "", false);
+            clients.push_back(pendingRegistration);
+            co_await waitFor([&] { return pendingRegistration->attempted.load(); }, "pending handshake missing");
+            unavailable = true;
+            done = false;
+            drogon::async_run([&]() -> drogon::Task<> {
+                uncertain = co_await manager.invoke("command", "chess", json::object(), origin());
+                done = true;
+            });
+            co_await waitFor([&] { return callCount("command") == beforeCommand + 2; }, "pending command not sent");
+            const auto rotatedToken = std::string("rotated-fixture-secret");
+            require(manager.saveToken(rotatedToken, store).has_value(), "token rotation failed");
+            co_await waitFor([&] { return done.load(); }, "stop leaked waiter");
+            co_await waitFor(
+              [&] { return pendingRegistration->closed.load(); }, "rotation left unregistered connection alive");
+            require(!manager.authorized(kToken) && manager.authorized(rotatedToken), "old token remains authorized");
+            require(!getBool(uncertain, "success", true), "stop returned confirmed success");
+            unavailable = false;
+            auto rotated = connectService(endpoint, "chess", rotatedToken);
+            clients.push_back(rotated);
+            co_await waitFor([&] { return rotated->ready.load(); }, "new token cannot restore activity");
+            unavailable = true;
+            done = false;
+            const auto beforeDelete = callCount("command");
+            drogon::async_run([&]() -> drogon::Task<> {
+                uncertain = co_await manager.invoke("command", "chess", json::object(), origin());
+                done = true;
+            });
+            co_await waitFor([&] { return callCount("command") > beforeDelete; }, "delete fixture request missing");
+            auto deleteRequest = drogon::HttpRequest::newHttpRequest();
+            deleteRequest->setMethod(drogon::Delete);
+            deleteRequest->setPath("/admin/api/activities");
+            deleteRequest->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            deleteRequest->setBody("{\"name\":\"chess\",\"force\":\"true\"}");
+            const auto invalidDelete = co_await httpClient->sendRequestCoro(deleteRequest, 3);
+            require(invalidDelete->statusCode() == drogon::k400BadRequest && !registered("chess").is_null(),
+              "non-boolean force accepted");
+            deleteRequest = drogon::HttpRequest::newHttpRequest();
+            deleteRequest->setMethod(drogon::Delete);
+            deleteRequest->setPath("/admin/api/activities");
+            deleteRequest->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            deleteRequest->setBody("{\"name\":\"chess\",\"force\":true}");
+            const auto forced = co_await httpClient->sendRequestCoro(deleteRequest, 3);
+            require(forced->statusCode() == drogon::k200OK, "force delete endpoint failed");
+            co_await waitFor(
+              [&] { return done.load() && rotated->closed.load(); }, "force delete left connection or waiter alive");
+            require(!getBool(uncertain, "success", true) && registered("chess").is_null() &&
+                      manager.runningActivities().empty(),
+              "force delete retained runtime or confirmed pending operation");
+            auto savedState = json{};
+            std::ifstream("data/activity-state.json") >> savedState;
+            require(!savedState.contains("chess") && store.getActivitiesConfig()["servers"].empty(),
+              "force deletion not persisted");
+            unavailable = false;
+            auto rediscovered = connectService(endpoint, "chess", rotatedToken);
+            clients.push_back(rediscovered);
+            co_await waitFor([&] { return rediscovered->ready.load(); }, "deleted service cannot register again");
+            require(!manager.removeService("chess", store), "ordinary deletion bypassed running guard");
+            rediscovered->close();
+            co_await waitFor(
+              [&] { return !getBool(registered("chess"), "connected"); }, "offline fixture did not disconnect");
+            require(manager.removeService("chess", store, true).has_value() && manager.runningActivities().empty(),
+              "abandoned offline activity cannot be force deleted");
+            require(
+              manager.saveToken("", store).has_value() && !manager.authorized(rotatedToken) && !manager.authorized(""),
+              "empty token did not close access");
             manager.stop();
-            recovered.stop();
-            cold.stop();
+            require(HttpTrace::instance().size() > 0, "WS traces missing");
             co_await testWorkflow(endpoint, root);
             exitCode = 0;
-            std::cout << "All activity protocol tests passed\n";
+            std::cout << "All activity WebSocket and workflow tests passed\n";
         } catch (const std::exception &error) {
             std::cerr << error.what() << '\n';
         }
+        manager.stop();
+        for (const auto &client: clients)
+            client->close();
+        co_await drogon::sleepCoro(trantor::EventLoop::getEventLoopOfCurrentThread(), .1);
+        drogon::app().quit();
+    }
+    auto runPeriodic(const std::string endpoint, const std::filesystem::path root, int &exitCode) -> drogon::Task<> {
+        auto &manager = ActivityManager::instance();
+        std::shared_ptr<MockService> service;
+        try {
+            require(Config::instance().initialize((root / "config.json").string()).has_value(),
+              "periodic fixture config failed");
+            require(manager.initialize(configuration()).has_value(), "periodic manager init failed");
+            manager.start(*drogon::app().getLoop(), std::chrono::seconds{1});
+            service = connectService(endpoint);
+            co_await waitFor([&] { return service->ready.load(); }, "periodic service not ready");
+            const auto started = co_await manager.invoke("start", "chess", json::object(), origin());
+            require(started.contains("snapshot"), "periodic fixture start failed");
+            const auto before = callCount("status");
+            changeSnapshot("未推送的最新状态");
+            co_await waitFor(
+              [&] {
+                  return getStr(registered("chess"), "status") == "未推送的最新状态" && callCount("status") > before;
+              },
+              "periodic query did not repair missed push");
+            changeSnapshot("已结束", false);
+            co_await waitFor(
+              [&] { return manager.runningActivities().empty(); }, "periodic query did not detect finish");
+            require(executorRequests == 0 && routerRequests == 0, "periodic query triggered model");
+            exitCode = 0;
+        } catch (const std::exception &error) {
+            std::cerr << error.what() << '\n';
+        }
+        manager.stop();
+        if (service)
+            service->close();
+        co_await drogon::sleepCoro(trantor::EventLoop::getEventLoopOfCurrentThread(), .1);
         drogon::app().quit();
     }
 } // namespace
 
-auto main() -> int {
+auto main(int argc, char **argv) -> int {
+    const auto periodic = argc > 1 && std::string(argv[1]) == "--periodic";
     auto root = std::filesystem::temp_directory_path() / ("insoulforge-activities-" + drogon::utils::getUuid());
     std::filesystem::create_directories(root);
     // 单例持久化也隔离到临时运行目录，绝不接触项目 data。
     const auto original = std::filesystem::current_path();
     std::filesystem::current_path(root);
-    drogon::app().addListener("127.0.0.1", 0).setThreadNum(1);
+    drogon::app().addListener("127.0.0.1", 0).setThreadNum(1).setClientMaxWebSocketMessageSize(1024 * 1024);
     drogon::app().registerHandler("/activity-model",
       [](const drogon::HttpRequestPtr &request, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
           const auto body = json::parse(request->body());
@@ -367,51 +659,6 @@ auto main() -> int {
               callback(jsonResponse({{"status", "ok"}, {"retcode", 0}, {"data", {{"message_id", ++deliveries}}}}));
           },
           {drogon::Post});
-    for (const auto *operation: {"status", "start", "command", "stop", "details"}) {
-        drogon::app().registerHandler(std::string("/") + operation,
-          [operation](
-            const drogon::HttpRequestPtr &request, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
-              auto result = json::object();
-              auto response = drogon::HttpResponse::newHttpResponse();
-              bool delay = false;
-              {
-                  std::lock_guard lock(fixtureMutex);
-                  ++calls[operation];
-                  if (request->getHeader("authorization") != std::string("Bearer ") + kToken) {
-                      response->setStatusCode(drogon::k401Unauthorized);
-                  } else if (unavailable)
-                      response->setStatusCode(drogon::k503ServiceUnavailable);
-                  else {
-                      const auto body = json::parse(request->body());
-                      if (std::string(operation) == "start") {
-                          remote = {{"running", true}, {"run_id", body["run_id"]}, {"sequence", 0},
-                            {"origin", body["origin"]}, {"status", "等待开始"}};
-                          result = {{"snapshot", remote}, {"url", "http://" + request->getHeader("host") + "/play"}};
-                          delay = delayStart;
-                          startReceived = true;
-                          if (loseStartResponse)
-                              response->setStatusCode(drogon::k503ServiceUnavailable);
-                      } else if (std::string(operation) == "status")
-                          result = remote;
-                      else if (std::string(operation) == "command") {
-                          lastCommand = body;
-                          result = {{"success", true}};
-                      } else if (std::string(operation) == "stop")
-                          result = {{"accepted", true}};
-                      else
-                          result = {{"snapshot", remote}, {"board", {{"turn", "user"}}}};
-                  }
-              }
-              response->setContentTypeCode(drogon::CT_APPLICATION_JSON);
-              response->setBody(result.dump());
-              if (delay)
-                  drogon::app().getLoop()->runAfter(
-                    0.15, [callback = std::move(callback), response] { callback(response); });
-              else
-                  callback(response);
-          },
-          {drogon::Post});
-    }
     auto client = trantor::EventLoopThread{};
     client.run();
     int exitCode = 1;
@@ -419,7 +666,10 @@ auto main() -> int {
         const auto endpoint = "http://127.0.0.1:" + std::to_string(drogon::app().getListeners().front().toPort());
         client.getLoop()->queueInLoop([&, endpoint] {
             drogon::async_run([&, endpoint]() -> drogon::Task<> {
-                co_await run(endpoint, root, exitCode);
+                if (periodic)
+                    co_await runPeriodic(endpoint, root, exitCode);
+                else
+                    co_await run(endpoint, root, exitCode);
                 client.getLoop()->quit();
             });
         });

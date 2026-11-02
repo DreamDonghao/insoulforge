@@ -1,5 +1,5 @@
 /// @file ActivityController.cpp
-/// @brief 管理请求由统一登录检查保护，服务回调由管理器验证独立密钥。
+/// @brief 管理请求由统一登录检查保护，活动通信使用独立的 WebSocket 入口。
 #include <admin/http/ActivityController.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <workflow/activity/ActivityManager.hpp>
@@ -25,25 +25,44 @@ namespace insoulforge {
     void ActivityController::saveConfig(
       const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) const {
         const auto body = parseJsonBody(req);
-        const auto result = body ? ActivityManager::instance().saveConfiguration(*body, Config::instance())
-                                 : std::expected<void, std::string>{std::unexpected("无效的 JSON 配置")};
+        const auto result = body && body->is_object() && body->size() == 1 && atOrNull(*body, "token").is_string()
+                              ? ActivityManager::instance().saveToken(getStr(*body, "token"), Config::instance())
+                              : std::expected<void, std::string>{std::unexpected("请求只能包含 token 字符串")};
         callback(reply(result, drogon::k400BadRequest));
     }
-    void ActivityController::event(
+    void ActivityController::setEnabled(
       const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) const {
-        if (req->body().size() > 128 * 1024) {
-            callback(reply(std::unexpected("活动事件过大"), drogon::k413RequestEntityTooLarge));
-            return;
-        }
         const auto body = parseJsonBody(req);
-        const auto authorization = req->getHeader("authorization");
-        if (!body || !body->is_object() || !authorization.starts_with("Bearer ")) {
-            callback(reply(std::unexpected("无效的活动事件或认证"), drogon::k401Unauthorized));
+        const auto result =
+          body && body->is_object() && body->size() == 2 && atOrNull(*body, "name").is_string() &&
+              atOrNull(*body, "enabled").is_boolean()
+            ? ActivityManager::instance().setEnabled(
+                getStr(*body, "name"), getBool(*body, "enabled"), Config::instance())
+            : std::expected<void, std::string>{std::unexpected("请求只能包含 name 字符串和 enabled 布尔值")};
+        callback(reply(result, drogon::k400BadRequest));
+    }
+    void ActivityController::removeService(
+      const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) const {
+        const auto body = parseJsonBody(req);
+        const auto valid =
+          body && body->is_object() && atOrNull(*body, "name").is_string() &&
+          (body->contains("force") ? body->size() == 2 && (*body)["force"].is_boolean() : body->size() == 1);
+        const auto result =
+          valid ? ActivityManager::instance().removeService(
+                    getStr(*body, "name"), Config::instance(), getBool(*body, "force"))
+                : std::expected<void, std::string>{std::unexpected("请求需要 name 字符串和可选的 force 布尔值")};
+        callback(reply(result, drogon::k400BadRequest));
+    }
+    void ActivityController::synchronize(
+      const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) const {
+        const auto body = parseJsonBody(req);
+        if (!body || !body->is_object() || body->size() != 1 || !atOrNull(*body, "name").is_string()) {
+            callback(reply(std::unexpected("请求只能包含 name 字符串"), drogon::k400BadRequest));
             return;
         }
-        const auto result =
-          ActivityManager::instance().receiveEvent(getStr(*body, "name"), authorization.substr(7), *body);
-        const auto unauthorized = !result && result.error() == "活动认证失败";
-        callback(reply(result, unauthorized ? drogon::k401Unauthorized : drogon::k400BadRequest));
+        drogon::async_run([name = getStr(*body, "name"), callback = std::move(callback)]() mutable -> drogon::Task<> {
+            const auto result = co_await ActivityManager::instance().refresh(name);
+            callback(reply(result, drogon::k400BadRequest));
+        });
     }
 } // namespace insoulforge

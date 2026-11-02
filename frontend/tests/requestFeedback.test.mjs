@@ -77,7 +77,7 @@ function mount(page, props = {}) {
   return app._instance.setupState
 }
 
-test('activity config cannot overwrite server defaults after a failed initial read', async () => {
+test('activity config cannot overwrite defaults after a failed initial read', async () => {
   let posts = 0
   globalThis.fetch = async (_url, options) => {
     if (options?.method === 'POST') posts++
@@ -86,53 +86,108 @@ test('activity config cannot overwrite server defaults after a failed initial re
   const state = mount('tools/Activities')
   await flush()
   assert.equal(state.loaded, false)
-  await state.persist([])
+  await state.saveToken()
   assert.equal(posts, 0)
 })
 
-test('activity editor loads the configured secret hidden; polling preserves drafts and saves omit runtime fields', async () => {
-  const original = {callbackUrl: 'http://bot/activities/events', servers: [{name: 'chess',
-    url: 'http://chess:8080', description: '下棋', enabled: true, token: 'configured-fixture-secret',
-    running: false, reachable: true, synchronized: true, busy: false, status: '', updatedAt: 0}]}
+test('activity token is hidden; polling preserves drafts and saving cannot replace the registered list', async () => {
+  const original = {token: 'configured-fixture-secret', servers: []}
   let posted
   globalThis.fetch = async (_url, options) => {
-    if (options?.method === 'POST') { posted = JSON.parse(options.body); return response({success: true}) }
-    return response(original)
+    if (options?.method === 'POST') {
+      posted = JSON.parse(options.body)
+      original.token = posted.token
+      return response({success: true})
+    }
+    return response(structuredClone(original))
   }
   const state = mount('tools/Activities')
   await flush()
-  state.callbackUrl = 'http://changed/activities/events'
-  state.open(state.config.servers[0])
-  assert.equal(state.draft.token, 'configured-fixture-secret')
+  assert.equal(state.token, original.token)
   assert.equal(state.showToken, false)
-  state.showToken = true
-  state.draft.description = '新描述'
+  state.token = 'changed-fixture-secret'
+  original.servers.push({name: 'new-service', description: '服务上报描述', enabled: true})
   await state.load(true)
-  assert.equal(state.callbackUrl, 'http://changed/activities/events')
-  assert.equal(state.draft.description, '新描述')
-  assert.equal(state.locked({...state.config.servers[0], running: true}), true)
-  await state.saveService()
-  assert.equal(posted.callbackUrl, 'http://changed/activities/events')
-  assert.deepEqual(posted.servers, [{name: 'chess', description: '新描述', url: 'http://chess:8080', enabled: true, token: 'configured-fixture-secret'}])
-  assert.equal(state.dialog, false)
-  assert.equal(state.showToken, false)
+  assert.equal(state.token, 'changed-fixture-secret')
+  assert.equal(state.config.servers.length, 1)
+  await state.saveToken()
+  assert.deepEqual(posted, {token: 'changed-fixture-secret'})
+  assert.equal(state.config.servers.length, 1)
+  assert.equal(state.dirty, false)
 })
 
-test('activity save failure retains the editor and the changed description', async () => {
-  globalThis.fetch = async (_url, options) => options?.method === 'POST'
-    ? {...response({success: false, error: '活动仍在运行'}), ok: false, status: 400}
-    : response({callbackUrl: 'http://bot/activities/events', servers: [{name: 'chess',
-      url: 'http://chess:8080', description: '下棋', enabled: true}]})
+test('activity enable updates only one registered service without saving the token draft or metadata', async () => {
+  let posted, path
+  globalThis.fetch = async (url, options) => {
+    if (options?.method === 'PATCH') {
+      path = url
+      posted = JSON.parse(options.body)
+      return response({success: true})
+    }
+    return response({token: 'configured-fixture-secret', servers: [{name: '井字棋 / test', description: '服务描述', enabled: true}]})
+  }
   const state = mount('tools/Activities')
   await flush()
-  state.open(state.config.servers[0])
-  state.draft.description = '保留草稿'
-  await state.saveService()
-  assert.equal(state.dialog, true)
-  assert.equal(state.draft.description, '保留草稿')
-  assert.equal(state.saving, false)
+  state.token = 'unsaved-fixture-secret'
+  await state.setEnabled(state.config.servers[0], false)
+  assert.equal(path, '/admin/api/activities')
+  assert.deepEqual(posted, {name: '井字棋 / test', enabled: false})
+  assert.equal(state.token, 'unsaved-fixture-secret')
 })
 
+test('activity force deletion requires confirmation and sends an explicit boolean', async () => {
+  const posted = []
+  globalThis.fetch = async (_url, options) => {
+    if (options?.method === 'DELETE') { posted.push(JSON.parse(options.body)); return response({success: true}) }
+    return response({token: 'configured-fixture-secret', servers: []})
+  }
+  const state = mount('tools/Activities')
+  await flush()
+  const abandoned = {name: 'chess', running: true, connected: false, busy: false}
+  await state.remove(abandoned)
+  assert.equal(posted.length, 0)
+  confirmResult = true
+  await state.remove(abandoned)
+  assert.deepEqual(posted[0], {name: 'chess', force: true})
+  await state.remove({...abandoned, running: false})
+  assert.deepEqual(posted[1], {name: 'chess'})
+})
+
+for (const success of [true, false]) {
+  test(`activity synchronization ${success ? 'success' : 'failure'} preserves token draft and clears pending state`, async () => {
+    let posted
+    globalThis.fetch = async (url, options) => {
+      if (url.endsWith('/sync')) {
+        posted = JSON.parse(options.body)
+        return success ? response({success: true}) : {...response({success: false, error: '同步失败'}), ok: false, status: 400}
+      }
+      return response({token: 'configured-fixture-secret', servers: [{name: 'chess', connected: true, busy: false}]})
+    }
+    const state = mount('tools/Activities')
+    await flush()
+    state.token = 'unsaved-fixture-secret'
+    await state.syncService(state.config.servers[0])
+    assert.deepEqual(posted, {name: 'chess'})
+    assert.equal(state.token, 'unsaved-fixture-secret')
+    assert.equal(state.syncing, '')
+    assert.equal(state.saving, false)
+    const notices = load(resolve(root, 'src/composables/useToast.ts')).useToast().notifications.value
+    assert.equal(notices.some(item => item.message.includes(success ? '已同步' : '同步失败')), true)
+  })
+}
+
+test('activity token save failure retains the draft', async () => {
+  globalThis.fetch = async (_url, options) => options?.method === 'POST'
+    ? {...response({success: false, error: '无法保存'}), ok: false, status: 400}
+    : response({token: 'configured-fixture-secret', servers: []})
+  const state = mount('tools/Activities')
+  await flush()
+  state.token = 'changed-fixture-secret'
+  await state.saveToken()
+  assert.equal(state.token, 'changed-fixture-secret')
+  assert.equal(state.saving, false)
+  assert.equal(state.dirty, true)
+})
 
 for (const [page, load, dataKey, errorKey, url] of [
   ['access/AccessManager', 'loadAdmins', 'admins', 'adminError', '/admin/api/admins'],

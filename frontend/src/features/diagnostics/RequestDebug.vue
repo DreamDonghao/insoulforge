@@ -92,7 +92,7 @@ const statusClass = (status: number): string =>
 const statusText = (status: number): string =>
     status === 0 ? '无响应' : String(status)
 
-const shortUrl = (url: string): string => url.replace(/^https?:\/\//, '')
+const shortUrl = (url: string): string => url.replace(/^(?:https?|wss?):\/\//, '')
 
 const copyText = async (text: string, label: string): Promise<void> => {
   if (!text) return

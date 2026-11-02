@@ -77,7 +77,7 @@ namespace insoulforge::ConfigStore {
                   {"longTermInjectThreshold", 0.45}}},
               {"execution", {{"maxToolRounds", ExecutionSettings::kDefaultMaxToolRounds}, {"routeWhileReplying", false},
                               {"mcpToolPageSize", 10}, {"mcpMaxToolsPerEnable", 4}, {"mcpMaxToolsPerReply", 12}}},
-              {"activities", {{"callbackUrl", ""}, {"servers", json::array()}}}, {"builtinTools", json::object()},
+              {"activities", {{"token", ""}, {"servers", json::array()}}}, {"builtinTools", json::object()},
               {"mcp", {{"servers", json::array()}}}};
         }
 

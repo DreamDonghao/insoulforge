@@ -14,6 +14,8 @@ else()
 endif()
 add_test(NAME activities COMMAND insoulforge_activity_tests)
 set_tests_properties(activities PROPERTIES TIMEOUT 45)
+add_test(NAME activity_sync COMMAND insoulforge_activity_tests --periodic)
+set_tests_properties(activity_sync PROPERTIES TIMEOUT 15)
 
 add_executable(insoulforge_process_metrics_tests EXCLUDE_FROM_ALL
         ProcessMetricsTests.cpp
