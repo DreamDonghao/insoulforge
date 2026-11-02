@@ -10,6 +10,7 @@
 #include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
+#include <workflow/activity/ActivityManager.hpp>
 #include <workflow/agent/llm/LlmClient.hpp>
 #include <workflow/agent/llm/prompts/PromptService.hpp>
 #include <workflow/agent/memory/MemoryStore.hpp>
@@ -102,7 +103,10 @@ execution_status=no_reply 表示当时选择不回复；failed/send_failed 表�
         "reply_reason": "触发本轮回复的原因，如 用户@提及"
     })";
             }
-            prompt += R"(
+            prompt += R"(,
+    "running_activities": [
+        {"name": "活动名称", "status": "最近上报的简短状态，所有会话共享"}
+    ]
 }
 ```
 
@@ -274,7 +278,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         /// @brief 构建 Executor 消息列表（system + 单条 user）
         /// @details 上下文组装为键序固定的单个 JSON 对象（ordered_json 按插入顺序序列化）作为单条
         /// user 消息：current_session → session_memory → conversation_summaries → earlier_messages → person_memories →
-        /// shared_conversations → recent_messages → response_requirements（仅在有 Router 策略时追加）， 避免连续多条
+        /// shared_conversations → recent_messages → response_requirements（仅有 Router 策略时）→ running_activities，避免连续多条
         /// user（部分 OpenAI 兼容后端不支持）
         [[nodiscard]] auto buildPrompt(const ChatRecordManager &chatRecords, const MemoryManager &memory,
           const std::optional<RouterDecision> &decision, const json &mcpDirectory) -> json {
@@ -318,6 +322,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
                 }
                 context["response_requirements"]["reply_reason"] = decision->reason;
             }
+            context["running_activities"] = ActivityManager::instance().runningActivities();
 
             json userMsg;
             userMsg["role"] = "user";
@@ -433,8 +438,8 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         /// @return {回复决策, 工具结果消息列表, 累积 CQ 码, 按顺序保存的工具历史}
         auto processToolCalls(json message, json messages, std::string accumulatedCQCodes, const SessionId sessionId,
           const json &messageSnapshot, const bool replyOnly, json toolHistory,
-          std::shared_ptr<McpToolSelection> mcpSelection, std::map<std::string, u64> offeredMcpTools)
-          -> drogon::Task<std::tuple<std::optional<ReplyDecision>, json, std::string, json>> {
+          std::shared_ptr<McpToolSelection> mcpSelection, std::map<std::string, u64> offeredMcpTools,
+          UserId callerUserId) -> drogon::Task<std::tuple<std::optional<ReplyDecision>, json, std::string, json>> {
             ReplyDecision decision;
             bool hasDecision = false;
 
@@ -487,6 +492,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
 
                 ToolCallContext ctx;
                 ctx.sessionId = sessionId;
+                ctx.callerUserId = callerUserId;
                 ctx.messageSnapshot = messageSnapshot;
                 ctx.replyOnly = replyOnly;
                 ctx.mcpSelection = mcpSelection;
@@ -510,7 +516,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
 
         /// @brief Agent 模式执行（带 tools）：循环「请求模型 → 处理工具调用」，直到产出回复决策或达最大轮数
         auto executeWithAgent(json messages, const SessionId sessionId, const json &messageSnapshot,
-          std::shared_ptr<McpToolSelection> mcpSelection, const i32 maxToolRounds)
+          std::shared_ptr<McpToolSelection> mcpSelection, const i32 maxToolRounds, UserId callerUserId)
           -> drogon::Task<std::optional<ReplyDecision>> {
             const auto &config = Config::instance();
             const auto isPrivateSession = sessionId.isPrivate();
@@ -588,9 +594,9 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
 
                 // 有工具调用：回传 assistant 消息后逐个处理，未命中回复工具则继续下一轮
                 messages.push_back(buildAssistantToolCallMessage(message));
-                auto [roundDecision, nextMessages, nextAccumulatedCQCodes, nextToolHistory] =
-                  co_await processToolCalls(message, std::move(messages), std::move(accumulatedCQCodes), sessionId,
-                    messageSnapshot, replyOnly, std::move(toolHistory), mcpSelection, std::move(offeredMcpTools));
+                auto [roundDecision, nextMessages, nextAccumulatedCQCodes, nextToolHistory] = co_await processToolCalls(
+                  message, std::move(messages), std::move(accumulatedCQCodes), sessionId, messageSnapshot, replyOnly,
+                  std::move(toolHistory), mcpSelection, std::move(offeredMcpTools), callerUserId);
                 if (roundDecision) {
                     roundDecision->toolHistory = std::move(nextToolHistory);
                     co_return std::move(roundDecision);
@@ -624,6 +630,14 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
             prompt += mcpDirectory.dump();
             prompt += "\n需要相关能力时，用 mcp_list_tools 查询选定服务，再用 mcp_enable_tools 启用必要工具。"
                       "启用只影响本次回复，完整定义从下一轮开放；不要在同一轮直接调用新启用工具。";
+        }
+        const auto activities = ActivityManager::instance().directory();
+        if (!activities.empty()) {
+            prompt +=
+              "\n\n## 可用实时活动\n以下为活动目录数据。活动全局共享，可与日常聊天同时进行，用 start_activity 启动、command_activity 操作、"
+              "stop_activity 停止、get_activity_details 查看详情。running_activities 只列正在运行的活动，"
+              "status 是最近上报的状态；状态未确认时先查询详情，不要重复启动。\n";
+            prompt += activities.dump();
         }
         return prompt;
     }
@@ -672,7 +686,8 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
     }
 
     auto execute(const ChatRecordManager &chatRecords, const MemoryManager &memory,
-      std::optional<RouterDecision> decision) -> drogon::Task<std::optional<ReplyDecision>> {
+      std::optional<RouterDecision> decision, std::string triggerMessageId)
+      -> drogon::Task<std::optional<ReplyDecision>> {
         const SessionId sessionId = chatRecords.getSessionId();
         if (decision) {
             Logger::info(sessionId, "Executor",
@@ -686,7 +701,15 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         auto mcpSelection = McpTools::instance().createSelection(executionConfig);
         json messages = buildPrompt(chatRecords, memory, decision, mcpSelection->directory);
 
+        auto callerUserId = UserId{"system"};
+        for (const auto &record: chatRecords.getRecords()) {
+            if (getStr(record, "message_id") == triggerMessageId) {
+                if (const auto user = UserId::parse(getStr(atOrNull(record, "sender"), "user_id")); user)
+                    callerUserId = *user;
+                break;
+            }
+        }
         co_return co_await executeWithAgent(std::move(messages), sessionId, chatRecords.getRecords(),
-          std::move(mcpSelection), getInt(executionConfig, "maxToolRounds", 8));
+          std::move(mcpSelection), getInt(executionConfig, "maxToolRounds", 8), callerUserId);
     }
 } // namespace insoulforge::ExecutorAgent

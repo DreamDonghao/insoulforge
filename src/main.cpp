@@ -27,6 +27,7 @@
 #include <infrastructure/storage/Database.hpp>
 #include <onebot/transport/OneBotWebSocketClient.hpp>
 #include <workflow/OneBotEventWorkflow.hpp>
+#include <workflow/activity/ActivityManager.hpp>
 #include <workflow/agent/ability/AsyncTaskManager.hpp>
 #include <workflow/agent/memory/maintenance/PersonMemoryConsolidator.hpp>
 #include <workflow/agent/runtime/AgentSystem.hpp>
@@ -137,6 +138,10 @@ auto main() -> int {
             return EXIT_FAILURE;
         }
 
+        if (auto result = ActivityManager::instance().initialize(config.getActivitiesConfig()); !result) {
+            Logger::error(std::nullopt, "Activity", result.error());
+            return EXIT_FAILURE;
+        }
         // 将自己的 用户 ID映射为带“(我)”标记的名称，便于区分机器人与同名群友。
         QQNameDirectory::setCustomName(UserId{config.selfQQNumber}, config.botName + "(我)");
 
@@ -157,6 +162,8 @@ auto main() -> int {
         // 角色形象图允许 8 MiB；为 multipart 边界和表单头预留空间。
         drogon::app().setClientMaxBodySize(10U * 1024U * 1024U);
         drogon::app().setClientMaxMemoryBodySize(10U * 1024U * 1024U);
+        // 活动详情响应允许最多 1 MiB；活动事件仍在协议入口限制为 128 KiB。
+        drogon::app().setClientMaxWebSocketMessageSize(1024U * 1024U);
         // 前端构建产物位于运行目录的 public/，由同一 HTTP 服务提供。
         drogon::app().setDocumentRoot("public");
         Logger::info(std::nullopt, "Main", "HTTP 服务启动 | port=7778");
@@ -167,7 +174,9 @@ auto main() -> int {
         // 资源历史在无人访问后台时也持续采样，退出事件循环后停止采样。
         ProcessMetrics::instance().start(*drogon::app().getLoop());
         PersonMemoryConsolidator::instance().start(*drogon::app().getLoop());
+        ActivityManager::instance().start(*drogon::app().getLoop());
         drogon::app().run();
+        ActivityManager::instance().stop();
         PersonMemoryConsolidator::instance().stop();
         PersonNameResolver::instance().stop();
         ProcessMetrics::instance().stop();
@@ -184,6 +193,7 @@ auto main() -> int {
         database.close();
         Logger::info(std::nullopt, "Main", "系统正常退出");
     } catch (const std::exception &e) {
+        ActivityManager::instance().stop();
         PersonMemoryConsolidator::instance().stop();
         PersonNameResolver::instance().stop();
         ProcessMetrics::instance().stop();
@@ -191,6 +201,7 @@ auto main() -> int {
         Logger::shutdown();
         return EXIT_FAILURE;
     } catch (...) {
+        ActivityManager::instance().stop();
         PersonMemoryConsolidator::instance().stop();
         PersonNameResolver::instance().stop();
         ProcessMetrics::instance().stop();

@@ -1,7 +1,10 @@
 /// @file OneBotEventWorkflow.cpp
 /// @brief OneBot 入站事件处理工作流实现
 
+#include <algorithm>
+
 #include <cassert>
+#include <drogon/utils/Utilities.h>
 
 #include <admin/events/WebSocketManager.hpp>
 #include <infrastructure/CommonUtil.hpp>
@@ -275,6 +278,15 @@ namespace insoulforge {
         drogon::async_run([this, sessionId]() -> drogon::Task<> { co_await processPreparationQueue(sessionId); });
     }
 
+    void OneBotEventWorkflow::enqueueActivityMessage(
+      const SessionId &sessionId, std::string text, std::string name, std::string mode, json origin) {
+        enqueueNormalizedMessage({{"session_id", sessionId.toString()}, {"time", currentDateTime()},
+          {"message_id", "activity-" + drogon::utils::getUuid()},
+          {"sender", {{"user_id", "system"}, {"name", "实时活动：" + name}}},
+          {"activity", {{"name", std::move(name)}, {"mode", std::move(mode)}, {"origin", std::move(origin)}}},
+          {"segments", {{{"type", "text"}, {"text", std::move(text)}}}}});
+    }
+
     auto OneBotEventWorkflow::processPreparationQueue(const SessionId sessionId) -> drogon::Task<> {
         const auto sessionState = getOrCreateSessionState(sessionId);
         while (true) {
@@ -313,8 +325,31 @@ namespace insoulforge {
                     pushRecordedMessage(sessionId, update->back());
 
                     const auto triggerMessageId = getStr(update->back(), "message_id");
+                    const auto activityMode = getStr(atOrNull(update->back(), "activity"), "mode");
+                    if (activityMode == "silent") {
+                        recordMessageProcessingStats(sessionId);
+                        scheduleMemoryMaintenance(m_dependencies->database, sessionId, sessionState->messageList());
+                        continue;
+                    }
                     bool mayWait = shouldQueueWhileReplying(sessionId, update->back());
                     std::optional<RouterDecision> decision;
+                    if (activityMode == "force") {
+                        decision = RouterDecision{.action = RouterDecision::Action::REPLY,
+                          .reason = "实时活动通知",
+                          .shouldReply = true,
+                          .tone = "friendly",
+                          .maxLength = std::nullopt,
+                          .isPriority = true,
+                          .isPrivate = sessionId.isPrivate()};
+                    } else if (activityMode == "judge") {
+                        decision = co_await MessageRouter::route(
+                          sessionId, triggerMessageId, sessionState->messageList()->snapshot());
+                        if (!decision->shouldReply) {
+                            recordMessageProcessingStats(sessionId);
+                            scheduleMemoryMaintenance(m_dependencies->database, sessionId, sessionState->messageList());
+                            continue;
+                        }
+                    }
                     if (!mayWait && m_dependencies->config.execution.routeWhileReplying.load(std::memory_order_relaxed) &&
                         sessionState->isReplyProcessing()) {
                         // 同会话预处理串行判断新消息，避免乱序结果覆盖较新的触发；当前回复继续执行。
@@ -357,7 +392,7 @@ namespace insoulforge {
             auto messageSnapshot = sessionState->messageList()->snapshot();
 
             try {
-                if (!m_dependencies->agent.isReady()) {
+                if (!m_dependencies->agent.isReady() || !SessionStore::isSessionEnabled(sessionId)) {
                     Logger::warn(sessionId, "Workflow", "回复任务跳过：Agent 不可用");
                 } else {
                     auto routerDecision = std::move(request.decision);
@@ -377,8 +412,8 @@ namespace insoulforge {
                     if (!routerDecision || routerDecision->shouldReply) {
                         const auto records = ChatRecordManager{sessionId, std::move(messageSnapshot)};
                         const auto memory = MemoryManager{sessionId};
-                        const auto replyDecision =
-                          co_await ExecutorAgent::execute(records, memory, std::move(routerDecision));
+                        const auto replyDecision = co_await ExecutorAgent::execute(records, memory,
+                          sessionId.isPrivate() ? std::nullopt : std::move(routerDecision), request.messageId);
                         if (replyDecision && replyDecision->shouldReply && !replyDecision->content.empty()) {
                             co_await MessageService::sendToSession(
                               sessionId, replyDecision->content, std::nullopt, replyDecision->toolHistory);

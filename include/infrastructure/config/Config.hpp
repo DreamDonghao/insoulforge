@@ -118,6 +118,9 @@ namespace insoulforge {
         [[nodiscard]] auto getMemoryConfig() const -> json;
         [[nodiscard]] auto getExecutionConfig() const -> json;
         /// @brief 获取 MCP 服务配置快照。
+        /// @brief 已配置的全局活动服务；密钥仅供网络边界使用。
+        [[nodiscard]] auto getActivitiesConfig() const -> json;
+        [[nodiscard]] auto saveActivitiesConfig(const json &value) -> std::expected<void, ConfigError>;
         [[nodiscard]] auto getMcpConfig() const -> json;
         [[nodiscard]] auto getBuiltinToolsConfig() const -> json;
         [[nodiscard]] auto saveBuiltinToolsConfig(const json &value) -> std::expected<void, ConfigError>;

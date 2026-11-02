@@ -284,6 +284,8 @@ namespace insoulforge::MessageRecord {
             return record;
         }
         json projected;
+        if (isSystem(record) && atOrNull(record, "activity").is_object())
+            projected["activity"] = record["activity"];
         if (record.contains("time")) {
             projected["time"] = record["time"];
         }

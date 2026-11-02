@@ -6,6 +6,7 @@
 #include <workflow/agent/tools/ToolPluginCatalog.hpp>
 #include <workflow/agent/tools/ToolRegistry.hpp>
 #include <workflow/agent/tools/plugins/ActionToolsPlugin.hpp>
+#include <workflow/agent/tools/plugins/ActivityToolsPlugin.hpp>
 #include <workflow/agent/tools/plugins/InfoToolsPlugin.hpp>
 #include <workflow/agent/tools/plugins/ReplyToolsPlugin.hpp>
 
@@ -17,10 +18,12 @@ namespace insoulforge::ToolPluginCatalog {
         const ReplyToolsPlugin replyTools;
         const InfoToolsPlugin infoTools;
         const ActionToolsPlugin actionTools(botName);
-        const std::array<const ToolPlugin *, 3> plugins = {
+        const ActivityToolsPlugin activityTools;
+        const std::array<const ToolPlugin *, 4> plugins = {
           &replyTools,
           &infoTools,
           &actionTools,
+          &activityTools,
         };
         auto &registry = ToolRegistry::instance();
         for (const auto *plugin: plugins) {

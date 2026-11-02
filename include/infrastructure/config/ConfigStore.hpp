@@ -18,6 +18,9 @@
 namespace insoulforge::ConfigStore {
     /// @brief 在文件提交前完成运行配置转换，失败时不写入或替换存储状态。
     using ConfigValidator = std::function<std::expected<void, ConfigError>(const json &)>;
+    [[nodiscard]] auto getActivitiesConfig() -> json;
+    [[nodiscard]] auto saveActivitiesConfig(const json &config, const ConfigValidator &validate)
+      -> std::expected<void, ConfigError>;
     [[nodiscard]] auto getBuiltinToolsConfig() -> json;
     [[nodiscard]] auto saveBuiltinToolsConfig(const json &config, const ConfigValidator &validate)
       -> std::expected<void, ConfigError>;

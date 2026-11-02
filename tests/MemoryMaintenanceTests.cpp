@@ -995,12 +995,13 @@ auto main() -> int {
           std::vector<std::string> expected = {"current_session", "session_memory", "conversation_summaries", "earlier_messages",
             "person_memories", "shared_conversations", "recent_messages"};
           if (!isPrivate) expected.push_back("response_requirements");
+          expected.push_back("running_activities");
           const auto state = json::parse(messages.back()["content"].get<std::string>());
           bool valid = keys == expected && messages.back()["role"] == "system" && state.size() == 1 &&
                        state["execution_state"]["current_round"] == (isPrivate ? executorRequests : 1) &&
                        context["person_memories"].size() == 1 && context["person_memories"][0]["user_id"] == "11" &&
                        context["person_memories"][0]["pending_entries"].size() == 3 &&
-                       context["shared_conversations"].empty();
+                       context["shared_conversations"].empty() && context["running_activities"].empty();
           valid = valid && (isPrivate ? context["conversation_summaries"].size() == 1 &&
               context["conversation_summaries"][0]["summary"] == "讨论了部署方式，等待后续验证。"
               : !context["conversation_summaries"].empty());

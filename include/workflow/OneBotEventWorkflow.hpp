@@ -81,6 +81,9 @@ namespace insoulforge {
         void enqueueOneBotEvent(const json &body);
         /// @brief 内部定时任务直接入队，不经过 OneBot 协议字段转换。
         void enqueueSystemMessage(const SessionId &sessionId, std::string text, std::string senderName = "系统任务");
+        /// @brief 活动事件使用会话串行队列；silent 仅记录，judge 路由判断，force 跳过回复判断。
+        void enqueueActivityMessage(const SessionId &sessionId, std::string text, std::string name, std::string mode,
+          json origin = json::object());
 
     private:
         void enqueueNormalizedMessage(json message);

@@ -319,7 +319,7 @@ namespace insoulforge::MessageRouter {
         if (trigger == snapshot.end()) {
             co_return applySessionType(makeDecision(RouterDecision::Action::SKIP, "找不到触发消息"), sessionId);
         }
-        if (MessageRecord::isSystem(*trigger)) {
+        if (MessageRecord::isSystem(*trigger) && getStr(atOrNull(*trigger, "activity"), "mode") != "judge") {
             co_return applySessionType(
               makeDecision(RouterDecision::Action::REPLY, "系统消息触发", 100, true), sessionId);
         }
