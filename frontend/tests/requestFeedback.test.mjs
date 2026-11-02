@@ -77,6 +77,62 @@ function mount(page, props = {}) {
   return app._instance.setupState
 }
 
+test('activity config cannot overwrite server defaults after a failed initial read', async () => {
+  let posts = 0
+  globalThis.fetch = async (_url, options) => {
+    if (options?.method === 'POST') posts++
+    throw new TypeError('offline')
+  }
+  const state = mount('tools/Activities')
+  await flush()
+  assert.equal(state.loaded, false)
+  await state.persist([])
+  assert.equal(posts, 0)
+})
+
+test('activity editor loads the configured secret hidden; polling preserves drafts and saves omit runtime fields', async () => {
+  const original = {callbackUrl: 'http://bot/activities/events', servers: [{name: 'chess',
+    url: 'http://chess:8080', description: '下棋', enabled: true, token: 'configured-fixture-secret',
+    running: false, reachable: true, synchronized: true, busy: false, status: '', updatedAt: 0}]}
+  let posted
+  globalThis.fetch = async (_url, options) => {
+    if (options?.method === 'POST') { posted = JSON.parse(options.body); return response({success: true}) }
+    return response(original)
+  }
+  const state = mount('tools/Activities')
+  await flush()
+  state.callbackUrl = 'http://changed/activities/events'
+  state.open(state.config.servers[0])
+  assert.equal(state.draft.token, 'configured-fixture-secret')
+  assert.equal(state.showToken, false)
+  state.showToken = true
+  state.draft.description = '新描述'
+  await state.load(true)
+  assert.equal(state.callbackUrl, 'http://changed/activities/events')
+  assert.equal(state.draft.description, '新描述')
+  assert.equal(state.locked({...state.config.servers[0], running: true}), true)
+  await state.saveService()
+  assert.equal(posted.callbackUrl, 'http://changed/activities/events')
+  assert.deepEqual(posted.servers, [{name: 'chess', description: '新描述', url: 'http://chess:8080', enabled: true, token: 'configured-fixture-secret'}])
+  assert.equal(state.dialog, false)
+  assert.equal(state.showToken, false)
+})
+
+test('activity save failure retains the editor and the changed description', async () => {
+  globalThis.fetch = async (_url, options) => options?.method === 'POST'
+    ? {...response({success: false, error: '活动仍在运行'}), ok: false, status: 400}
+    : response({callbackUrl: 'http://bot/activities/events', servers: [{name: 'chess',
+      url: 'http://chess:8080', description: '下棋', enabled: true}]})
+  const state = mount('tools/Activities')
+  await flush()
+  state.open(state.config.servers[0])
+  state.draft.description = '保留草稿'
+  await state.saveService()
+  assert.equal(state.dialog, true)
+  assert.equal(state.draft.description, '保留草稿')
+  assert.equal(state.saving, false)
+})
+
 
 for (const [page, load, dataKey, errorKey, url] of [
   ['access/AccessManager', 'loadAdmins', 'admins', 'adminError', '/admin/api/admins'],

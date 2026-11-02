@@ -1,5 +1,20 @@
 # Tests are organized as a CMake subproject to keep production targets separate.
 
+add_executable(insoulforge_activity_tests EXCLUDE_FROM_ALL
+        ActivityTests.cpp $<TARGET_OBJECTS:${PROJECT_NAME}_backend>)
+target_compile_features(insoulforge_activity_tests PRIVATE cxx_std_23)
+target_include_directories(insoulforge_activity_tests PRIVATE ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(insoulforge_activity_tests PRIVATE
+        Drogon::Drogon spdlog::spdlog_header_only fmt::fmt-header-only
+        SQLite3_lib OpenSSL::Crypto PNG::PNG ${GIFLIB_LIBRARY} ${LUA_LIBRARIES})
+if(nlohmann_json_FOUND)
+    target_link_libraries(insoulforge_activity_tests PRIVATE nlohmann_json::nlohmann_json)
+else()
+    target_include_directories(insoulforge_activity_tests PRIVATE ${NLOHMANN_JSON_INCLUDE_DIR})
+endif()
+add_test(NAME activities COMMAND insoulforge_activity_tests)
+set_tests_properties(activities PROPERTIES TIMEOUT 45)
+
 add_executable(insoulforge_process_metrics_tests EXCLUDE_FROM_ALL
         ProcessMetricsTests.cpp
         ${PROJECT_SOURCE_DIR}/src/infrastructure/monitoring/ProcessMetrics.cpp)
