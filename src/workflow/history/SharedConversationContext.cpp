@@ -58,6 +58,7 @@ namespace insoulforge::SharedConversationContext {
                 break;
             }
             segment.erase("image_index");
+            segment.erase("image_id");
             limitText(segment, remaining, truncated);
             result["segments"].push_back(std::move(segment));
         }

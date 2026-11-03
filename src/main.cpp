@@ -22,6 +22,7 @@
 #include <admin/http/PersonNameResolver.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
+#include <infrastructure/image/Image.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/monitoring/ProcessMetrics.hpp>
 #include <infrastructure/storage/Database.hpp>
@@ -175,6 +176,12 @@ auto main() -> int {
         ProcessMetrics::instance().start(*drogon::app().getLoop());
         PersonMemoryConsolidator::instance().start(*drogon::app().getLoop());
         ActivityManager::instance().start(*drogon::app().getLoop());
+        const auto cleanImages = [] {
+            if (auto result = Image::cleanup(); !result)
+                Logger::warn(std::nullopt, "Image", result.error());
+        };
+        cleanImages();
+        drogon::app().getLoop()->runEvery(3600.0, cleanImages);
         drogon::app().run();
         ActivityManager::instance().stop();
         PersonMemoryConsolidator::instance().stop();

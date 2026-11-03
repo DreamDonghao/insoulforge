@@ -74,6 +74,8 @@ namespace insoulforge::MessageRecord {
             json summary;
             summary["type"] = "image";
             summary["image_index"] = imageIndex;
+            if (const auto id = getStr(image, "image_id"); !id.empty())
+                summary["image_id"] = id;
             if (const std::string status = getStr(image, "recognition_status"); !status.empty()) {
                 summary["recognition_status"] = status;
             }
@@ -199,11 +201,17 @@ namespace insoulforge::MessageRecord {
         return record;
     }
 
-    auto createAssistantGeneratedImageRecord(
-      std::string senderName, const std::optional<u64> messageId, const std::string &description) -> json {
+    auto createAssistantGeneratedImageRecord(std::string senderName, const std::optional<u64> messageId,
+      const std::string &description, const std::string &imageId) -> json {
         auto record = createAssistantRecord(std::move(senderName), messageId, "[CQ:image]");
         record["segments"][0]["recognition_status"] = "generated";
         record["segments"][0]["description"] = description;
+        if (!imageId.empty()) {
+            record["segments"][0]["image_id"] = imageId;
+            record["segments"][0]["image_index"] = 0;
+            record["assets"]["images"] = json::array(
+              {json{{"image_id", imageId}, {"description", description}, {"recognition_status", "generated"}}});
+        }
         return record;
     }
 
@@ -366,9 +374,11 @@ namespace insoulforge::MessageRecord {
         const json &image = images[imageIndex];
         const json &source = atOrNull(image, "source");
         ImageSource result{
+          .imageId = getStr(image, "image_id"),
           .file = getStr(source, "file"),
           .url = getStr(source, "url"),
         };
-        return result.file.empty() && result.url.empty() ? std::nullopt : std::optional{std::move(result)};
+        return result.imageId.empty() && result.file.empty() && result.url.empty() ? std::nullopt
+                                                                                   : std::optional{std::move(result)};
     }
 } // namespace insoulforge::MessageRecord

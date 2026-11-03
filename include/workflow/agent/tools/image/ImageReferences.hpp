@@ -12,7 +12,7 @@ namespace insoulforge {
     struct ToolCallContext;
     namespace ImageReferences {
         [[nodiscard]] auto schema() -> json;
-        /// @brief 按引用顺序解析当前会话原图地址，重复的消息 ID 和索引只保留一次。
+        /// @brief 按引用顺序解析可见图片 ID 或旧消息/索引；返回缓存 ID 或回退 URL，去重。
         [[nodiscard]] auto resolve(const json &images, const ToolCallContext &ctx)
           -> std::expected<std::vector<std::string>, std::string>;
     }

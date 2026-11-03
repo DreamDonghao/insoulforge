@@ -11,16 +11,16 @@
 
 namespace insoulforge::ImageGenerationService {
     namespace {
-        constexpr size_t kMaxImageBase64Length = 32 * 1024 * 1024;
-
         auto base64ImageCode(const std::string_view base64) -> std::optional<GeneratedImage> {
-            if (base64.empty() || base64.size() > kMaxImageBase64Length || base64.size() % 4 != 0 ||
-                base64.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=") !=
-                  std::string_view::npos) {
+            auto image = Image::fromBase64(base64);
+            if (!image)
                 return std::nullopt;
-            }
-            std::string source = "base64://" + std::string(base64);
-            return GeneratedImage{.message = "[CQ:image,file=" + source + "]", .source = std::move(source)};
+            const auto encoded = image->base64();
+            if (!encoded)
+                return std::nullopt;
+            const auto id = image->id();
+            return GeneratedImage{
+              .message = "[CQ:image,file=base64://" + *encoded + "]", .image = std::move(*image), .source = id};
         }
 
         auto escapeCqValue(const std::string &value) -> std::string {
@@ -124,10 +124,19 @@ namespace insoulforge::ImageGenerationService {
         if (!tryParseJson((*response)->body(), result)) {
             throw std::runtime_error("图片生成接口返回了无效 JSON");
         }
-        const auto image = imageCode(result);
+        auto image = imageCode(result);
         if (!image) {
             throw std::runtime_error("图片生成接口未返回可发送的图片");
         }
-        co_return *image;
+        auto cached = co_await Image::load(image->source);
+        if (!cached)
+            throw std::runtime_error(cached.error());
+        auto encoded = cached->base64();
+        if (!encoded)
+            throw std::runtime_error(encoded.error());
+        image->message = "[CQ:image,file=base64://" + *encoded + "]";
+        image->source = cached->id();
+        image->image = std::move(*cached);
+        co_return std::move(*image);
     }
 } // namespace insoulforge::ImageGenerationService

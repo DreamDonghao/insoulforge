@@ -148,7 +148,7 @@ execution_status=no_reply 表示当时选择不回复；failed/send_failed 表�
 
 ### 辅助工具
 
-at_user/send_face/send_image 返回CQ码，嵌入 reply 的 content 参数中才会发送。
+at_user/send_face 返回CQ码，嵌入 reply 的 content 参数中才会发送。send_image 通过 image_id 或 url 直接发送图片。
 
 ### 调用机制
 
@@ -158,10 +158,10 @@ at_user/send_face/send_image 返回CQ码，嵌入 reply 的 content 参数中才
 - reply 必须传入非空 content，例如 reply({"content":"你好"})；不要把最终回复只写在 assistant 的 content 字段
 - 模型只决定调用哪个工具、传什么参数
 
-QQ原生表情/网络图片的CQ码必须通过 send_face/send_image 获取。
-先调工具，拿到结果后把返回的[CQ:image...]或[CQ:face...]原样拼接到reply的content中。
+QQ原生表情的CQ码必须通过 send_face 获取；图片使用 send_image 直接发送。
+send_face 返回的[CQ:face...]原样拼接到reply的content中；send_image 已直接发送，不要重复发送。
 禁止自己编造假CQ标签，工具返回什么就复制什么。
-send_sticker/send_poke/reply_and_continue 都是中途动作：发出后回合不结束，最终仍要用 reply/no_reply 收尾。
+send_image/send_sticker/send_poke/reply_and_continue 都是中途动作：发出后回合不结束，最终仍要用 reply/no_reply 收尾。
 send_sticker：直接发送独立的表情包消息，不返回供reply发送的CQ码，不要通过reply重复发送。
 确认发送成功后，若表情包就是全部回复，调 no_reply 收尾；若还需文字，调用 reply 发送文字。
 发送失败不能当作已经发送成功，应根据工具结果处理。
@@ -333,9 +333,7 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         }
 
         /// @brief 结果为内联 CQ 码、需在产出 reply 时自动拼入正文的工具（send_sticker 已直接发送，不经此路径）
-        [[nodiscard]] auto isCqCodeTool(const std::string &name) -> bool {
-            return name == "send_face" || name == "send_image";
-        }
+        [[nodiscard]] auto isCqCodeTool(const std::string &name) -> bool { return name == "send_face"; }
 
         /// @brief 清理回复内容，并在模型忘记拼接 CQ 码时自动补上已获取的 CQ 码
         [[nodiscard]] auto finalizeContent(const std::string &rawContent, const std::string &accumulatedCQCodes)

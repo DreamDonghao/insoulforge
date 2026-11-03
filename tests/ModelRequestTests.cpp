@@ -284,7 +284,7 @@ namespace {
                   std::vector<std::string>{"data:image/png;base64,fixture"} : std::vector<std::string>{};
                 const auto result = co_await ImageGenerationService::generate(
                   "test", "1024x1024", insoulforge::SessionId::group("0"), references);
-                require(result.source == "https://example.com/image.png" && fixture.count(key) == 2,
+                require(result.image && result.source == result.image->id() && fixture.count(key) == 2,
                   "image generation/edit ignored retry settings");
             }
             config.memory = apiFor(endpoint, "cancel", 3);
@@ -313,7 +313,10 @@ int main() {
         const int attempt = fixture.record(key, body);
         const auto response = drogon::HttpResponse::newHttpResponse();
         response->setContentTypeCode(drogon::CT_APPLICATION_JSON);
-        response->setBody(R"({"choices":[{"message":{"content":"answer"}}],"answers":{"answer":{}},"data":[{"embedding":[1,0],"url":"https://example.com/image.png"}]})");
+        response->setBody(
+          json{{"choices", {{{"message", {{"content", "answer"}}}}}}, {"answers", {{"answer", json::object()}}},
+            {"data", {{{"embedding", {1, 0}}, {"url", "http://" + request->getHeader("host") + "/pixel"}}}}}
+            .dump());
         if (key.starts_with("jev-window-")) {
             response->setBody(key == "jev-window-fallback"
               ? R"({"answers":{"action":{"choice":"skip","confidence":0.1}}})"

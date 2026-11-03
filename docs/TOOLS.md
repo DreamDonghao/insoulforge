@@ -67,7 +67,7 @@ Executor（`ExecutorAgent`）在单个 Agent 循环中通过工具调用生成�
 | 工具             | 参数                                | 说明                                                                                                                                                                                                                                             |
 |------------------|-------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `send_face`      | `id`                                | 生成 QQ 原生表情 CQ 码（返回的 CQ 码需拼进 `reply` 的 content）                                                                                                                                                                                  |
-| `send_image`     | `url`                               | 生成网络图片 CQ 码（同上）                                                                                                                                                                                                                       |
+| `send_image`     | `image_id`                               | 读取图片缓存后以 Base64 直接发送到当前会话，结果记录图片 ID；ID 只能来自当前可见快照                                                                                                                                                                                                                       |
 | `send_sticker`   | `name`, `group_id?`, `user_id?`     | 把收藏表情作为**独立消息**发送到当前或指定已启用会话，无需拼进 reply；商城表情走 `[CQ:mface]`，个人收藏走 `[CQ:image,sub_type=1]`，消息记入目标会话并推送 WebSocket                                                                              |
 | `save_sticker`   | `message_id`, `image_index`, `name` | 把用户发的图片存为收藏表情并设置描述名：工具按消息 ID 和从 0 开始的图片索引在当前会话记录中解析图片来源，先 `get_image` 拿容器内路径，失败回退 `download_file`；`add_custom_face` 保存后 diff 保存前后的 `res_id` 集合定位新表情，再设置描述名。 |
 | `rename_sticker` | `name`, `new_name`                  | 修改收藏表情的描述名                                                                                                                                                                                                                             |
@@ -126,7 +126,7 @@ MCP 远程工具仍由“MCP 服务”管理。
 | 工具              | 参数                                                          | 说明                                                                                                                                                 |
 |-------------------|---------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `demo_async_task` | 无                                                            | 仅供明确测试异步任务时使用；约 3 秒后向原会话发送固定完成回执，不提供生图能力                                                                        |
-| `generate_image`  | `prompt`, `size?`, `use_self_reference?`, `reference_images?` | 生成或编辑图片；参考图数组每项为 `message_id`、`image_index`，支持多张会话图片与角色形象图同时使用。默认尺寸 `2048x2048`，任务完成后自动发送到原会话 |
+| `generate_image`  | `prompt`, `size?`, `use_self_reference?`, `reference_images?` | 生成或编辑图片；参考图数组支持图片 ID 字符串、`{image_id}` 或旧 `{message_id, image_index}`，支持多张会话图片与角色形象图同时使用。默认尺寸 `2048x2048`，任务完成后自动发送到原会话 |
 
 异步任务按会话互斥：同一会话已有任务时返回现有任务编号，不再启动新任务；不同会话可并行。工具调用立即把受理或忙碌状态交回 Executor，是否在当前回复中告知用户仍由模型决定。启动状态只写入消息列表，不触发回复；任务完成或失败时则像定时任务一样，将系统消息加入入站工作流，触发一轮 Router 和 Executor 回复。后台任务完成后通过 `MessageService` 直接向原会话发送结果；发送成功的结果及其图片描述先进入消息列表，然后再注入成功系统消息。任务执行或发送失败时只注入失败系统消息，附带最多 500 字符的失败原因供模型判断，不直接向 QQ 发送失败提示。退出中断状态仅写入消息列表。
 
@@ -135,7 +135,7 @@ MCP 远程工具仍由“MCP 服务”管理。
 `generate_image` 使用管理后台“LLM 配置”中的“图片生成”独立配置。默认地址为
 `https://api.openai.com/v1`、路径为 `/images/generations`、模型为 `gpt-image-2.5-flare`，API Key 默认为空，需自行配置。
 可用尺寸取决于实际配置的图片生成接口和模型；尺寸格式通过工具校验后原样传给接口。
-`generate_image` 按 `reference_images` 中的消息 ID 和图片索引从当前会话定位原图，在内存中转换为
+`generate_image` 按 `reference_images` 中的可见图片 ID 或旧消息 ID 和图片索引从当前会话定位原图，在内存中转换为
 `data:image/...;base64,...`，不保存下载的原图或 base64。原 `edit_image` 已合并到此工具。
 `generate_image` 的角色参考图在后台“提示词 → 角色形象”上传，保存在持久化的 `data/character-image` 中；
 仅在 `use_self_reference=true` 时读取并放在所有参考图的第一张，日常聊天模型不接收图像字节。
@@ -322,3 +322,8 @@ HTTP 响应体仍受 Lua 执行器的 1 MiB 限制，超限时返回错误，而
   ），缺参数返回引导性错误提示而非异常
 - **注册方式**：见 `include/workflow/agent/tools/plugins/*ToolsPlugin.hpp`、`include/workflow/agent/tools/ToolArgument.hpp`
   与 [DEVELOPMENT.md](./DEVELOPMENT.md) 开发指南
+
+图片 ID 使用 `img_` 加 8 位十六进制的短标识；旧完整 SHA-256 ID 仍可读取。
+
+`ask_images(question, images)` 支持按顺序查询多张原图；`images` 接受图片 ID 字符串、`{image_id}` 或旧 `{message_id, image_index}`。
+ID 必须在当前冻结会话快照中可见，缓存过期时要求重发；旧引用优先读缓存，缺失时回退原始 URL。GIF 仍按播放时间抽帧。

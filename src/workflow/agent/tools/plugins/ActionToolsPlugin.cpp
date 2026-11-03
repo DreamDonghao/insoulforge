@@ -11,6 +11,7 @@
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
+#include <infrastructure/image/Image.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <onebot/transport/OneBotClient.hpp>
 #include <workflow/OneBotEventWorkflow.hpp>
@@ -79,41 +80,49 @@ namespace insoulforge {
 
         auto startImageTask(const SessionId &sessionId, std::string prompt, std::string size,
           std::vector<std::string> referenceUrls, std::optional<std::string> characterDataUrl) -> std::string {
-            const auto [status, taskId] =
-              AsyncTaskManager::instance().start(sessionId, "生成图片",
-                [sessionId, prompt = std::move(prompt), size = std::move(size), referenceUrls = std::move(referenceUrls),
-                  characterDataUrl = std::move(characterDataUrl)]() mutable -> drogon::Task<AsyncTaskManager::Result> {
-                    const bool useSelfReference = characterDataUrl.has_value();
-                    std::vector<std::string> references;
-                    if (characterDataUrl) references.push_back(std::move(*characterDataUrl));
-                    for (const auto &url : referenceUrls) {
-                        auto dataUrl = co_await ImageDescriptionService::referenceDataUrl(url, sessionId);
-                        if (!dataUrl) {
-                            throw std::runtime_error("原图下载失败或格式不受支持，请重新发送静态图片");
-                        }
-                        references.push_back(std::move(*dataUrl));
-                    }
-                    std::string generationPrompt = prompt;
-                    if (useSelfReference) {
-                        generationPrompt = "第一张参考图是你的角色形象图，请以它为人物形象依据，保持角色可辨认的外观特征。"
-                                           "除非画面要求明确提出修改，否则发型、发色、耳朵、服饰等以参考图为准，"
-                                           "不要根据文字重新设计角色。其余参考图按用户要求使用。请按以下画面要求生成：" +
-                                           prompt;
-                    }
-                    auto [message, source] = co_await ImageGenerationService::generate(
-                      std::move(generationPrompt), size, sessionId, std::move(references));
-                    std::string description = "依据生成提示词：" + prompt;
-                    try {
-                        if (const auto recognized =
-                              co_await ImageDescriptionService::describeGeneratedImage(std::move(source), sessionId)) {
-                            description = recognized->description;
-                        }
-                    } catch (const std::exception &error) {
-                        Logger::warn(sessionId, "ImageGeneration", fmt::format("生成图片识别失败: {}", error.what()));
-                    }
-                    co_return AsyncTaskManager::Result{
-                      .content = std::move(message), .imageDescription = std::move(description)};
-                });
+            std::vector<Image> referenceHandles;
+            for (const auto &source: referenceUrls) {
+                if (auto image = Image::find(source); image)
+                    referenceHandles.push_back(std::move(*image));
+            }
+            const auto [status, taskId] = AsyncTaskManager::instance().start(sessionId, "生成图片",
+              [sessionId, prompt = std::move(prompt), size = std::move(size), referenceUrls = std::move(referenceUrls),
+                characterDataUrl = std::move(characterDataUrl),
+                referenceHandles = std::move(referenceHandles)]() mutable -> drogon::Task<AsyncTaskManager::Result> {
+                  const bool useSelfReference = characterDataUrl.has_value();
+                  std::vector<std::string> references;
+                  if (characterDataUrl)
+                      references.push_back(std::move(*characterDataUrl));
+                  for (const auto &url: referenceUrls) {
+                      auto dataUrl = co_await ImageDescriptionService::referenceDataUrl(url, sessionId);
+                      if (!dataUrl) {
+                          throw std::runtime_error("原图下载失败或格式不受支持，请重新发送静态图片");
+                      }
+                      references.push_back(std::move(*dataUrl));
+                  }
+                  std::string generationPrompt = prompt;
+                  if (useSelfReference) {
+                      generationPrompt =
+                        "第一张参考图是你的角色形象图，请以它为人物形象依据，保持角色可辨认的外观特征。"
+                        "除非画面要求明确提出修改，否则发型、发色、耳朵、服饰等以参考图为准，"
+                        "不要根据文字重新设计角色。其余参考图按用户要求使用。请按以下画面要求生成：" +
+                        prompt;
+                  }
+                  auto generated = co_await ImageGenerationService::generate(
+                    std::move(generationPrompt), size, sessionId, std::move(references));
+                  std::string description = "依据生成提示词：" + prompt;
+                  try {
+                      if (const auto recognized =
+                            co_await ImageDescriptionService::describeGeneratedImage(generated.source, sessionId)) {
+                          description = recognized->description;
+                      }
+                  } catch (const std::exception &error) {
+                      Logger::warn(sessionId, "ImageGeneration", fmt::format("生成图片识别失败: {}", error.what()));
+                  }
+                  co_return AsyncTaskManager::Result{.content = std::move(generated.message),
+                    .image = std::move(generated.image),
+                    .imageDescription = std::move(description)};
+              });
             switch (status) {
                 case AsyncTaskManager::StartResult::Status::Started:
                     return fmt::format("图片任务 #{} 已启动，完成后会直接发送到本会话。", taskId);
@@ -190,7 +199,7 @@ namespace insoulforge {
                            "会自动发送到当前会话，不要再调用 reply 发送图片。绘制你自己的角色形象时，"
                            "将 use_self_reference 设为 true，以后台上传的角色图为准；prompt 只描述用户要求的"
                            "场景、动作、表情等变化，不重复编造参考图中已有的外观设定。其他画面不要设置此参数。"
-                           "修改或参考聊天图片时，用 reference_images 按顺序指定当前会话中一张或多张图片的"
+                           "修改或参考聊天图片时，用 reference_images 按顺序指定当前可见会话图片的 image_id，或旧的"
                            "message_id 和 image_index，不要传入或猜测图片 URL。可同时使用角色形象图和聊天参考图。"
                            "一次会话同时只能生成一张。",
             .parameters = json{{"type", "object"},
@@ -231,7 +240,8 @@ namespace insoulforge {
                 std::vector<std::string> referenceUrls;
                 if (const auto &images = atOrNull(args, "reference_images"); args.contains("reference_images")) {
                     auto resolved = ImageReferences::resolve(images, ctx);
-                    if (!resolved) co_return resolved.error();
+                    if (!resolved)
+                        co_return resolved.error();
                     referenceUrls = std::move(*resolved);
                 }
                 co_return startImageTask(
@@ -290,29 +300,30 @@ namespace insoulforge {
           ToolCategory::ACTION);
 
         // send_image
-        const json imageParams = json::parse(R"json({
-                "type": "object",
-                "properties": {
-                    "url": {
-                        "type": "string",
-                        "description": "图片URL地址"
-                    }
-                },
-                "required": ["url"]
-            })json");
+        const json imageParams = {{"type", "object"},
+          {"properties", {{"image_id", {{"type", "string"}, {"description", "当前可见会话中的图片 ID"}}}}},
+          {"required", {"image_id"}}, {"additionalProperties", false}};
         registry.registerTool(
-          {
-            .name = "send_image",
-            .description = "获取网络图片的CQ码。提供图片URL。返回的CQ码必须复制到reply的content中。",
+          {.name = "send_image",
+            .description = "通过 image_id 将图片直接发送到当前会话，无需在 reply 中复制 CQ 码。",
             .parameters = imageParams,
-            .handler = [](const json args, ToolCallContext) -> drogon::Task<std::string> {
-                std::string url = argString(args, "url");
-                if (url.empty()) {
-                    co_return std::string("请提供图片URL");
-                }
-                co_return fmt::format("[CQ:image,file={}]", url);
-            },
-          },
+            .handler = [](json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
+                const auto id = argString(args, "image_id");
+                if (id.empty() || args.contains("url"))
+                    co_return "请仅提供当前可见会话中的 image_id。";
+                const auto resolved = ImageReferences::resolve(json::array({json{{"image_id", id}}}), ctx);
+                if (!resolved)
+                    co_return resolved.error();
+                const auto image = co_await Image::load(resolved->front());
+                if (!image)
+                    co_return image.error();
+                const auto encoded = image->base64();
+                if (!encoded)
+                    co_return encoded.error();
+                const auto sent = co_await MessageService::sendToSession(ctx.requireSession(),
+                  "[CQ:image,file=base64://" + *encoded + "]", std::string("已发送图片"), {}, image->id());
+                co_return sent ? "图片已发送。" : "图片发送失败：" + sent.error();
+            }},
           ToolCategory::ACTION);
 
         // send_sticker - 直接把表情包作为独立消息发出（经 MessageService，发送后记入聊天记录）

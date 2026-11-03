@@ -14,6 +14,7 @@
 #include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/http/HttpUtil.hpp>
+#include <infrastructure/image/Image.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <workflow/OneBotEventWorkflow.hpp>
 #include <workflow/access/BlacklistStore.hpp>
@@ -23,6 +24,7 @@
 #include <workflow/agent/tools/image/ImageGenerationService.hpp>
 #include <workflow/history/ChatRecordStore.hpp>
 #include <workflow/history/SharedConversationContext.hpp>
+#include <workflow/message/MessageContentEnricher.hpp>
 #include <workflow/message/MessageService.hpp>
 #include <workflow/message/image/ImageDescriptionService.hpp>
 #include <workflow/session/SessionStore.hpp>
@@ -58,15 +60,16 @@ namespace {
     } fixture;
 
     void require(const bool value, const char *message) {
-        if (!value) throw std::runtime_error(message);
+        if (!value)
+            throw std::runtime_error(message);
     }
 
     auto imageBytes() -> std::string {
         const std::string encoded =
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9d1QAAAABJRU5ErkJggg==";
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9d1QAAAABJRU5ErkJggg==";
         std::string bytes(encoded.size() / 4 * 3, '\0');
         const auto length = EVP_DecodeBlock(reinterpret_cast<unsigned char *>(bytes.data()),
-            reinterpret_cast<const unsigned char *>(encoded.data()), static_cast<int>(encoded.size()));
+          reinterpret_cast<const unsigned char *>(encoded.data()), static_cast<int>(encoded.size()));
         bytes.resize(static_cast<size_t>(length) - 2);
         return bytes;
     }
@@ -75,7 +78,7 @@ namespace {
         const std::string encoded = "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
         std::string bytes(encoded.size() / 4 * 3, '\0');
         const auto length = EVP_DecodeBlock(reinterpret_cast<unsigned char *>(bytes.data()),
-            reinterpret_cast<const unsigned char *>(encoded.data()), static_cast<int>(encoded.size()));
+          reinterpret_cast<const unsigned char *>(encoded.data()), static_cast<int>(encoded.size()));
         bytes.resize(static_cast<size_t>(length));
         // Repeat the complete frame block after the header and global color table.
         const auto frame = bytes.substr(19, bytes.size() - 20);
@@ -92,24 +95,24 @@ namespace {
         auto &registry = ToolRegistry::instance();
         const auto sentBefore = fixture.messages().size();
         const json record = {{"message_id", "6001"}, {"segments", {{{"type", "text"}, {"text", "secret chat"}}}},
-            {"assets", {{"images", {
-                {{"description", "stale summary"}, {"source", {{"url", endpoint + "/reference.png"}}}},
+          {"assets",
+            {{"images",
+              {{{"description", "stale summary"}, {"source", {{"url", endpoint + "/reference.png"}}}},
                 {{"description", "stale gif summary"}, {"source", {{"url", endpoint + "/reference.gif"}}}}}}}}};
         const ToolCallContext context{
           .sessionId = insoulforge::SessionId::group("600"), .messageSnapshot = json::array({record})};
         const json image = {{"message_id", "6001"}, {"image_index", 0}};
         json args = {{"question", "图片上的小字是什么？"}, {"images", json::array({image})}};
-        for (const auto &invalid : {json::object(), json{{"question", " \t"}, {"images", {image}}},
-                 json{{"question", 12}, {"images", {image}}}, json{{"question", "test"}},
-                 json{{"question", "test"}, {"images", json::array()}},
-                 json{{"question", "test"}, {"images", {42}}},
-                 json{{"question", "test"}, {"images", {{{"message_id", "6001"}, {"image_index", -1}}}}}}) {
+        for (const auto &invalid: {json::object(), json{{"question", " \t"}, {"images", {image}}},
+               json{{"question", 12}, {"images", {image}}}, json{{"question", "test"}},
+               json{{"question", "test"}, {"images", json::array()}}, json{{"question", "test"}, {"images", {42}}},
+               json{{"question", "test"}, {"images", {{{"message_id", "6001"}, {"image_index", -1}}}}}}) {
             const auto error = co_await registry.executeTool("ask_images", invalid, context);
             require(!error.starts_with("【原图问答结果】") && fixture.visions().empty(),
-                "invalid image question reached the model");
+              "invalid image question reached the model");
         }
         require(registry.saveBuiltinToolConfig("ask_images", {{"enabled", false}}).has_value(),
-            "image question tool is not configurable");
+          "image question tool is not configurable");
         const auto disabled = co_await registry.executeTool("ask_images", args, context);
         require(disabled.contains("工具已关闭"), "disabled image question tool ran");
         require(registry.saveBuiltinToolConfig("ask_images", {{"enabled", true}}).has_value(), "tool enable failed");
@@ -132,19 +135,22 @@ namespace {
                     .has_value() &&
                   fixture.visions().size() == 1,
           "automatic description cache stopped working");
-        for (const auto *question : {"图片上的小字是什么？", "第二个问题，不应复用上次答案"}) {
+        for (const auto *question: {"图片上的小字是什么？", "第二个问题，不应复用上次答案"}) {
             args["question"] = question;
             const auto answer = co_await registry.executeTool("ask_images", args, context);
             require(answer == "【原图问答结果】\nvision answer", "image question failed");
             const auto request = fixture.visions().back();
             const auto &messages = request["messages"];
             require(messages.size() == 2 && messages[0]["role"] == "system" && messages[1]["role"] == "user" &&
-                messages[1]["content"][0]["text"] == question &&
-                messages[1]["content"][2]["image_url"]["url"] == *ImageDescriptionService::staticImageDataUrl(imageBytes()) &&
-                !messages.dump().contains("stale summary") && !messages.dump().contains("secret chat") &&
-                !messages.dump().contains("300字"), "question request lost pixels or leaked chat/summary");
+                      messages[1]["content"][0]["text"] == question &&
+                      messages[1]["content"][2]["image_url"]["url"] ==
+                        *ImageDescriptionService::staticImageDataUrl(imageBytes()) &&
+                      !messages.dump().contains("stale summary") && !messages.dump().contains("secret chat") &&
+                      !messages.dump().contains("300字"),
+              "question request lost pixels or leaked chat/summary");
             require(HttpUtil::redactImagePayloads(request)["messages"][1]["content"][2]["image_url"]["url"] ==
-                "[图片数据已省略]", "question trace leaks image data");
+                      "[图片数据已省略]",
+              "question trace leaks image data");
         }
         require(fixture.visions().size() == 3, "different questions reused description/answer cache");
         args["images"].push_back({{"message_id", "6001"}, {"image_index", 1}});
@@ -153,9 +159,10 @@ namespace {
         require(mixed.starts_with("【原图问答结果】"), "mixed GIF question failed");
         const auto content = fixture.visions().back()["messages"][1]["content"];
         require(content.size() == 8 && content[1]["text"] == "图片 1（静态原图）" &&
-            getStr(content[3], "text").starts_with("图片 2（GIF") && content[4]["text"] == "图片 2，帧 1/2" &&
-            content[6]["text"] == "图片 2，帧 2/2", "image/frame order or deduplication changed");
-        for (const auto mode : {1, 2}) {
+                  getStr(content[3], "text").starts_with("图片 2（GIF") && content[4]["text"] == "图片 2，帧 1/2" &&
+                  content[6]["text"] == "图片 2，帧 2/2",
+          "image/frame order or deduplication changed");
+        for (const auto mode: {1, 2}) {
             fixture.visionMode = mode;
             error = co_await registry.executeTool("ask_images", args, context);
             require(error.contains("原图问答失败"), "failed/empty vision response reported an answer");
@@ -167,13 +174,47 @@ namespace {
         error = co_await registry.executeTool("ask_images", args,
           {.sessionId = insoulforge::SessionId::group("600"), .messageSnapshot = json::array({broken})});
         require(error.contains("图片 2 下载失败") && fixture.visions().size() == beforeFailure,
-            "missing image was ignored or replaced with a description");
+          "missing image was ignored or replaced with a description");
         require(fixture.messages().size() == sentBefore, "image question sent a message directly");
         require((co_await ImageDescriptionService::describe(
                    endpoint + "/reference.png", insoulforge::SessionId::group("600")))
                     .has_value() &&
                   fixture.visions().size() == beforeFailure,
           "image questions altered the automatic description cache");
+        // Receiving an image must cache pixels and expose an ID even when vision is disabled.
+        config.image.model.clear();
+        auto enriched = co_await MessageContentEnricher::enrichImages(record, SessionId::group("600"));
+        config.image.model = model;
+        const auto cachedId = getStr(enriched["assets"]["images"][0], "image_id");
+        require(!cachedId.empty() && enriched["assets"]["images"][0]["recognition_status"] == "failed",
+          "received image ID depends on recognition success");
+        const ToolCallContext cachedContext{
+          .sessionId = SessionId::group("600"), .messageSnapshot = json::array({enriched})};
+        const json cachedArgs = {
+          {"question", "read pixels"}, {"images", json::array({cachedId, json{{"image_id", cachedId}}})}};
+        const auto cachedAnswer = co_await registry.executeTool("ask_images", cachedArgs, cachedContext);
+        require(cachedAnswer.starts_with("【原图问答结果】") &&
+                  fixture.visions().back()["messages"][1]["content"].size() == 3,
+          "ID questions lost pixels or duplicated references");
+        const auto visionsBeforeInvisible = fixture.visions().size();
+        require(!(co_await registry.executeTool("ask_images", cachedArgs, {.sessionId = SessionId::group("601")}))
+                    .starts_with("【原图问答结果】") &&
+                  fixture.visions().size() == visionsBeforeInvisible,
+          "invisible cached ID reached vision");
+        const json sendById = {{"image_id", cachedId}};
+        const auto beforeSend = fixture.messages().size();
+        require(
+          (co_await registry.executeTool("send_image", sendById, cachedContext)).contains("已发送"), "ID send failed");
+        require(fixture.messages().size() == beforeSend + 1 &&
+                  getStr(fixture.messages().back(), "message") ==
+                    "[CQ:image,file=base64://" + Image::encode(imageBytes()) + "]",
+          "ID send did not directly send Base64");
+        const auto beforeRejectedSend = fixture.messages().size();
+        co_await registry.executeTool("send_image", {{"url", endpoint + "/reference.png"}}, cachedContext);
+        co_await registry.executeTool("send_image", sendById, {.sessionId = SessionId::group("601")});
+        co_await registry.executeTool(
+          "send_image", {{"image_id", cachedId}, {"url", endpoint + "/reference.png"}}, cachedContext);
+        require(fixture.messages().size() == beforeRejectedSend, "invalid or invisible IDs were sent");
     }
 
     auto testImageGeneration(const std::string endpoint) -> drogon::Task<> {
@@ -183,11 +224,13 @@ namespace {
         config.imageGeneration.path = "/image-generation";
         config.imageGeneration.apiKey = "fixture";
         config.imageGeneration.model = "fixture";
-        for (const auto &references : {std::vector<std::string>{}, std::vector<std::string>{"first"},
-                 std::vector<std::string>{"first", "second", "third"}}) {
+        for (const auto &references: {std::vector<std::string>{}, std::vector<std::string>{"first"},
+               std::vector<std::string>{"first", "second", "third"}}) {
             const auto result = co_await ImageGenerationService::generate(
               "test", "1024x1024", insoulforge::SessionId::group("500"), references);
-            require(result.source == "https://example.com/generated.png", "image response parsing changed");
+            require(result.image && result.source == result.image->id() &&
+                      result.message.starts_with("[CQ:image,file=base64://"),
+              "generated cache ID or Base64 delivery lost");
             const auto request = fixture.images().back();
             require(request["size"] == "1024x1024", "image size was lost");
             if (references.empty()) {
@@ -196,44 +239,47 @@ namespace {
                 require(request["input_references"].size() == references.size(), "references were dropped");
                 for (size_t index = 0; index < references.size(); ++index)
                     require(request["input_references"][index]["image_url"]["url"] == references[index],
-                        "reference order changed");
+                      "reference order changed");
             }
         }
         fixture.failImage = true;
         bool failed = false;
         try {
             co_await ImageGenerationService::generate("test", "1024x1024", insoulforge::SessionId::group("500"));
-        } catch (const std::exception &) { failed = true; }
+        } catch (const std::exception &) {
+            failed = true;
+        }
         require(failed, "upstream rejection was silently ignored");
         fixture.failImage = false;
 
         config.imageGeneration.apiType = "openai";
         config.imageGeneration.path = "/v1/images/generations";
         config.imageGeneration.editPath = "/custom/images/edits";
-        for (const auto &references : {std::vector<std::string>{}, std::vector<std::string>{"first"},
-                 std::vector<std::string>{"first", "second", "third"}}) {
+        for (const auto &references: {std::vector<std::string>{}, std::vector<std::string>{"first"},
+               std::vector<std::string>{"first", "second", "third"}}) {
             co_await ImageGenerationService::generate(
               "test", "1024x1024", insoulforge::SessionId::group("500"), references);
             const auto request = fixture.images().back();
             require(!request.contains("input_references"), "OpenAI request used OpenRouter references");
             require(request["_testPath"] == (references.empty() ? "/v1/images/generations" : "/custom/images/edits"),
-                "OpenAI did not switch generation/edit paths");
+              "OpenAI did not switch generation/edit paths");
             if (references.empty()) {
                 require(!request.contains("images"), "OpenAI text generation included images");
             } else {
                 require(request["images"].size() == references.size(), "OpenAI dropped references");
                 for (size_t index = 0; index < references.size(); ++index)
                     require(request["images"][index] == json{{"image_url", references[index]}},
-                        "OpenAI image_url must be a string in reference order");
+                      "OpenAI image_url must be a string in reference order");
             }
         }
 
         auto &registry = ToolRegistry::instance();
-        const json record = {{"message_id", "5001"}, {"assets", {{"images", {
-            {{"source", {{"url", endpoint + "/reference.png"}}}},
-            {{"source", {{"url", endpoint + "/reference.png"}}}}}}}}};
+        const json record = {
+          {"message_id", "5001"}, {"assets", {{"images", {{{"source", {{"url", endpoint + "/reference.png"}}}},
+                                                           {{"source", {{"url", endpoint + "/reference.png"}}}}}}}}};
         ChatRecordStore::addChatRecord(insoulforge::SessionId::group("500"), "user", record.dump());
-        const json args = {{"prompt", "参考图片"}, {"reference_images", {{{"message_id", "5001"}, {"image_index", 0}}}}};
+        const json args = {
+          {"prompt", "参考图片"}, {"reference_images", {{{"message_id", "5001"}, {"image_index", 0}}}}};
         auto error =
           co_await registry.executeTool("generate_image", args, {.sessionId = insoulforge::SessionId::group("501")});
         require(error.contains("未找到该会话"), "references leaked across sessions");
@@ -245,8 +291,9 @@ namespace {
 
         // Isolate the relative character-image store from any developer data.
         const auto originalPath = std::filesystem::current_path();
-        const auto temporary = std::filesystem::temp_directory_path() /
-            ("insoulforge-image-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        const auto temporary =
+          std::filesystem::temp_directory_path() /
+          ("insoulforge-image-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         std::filesystem::create_directories(temporary);
         std::filesystem::current_path(temporary);
         require(!CharacterImageStore::save(imageBytes()), "character image fixture could not be saved");
@@ -266,11 +313,11 @@ namespace {
         require(fixture.messages().size() == sentBefore + 1, "generated image was not delivered");
         const auto request = fixture.images().back();
         require(request["images"].size() == 3 && request["_testPath"] == "/custom/images/edits" &&
-            getStr(request, "prompt").starts_with("第一张参考图是你的角色形象图"),
-            "mixed references lost the character image or retained duplicate chat references");
-        for (const auto &reference : request["images"])
+                  getStr(request, "prompt").starts_with("第一张参考图是你的角色形象图"),
+          "mixed references lost the character image or retained duplicate chat references");
+        for (const auto &reference: request["images"])
             require(reference["image_url"] == *ImageDescriptionService::staticImageDataUrl(imageBytes()),
-                "references were not converted to image data URLs");
+              "references were not converted to image data URLs");
         co_await drogon::sleepCoro(drogon::app().getLoop(), 0.02);
         std::filesystem::current_path(originalPath);
         std::filesystem::remove_all(temporary);
@@ -299,8 +346,28 @@ namespace {
         for (int attempt = 0; attempt < 200 && fixture.messages().size() == sentBefore + 1; ++attempt)
             co_await drogon::sleepCoro(drogon::app().getLoop(), 0.01);
         require(fixture.messages().size() == sentBefore + 2 && fixture.images().size() == imageRequestsBefore + 1 &&
-            fixture.images().back()["input_references"].size() == 1,
-            "download failure generated an image or subsequent single-reference generation failed");
+                  fixture.images().back()["input_references"].size() == 1,
+          "download failure generated an image or subsequent single-reference generation failed");
+        co_await drogon::sleepCoro(drogon::app().getLoop(), 0.02);
+        const auto cached = Image::fromBytes(imageBytes());
+        require(cached.has_value(), "ID generation fixture cache failed");
+        auto idRecord = record;
+        idRecord["assets"]["images"][0]["image_id"] = cached->id();
+        const json idArgs = {{"prompt", "edit ID"}, {"reference_images", json::array({cached->id()})}};
+        const auto beforeIdGeneration = fixture.messages().size();
+        require((co_await registry.executeTool("generate_image", idArgs,
+                   {.sessionId = SessionId::group("503"), .messageSnapshot = json::array({idRecord})}))
+                  .contains("已启动"),
+          "ID generation task rejected visible image");
+        for (int attempt = 0; attempt < 200 && fixture.messages().size() == beforeIdGeneration; ++attempt)
+            co_await drogon::sleepCoro(drogon::app().getLoop(), 0.01);
+        require(fixture.messages().size() == beforeIdGeneration + 1 &&
+                  fixture.images().back()["input_references"][0]["image_url"]["url"] == *cached->dataUrl(),
+          "ID generation lost reference pixels");
+        const auto generatedRecords = OneBotEventWorkflow::instance().getSessionMessages(SessionId::group("503"));
+        require(generatedRecords && generatedRecords->dump().contains(cached->id()) &&
+                  !generatedRecords->dump().contains("base64://"),
+          "generated delivery records lost image IDs or persisted transport data");
         co_await drogon::sleepCoro(drogon::app().getLoop(), 0.02);
     }
 
@@ -317,8 +384,8 @@ namespace {
         const auto stickerQueriesBefore = fixture.stickerQueries.load();
         const auto invalidIds = json::array({nullptr, false, 702, "", " ", "0", "-1", "+702", "702x", "702.0",
           "18446744073709551616", target.toString(), "system", "700", "701", "200"});
-        for (const auto *tool : {"reply_and_continue", "send_sticker"}) {
-            for (const auto &id : invalidIds) {
+        for (const auto *tool: {"reply_and_continue", "send_sticker"}) {
+            for (const auto &id: invalidIds) {
                 const json args = {{"content", "test"}, {"name", "fixture"}, {"user_id", id}};
                 const auto error =
                   co_await registry.executeTool(tool, args, {.sessionId = insoulforge::SessionId::group("100")});
@@ -341,17 +408,18 @@ namespace {
           "rejected target performed network requests or enabled a private session");
         const auto callerRecords = workflow.getSessionMessages(insoulforge::SessionId::group("100"))->size();
         for (const auto caller: {insoulforge::SessionId::group("100"), source}) {
-            for (const auto *tool : {"reply_and_continue", "send_sticker"}) {
+            for (const auto *tool: {"reply_and_continue", "send_sticker"}) {
                 const auto result = co_await registry.executeTool(tool,
-                    {{"content", "cross-private text"}, {"name", "fixture"}, {"user_id", "702"}}, {.sessionId = caller});
-                require(result.contains("目标私聊 702") && (result.contains("消息已发送") || result.contains("已发送表情")),
-                    "private send omitted target or failed");
+                  {{"content", "cross-private text"}, {"name", "fixture"}, {"user_id", "702"}}, {.sessionId = caller});
+                require(
+                  result.contains("目标私聊 702") && (result.contains("消息已发送") || result.contains("已发送表情")),
+                  "private send omitted target or failed");
             }
         }
         const auto sends = fixture.messages();
         for (size_t index = sentBefore; index < sends.size(); ++index)
             require(sends[index]["user_id"] == 702 && !sends[index].contains("group_id"),
-                "private send used internal session ID or group endpoint");
+              "private send used internal session ID or group endpoint");
         require(workflow.getSessionMessages(target)->size() == 4 && !workflow.getSessionMessages(source) &&
                   workflow.getSessionMessages(insoulforge::SessionId::group("100"))->size() == callerRecords,
           "private sends were copied into the calling session");
@@ -361,14 +429,15 @@ namespace {
           {{"content", "large QQ"}, {"user_id", std::to_string(largeQQ)}},
           {.sessionId = insoulforge::SessionId::group("100")});
         require(large.contains(std::to_string(largeQQ)) && fixture.messages().back()["user_id"] == largeQQ,
-            "private target lost integer precision");
+          "private target lost integer precision");
         fixture.fail = true;
         const auto beforeFailure = fixture.messages().size();
-        for (const auto *tool : {"reply_and_continue", "send_sticker"}) {
+        for (const auto *tool: {"reply_and_continue", "send_sticker"}) {
             const auto error =
               co_await registry.executeTool(tool, {{"content", "failed"}, {"name", "fixture"}, {"user_id", "702"}},
                 {.sessionId = insoulforge::SessionId::group("100")});
-            require(error.contains("目标私聊 702") && error.contains("未确认成功"), "failed private send reported success");
+            require(
+              error.contains("目标私聊 702") && error.contains("未确认成功"), "failed private send reported success");
         }
         require(fixture.messages().size() == beforeFailure + 2, "failed private sends were retried");
         fixture.fail = false;
@@ -376,13 +445,13 @@ namespace {
         const auto disconnected = co_await registry.executeTool("reply_and_continue",
           {{"content", "unconfirmed"}, {"user_id", "702"}}, {.sessionId = insoulforge::SessionId::group("100")});
         require(disconnected.contains("未确认成功") && fixture.messages().size() == beforeFailure + 2,
-            "disconnected private send fell back to HTTP");
+          "disconnected private send fell back to HTTP");
         config.oneBotTransport = "http";
         workflow.flushMessageListsToStorage();
         const auto records = workflow.getSessionMessages(target);
         require(records->size() == 7 && records->back().contains("send_error") &&
-            ChatRecordStore::getChatRecords(Database::instance(), target).size() == 7,
-            "private send records were lost or persisted under the wrong session");
+                  ChatRecordStore::getChatRecords(Database::instance(), target).size() == 7,
+          "private send records were lost or persisted under the wrong session");
         co_await drogon::sleepCoro(drogon::app().getLoop(), 0.02);
         require(fixture.modelQueries == 0, "outgoing private message triggered another reply");
     }
@@ -397,17 +466,18 @@ namespace {
         SessionStore::updateSessionName(insoulforge::SessionId::group("400"), "查询测试群");
         json expected = json::array();
         std::string longText;
-        for (int index = 0; index < 250; ++index) longText += "测";
+        for (int index = 0; index < 250; ++index)
+            longText += "测";
         for (int index = 0; index < 25; ++index) {
             json record = {{"time", "2020-01-01 00:00:00"},
-                {"sender", {{"user_id", "11"}, {"name", "Alice"}, {"card", "hidden card"}}},
-                {"message_id", std::to_string(1000 + index)}, {"reply_to", "999"},
-                {"memories", {"hidden memory"}}, {"tool_history", {{{"name", "hidden"}}}},
-                {"segments", {{{"type", "text"}, {"text", index == 0 ? longText : std::to_string(index)}}}}};
+              {"sender", {{"user_id", "11"}, {"name", "Alice"}, {"card", "hidden card"}}},
+              {"message_id", std::to_string(1000 + index)}, {"reply_to", "999"}, {"memories", {"hidden memory"}},
+              {"tool_history", {{{"name", "hidden"}}}},
+              {"segments", {{{"type", "text"}, {"text", index == 0 ? longText : std::to_string(index)}}}}};
             if (index == 24) {
                 record["segments"].push_back({{"type", "image"}, {"image_index", 0}});
                 record["assets"] = {{"images", {{{"recognition_status", "succeeded"}, {"description", "a cat"},
-                    {"source", {{"url", "https://example.com/private.png"}}}}}}};
+                                                 {"source", {{"url", "https://example.com/private.png"}}}}}}};
             }
             expected.push_back(*SharedConversationContext::projectMessage(record));
             workflow.appendDeliveredAssistantMessage(insoulforge::SessionId::group("400"), record);
@@ -436,11 +506,11 @@ namespace {
                   output["messages"] == expected && output["messages"].size() == 25,
           "query was limited by age, sharing count, context window, or returned wrong projection order");
         require(output["messages"][0]["truncated"] == true &&
-            output["messages"][0]["segments"][0]["text"].get<std::string>().size() == 600 &&
-            !result.contains("hidden") && !result.contains("message_id") && !result.contains("reply_to") &&
-            !result.contains("image_index") && !result.contains("private.png") &&
-            output["messages"][24]["segments"][1]["description"] == "a cat",
-            "query leaked metadata or broke UTF-8 truncation or image summaries");
+                  output["messages"][0]["segments"][0]["text"].get<std::string>().size() == 600 &&
+                  !result.contains("hidden") && !result.contains("message_id") && !result.contains("reply_to") &&
+                  !result.contains("image_index") && !result.contains("private.png") &&
+                  output["messages"][24]["segments"][1]["description"] == "a cat",
+          "query leaked metadata or broke UTF-8 truncation or image summaries");
         require(workflow.getSessionMessages(insoulforge::SessionId::group("400")) == before &&
                   !workflow.getSessionMessages(caller),
           "query changed target records or created calling session");
@@ -467,17 +537,17 @@ namespace {
         require(json::parse(onlyFiltered)["messages"].empty(), "filtered-only session must return an empty array");
 
         require(registry.saveBuiltinToolConfig("get_group_messages", {{"enabled", false}}).has_value(),
-            "query tool missing builtin configuration");
+          "query tool missing builtin configuration");
         const auto disabled = co_await registry.executeTool(
           "get_group_messages", args, {.sessionId = insoulforge::SessionId::group("100")});
         require(disabled.contains("工具已关闭"), "disabled query tool was executed");
         require(registry.saveBuiltinToolConfig("get_group_messages", {{"enabled", true}}).has_value(),
-            "query tool could not be enabled again");
+          "query tool could not be enabled again");
         SessionStore::disableSession(insoulforge::SessionId::group("400"));
         const auto forbidden = co_await registry.executeTool(
           "get_group_messages", args, {.sessionId = insoulforge::SessionId::group("100")});
         require(forbidden.contains("未在后台启用") && !forbidden.contains("Alice"),
-            "disabled target leaked retained records");
+          "disabled target leaked retained records");
         config.contextWindowLimit = oldWindow;
     }
 
@@ -535,17 +605,18 @@ namespace {
             require(!SessionStore::getSessionConfig(insoulforge::SessionId::group("100")).crossSessionSharing &&
                       !SessionStore::getSessionConfig(insoulforge::SessionId::group("200")).crossSessionSharing,
               "sharing fixture must be disabled");
-            for (const auto &tool : registry.getTools({})) {
+            for (const auto &tool: registry.getTools({})) {
                 const auto &definition = tool["function"];
                 if (definition["name"] == "reply_and_continue" || definition["name"] == "send_sticker") {
                     require(definition["parameters"]["properties"]["group_id"]["type"] == "string" &&
-                        definition["parameters"]["properties"]["user_id"]["type"] == "string" &&
-                        definition["parameters"]["required"].size() == 1, "group_id must be optional string");
+                              definition["parameters"]["properties"]["user_id"]["type"] == "string" &&
+                              definition["parameters"]["required"].size() == 1,
+                      "group_id must be optional string");
                 }
                 if (definition["name"] == "get_group_messages") {
                     require(definition["parameters"]["properties"]["group_id"]["type"] == "string" &&
-                        definition["parameters"]["required"] == json::array({"group_id"}),
-                        "query requires a string group_id");
+                              definition["parameters"]["required"] == json::array({"group_id"}),
+                      "query requires a string group_id");
                 }
             }
             const auto specialSession = SessionId::group("room:a/%测试");
@@ -561,77 +632,82 @@ namespace {
             const auto invalidIds =
               json::array({nullptr, false, 200, "", " ", "0", "-1", "+200", "200x", "200.0", "18446744073709551616",
                 SessionId::privateChat(insoulforge::UserId{200}).toString(), "system", "201", "999"});
-            for (const auto *tool : {"reply_and_continue", "send_sticker", "get_group_messages"}) {
-                for (const auto &id : invalidIds) {
+            for (const auto *tool: {"reply_and_continue", "send_sticker", "get_group_messages"}) {
+                for (const auto &id: invalidIds) {
                     const json args = {{"content", "test"}, {"name", "fixture"}, {"group_id", id}};
                     const auto result =
                       co_await registry.executeTool(tool, args, {.sessionId = insoulforge::SessionId::group("100")});
-                    require(result.find("group_id") != std::string::npos || result.find("未在后台启用") != std::string::npos,
-                        "invalid target not rejected");
+                    require(
+                      result.find("group_id") != std::string::npos || result.find("未在后台启用") != std::string::npos,
+                      "invalid target not rejected");
                 }
             }
-            require(fixture.messages().empty() && fixture.stickerQueries == 0,
-                "invalid target performed network requests");
+            require(
+              fixture.messages().empty() && fixture.stickerQueries == 0, "invalid target performed network requests");
             const auto missing = co_await registry.executeTool(
               "get_group_messages", json::object(), {.sessionId = insoulforge::SessionId::group("100")});
             require(missing.contains("group_id"), "query silently defaulted missing target");
             co_await testGroupMessageQuery();
             require(fixture.messages().empty() && fixture.stickerQueries == 0 && fixture.modelQueries == 0,
-                "memory query performed network or model requests");
+              "memory query performed network or model requests");
 
             auto result = co_await registry.executeTool("reply_and_continue",
               {{"content", "cross-group text"}, {"group_id", "200"}},
               {.sessionId = insoulforge::SessionId::group("100")});
             require(result.find("目标群 200") != std::string::npos && result.find("消息已发送") != std::string::npos,
-                "cross-group text result omitted destination or success");
+              "cross-group text result omitted destination or success");
             result = co_await registry.executeTool("send_sticker", {{"name", "fixture"}, {"group_id", "200"}},
               {.sessionId = insoulforge::SessionId::group("100")});
             require(result.find("目标群 200") != std::string::npos && result.find("已发送表情") != std::string::npos,
-                "cross-group sticker did not send");
+              "cross-group sticker did not send");
             require(!workflow.getSessionMessages(insoulforge::SessionId::group("100")) &&
                       workflow.getSessionMessages(insoulforge::SessionId::group("200"))->size() == 2,
               "cross-group messages were copied into the calling session");
 
             const auto privateSession = SessionId::privateChat(insoulforge::UserId{300});
             for (const auto session: {insoulforge::SessionId::group("100"), privateSession}) {
-                result = co_await registry.executeTool("reply_and_continue", {{"content", "local text"}}, {.sessionId = session});
+                result = co_await registry.executeTool(
+                  "reply_and_continue", {{"content", "local text"}}, {.sessionId = session});
                 require(result.find("消息已发送") != std::string::npos, "default text destination changed");
                 result = co_await registry.executeTool("send_sticker", {{"name", "fixture"}}, {.sessionId = session});
                 require(result.find("已发送表情") != std::string::npos, "default sticker destination changed");
             }
             result = co_await registry.executeTool("reply_and_continue",
-                {{"content", "private-to-group"}, {"group_id", "200"}}, {.sessionId = privateSession});
+              {{"content", "private-to-group"}, {"group_id", "200"}}, {.sessionId = privateSession});
             require(result.find("目标群 200") != std::string::npos, "private session cannot send to enabled group");
             const auto sent = fixture.messages();
             require(sent.size() == 7 && sent[0]["group_id"] == 200 && sent[0]["message"] == "cross-group text" &&
-                sent[1]["group_id"] == 200 && getStr(sent[1], "message").find("sub_type=1") != std::string::npos &&
-                sent[2]["group_id"] == 100 && sent[3]["group_id"] == 100 &&
-                sent[4]["user_id"] == 300 && sent[5]["user_id"] == 300 && sent[6]["group_id"] == 200,
-                "OneBot requests used incorrect destinations or sticker format");
+                      sent[1]["group_id"] == 200 &&
+                      getStr(sent[1], "message").find("sub_type=1") != std::string::npos &&
+                      sent[2]["group_id"] == 100 && sent[3]["group_id"] == 100 && sent[4]["user_id"] == 300 &&
+                      sent[5]["user_id"] == 300 && sent[6]["group_id"] == 200,
+              "OneBot requests used incorrect destinations or sticker format");
 
-            for (const auto right : {1, 4, 64}) {
+            for (const auto right: {1, 4, 64}) {
                 fixture.qzoneRight = right;
                 json args = {{"content", "visibility fixture"}};
-                if (right != 1) args["ugc_right"] = right;
+                if (right != 1)
+                    args["ugc_right"] = right;
                 result = co_await registry.executeTool(
                   "send_qzone_msg", args, {.sessionId = insoulforge::SessionId::group("100")});
                 require(result.find("fixture-tid") != std::string::npos,
-                    "qzone default or explicit visibility was not passed to OneBot");
+                  "qzone default or explicit visibility was not passed to OneBot");
             }
             fixture.fail = true;
-            for (const auto *tool : {"reply_and_continue", "send_sticker"}) {
+            for (const auto *tool: {"reply_and_continue", "send_sticker"}) {
                 result = co_await registry.executeTool(tool,
                   {{"content", "failed text"}, {"name", "fixture"}, {"group_id", "200"}},
                   {.sessionId = insoulforge::SessionId::group("100")});
-                require(result.find("目标群 200") != std::string::npos && result.find("未确认成功") != std::string::npos,
-                    "failed send reported success or omitted target");
+                require(
+                  result.find("目标群 200") != std::string::npos && result.find("未确认成功") != std::string::npos,
+                  "failed send reported success or omitted target");
             }
             require(fixture.messages().size() == 9, "failed sends were automatically retried");
             config.oneBotTransport = "websocket";
             result = co_await registry.executeTool("reply_and_continue",
               {{"content", "unconfirmed"}, {"group_id", "200"}}, {.sessionId = insoulforge::SessionId::group("100")});
             require(result.find("未确认成功") != std::string::npos && fixture.messages().size() == 9,
-                "disconnected send retried via HTTP or reported success");
+              "disconnected send retried via HTTP or reported success");
             const auto targetRecords = workflow.getSessionMessages(insoulforge::SessionId::group("200"));
             require(targetRecords && targetRecords->size() == 6 && targetRecords->back().contains("send_error") &&
                       workflow.getSessionMessages(insoulforge::SessionId::group("100"))->size() == 2 &&
@@ -655,11 +731,12 @@ namespace {
         }
         drogon::app().quit();
     }
-}
+} // namespace
 
 auto main() -> int {
     const auto configPath = std::filesystem::temp_directory_path() /
-        ("insoulforge-cross-group-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".json");
+                            ("insoulforge-cross-group-" +
+                              std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".json");
     require(Config::instance().initialize(configPath.string()).has_value(), "config initialization failed");
     drogon::app().setLogLevel(trantor::Logger::kWarn).addListener("127.0.0.1", 0);
     drogon::app().registerHandler("/session-key/{key}",
@@ -673,87 +750,102 @@ auto main() -> int {
       },
       {drogon::Post});
     drogon::app().registerHandler("/reference.png",
-        [](const drogon::HttpRequestPtr &, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
-            auto response = drogon::HttpResponse::newHttpResponse();
-            response->setBody(imageBytes());
-            callback(response);
-        }, {drogon::Get});
+      [](const drogon::HttpRequestPtr &, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+          auto response = drogon::HttpResponse::newHttpResponse();
+          response->setBody(imageBytes());
+          callback(response);
+      },
+      {drogon::Get});
     drogon::app().registerHandler("/reference.gif",
-        [](const drogon::HttpRequestPtr &, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
-            auto response = drogon::HttpResponse::newHttpResponse();
-            response->setBody(gifBytes());
-            callback(response);
-        }, {drogon::Get});
+      [](const drogon::HttpRequestPtr &, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+          auto response = drogon::HttpResponse::newHttpResponse();
+          response->setBody(gifBytes());
+          callback(response);
+      },
+      {drogon::Get});
     drogon::app().registerHandler("/vision-question",
-        [](const drogon::HttpRequestPtr &request, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
-            {
-                std::lock_guard lock(fixture.mutex);
-                fixture.visionRequests.push_back(json::parse(request->body()));
-            }
-            auto response = drogon::HttpResponse::newHttpResponse();
-            response->setContentTypeCode(drogon::CT_APPLICATION_JSON);
-            if (fixture.visionMode == 1) response->setStatusCode(drogon::k400BadRequest);
-            const json body = {{"choices", {{{"message", {{"role", "assistant"},
-                {"content", fixture.visionMode == 2 ? "" : "vision answer"}}}}}}};
-            response->setBody(body.dump());
-            callback(response);
-        }, {drogon::Post});
-    for (const auto *path : {"/image-generation", "/v1/images/generations", "/custom/images/edits"}) {
-    drogon::app().registerHandler(path,
-        [](const drogon::HttpRequestPtr &request, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
-            {
-                std::lock_guard lock(fixture.mutex);
-                auto body = json::parse(request->body());
-                body["_testPath"] = request->path();
-                fixture.imageRequests.push_back(std::move(body));
-            }
-            auto response = drogon::HttpResponse::newHttpResponse();
-            response->setContentTypeCode(drogon::CT_APPLICATION_JSON);
-            if (fixture.failImage) response->setStatusCode(drogon::k400BadRequest);
-            response->setBody(R"({"data":[{"url":"https://example.com/generated.png"}]})");
-            callback(response);
-        }, {drogon::Post});
-    }
-    for (const auto *path : {"/send_group_msg", "/send_private_msg"}) {
+      [](const drogon::HttpRequestPtr &request, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+          {
+              std::lock_guard lock(fixture.mutex);
+              fixture.visionRequests.push_back(json::parse(request->body()));
+          }
+          auto response = drogon::HttpResponse::newHttpResponse();
+          response->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+          if (fixture.visionMode == 1)
+              response->setStatusCode(drogon::k400BadRequest);
+          const json body = {{"choices",
+            {{{"message", {{"role", "assistant"}, {"content", fixture.visionMode == 2 ? "" : "vision answer"}}}}}}};
+          response->setBody(body.dump());
+          callback(response);
+      },
+      {drogon::Post});
+    for (const auto *path: {"/image-generation", "/v1/images/generations", "/custom/images/edits"}) {
         drogon::app().registerHandler(path,
-            [](const drogon::HttpRequestPtr &request, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
-                json body;
-                {
-                    std::lock_guard lock(fixture.mutex);
-                    fixture.sends.push_back(json::parse(request->body()));
-                    body = fixture.fail ? json{{"status", "failed"}, {"retcode", 1200}, {"message", "fixture failure"}} :
-                        json{{"status", "ok"}, {"data", {{"message_id", fixture.sends.size()}}}};
-                }
-                const auto response = drogon::HttpResponse::newHttpResponse();
-                response->setContentTypeCode(drogon::CT_APPLICATION_JSON);
-                response->setBody(body.dump());
-                callback(response);
-            }, {drogon::Post});
+          [](const drogon::HttpRequestPtr &request, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+              {
+                  std::lock_guard lock(fixture.mutex);
+                  auto body = json::parse(request->body());
+                  body["_testPath"] = request->path();
+                  fixture.imageRequests.push_back(std::move(body));
+              }
+              auto response = drogon::HttpResponse::newHttpResponse();
+              response->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+              if (fixture.failImage)
+                  response->setStatusCode(drogon::k400BadRequest);
+              const json imageData = request->path() == "/v1/images/generations"
+                                       ? json{{"url", "http://" + request->getHeader("host") + "/reference.png"}}
+                                       : json{{"b64_json", insoulforge::Image::encode(imageBytes())}};
+              response->setBody(json{{"data", {imageData}}}.dump());
+              callback(response);
+          },
+          {drogon::Post});
+    }
+    for (const auto *path: {"/send_group_msg", "/send_private_msg"}) {
+        drogon::app().registerHandler(path,
+          [](const drogon::HttpRequestPtr &request, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+              json body;
+              {
+                  std::lock_guard lock(fixture.mutex);
+                  fixture.sends.push_back(json::parse(request->body()));
+                  body = fixture.fail ? json{{"status", "failed"}, {"retcode", 1200}, {"message", "fixture failure"}}
+                                      : json{{"status", "ok"}, {"data", {{"message_id", fixture.sends.size()}}}};
+              }
+              const auto response = drogon::HttpResponse::newHttpResponse();
+              response->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+              response->setBody(body.dump());
+              callback(response);
+          },
+          {drogon::Post});
     }
     drogon::app().registerHandler("/fetch_custom_face_detail",
-        [](const drogon::HttpRequestPtr &, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
-            ++fixture.stickerQueries;
-            auto response = drogon::HttpResponse::newHttpResponse();
-            response->setContentTypeCode(drogon::CT_APPLICATION_JSON);
-            response->setBody(R"({"status":"ok","data":[{"desc":"fixture","url":"https://example.com/sticker.png"}]})");
-            callback(response);
-        }, {drogon::Post});
+      [](const drogon::HttpRequestPtr &, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+          ++fixture.stickerQueries;
+          auto response = drogon::HttpResponse::newHttpResponse();
+          response->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+          response->setBody(R"({"status":"ok","data":[{"desc":"fixture","url":"https://example.com/sticker.png"}]})");
+          callback(response);
+      },
+      {drogon::Post});
     drogon::app().registerHandler("/send_qzone_msg",
-        [](const drogon::HttpRequestPtr &request, std::function<void(const drogon::HttpResponsePtr &)> &&callback) -> void {
-            const auto params = json::parse(request->body());
+      [](const drogon::HttpRequestPtr &request,
+        std::function<void(const drogon::HttpResponsePtr &)> &&callback) -> void {
+          const auto params = json::parse(request->body());
           const auto response = drogon::HttpResponse::newHttpResponse();
-            response->setContentTypeCode(drogon::CT_APPLICATION_JSON);
-            response->setBody(params["ugc_right"] == fixture.qzoneRight.load() ?
-                R"({"status":"ok","data":{"tid":"fixture-tid"}})" : R"({"status":"failed","retcode":400})");
-            callback(response);
-        }, {drogon::Post});
+          response->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+          response->setBody(params["ugc_right"] == fixture.qzoneRight.load()
+                              ? R"({"status":"ok","data":{"tid":"fixture-tid"}})"
+                              : R"({"status":"failed","retcode":400})");
+          callback(response);
+      },
+      {drogon::Post});
     drogon::app().registerHandler("/unexpected-model",
-        [](const drogon::HttpRequestPtr &, std::function<void(const drogon::HttpResponsePtr &)> &&callback) -> void {
-            ++fixture.modelQueries;
+      [](const drogon::HttpRequestPtr &, std::function<void(const drogon::HttpResponsePtr &)> &&callback) -> void {
+          ++fixture.modelQueries;
           const auto response = drogon::HttpResponse::newHttpResponse();
-            response->setStatusCode(drogon::k400BadRequest);
-            callback(response);
-        }, {drogon::Post});
+          response->setStatusCode(drogon::k400BadRequest);
+          callback(response);
+      },
+      {drogon::Post});
     trantor::EventLoopThread clientThread;
     clientThread.run();
     i32 exitCode = 1;

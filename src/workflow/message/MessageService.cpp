@@ -18,7 +18,7 @@
 
 namespace insoulforge::MessageService {
     auto sendToSession(const SessionId sessionId, std::string message, std::optional<std::string> imageDescription,
-      json toolHistory) -> drogon::Task<std::expected<u64, std::string>> {
+      json toolHistory, std::string imageId) -> drogon::Task<std::expected<u64, std::string>> {
         // 群聊与私聊使用相同的格式转换及发送结果记录，只在协议边界选择接口。
         const std::string processedMessage = message.starts_with("[CQ:image,file=base64://")
                                                ? std::move(message)
@@ -32,10 +32,10 @@ namespace insoulforge::MessageService {
         const auto storedMessage =
           processedMessage.starts_with("[CQ:image,file=base64://") ? std::string("[生成图片]") : processedMessage;
         const auto senderName = Config::instance().botName + "(我)";
-        json record =
-          imageDescription && processedMessage.starts_with("[CQ:image,file=")
-            ? MessageRecord::createAssistantGeneratedImageRecord(senderName, recordMessageId, *imageDescription)
-            : MessageRecord::createAssistantRecord(senderName, recordMessageId, storedMessage);
+        json record = imageDescription && processedMessage.starts_with("[CQ:image,file=")
+                        ? MessageRecord::createAssistantGeneratedImageRecord(
+                            senderName, recordMessageId, *imageDescription, imageId)
+                        : MessageRecord::createAssistantRecord(senderName, recordMessageId, storedMessage);
         if (!messageId) {
             record["send_error"] = messageId.error();
         }

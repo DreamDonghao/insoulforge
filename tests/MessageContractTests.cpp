@@ -1691,6 +1691,7 @@ namespace {
         std::filesystem::current_path(testPath);
         check(!insoulforge::CharacterImageStore::load(), "initially empty", kTestName);
         check(!insoulforge::CharacterImageStore::save(image), "upload succeeds", kTestName);
+        check(!std::filesystem::exists("cache/images"), "role image stays outside transient cache", kTestName);
         const auto stored = insoulforge::CharacterImageStore::load();
         check(stored && stored->bytes == image && stored->mimeType == "image/png", "saved bytes persist", kTestName);
         check(insoulforge::CharacterImageStore::save("invalid").has_value(), "invalid replacement rejected", kTestName);
@@ -3687,18 +3688,16 @@ namespace {
         check(urlImage && urlImage->message == "[CQ:image,file=https://example.com/image.png?a=1&amp;b=2]" &&
                 urlImage->source == "https://example.com/image.png?a=1&b=2",
           "escapes URL for OneBot CQ", kTestName);
-        const auto dataUrlImage =
-          insoulforge::ImageGenerationService::imageCode({{"data", {{{"url", "data:image/png;base64,aGVsbG8="}}}}});
-        check(dataUrlImage && dataUrlImage->message == "[CQ:image,file=base64://aGVsbG8=]" &&
-                dataUrlImage->source == "base64://aGVsbG8=",
-          "accepts base64 data URL", kTestName);
-        const auto rawUrlImage = insoulforge::ImageGenerationService::imageCode({{"data", {{{"url", "aGVsbG8="}}}}});
-        check(rawUrlImage && rawUrlImage->message == "[CQ:image,file=base64://aGVsbG8=]",
-          "accepts raw base64 URL field", kTestName);
-        const auto base64Image =
-          insoulforge::ImageGenerationService::imageCode({{"data", {{{"b64_json", "aGVsbG8="}}}}});
-        check(base64Image && base64Image->message == "[CQ:image,file=base64://aGVsbG8=]", "accepts base64 image",
-          kTestName);
+        const std::string encoded = "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+        for (const auto &payload: {insoulforge::json{{"url", "data:image/gif;base64," + encoded}},
+               insoulforge::json{{"url", encoded}}, insoulforge::json{{"b64_json", encoded}}}) {
+            const auto image = insoulforge::ImageGenerationService::imageCode({{"data", {payload}}});
+            check(image && image->image && image->source == image->image->id() &&
+                    image->message == "[CQ:image,file=base64://" + encoded + "]",
+              "caches Base64 image responses", kTestName);
+        }
+        check(!insoulforge::ImageGenerationService::imageCode({{"data", {{{"b64_json", "aGVsbG8="}}}}}),
+          "rejects Base64 without image bytes", kTestName);
         check(!insoulforge::ImageGenerationService::imageCode({{"data", {{{"b64_json", "bad!"}}}}}),
           "rejects malformed base64", kTestName);
         check(!insoulforge::ImageGenerationService::imageCode({{"data", insoulforge::json::array()}}),

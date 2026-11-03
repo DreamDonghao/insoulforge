@@ -18,6 +18,7 @@ namespace insoulforge::MessageRecord {
     /// @brief 图片的 OneBot 获取信息
     /// @details 仅供服务端工具使用，绝不能直接投影到 LLM 上下文。
     struct ImageSource {
+        std::string imageId; ///< 内容寻址图片 ID
         std::string file; ///< OneBot 图片缓存文件名
         std::string url; ///< OneBot 图片下载地址
     };
@@ -33,9 +34,9 @@ namespace insoulforge::MessageRecord {
     [[nodiscard]] auto createAssistantRecord(
       std::string senderName, std::optional<u64> messageId, const std::string &content) -> json;
 
-    /// @brief 创建生成图片记录，只保存图片描述，不保存传输用 URL/base64；失败记录不带消息 ID。
-    [[nodiscard]] auto createAssistantGeneratedImageRecord(
-      std::string senderName, std::optional<u64> messageId, const std::string &description) -> json;
+    /// @brief 创建生成图片记录，保存图片 ID 和描述，不保存传输用 URL/base64；失败记录不带消息 ID。
+    [[nodiscard]] auto createAssistantGeneratedImageRecord(std::string senderName, std::optional<u64> messageId,
+      const std::string &description, const std::string &imageId = {}) -> json;
 
     /// @brief 构造内部执行记录，不生成 QQ 消息 ID，也不表示向用户发送了消息。
     [[nodiscard]] auto createAssistantExecutionRecord(

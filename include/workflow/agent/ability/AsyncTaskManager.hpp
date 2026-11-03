@@ -13,6 +13,7 @@
 
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
+#include <infrastructure/image/Image.hpp>
 
 namespace insoulforge {
     /// @brief 管理进程内的耗时任务，每个会话同时只允许一个任务运行
@@ -21,6 +22,7 @@ namespace insoulforge {
     public:
         struct Result {
             std::string content; ///< 要直接发送给原会话的内容
+            std::optional<Image> image; ///< 交付前保护缓存
             std::optional<std::string> imageDescription; ///< 发送图片时写入上下文的视觉描述
         };
 

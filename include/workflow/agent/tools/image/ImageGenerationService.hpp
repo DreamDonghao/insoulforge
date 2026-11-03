@@ -12,11 +12,13 @@
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
+#include <infrastructure/image/Image.hpp>
 
 namespace insoulforge::ImageGenerationService {
     struct GeneratedImage {
         std::string message; ///< 用于发送的 OneBot CQ 码
-        std::string source; ///< 用于视觉识别的原始 URL 或 base64:// 数据
+        std::optional<Image> image; ///< 活动缓存句柄
+        std::string source; ///< 生成完成后为缓存 ID；解析 HTTP 响应阶段可为原始 URL
     };
 
     /// @brief 从 OpenAI 兼容的图片响应中提取第一张图片的 CQ 码。

@@ -148,3 +148,11 @@ else()
 endif()
 add_test(NAME onebot_reconnect COMMAND insoulforge_onebot_reconnect_tests)
 set_tests_properties(onebot_reconnect PROPERTIES TIMEOUT 30)
+
+add_executable(insoulforge_image_tests EXCLUDE_FROM_ALL
+        ImageTests.cpp $<TARGET_OBJECTS:${PROJECT_NAME}_backend>)
+target_compile_features(insoulforge_image_tests PRIVATE cxx_std_23)
+target_include_directories(insoulforge_image_tests PRIVATE ${PROJECT_SOURCE_DIR}/include)
+get_target_property(IMAGE_TEST_LIBRARIES insoulforge_activity_tests LINK_LIBRARIES)
+target_link_libraries(insoulforge_image_tests PRIVATE ${IMAGE_TEST_LIBRARIES})
+add_test(NAME image_cache COMMAND insoulforge_image_tests)

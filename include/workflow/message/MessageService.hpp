@@ -23,6 +23,6 @@ namespace insoulforge::MessageService {
     /// @param imageDescription 可选的图片描述，写入助手记录；发送状态由 send_error 区分。
     /// @param toolHistory 可选的执行历史，附在助手记录中，不发送给 OneBot。
     auto sendToSession(SessionId sessionId, std::string message,
-      std::optional<std::string> imageDescription = std::nullopt, json toolHistory = {})
+      std::optional<std::string> imageDescription = std::nullopt, json toolHistory = {}, std::string imageId = {})
       -> drogon::Task<std::expected<u64, std::string>>;
 } // namespace insoulforge::MessageService

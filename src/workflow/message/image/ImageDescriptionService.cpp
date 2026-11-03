@@ -2,13 +2,12 @@
 /// @brief 图片与动图的视觉描述服务实现
 
 #include <gif_lib.h>
-#include <openssl/evp.h>
-#include <openssl/sha.h>
 #include <png.h>
 
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
+#include <infrastructure/image/Image.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <workflow/agent/llm/LlmClient.hpp>
 #include <workflow/message/image/ImageDescriptionService.hpp>
@@ -54,89 +53,21 @@ namespace insoulforge::ImageDescriptionService {
             return static_cast<int>(readable);
         }
 
-        /// @brief 通过文件魔数判断媒体格式
-        [[nodiscard]] auto detectMedia(const std::string_view bytes) -> std::optional<std::pair<std::string, bool>> {
-            if (bytes.size() >= 6 && (bytes.starts_with("GIF87a") || bytes.starts_with("GIF89a")))
-                return std::pair{"image/gif", true};
-            if (bytes.size() >= 8 && std::memcmp(bytes.data(), "\x89PNG\r\n\x1a\n", 8) == 0)
-                return std::pair{"image/png", false};
-            if (bytes.size() >= 3 && static_cast<unsigned char>(bytes[0]) == 0xFF &&
-                static_cast<unsigned char>(bytes[1]) == 0xD8 && static_cast<unsigned char>(bytes[2]) == 0xFF)
-                return std::pair{"image/jpeg", false};
-            if (bytes.size() >= 12 && std::memcmp(bytes.data(), "RIFF", 4) == 0 &&
-                std::memcmp(bytes.data() + 8, "WEBP", 4) == 0)
-                return std::pair{"image/webp", false};
-            return std::nullopt;
-        }
-
-        [[nodiscard]] auto base64Encode(const std::string_view input) -> std::string {
-            static constexpr std::string_view alphabet =
-              "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-            std::string output;
-            output.reserve((input.size() + 2) / 3 * 4);
-            for (size_t i = 0; i < input.size(); i += 3) {
-                const u32 value =
-                  static_cast<u32>(static_cast<unsigned char>(input[i])) << 16U |
-                  (i + 1 < input.size() ? static_cast<u32>(static_cast<unsigned char>(input[i + 1])) << 8U : 0U) |
-                  (i + 2 < input.size() ? static_cast<unsigned char>(input[i + 2]) : 0U);
-                output += alphabet[(value >> 18U) & 0x3FU];
-                output += alphabet[(value >> 12U) & 0x3FU];
-                output += i + 1 < input.size() ? alphabet[(value >> 6U) & 0x3FU] : '=';
-                output += i + 2 < input.size() ? alphabet[value & 0x3FU] : '=';
-            }
-            return output;
-        }
-
-        [[nodiscard]] auto sha256(const std::string_view bytes) -> std::string {
-            std::array<unsigned char, SHA256_DIGEST_LENGTH> digest{};
-            SHA256(reinterpret_cast<const unsigned char *>(bytes.data()), bytes.size(), digest.data());
-            static constexpr std::string_view hex = "0123456789abcdef";
-            std::string result;
-            result.reserve(digest.size() * 2);
-            for (const auto value: digest) {
-                result += hex[value >> 4U];
-                result += hex[value & 0x0FU];
-            }
-            return result;
-        }
-
-        /// @brief 下载 URL 的原始媒体字节，不写入 HTTP 跟踪日志以避免二进制内容进入内存日志。
-        auto download(const std::string sourceUrl, const SessionId sessionId, const size_t maxBytes)
+        auto download(std::string source, const SessionId sessionId, const size_t maxBytes)
           -> drogon::Task<std::optional<DownloadedMedia>> {
-            static const std::regex urlPattern(R"(^(https?://[^/]+)(/.*)?$)", std::regex::icase);
-            std::smatch match;
-            if (!std::regex_match(sourceUrl, match, urlPattern)) {
-                Logger::warn(sessionId, "Media", fmt::format("拒绝非 HTTP 图片地址"));
+            const auto image = co_await Image::load(std::move(source));
+            if (!image) {
+                Logger::warn(sessionId, "Media", image.error());
                 co_return std::nullopt;
             }
-            try {
-                const auto client = drogon::HttpClient::newHttpClient(match[1].str());
-                const auto request = drogon::HttpRequest::newHttpRequest();
-                request->setMethod(drogon::Get);
-                request->setPath(match[2].matched ? match[2].str() : "/");
-                const auto response = co_await client->sendRequestCoro(request, 30.0);
-                if (!response || response->getStatusCode() < drogon::k200OK ||
-                    response->getStatusCode() >= drogon::k300MultipleChoices) {
-                    Logger::warn(sessionId, "Media",
-                      fmt::format("下载失败: status={}", response ? static_cast<i32>(response->getStatusCode()) : 0));
-                    co_return std::nullopt;
-                }
-                std::string bytes(response->body());
-                if (bytes.empty() || bytes.size() > maxBytes) {
-                    Logger::warn(sessionId, "Media", fmt::format("下载媒体大小无效: {} bytes", bytes.size()));
-                    co_return std::nullopt;
-                }
-                const auto format = detectMedia(bytes);
-                if (!format) {
-                    Logger::warn(sessionId, "Media", fmt::format("不支持的媒体格式"));
-                    co_return std::nullopt;
-                }
-                co_return DownloadedMedia{
-                  .bytes = std::move(bytes), .mimeType = format->first, .isGif = format->second};
-            } catch (const std::exception &error) {
-                Logger::warn(sessionId, "Media", fmt::format("下载异常: {}", error.what()));
+            auto bytes = image->bytes();
+            if (!bytes || bytes->size() > maxBytes)
                 co_return std::nullopt;
-            }
+            const auto mime = Image::mimeType(*bytes);
+            if (!mime)
+                co_return std::nullopt;
+            co_return DownloadedMedia{
+              .bytes = std::move(*bytes), .mimeType = std::string(*mime), .isGif = *mime == "image/gif"};
         }
 
         [[nodiscard]] auto selectGifFrames(GifFileType &gif) -> std::vector<size_t> {
@@ -279,7 +210,7 @@ namespace insoulforge::ImageDescriptionService {
                     i32 outputHeight = 0;
                     const auto resized = resizeRgba(canvas, width, height, outputWidth, outputHeight);
                     if (const auto png = encodePng(resized, outputWidth, outputHeight))
-                        frames.push_back("data:image/png;base64," + base64Encode(*png));
+                        frames.push_back("data:image/png;base64," + Image::encode(*png));
                 }
                 if (control.DisposalMode == DISPOSE_BACKGROUND) {
                     for (i32 y = 0; y < desc.Height; ++y) {
@@ -320,7 +251,7 @@ namespace insoulforge::ImageDescriptionService {
         auto describeMedia(DownloadedMedia media, const SessionId sessionId)
           -> drogon::Task<std::optional<ImageDescriptionResult>> {
             const auto &config = Config::instance();
-            const std::string hash = sha256(media.bytes);
+            const std::string hash = Image::hash(media.bytes);
             const std::string mediaType = media.isGif ? "gif" : "image";
             if (const auto cached = ImageDescriptionStore::find(hash, config.image.model, kPromptVersion)) {
                 if (!cached->succeeded)
@@ -334,7 +265,7 @@ namespace insoulforge::ImageDescriptionService {
             if (media.isGif) {
                 images = extractGifFrames(media.bytes, sessionId);
             } else {
-                images.push_back("data:" + media.mimeType + ";base64," + base64Encode(media.bytes));
+                images.push_back("data:" + media.mimeType + ";base64," + Image::encode(media.bytes));
             }
             if (images.empty()) {
                 ImageDescriptionStore::upsert(hash, config.image.model, kPromptVersion, mediaType, false, "", 0);
@@ -396,30 +327,8 @@ namespace insoulforge::ImageDescriptionService {
     }
 
     auto staticImageMimeType(const std::string_view bytes) -> std::optional<std::string_view> {
-        const auto format = detectMedia(bytes);
-        if (!format || format->second) {
-            return std::nullopt;
-        }
-        if (format->first == "image/png") {
-            if (bytes.size() < 45 || std::memcmp(bytes.data() + bytes.size() - 12, "\0\0\0\0IEND", 8) != 0) {
-                return std::nullopt;
-            }
-            return "image/png";
-        }
-        if (format->first == "image/jpeg") {
-            if (bytes.size() < 4 || static_cast<u8>(bytes[bytes.size() - 2]) != 0xFF ||
-                static_cast<u8>(bytes.back()) != 0xD9) {
-                return std::nullopt;
-            }
-            return "image/jpeg";
-        }
-        if (bytes.size() < 20) {
-            return std::nullopt;
-        }
-        const u32 riffSize = static_cast<u8>(bytes[4]) | static_cast<u32>(static_cast<u8>(bytes[5])) << 8U |
-                             static_cast<u32>(static_cast<u8>(bytes[6])) << 16U |
-                             static_cast<u32>(static_cast<u8>(bytes[7])) << 24U;
-        return riffSize == bytes.size() - 8 ? std::optional<std::string_view>{"image/webp"} : std::nullopt;
+        const auto mime = Image::mimeType(bytes);
+        return mime && *mime != "image/gif" ? mime : std::nullopt;
     }
 
     auto staticImageDataUrl(const std::string_view bytes) -> std::optional<std::string> {
@@ -427,7 +336,7 @@ namespace insoulforge::ImageDescriptionService {
         if (!mimeType) {
             return std::nullopt;
         }
-        return "data:" + std::string(*mimeType) + ";base64," + base64Encode(bytes);
+        return "data:" + std::string(*mimeType) + ";base64," + Image::encode(bytes);
     }
 
     auto referenceDataUrl(std::string sourceUrl, const SessionId sessionId)
@@ -454,31 +363,7 @@ namespace insoulforge::ImageDescriptionService {
 
     auto describeGeneratedImage(std::string source, const SessionId sessionId)
       -> drogon::Task<std::optional<ImageDescriptionResult>> {
-        if (!LlmClient::isConfigured(Config::instance().image))
-            co_return std::nullopt;
-        if (!source.starts_with("base64://")) {
-            auto media = co_await download(std::move(source), sessionId, kMaxGeneratedImageBytes);
-            co_return media ? co_await describeMedia(std::move(*media), sessionId) : std::nullopt;
-        }
-        const std::string_view encoded(source.data() + 9, source.size() - 9);
-        if (encoded.empty() || encoded.size() % 4 != 0 || encoded.size() > kMaxGeneratedImageBytes / 3 * 4 ||
-            encoded.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=") !=
-              std::string_view::npos) {
-            co_return std::nullopt;
-        }
-        std::string bytes(encoded.size() / 4 * 3, '\0');
-        const i32 decoded = EVP_DecodeBlock(reinterpret_cast<unsigned char *>(bytes.data()),
-          reinterpret_cast<const unsigned char *>(encoded.data()), static_cast<i32>(encoded.size()));
-        if (decoded < 0) {
-            co_return std::nullopt;
-        }
-        const size_t padding = static_cast<size_t>(encoded.ends_with("==") ? 2 : encoded.ends_with('=') ? 1 : 0);
-        bytes.resize(static_cast<size_t>(decoded) - padding);
-        const auto format = detectMedia(bytes);
-        if (!format) {
-            co_return std::nullopt;
-        }
-        co_return co_await describeMedia(
-          DownloadedMedia{.bytes = std::move(bytes), .mimeType = format->first, .isGif = format->second}, sessionId);
+        auto media = co_await download(std::move(source), sessionId, kMaxGeneratedImageBytes);
+        co_return media ? co_await describeMedia(std::move(*media), sessionId) : std::nullopt;
     }
 } // namespace insoulforge::ImageDescriptionService

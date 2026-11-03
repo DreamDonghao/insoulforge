@@ -7,6 +7,7 @@
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
+#include <infrastructure/image/Image.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <workflow/agent/llm/LlmClient.hpp>
 #include <workflow/agent/memory/LongTermMemoryStore.hpp>
@@ -43,7 +44,13 @@ namespace insoulforge::MessageContentEnricher {
                 image["recognition_status"] = "failed";
                 continue;
             }
-            const auto description = co_await ImageDescriptionService::describe(sourceUrl, sessionId);
+            const auto cached = co_await Image::load(sourceUrl);
+            if (!cached) {
+                image["recognition_status"] = "failed";
+                continue;
+            }
+            image["image_id"] = cached->id();
+            const auto description = co_await ImageDescriptionService::describe(cached->id(), sessionId);
             if (!description) {
                 image["recognition_status"] = "failed";
                 continue;

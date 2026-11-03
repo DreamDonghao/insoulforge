@@ -643,14 +643,22 @@ OneBot 11 的数字要求仅保留在协议适配层，目标无法转换时不�
 
 ### 图片缓存类
 
-`workflow/message/image/Image.hpp` 提供统一的图片缓存句柄，目前尚未接入已有消息与生图流程。
+`infrastructure/image/Image.hpp` 统一负责格式检测、SHA-256、Base64 和图片缓存，已接入接收图片、视觉问答、参考图与生图发送流程。
 `fromUrl` 异步下载 HTTP/HTTPS 图片，`fromBase64` 接收标准 Base64、`base64://` 或图片 Data URL，
 `fromBytes` 接收原始字节；成功时返回 `std::expected<Image, std::string>`。
 支持 PNG、JPEG、WebP、GIF，原始数据最多 24 MiB；下载响应接收完成后校验大小，下载超时为 30 秒，不跟随重定向。
 
 图片保存在工作目录的 `cache/images/`，不放入 `data`、不挂载持久卷。
-`id()` 返回内容 SHA-256，相同图片复用同一个文件；`find(id)` 查找已有缓存。
+`id()` 返回短 ID（`img_` 加 8 位十六进制），`contentHash()` 返回完整 SHA-256；相同图片复用同一个文件与 ID。
+短 ID 冲突时选择其他候选值，映射通过原子替换保存在 `cache/images/ids`，重启后仍有效，缓存淘汰时删除对应映射。
+文件仍以完整哈希命名；`find(id)` 与 `load(id)` 同时兼容短 ID 和旧完整哈希 ID。图片描述数据库继续使用完整 SHA-256。
 `path()` 返回绝对文件位置，`bytes()`、`base64()`、`dataUrl()` 按需读取及编码。
-读取会刷新使用时间；对象析构不删除图片，`cleanup(maxAge)` 显式清理超期缓存，尚未自动调度。
+读取会刷新使用时间；对象析构不删除图片。默认保留三天，容量上限 1 GiB，启动时、每小时及写入时清理；容量超限按最久未用优先淘汰。
+活动句柄（含后台任务参考图和待交付生图）受保护，保护中的文件可能暂时使容量超限，下次清理继续回收。
 容器重建或缓存清理后，读取旧 ID 返回错误；该类不保存来源地址，也不会自动重新下载。
 角色形象图的持久存储保持独立，不由缓存清理。
+
+接收图片即保存 `assets.images[].image_id`，不依赖识别成功；模型投影包含 ID。生成图片记录保留 ID 与描述，不保存传输 Base64。
+`ask_images.images` 与 `generate_image.reference_images` 支持 ID 字符串或 `{image_id}`；ID 必须属于本次冻结的可见会话快照，不能凭全局缓存或其他会话访问。
+旧 `{message_id, image_index}` 引用继续按当前会话读取，优先使用缓存 ID，缓存缺失时回退原图 URL。显式过期 ID 返回错误并要求重发。
+角色形象图仍独立存放在 `data/character-image`，不进入图片缓存；收藏表情和 QQ 空间 URL 发送方式保持原有逻辑。

@@ -96,7 +96,9 @@ namespace insoulforge {
     auto AsyncTaskManager::run(const SessionId sessionId, std::string taskId, const Handler handler) -> drogon::Task<> {
         std::string failureReason;
         try {
-            const auto [content, imageDescription] = co_await handler();
+            const auto result = co_await handler();
+            const auto &content = result.content;
+            const auto &imageDescription = result.imageDescription;
             bool maySend;
             {
                 std::lock_guard lock(m_mutex);
@@ -106,7 +108,8 @@ namespace insoulforge {
                 if (content.empty()) {
                     throw std::runtime_error("任务结果为空");
                 }
-                const auto sent = co_await MessageService::sendToSession(sessionId, content, imageDescription);
+                const auto sent = co_await MessageService::sendToSession(
+                  sessionId, content, imageDescription, {}, result.image ? result.image->id() : "");
                 if (!sent) {
                     throw std::runtime_error("结果发送未确认成功：" + sent.error());
                 }

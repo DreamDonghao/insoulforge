@@ -13,7 +13,7 @@ namespace insoulforge::MessageContentEnricher {
     /// @brief 识别消息内的普通图片和 GIF 动图
     /// @param message 待补充的统一消息 JSON
     /// @param sessionId 所属会话 ID
-    /// @details GIF 的抽帧、视觉模型调用与媒体哈希缓存由 ImageDescriptionService 负责。识别失败时只标记
+    /// @details Image 负责图片缓存与 ID；GIF 抽帧、视觉调用与描述缓存由 ImageDescriptionService 负责。识别失败时只标记
     ///          对应图片资产，不影响消息其余内容。
     /// @return 完成图片识别状态写入后的消息 JSON
     [[nodiscard]] auto enrichImages(json message, SessionId sessionId) -> drogon::Task<json>;
