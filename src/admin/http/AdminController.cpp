@@ -1,4 +1,5 @@
 #include <charconv>
+#include <filesystem>
 
 #include <admin/access/AdminAccessToken.hpp>
 #include <admin/http/AdminController.hpp>
@@ -251,6 +252,47 @@ auto AdminController::getSystemInfo(HttpRequestPtr req, std::function<void(const
     json resp;
     resp["startTime"] = startEpoch;
     resp["uptimeSeconds"] = uptimeSeconds;
+    // 缺失文件计为零；权限或读取错误返回 null，避免把统计失败显示成零占用。
+    const auto fileSize = [](const std::filesystem::path &path) -> std::optional<u64> {
+        auto error = std::error_code{};
+        const auto size = std::filesystem::file_size(path, error);
+        if (error == std::errc::no_such_file_or_directory)
+            return 0;
+        if (error)
+            return std::nullopt;
+        return size;
+    };
+    auto databaseBytes = std::optional<u64>{0};
+    for (const auto suffix: {"", "-wal", "-shm"}) {
+        const auto size = fileSize(std::string("data/insoulforge.db") + suffix);
+        if (!size) {
+            databaseBytes.reset();
+            break;
+        }
+        *databaseBytes += *size;
+    }
+    auto logBytes = u64{0};
+    auto error = std::error_code{};
+    auto files = std::filesystem::recursive_directory_iterator("logs", error);
+    if (error == std::errc::no_such_file_or_directory)
+        error.clear();
+    const auto end = std::filesystem::recursive_directory_iterator{};
+    while (!error && files != end) {
+        // 不跟随符号链接，避免统计日志目录之外的文件。
+        if (files->is_regular_file(error) && !files->is_symlink(error)) {
+            const auto size = fileSize(files->path());
+            if (!size) {
+                error = std::make_error_code(std::errc::io_error);
+                break;
+            }
+            logBytes += *size;
+        }
+        if (!error)
+            files.increment(error);
+    }
+    resp["storage"] = {{"databaseBytes", databaseBytes ? json(*databaseBytes) : json(nullptr)},
+      {"logBytes", error ? json(nullptr) : json(logBytes)},
+      {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count()}};
     callback(jsonResponse(resp));
     co_return;
 }

@@ -117,6 +117,12 @@ let loadMoment = Date.now()
 const nowTick: Ref<number> = ref(Date.now())
 let uptimeTimer: number | undefined
 let oneBotStatusTimer: number | undefined
+let storageTimer: number | undefined
+const storage = ref<{databaseBytes: number | null; logBytes: number | null; timestamp: number} | null>(null)
+const formatStorage = (bytes: number | null | undefined): string => {
+  if (bytes == null) return '无法获取'
+  return `${(bytes / 1024 ** 2).toFixed(2)} MiB`
+}
 
 // ---- 每日用量 ----
 interface UsageItem {
@@ -211,11 +217,12 @@ const loadLLMModels = async (): Promise<void> => {
   llmLoading.value = false
 }
 const loadSystemInfo = (): Promise<void> => loadData('system', async signal => {
-  const data = await readData<{startTime: number; uptimeSeconds: number}>('/admin/api/system-info', signal)
+  const data = await readData<{startTime: number; uptimeSeconds: number; storage: NonNullable<typeof storage.value>}>('/admin/api/system-info', signal)
   if (typeof data.startTime !== 'number' || typeof data.uptimeSeconds !== 'number') throw new Error('运行时间数据无效')
   startTimeEpoch.value = data.startTime
   baseUptime.value = data.uptimeSeconds
   loadMoment = Date.now()
+  storage.value = data.storage
 })
 const {refresh: loadUsage} = useCoalescedRefresh(async signal => {
   dataState.usage.loading = true
@@ -290,6 +297,7 @@ onMounted(() => {
     nowTick.value = Date.now()
   }, 1000)
   oneBotStatusTimer = window.setInterval(loadOneBotStatus, 5000)
+  storageTimer = window.setInterval(loadSystemInfo, 60000)
 })
 
 onUnmounted(() => {
@@ -297,6 +305,7 @@ onUnmounted(() => {
   for (const controller of dataRequests.values()) controller.abort()
   if (uptimeTimer) clearInterval(uptimeTimer)
   if (oneBotStatusTimer) clearInterval(oneBotStatusTimer)
+  if (storageTimer) clearInterval(storageTimer)
 })
 </script>
 
@@ -311,7 +320,7 @@ onUnmounted(() => {
       <RequestError :message="dataState[section.key].error ? section.label + '：' + dataState[section.key].error : ''"
                     :busy="dataState[section.key].loading" :stale="dataState[section.key].loaded" @retry="section.retry"/>
     </div>
-    <p v-if="dataKeys.some(key => dataState[key].loading)" role="status">正在更新运行概况…</p>
+    <p v-if="dataKeys.some(key => dataState[key].loading && !dataState[key].loaded)" role="status">正在加载运行概况…</p>
     <!-- 状态条 -->
     <div class="dash-status-bar">
       <div class="status-item bot-control-item">
@@ -335,20 +344,22 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <ProcessMemory/>
+    <ProcessMemory>
+      <template #before-metrics>
+        <div :title="`启动于 ${fmtDateTime(startTimeEpoch)}`"><dt>运行时间</dt><dd>{{ dataState.system.loaded ? uptimeText : '—' }}</dd></div>
+      </template>
+      <template #after-metrics>
+        <div title="数据库主文件与 WAL、SHM 辅助文件的总大小"><dt>数据库占用</dt><dd>{{ storage ? formatStorage(storage.databaseBytes) : '—' }}</dd></div>
+        <div title="整个日志目录，包含子目录和历史日志"><dt>日志占用</dt><dd>{{ storage ? formatStorage(storage.logBytes) : '—' }}</dd></div>
+      </template>
+      <template #metrics-note>
+        <span class="storage-note">启动于 {{ fmtDateTime(startTimeEpoch) }}</span>
+        <span class="storage-note">{{ storage ? `存储 ${new Date(storage.timestamp).toLocaleTimeString()} · 每分钟更新` : '存储加载中…' }}</span>
+      </template>
+    </ProcessMemory>
 
-    <!-- 模型配置跨两行，底部资源和用量共用同一行。 -->
     <div class="dash-layout">
-      <!-- 左列 -->
       <div class="dash-col">
-        <!-- 运行时间 -->
-        <section class="overview-section" aria-label="运行时间">
-          <h2 class="section-title">运行时间</h2>
-          <div class="runtime-value">{{ dataState.system.loaded ? uptimeText : '—' }}</div>
-          <div class="runtime-sub">启动于 {{ fmtDateTime(startTimeEpoch) }}</div>
-        </section>
-
-        <!-- OneBot 配置 -->
         <section class="overview-section" aria-label="OneBot 配置">
           <h2 class="section-title">OneBot 配置</h2>
           <div class="kv-list">
@@ -376,8 +387,6 @@ onUnmounted(() => {
             </div>
           </div>
         </section>
-
-        <!-- 资源 -->
         <section class="overview-section" aria-label="资源">
           <h2 class="section-title">资源</h2>
           <div class="resource-grid">
@@ -403,31 +412,6 @@ onUnmounted(() => {
             </div>
           </div>
         </section>
-      </div>
-
-      <!-- 右列 -->
-      <div class="dash-col">
-        <!-- 模型配置 -->
-        <section class="overview-section" aria-label="模型配置">
-          <h2 class="section-title">模型配置</h2>
-          <div class="models-list">
-            <template v-if="llmLoading">
-              <span class="section-muted">加载中...</span>
-            </template>
-            <template v-else-if="!dataState.models.loaded"><span class="section-muted">模型数据待获取</span></template>
-            <template v-else-if="llmOrder.every(n => !llmModels[n])">
-              <span class="section-muted">未配置</span>
-            </template>
-            <template v-else>
-              <div v-for="name in llmOrder" :key="name" class="model-row">
-                <span class="model-name">{{ llmLabels[name] }}</span>
-                <code class="model-code">{{ llmModels[name] || '未配置' }}</code>
-              </div>
-            </template>
-          </div>
-        </section>
-
-        <!-- 每日用量 -->
         <section class="overview-section" aria-label="每日用量">
           <div class="section-header">
             <h2 class="section-title">每日用量</h2>
@@ -459,11 +443,32 @@ onUnmounted(() => {
           </div>
         </section>
       </div>
+      <div class="dash-col">
+        <section class="overview-section" aria-label="模型配置">
+          <h2 class="section-title">模型配置</h2>
+          <div class="models-list">
+            <template v-if="llmLoading">
+              <span class="section-muted">加载中...</span>
+            </template>
+            <template v-else-if="!dataState.models.loaded"><span class="section-muted">模型数据待获取</span></template>
+            <template v-else-if="llmOrder.every(n => !llmModels[n])">
+              <span class="section-muted">未配置</span>
+            </template>
+            <template v-else>
+              <div v-for="name in llmOrder" :key="name" class="model-row">
+                <span class="model-name">{{ llmLabels[name] }}</span>
+                <code class="model-code">{{ llmModels[name] || '未配置' }}</code>
+              </div>
+            </template>
+          </div>
+        </section>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
+.storage-note { font-size: 12px; color: var(--text-secondary); }
 /* ====== 状态条 ====== */
 .dash-status-bar {
   display: flex;
@@ -509,33 +514,13 @@ onUnmounted(() => {
   background: var(--text-light);
 }
 
-/* 底部资源与用量共用行轨道，使分区边界保持对齐。 */
 .dash-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
-  gap: 0;
-  grid-template-rows: auto auto auto;
-  align-items: stretch;
-  border-top: 1px solid var(--border);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  border-block: 1px solid var(--border);
 }
-
-.dash-col {
-  display: grid;
-  grid-template-rows: subgrid;
-  grid-row: 1 / span 3;
-  gap: 0;
-  min-width: 0;
-  padding-right: 28px;
-}
-
-.dash-col + .dash-col {
-  border-left: 1px solid var(--border);
-  padding: 0 0 0 28px;
-}
-
-.dash-col:last-child > .overview-section:first-child {
-  grid-row: span 2;
-}
+.dash-col { min-width: 0; padding-right: 28px; }
+.dash-col + .dash-col { border-left: 1px solid var(--border); padding: 0 0 0 28px; }
 
 .overview-section {
   min-width: 0;
@@ -590,7 +575,7 @@ onUnmounted(() => {
   grid-template-columns: 96px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
-  padding: 10px 0;
+  padding: 18px 0;
   border-bottom: 1px solid var(--border);
 }
 
@@ -599,14 +584,14 @@ onUnmounted(() => {
 }
 
 .model-name {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-secondary);
   flex-shrink: 0;
 }
 
 .model-code {
-  font-size: 12px;
+  font-size: 14px;
   min-width: 0;
   width: fit-content;
   max-width: 100%;
@@ -694,21 +679,6 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-/* ====== 运行时间 ====== */
-.runtime-value {
-  font-size: 28px;
-  font-weight: 700;
-  color: var(--text-primary);
-  letter-spacing: 0;
-  font-variant-numeric: tabular-nums;
-}
-
-.runtime-sub {
-  margin-top: 6px;
-  font-size: 12px;
-  color: var(--text-light);
-}
-
 /* ====== kv 列表（OneBot） ====== */
 .kv-list {
   display: flex;
@@ -773,7 +743,7 @@ onUnmounted(() => {
 .resource-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
+  gap: 16px;
 }
 
 .resource-tile {

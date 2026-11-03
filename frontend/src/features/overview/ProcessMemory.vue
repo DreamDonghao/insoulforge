@@ -23,7 +23,7 @@ const requests = new Map<'current' | 'history', AbortController>()
 let disposed = false
 
 const memory = (value: number | null | undefined): string =>
-    value == null ? '—' : `${(value / 1024 / 1024).toFixed(2)} MiB`
+    value == null ? '—' : `${(value / 1024 ** 2).toFixed(2)} MiB`
 const time = (value: number, seconds = false): string => new Date(value).toLocaleTimeString([], {
   hour: '2-digit', minute: '2-digit', ...(seconds ? {second: '2-digit'} : {})
 })
@@ -126,17 +126,22 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section class="process-memory" aria-label="进程内存监控">
+  <section class="process-memory" aria-label="运行概况">
     <header>
-      <h2>进程内存</h2>
-      <span v-if="currentFailed" class="stale">更新失败，数据可能已过期</span>
-      <span v-else-if="latest" class="updated">{{ time(latest.timestamp, true) }}</span>
+      <h2>运行概况</h2>
+      <div class="update-notes">
+        <span v-if="currentFailed" class="stale">内存更新失败，数据可能已过期</span>
+        <span v-else-if="latest" class="updated">内存 {{ time(latest.timestamp, true) }}</span>
+        <slot name="metrics-note"/>
+      </div>
     </header>
     <div class="memory-body">
     <dl>
+      <slot name="before-metrics"/>
       <div><dt>驻留内存 RSS</dt><dd>{{ memory(latest?.rssBytes) }}</dd></div>
       <div><dt>启动以来峰值</dt><dd>{{ memory(latest?.peakRssBytes) }}</dd></div>
       <div><dt>线程数</dt><dd>{{ latest?.threads ?? '—' }}</dd></div>
+      <slot name="after-metrics"/>
     </dl>
     <div class="history-panel">
     <div class="chart-heading">
@@ -175,11 +180,13 @@ header, .chart-heading { display: flex; align-items: center; justify-content: sp
 h2, h3 { margin: 0; color: var(--text-primary); font-size: 16px; font-weight: 600; }
 .updated, .chart-heading span, .scale, .time-axis { font-size: 12px; color: var(--text-secondary); }
 .stale { font-size: 12px; color: var(--warning); }
-.memory-body { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 28px; margin-top: 20px; }
-dl { display: grid; align-content: start; gap: 18px; margin: 0; padding-right: 24px; border-right: 1px solid var(--border); }
-.history-panel { min-width: 0; }
-dt { font-size: 12px; color: var(--text-secondary); }
-dd { margin: 6px 0 0; font-size: 20px; font-weight: 600; color: var(--text-primary); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.update-notes { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; }
+.memory-body { display: flex; flex-direction: column; margin-top: 24px; }
+dl { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 20px; margin: 0; }
+.history-panel { min-width: 0; margin-top: 24px; }
+dl :deep(dt) { font-size: 12px; font-weight: 400; color: var(--text-secondary); }
+dl :deep(dd) { margin: 8px 0 0; font-size: 24px; font-weight: 600; color: var(--text-primary); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; line-height: 1.3; }
+.chart-heading h3 { font-size: 13px; font-weight: 500; color: var(--text-secondary); }
 .chart-heading { min-height: 20px; margin-bottom: 12px; }
 .chart { display: flex; gap: 12px; }
 .scale { display: flex; flex-direction: column; justify-content: space-between; flex: 0 0 75px; height: 144px; }
@@ -191,13 +198,13 @@ svg { display: block; width: 100%; height: 144px; overflow: visible; touch-actio
 .cursor-line { stroke: var(--text-secondary); stroke-dasharray: 3 4; vector-effect: non-scaling-stroke; }
 .time-axis { display: flex; justify-content: space-between; margin-top: 8px; }
 .empty { height: 164px; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); font-size: 13px; }
+dl :deep(small) { display: block; margin-top: 6px; font-size: 12px; color: var(--text-secondary); }
 @media (max-width: 1050px) {
-  .memory-body { grid-template-columns: minmax(0, 1fr); gap: 20px; }
-  dl { grid-template-columns: repeat(3, minmax(0, 1fr)); padding-right: 0; border-right: 0; }
+  dl { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @media (max-width: 600px) {
-  dl { gap: 10px; }
-  dd { font-size: 16px; }
+  dl { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  dl :deep(dd) { font-size: 16px; }
   .scale { flex-basis: 58px; font-size: 10px; }
   .time-axis { font-size: 10px; }
 }
