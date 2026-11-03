@@ -160,9 +160,9 @@ auto main() -> int {
 
         // 监听所有 IPv4 网卡，允许通过 Docker 映射端口或局域网访问后台。
         drogon::app().addListener("0.0.0.0", 7778);
-        // 角色形象图允许 8 MiB；为 multipart 边界和表单头预留空间。
-        drogon::app().setClientMaxBodySize(10U * 1024U * 1024U);
-        drogon::app().setClientMaxMemoryBodySize(10U * 1024U * 1024U);
+        // 活动附件允许 24 MiB；为 multipart 边界和表单头预留 1 MiB。
+        drogon::app().setClientMaxBodySize(25U * 1024U * 1024U);
+        drogon::app().setClientMaxMemoryBodySize(25U * 1024U * 1024U);
         // 活动详情响应允许最多 1 MiB；活动事件仍在协议入口限制为 128 KiB。
         drogon::app().setClientMaxWebSocketMessageSize(1024U * 1024U);
         // 前端构建产物位于运行目录的 public/，由同一 HTTP 服务提供。

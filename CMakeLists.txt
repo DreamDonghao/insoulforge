@@ -20,6 +20,7 @@ find_package(spdlog REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(PNG REQUIRED)
+find_package(JPEG REQUIRED)
 find_package(Lua 5.4 REQUIRED)
 
 find_path(GIFLIB_INCLUDE_DIR NAMES gif_lib.h REQUIRED)
@@ -72,7 +73,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
         fmt::fmt-header-only
         SQLite3_lib
         OpenSSL::Crypto
-        PNG::PNG
+        PNG::PNG JPEG::JPEG
         ${GIFLIB_LIBRARY}
 )
 target_link_libraries(${PROJECT_NAME}_backend PRIVATE
@@ -81,7 +82,7 @@ target_link_libraries(${PROJECT_NAME}_backend PRIVATE
         fmt::fmt-header-only
         SQLite3_lib
         OpenSSL::Crypto
-        PNG::PNG
+        PNG::PNG JPEG::JPEG
         ${GIFLIB_LIBRARY}
 )
 target_include_directories(${PROJECT_NAME}_backend PRIVATE ${GIFLIB_INCLUDE_DIR})

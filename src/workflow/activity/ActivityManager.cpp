@@ -9,9 +9,12 @@
 #include <stdexcept>
 #include <vector>
 
+#include <csetjmp>
 #include <drogon/HttpAppFramework.h>
 #include <drogon/utils/Utilities.h>
+#include <jpeglib.h>
 #include <openssl/crypto.h>
+#include <png.h>
 
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/http/HttpTrace.hpp>
@@ -33,6 +36,62 @@ namespace insoulforge {
             return !expected.empty() && expected.size() == actual.size() &&
                    CRYPTO_memcmp(expected.data(), actual.data(), expected.size()) == 0;
         }
+        // Decode bounded pixels rather than trusting a filename, MIME header or magic bytes alone.
+        auto validUploadImage(std::string_view bytes, std::string_view mime) -> bool {
+            constexpr size_t kMaxPixels = 16U * 1024U * 1024U;
+            if (mime == "image/png") {
+                auto image = png_image{};
+                image.version = PNG_IMAGE_VERSION;
+                if (!png_image_begin_read_from_memory(&image, bytes.data(), bytes.size())) {
+                    png_image_free(&image);
+                    return false;
+                }
+                image.format = PNG_FORMAT_RGBA;
+                if (!image.width || !image.height || size_t(image.width) * image.height > kMaxPixels) {
+                    png_image_free(&image);
+                    return false;
+                }
+                auto pixels = std::vector<unsigned char>(PNG_IMAGE_SIZE(image));
+                const auto valid = png_image_finish_read(&image, nullptr, pixels.data(), 0, nullptr) != 0;
+                png_image_free(&image);
+                return valid;
+            }
+            struct Decoder {
+                jpeg_decompress_struct image{};
+                jpeg_error_mgr error{};
+                std::jmp_buf jump;
+                bool warning = false;
+                std::vector<unsigned char> row;
+                ~Decoder() { jpeg_destroy_decompress(&image); }
+            };
+            auto decoder = std::make_unique<Decoder>();
+            decoder->image.err = jpeg_std_error(&decoder->error);
+            decoder->image.client_data = decoder.get();
+            decoder->error.error_exit = [](j_common_ptr info) {
+                auto *state = static_cast<Decoder *>(info->client_data);
+                std::longjmp(state->jump, 1);
+            };
+            decoder->error.emit_message = [](j_common_ptr info, int level) {
+                if (level < 0)
+                    static_cast<Decoder *>(info->client_data)->warning = true;
+            };
+            if (setjmp(decoder->jump))
+                return false;
+            jpeg_create_decompress(&decoder->image);
+            jpeg_mem_src(&decoder->image, reinterpret_cast<const unsigned char *>(bytes.data()), bytes.size());
+            if (jpeg_read_header(&decoder->image, TRUE) != JPEG_HEADER_OK || !decoder->image.image_width ||
+                !decoder->image.image_height ||
+                size_t(decoder->image.image_width) * decoder->image.image_height > kMaxPixels)
+                return false;
+            jpeg_start_decompress(&decoder->image);
+            decoder->row.resize(size_t(decoder->image.output_width) * decoder->image.output_components);
+            while (decoder->image.output_scanline < decoder->image.output_height) {
+                auto *row = decoder->row.data();
+                if (jpeg_read_scanlines(&decoder->image, &row, 1) != 1)
+                    return false;
+            }
+            return jpeg_finish_decompress(&decoder->image) && !decoder->warning;
+        }
         auto failure(const std::string &message) -> json { return {{"success", false}, {"error", message}}; }
         auto serviceDefinition(const json &value) -> json {
             return {{"name", getStr(value, "name")}, {"description", getStr(value, "description")},
@@ -44,11 +103,11 @@ namespace insoulforge {
         m_statePath(std::move(statePath)), m_sink(std::move(sink)) {}
 
     auto ActivityManager::instance() -> ActivityManager & {
-        static auto manager = ActivityManager{"data/activity-state.json", [](Event event) {
-                                                  OneBotEventWorkflow::instance().enqueueActivityMessage(
-                                                    event.sessionId, std::move(event.text), std::move(event.name),
-                                                    std::move(event.mode), std::move(event.origin));
-                                              }};
+        static auto manager = ActivityManager{
+          "data/activity-state.json", [](Event event) {
+              OneBotEventWorkflow::instance().enqueueActivityMessage(event.sessionId, std::move(event.text),
+                std::move(event.name), std::move(event.mode), std::move(event.origin), std::move(event.attachments));
+          }};
         return manager;
     }
 
@@ -102,6 +161,7 @@ namespace insoulforge {
                 }
                 services.emplace(name, std::move(service));
             }
+            m_uploads.clear();
             m_services = std::move(services);
             m_token = getStr(config, "token");
             m_stopping = false;
@@ -686,6 +746,47 @@ namespace insoulforge {
         co_return result;
     }
 
+    void ActivityManager::expireUploadsLocked() {
+        const auto current = std::chrono::steady_clock::now();
+        std::erase_if(m_uploads, [&](const auto &entry) {
+            const auto &[name, runId, id] = entry.first;
+            const auto service = m_services.find(name);
+            return entry.second.expires <= current || service == m_services.end() ||
+                   !getBool(service->second->runtime, "running") || getStr(service->second->runtime, "run_id") != runId;
+        });
+    }
+
+    auto ActivityManager::uploadFile(const std::string &name, const std::string &runId, std::string_view bytes)
+      -> std::expected<json, std::string> {
+        std::lock_guard lock(m_mutex);
+        expireUploadsLocked();
+        const auto found = m_services.find(name);
+        if (m_stopping || found == m_services.end() || !found->second->connection ||
+            !found->second->connection->connected() || !found->second->synchronized ||
+            !getBool(found->second->runtime, "running") || getBool(found->second->runtime, "starting") ||
+            runId.empty() || getStr(found->second->runtime, "run_id") != runId)
+            return std::unexpected("服务未连接、未就绪或 run_id 已失效");
+        const auto mime = Image::mimeType(bytes);
+        if (bytes.empty() || bytes.size() > 24U * 1024U * 1024U)
+            return std::unexpected("图片不能为空且不得超过 24 MiB");
+        if (!mime || (*mime != "image/png" && *mime != "image/jpeg"))
+            return std::unexpected("仅支持完整的 PNG 或 JPEG 图片");
+        if (!validUploadImage(bytes, *mime))
+            return std::unexpected("图片数据无效或像素超过 16 MiPixels");
+        size_t total = 0;
+        for (const auto &[key, upload]: m_uploads)
+            total += upload.size;
+        if (m_uploads.size() >= 128 || total + bytes.size() > 128U * 1024U * 1024U)
+            return std::unexpected("活动上传缓存已满，请稍后重试");
+        auto image = Image::fromBytes(bytes);
+        if (!image)
+            return std::unexpected("图片缓存失败");
+        const auto id = image->id();
+        m_uploads.insert_or_assign({name, runId, id},
+          Upload{std::move(*image), bytes.size(), std::chrono::steady_clock::now() + std::chrono::minutes(10)});
+        return json{{"success", true}, {"file_id", id}, {"media_type", *mime}};
+    }
+
     auto ActivityManager::receiveEvent(const std::string &name, const drogon::WebSocketConnectionPtr &connection,
       const json &event) -> std::expected<void, std::string> {
         std::optional<Event> notification;
@@ -704,11 +805,33 @@ namespace insoulforge {
             const auto text = getStr(event, "text");
             if (event.contains("text") && (!event["text"].is_string() || text.size() > 65536))
                 return std::unexpected("通知正文最多 65536 字节");
+            std::vector<Image> attachments;
+            const auto &files = atOrNull(event, "attachments");
+            if (event.contains("attachments") && (!files.is_array() || files.size() > 16))
+                return std::unexpected("attachments 必须是最多 16 个文件的数组");
+            const auto duplicate = getStr(event, "run_id") == getStr(service.runtime, "run_id") &&
+                                   atOrNull(event, "sequence").is_number_integer() &&
+                                   (event["sequence"] <= service.runtime.value("event_sequence", i64{-1}) ||
+                                     event["sequence"] < service.runtime.value("sequence", i64{-1}));
+            expireUploadsLocked();
+            if (files.is_array()) {
+                for (const auto &file: files) {
+                    if (!file.is_object() || file.size() != 1 || !atOrNull(file, "file_id").is_string())
+                        return std::unexpected("附件只能包含 file_id 字符串");
+                    if (duplicate)
+                        continue;
+                    const auto upload = m_uploads.find({name, getStr(event, "run_id"), getStr(file, "file_id")});
+                    if (upload == m_uploads.end())
+                        return std::unexpected("附件不存在、已过期或不属于本活动运行");
+                    attachments.push_back(upload->second.image);
+                }
+            }
+            const auto hasContent = !text.empty() || !attachments.empty();
             const auto target = event.contains("target_session")
                                   ? getStr(event, "target_session")
                                   : getStr(atOrNull(service.runtime, "origin"), "session_id");
             const auto session = SessionId::parse(target);
-            if (!text.empty() && !session)
+            if (hasContent && !session)
                 return std::unexpected("无效的目标会话");
             const auto applied = applySnapshotLocked(service, event, true);
             if (!applied)
@@ -724,8 +847,8 @@ namespace insoulforge {
                 runtime["event_sequence"] = previousEvent;
                 return std::unexpected(saved.error());
             }
-            if (!text.empty() && getBool(service.config, "enabled"))
-                notification = Event{*session, name, text, mode, runtime.at("origin")};
+            if (hasContent && getBool(service.config, "enabled"))
+                notification = Event{*session, name, text, mode, std::move(attachments), runtime.at("origin")};
         }
         if (notification && m_sink) {
             try {
@@ -744,6 +867,7 @@ namespace insoulforge {
             std::lock_guard lock(m_mutex);
             if (m_stopping)
                 return;
+            expireUploadsLocked();
             const auto current = std::chrono::steady_clock::now();
             for (const auto &[name, service]: m_services) {
                 if (!service->connection)
@@ -779,6 +903,7 @@ namespace insoulforge {
         {
             std::lock_guard lock(m_mutex);
             m_stopping = true;
+            m_uploads.clear();
             if (m_loop) {
                 m_loop->invalidateTimer(m_timer);
                 m_loop = nullptr;

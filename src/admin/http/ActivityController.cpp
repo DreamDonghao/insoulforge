@@ -1,5 +1,8 @@
 /// @file ActivityController.cpp
 /// @brief 管理请求由统一登录检查保护，活动通信使用独立的 WebSocket 入口。
+#include <drogon/MultiPart.h>
+
+#include <admin/events/ActivityWebSocket.hpp>
 #include <admin/http/ActivityController.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <workflow/activity/ActivityManager.hpp>
@@ -16,6 +19,34 @@ namespace insoulforge {
             return response;
         }
     } // namespace
+    void ActivityController::uploadFile(
+      const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) const {
+        if (req->body().size() > 25U * 1024U * 1024U) {
+            callback(reply(std::unexpected("上传请求过大"), drogon::k413RequestEntityTooLarge));
+            return;
+        }
+        drogon::MultiPartParser parser;
+        if (parser.parse(req) != 0 || parser.getFiles().size() != 1 || parser.getFiles()[0].getItemName() != "file" ||
+            parser.getParameters().size() != 2 || !parser.getParameters().contains("name") ||
+            !parser.getParameters().contains("run_id")) {
+            callback(reply(std::unexpected("需要 multipart 字段 name、run_id 和一个 file"), drogon::k400BadRequest));
+            return;
+        }
+        const auto bytes = parser.getFiles()[0].fileContent();
+        if (bytes.size() > 24U * 1024U * 1024U) {
+            callback(reply(std::unexpected("图片不得超过 24 MiB"), drogon::k413RequestEntityTooLarge));
+            return;
+        }
+        const auto result = ActivityManager::instance().uploadFile(
+          parser.getParameters().at("name"), parser.getParameters().at("run_id"), bytes);
+        if (!result) {
+            callback(reply(std::unexpected(result.error()), drogon::k400BadRequest));
+            return;
+        }
+        auto response = jsonResponse(*result);
+        response->addHeader("Cache-Control", "no-store");
+        callback(response);
+    }
     void ActivityController::getConfig(
       const drogon::HttpRequestPtr &, std::function<void(const drogon::HttpResponsePtr &)> &&callback) const {
         auto response = jsonResponse(ActivityManager::instance().configuration());

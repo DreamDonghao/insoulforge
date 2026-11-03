@@ -39,6 +39,9 @@ namespace insoulforge::MessageContentEnricher {
 
         size_t succeededCount = 0;
         for (json &image: *images) {
+            // 活动附件已经在接入处验证；保留资产 ID，按需由 ask_images 读取。
+            if (!getStr(image, "image_id").empty() && getStr(image, "recognition_status") == "available")
+                continue;
             const std::string sourceUrl = getStr(atOrNull(image, "source"), "url");
             if (sourceUrl.empty()) {
                 image["recognition_status"] = "failed";

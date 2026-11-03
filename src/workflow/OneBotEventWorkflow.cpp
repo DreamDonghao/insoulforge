@@ -278,13 +278,19 @@ namespace insoulforge {
         drogon::async_run([this, sessionId]() -> drogon::Task<> { co_await processPreparationQueue(sessionId); });
     }
 
-    void OneBotEventWorkflow::enqueueActivityMessage(
-      const SessionId &sessionId, std::string text, std::string name, std::string mode, json origin) {
-        enqueueNormalizedMessage({{"session_id", sessionId.toString()}, {"time", currentDateTime()},
+    void OneBotEventWorkflow::enqueueActivityMessage(const SessionId &sessionId, std::string text, std::string name,
+      std::string mode, json origin, std::vector<Image> attachments) {
+        auto message = json({{"session_id", sessionId.toString()}, {"time", currentDateTime()},
           {"message_id", "activity-" + drogon::utils::getUuid()},
           {"sender", {{"user_id", "system"}, {"name", "实时活动：" + name}}},
           {"activity", {{"name", std::move(name)}, {"mode", std::move(mode)}, {"origin", std::move(origin)}}},
           {"segments", {{{"type", "text"}, {"text", std::move(text)}}}}});
+        for (const auto &image: attachments) {
+            const auto index = message["assets"]["images"].is_array() ? message["assets"]["images"].size() : 0;
+            message["segments"].push_back({{"type", "image"}, {"image_index", index}});
+            message["assets"]["images"].push_back({{"image_id", image.id()}, {"recognition_status", "available"}});
+        }
+        enqueueNormalizedMessage(std::move(message));
     }
 
     auto OneBotEventWorkflow::processPreparationQueue(const SessionId sessionId) -> drogon::Task<> {

@@ -6,7 +6,7 @@ target_compile_features(insoulforge_activity_tests PRIVATE cxx_std_23)
 target_include_directories(insoulforge_activity_tests PRIVATE ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(insoulforge_activity_tests PRIVATE
         Drogon::Drogon spdlog::spdlog_header_only fmt::fmt-header-only
-        SQLite3_lib OpenSSL::Crypto PNG::PNG ${GIFLIB_LIBRARY} ${LUA_LIBRARIES})
+        SQLite3_lib OpenSSL::Crypto PNG::PNG JPEG::JPEG ${GIFLIB_LIBRARY} ${LUA_LIBRARIES})
 if(nlohmann_json_FOUND)
     target_link_libraries(insoulforge_activity_tests PRIVATE nlohmann_json::nlohmann_json)
 else()
@@ -48,7 +48,7 @@ target_link_libraries(insoulforge_message_contract_tests PRIVATE
         fmt::fmt-header-only
         SQLite3_lib
         OpenSSL::Crypto
-        PNG::PNG
+        PNG::PNG JPEG::JPEG
         ${GIFLIB_LIBRARY}
         ${LUA_LIBRARIES})
 
@@ -72,7 +72,7 @@ target_include_directories(insoulforge_mcp_tests PRIVATE
         ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(insoulforge_mcp_tests PRIVATE
         Drogon::Drogon spdlog::spdlog_header_only fmt::fmt-header-only
-        SQLite3_lib OpenSSL::Crypto PNG::PNG ${GIFLIB_LIBRARY} ${LUA_LIBRARIES})
+        SQLite3_lib OpenSSL::Crypto PNG::PNG JPEG::JPEG ${GIFLIB_LIBRARY} ${LUA_LIBRARIES})
 if(nlohmann_json_FOUND)
     target_link_libraries(insoulforge_mcp_tests PRIVATE nlohmann_json::nlohmann_json)
 else()
@@ -89,7 +89,7 @@ target_include_directories(insoulforge_memory_tests PRIVATE
         ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(insoulforge_memory_tests PRIVATE
         Drogon::Drogon spdlog::spdlog_header_only fmt::fmt-header-only
-        SQLite3_lib OpenSSL::Crypto PNG::PNG ${GIFLIB_LIBRARY} ${LUA_LIBRARIES})
+        SQLite3_lib OpenSSL::Crypto PNG::PNG JPEG::JPEG ${GIFLIB_LIBRARY} ${LUA_LIBRARIES})
 if(nlohmann_json_FOUND)
     target_link_libraries(insoulforge_memory_tests PRIVATE nlohmann_json::nlohmann_json)
 else()
@@ -106,7 +106,7 @@ target_include_directories(insoulforge_cross_group_tests PRIVATE
         ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(insoulforge_cross_group_tests PRIVATE
         Drogon::Drogon spdlog::spdlog_header_only fmt::fmt-header-only
-        SQLite3_lib OpenSSL::Crypto PNG::PNG ${GIFLIB_LIBRARY} ${LUA_LIBRARIES})
+        SQLite3_lib OpenSSL::Crypto PNG::PNG JPEG::JPEG ${GIFLIB_LIBRARY} ${LUA_LIBRARIES})
 if(nlohmann_json_FOUND)
     target_link_libraries(insoulforge_cross_group_tests PRIVATE nlohmann_json::nlohmann_json)
 else()
@@ -123,7 +123,7 @@ target_include_directories(insoulforge_model_request_tests PRIVATE
         ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(insoulforge_model_request_tests PRIVATE
         Drogon::Drogon spdlog::spdlog_header_only fmt::fmt-header-only
-        SQLite3_lib OpenSSL::Crypto PNG::PNG ${GIFLIB_LIBRARY} ${LUA_LIBRARIES})
+        SQLite3_lib OpenSSL::Crypto PNG::PNG JPEG::JPEG ${GIFLIB_LIBRARY} ${LUA_LIBRARIES})
 if(nlohmann_json_FOUND)
     target_link_libraries(insoulforge_model_request_tests PRIVATE nlohmann_json::nlohmann_json)
 else()
@@ -140,7 +140,7 @@ target_include_directories(insoulforge_onebot_reconnect_tests PRIVATE
         ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(insoulforge_onebot_reconnect_tests PRIVATE
         Drogon::Drogon spdlog::spdlog_header_only fmt::fmt-header-only
-        SQLite3_lib OpenSSL::Crypto PNG::PNG ${GIFLIB_LIBRARY} ${LUA_LIBRARIES})
+        SQLite3_lib OpenSSL::Crypto PNG::PNG JPEG::JPEG ${GIFLIB_LIBRARY} ${LUA_LIBRARIES})
 if(nlohmann_json_FOUND)
     target_link_libraries(insoulforge_onebot_reconnect_tests PRIVATE nlohmann_json::nlohmann_json)
 else()

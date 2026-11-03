@@ -12,7 +12,11 @@ namespace insoulforge {
         ADD_METHOD_TO(ActivityController::setEnabled, "/admin/api/activities", drogon::Patch);
         ADD_METHOD_TO(ActivityController::removeService, "/admin/api/activities", drogon::Delete);
         ADD_METHOD_TO(ActivityController::synchronize, "/admin/api/activities/sync", drogon::Post);
+        ADD_METHOD_TO(
+          ActivityController::uploadFile, "/activities/files", drogon::Post, "insoulforge::ActivityAuthentication");
         METHOD_LIST_END
+        void uploadFile(
+          const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) const;
         void getConfig(
           const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) const;
         void saveConfig(

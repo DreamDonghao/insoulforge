@@ -15,7 +15,7 @@
 | Drogon                        | 1.9.10                                         | `find_package(Drogon CONFIG REQUIRED)`                 |
 | SQLite3、spdlog、fmt、OpenSSL | 开发包                                         | 存储、日志、格式化、加密                               |
 | nlohmann-json                 | 头文件或 CMake 包                              | JSON；CMake 找不到包时会直接查找头文件                 |
-| libpng、giflib                | 开发包                                         | 图片与 GIF 解码                                        |
+| libpng、libjpeg、giflib                | 开发包                                         | 图片与 GIF 解码                                        |
 | Lua                           | 5.4 或更新的兼容版本                           | 进程内自定义工具执行器                                 |
 
 `ninja` 不是必需依赖，但与 Dockerfile 一致，推荐作为 CMake 生成器使用。
@@ -28,7 +28,7 @@
 sudo apt update && sudo apt install -y \
     build-essential cmake ninja-build git ca-certificates \
     libsqlite3-dev libspdlog-dev libfmt-dev libjsoncpp-dev nlohmann-json3-dev \
-    zlib1g-dev libssl-dev uuid-dev libgif-dev libpng-dev liblua5.4-dev \
+    zlib1g-dev libssl-dev uuid-dev libgif-dev libpng-dev libjpeg-dev liblua5.4-dev \
     nodejs npm
 ```
 
@@ -56,7 +56,7 @@ Ubuntu 22.04 默认编译器不满足本项目的 C++23 / `<format>` 要求。�
 ### macOS（Homebrew）
 
 ```bash
-brew install cmake drogon spdlog fmt nlohmann-json sqlite3 openssl brotli libpng giflib lua node
+brew install cmake drogon spdlog fmt nlohmann-json sqlite3 openssl brotli libpng jpeg-turbo giflib lua node
 ```
 
 Homebrew 的 `drogon` 会提供 CMake 包。若 CMake 找不到 OpenSSL、SQLite3 等 Homebrew 前缀下的依赖，请在配置时传入对应的

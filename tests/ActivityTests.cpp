@@ -1,6 +1,7 @@
 /// @file ActivityTests.cpp
 /// @brief 使用本地模拟服务验证全局活动协议，不启动机器人或访问外部服务。
 #include <atomic>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -10,18 +11,23 @@
 
 #include <drogon/WebSocketClient.h>
 #include <drogon/drogon.h>
+#include <drogon/utils/Utilities.h>
+#include <jpeglib.h>
 #include <trantor/net/EventLoopThread.h>
 
 #include <admin/events/ActivityWebSocket.hpp>
 #include <admin/http/ActivityController.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/http/HttpTrace.hpp>
+#include <infrastructure/image/Image.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <workflow/OneBotEventWorkflow.hpp>
 #include <workflow/activity/ActivityManager.hpp>
 #include <workflow/agent/runtime/AgentSystem.hpp>
 #include <workflow/agent/tools/ToolRegistry.hpp>
+#include <workflow/agent/tools/image/ImageReferences.hpp>
 #include <workflow/agent/tools/plugins/ActivityToolsPlugin.hpp>
+#include <workflow/message/MessageRecord.hpp>
 #include <workflow/session/SessionConfigManager.hpp>
 #include <workflow/session/SessionStore.hpp>
 
@@ -81,6 +87,49 @@ namespace {
             co_await drogon::sleepCoro(trantor::EventLoop::getEventLoopOfCurrentThread(), 0.01);
         }
     }
+    auto pngBytes() -> std::string {
+        return drogon::utils::base64Decode(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC");
+    }
+    auto jpegBytes() -> std::string {
+        auto image = jpeg_compress_struct{};
+        auto error = jpeg_error_mgr{};
+        image.err = jpeg_std_error(&error);
+        jpeg_create_compress(&image);
+        unsigned char *output = nullptr;
+        unsigned long size = 0;
+        jpeg_mem_dest(&image, &output, &size);
+        image.image_width = 1;
+        image.image_height = 1;
+        image.input_components = 3;
+        image.in_color_space = JCS_RGB;
+        jpeg_set_defaults(&image);
+        jpeg_start_compress(&image, TRUE);
+        unsigned char pixel[] = {255, 0, 0};
+        auto *row = pixel;
+        jpeg_write_scanlines(&image, &row, 1);
+        jpeg_finish_compress(&image);
+        const auto bytes = std::string(reinterpret_cast<char *>(output), size);
+        std::free(output);
+        jpeg_destroy_compress(&image);
+        return bytes;
+    }
+    auto uploadRequest(std::string name, std::string runId, std::string bytes, std::string token = kToken)
+      -> drogon::HttpRequestPtr {
+        auto request = drogon::HttpRequest::newHttpRequest();
+        request->setPath("/activities/files");
+        request->setMethod(drogon::Post);
+        if (!token.empty())
+            request->addHeader("Authorization", "Bearer " + token);
+        request->setContentTypeString("multipart/form-data; boundary=fixture-boundary");
+        request->setBody(
+          "--fixture-boundary\r\nContent-Disposition: form-data; name=\"name\"\r\n\r\n" + name +
+          "\r\n--fixture-boundary\r\nContent-Disposition: form-data; name=\"run_id\"\r\n\r\n" + runId +
+          "\r\n--fixture-boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"wrong.gif\"\r\n"
+          "Content-Type: image/gif\r\n\r\n" +
+          bytes + "\r\n--fixture-boundary--\r\n");
+        return request;
+    }
     auto testWorkflow(std::string endpoint, std::filesystem::path root) -> drogon::Task<> {
         auto &config = Config::instance();
         auto &database = Database::instance();
@@ -103,16 +152,18 @@ namespace {
         require(workflow.initialize(database, config, agent).has_value(), "workflow initialization failed");
         const auto session = SessionId::group("12345");
         SessionStore::enableSession(session);
-        workflow.enqueueActivityMessage(session, "静默", "chess", "silent", origin());
+        const auto image = Image::fromBytes(pngBytes());
+        require(image.has_value(), "workflow fixture image failed");
+        workflow.enqueueActivityMessage(session, "", "chess", "silent", origin(), {*image});
         co_await waitFor(
           [&] { return SessionConfigManager::getConfig(session).allMesCount == 1; }, "silent not recorded");
         require(executorRequests == 0 && routerRequests == 0, "silent event invoked model");
-        workflow.enqueueActivityMessage(session, "判断", "chess", "judge", origin());
+        workflow.enqueueActivityMessage(session, "", "chess", "judge", origin(), {*image});
         co_await waitFor(
           [&] { return routerRequests == 1 && SessionConfigManager::getConfig(session).allMesCount == 2; },
           "judge not routed");
         require(executorRequests == 0, "judge ignored skip decision");
-        workflow.enqueueActivityMessage(session, "强制", "chess", "force", origin());
+        workflow.enqueueActivityMessage(session, "", "chess", "force", origin(), {*image});
         co_await waitFor([&] { return executorRequests == 1; }, "force not delivered to executor");
         workflow.enqueueActivityMessage(session, "继续", "chess", "force", origin());
         co_await waitFor([&] { return deliveries == 2; }, "queued force events lost");
@@ -120,6 +171,15 @@ namespace {
         require(routerRequests == 1 && maxConcurrentExecutors == 1, "force routed or replies ran concurrently");
         {
             std::lock_guard lock(fixtureMutex);
+            bool foundImage = false;
+            for (const auto &message: lastModelContext["recent_messages"])
+                for (const auto &segment: atOrNull(message, "segments"))
+                    foundImage = foundImage || getStr(segment, "image_id") == image->id();
+            require(foundImage, "image-only activity asset did not reach model");
+            const auto references = ImageReferences::resolve(json::array({image->id()}),
+              ToolCallContext{.sessionId = session, .messageSnapshot = lastModelContext["recent_messages"]});
+            require(references && references->size() == 1 && references->front() == image->id(),
+              "image tool cannot resolve activity asset");
             require(lastModelContext.contains("running_activities"), "model context omitted activities");
             auto keys = std::vector<std::string>{};
             for (const auto &[key, value]: lastModelContext.items())
@@ -427,6 +487,74 @@ namespace {
             require(!(co_await manager.refresh("chess")).has_value(), "manual synchronization overlapped operation");
             co_await waitFor([&] { return done.load(); }, "delayed confirmation did not finish");
             delayStatus = false;
+            const auto runId = getStr(first["snapshot"], "run_id");
+            auto response = co_await httpClient->sendRequestCoro(uploadRequest("chess", runId, pngBytes(), ""), 3);
+            require(response->statusCode() == drogon::k401Unauthorized, "anonymous upload accepted");
+            response = co_await httpClient->sendRequestCoro(uploadRequest("chess", runId, pngBytes(), "wrong"), 3);
+            require(response->statusCode() == drogon::k401Unauthorized, "wrong upload token accepted");
+            response = co_await httpClient->sendRequestCoro(uploadRequest("chess", "stale-run", pngBytes()), 3);
+            require(response->statusCode() == drogon::k400BadRequest, "stale upload run accepted");
+            response = co_await httpClient->sendRequestCoro(uploadRequest("missing", runId, pngBytes()), 3);
+            require(response->statusCode() == drogon::k400BadRequest, "unregistered upload accepted");
+            for (const auto &bytes: {std::string("not an image"), std::string("\xff\xd8\xff\xd9", 4),
+                   drogon::utils::base64Decode("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7")}) {
+                response = co_await httpClient->sendRequestCoro(uploadRequest("chess", runId, bytes), 3);
+                require(response->statusCode() == drogon::k400BadRequest, "unsupported or corrupt image accepted");
+            }
+            response = co_await httpClient->sendRequestCoro(
+              uploadRequest("chess", runId, std::string(24U * 1024U * 1024U + 1, 'x')), 3);
+            require(response->statusCode() == drogon::k413RequestEntityTooLarge, "oversize image accepted");
+            auto malformedUpload = drogon::HttpRequest::newHttpRequest();
+            malformedUpload->setPath("/activities/files");
+            malformedUpload->setMethod(drogon::Post);
+            malformedUpload->addHeader("Authorization", std::string("Bearer ") + kToken);
+            malformedUpload->setBody("{}");
+            response = co_await httpClient->sendRequestCoro(malformedUpload, 3);
+            require(response->statusCode() == drogon::k400BadRequest, "non-multipart upload accepted");
+            response = co_await httpClient->sendRequestCoro(uploadRequest("chess", runId, jpegBytes()), 3);
+            require(response->statusCode() == drogon::k200OK &&
+                      getStr(json::parse(response->body()), "media_type") == "image/jpeg",
+              "JPEG upload failed");
+            auto corruptPng = pngBytes();
+            corruptPng[45] ^= 1;
+            response = co_await httpClient->sendRequestCoro(uploadRequest("chess", runId, corruptPng), 3);
+            require(response->statusCode() == drogon::k400BadRequest, "corrupt PNG accepted");
+            auto other = connectService(endpoint, "other");
+            clients.push_back(other);
+            co_await waitFor([&] { return other->ready.load(); }, "other upload service not ready");
+            response = co_await httpClient->sendRequestCoro(uploadRequest("other", runId, pngBytes()), 3);
+            require(response->statusCode() == drogon::k200OK, "PNG multipart upload failed");
+            const auto uploaded = json::parse(response->body());
+            const auto fileId = getStr(uploaded, "file_id");
+            require(fileId.starts_with("img_") && fileId.size() == 12 && getStr(uploaded, "media_type") == "image/png",
+              "upload returned wrong ID or trusted declared MIME");
+            auto imageEvent = changeSnapshot("图片事件");
+            imageEvent["mode"] = "silent";
+            imageEvent["attachments"] = json::array({{{"file_id", fileId}}});
+            service->event(imageEvent);
+            co_await waitFor([&] { return service->acks == 1; }, "cross-service attachment ack missing");
+            require(!getBool(service->lastAck, "success"), "cross-service attachment accepted");
+            require(getStr(registered("chess"), "status") != getStr(imageEvent, "status"),
+              "rejected attachment advanced state");
+            response = co_await httpClient->sendRequestCoro(uploadRequest("chess", runId, pngBytes()), 3);
+            require(response->statusCode() == drogon::k200OK, "own upload failed");
+            auto invalidAttachment = imageEvent;
+            invalidAttachment["attachments"] = json::array({{{"file_id", "img_deadbeef"}}});
+            service->event(invalidAttachment);
+            co_await waitFor([&] { return service->acks == 2; }, "invalid attachment ack missing");
+            require(!getBool(service->lastAck, "success"), "unknown attachment accepted");
+            service->event(imageEvent);
+            co_await waitFor([&] { return service->acks == 3; }, "image-only event ack missing");
+            require(getBool(service->lastAck, "success"), "corrected image event rejected");
+            service->event(imageEvent);
+            co_await waitFor([&] { return service->acks == 4; }, "repeat image event ack missing");
+            require(getBool(service->lastAck, "success"), "repeat image event rejected");
+            require(
+              executorRequests == 0 && routerRequests == 0 && deliveries == 0, "upload invoked model or sent image");
+            other->close();
+            co_await waitFor([&] { return !getBool(registered("other"), "connected"); }, "other close missing");
+            require(manager.removeService("other", store, true).has_value(), "other cleanup failed");
+            service->acks = 0;
             auto event = changeSnapshot("等待落子");
             event["mode"] = "silent";
             service->event(event);
@@ -456,6 +584,7 @@ namespace {
             require(getStr(manager.runningActivities()[0], "status").find("状态未确认") != std::string::npos,
               "disconnect hid activity");
             require(!(co_await manager.refresh("chess")).has_value(), "offline synchronization accepted");
+            require(!manager.uploadFile("chess", runId, pngBytes()), "offline upload accepted");
             event = changeSnapshot("断线期间轮到机器人");
             event["mode"] = "silent";
             auto replacement = connectService(endpoint);
@@ -477,6 +606,7 @@ namespace {
             takeover->event(event);
             co_await waitFor([&] { return takeover->acks == 1; }, "finish not acknowledged");
             require(manager.runningActivities().empty(), "ended activity retained");
+            require(!manager.uploadFile("chess", runId, pngBytes()), "ended run upload accepted");
             auto resurrected = event;
             resurrected["running"] = true;
             resurrected["sequence"] = getInt(event, "sequence") + 1;
@@ -494,6 +624,11 @@ namespace {
             co_await waitFor([&] { return recovered->ready.load(); }, "uncertain start not recovered");
             require(
               manager.runningActivities().size() == 1 && callCount("start") == 2, "uncertain start retried or lost");
+            auto crossRun = changeSnapshot("新运行不能使用旧图片");
+            crossRun["attachments"] = json::array({{{"file_id", fileId}}});
+            recovered->event(crossRun);
+            co_await waitFor([&] { return recovered->acks == 1; }, "cross-run attachment ack missing");
+            require(!getBool(recovered->lastAck, "success"), "old-run file ID accepted in new run");
             // 超时只查询状态，不重新发送有副作用的指令。
             unavailable = true;
             const auto beforeCommand = callCount("command");
@@ -626,7 +761,12 @@ auto main(int argc, char **argv) -> int {
     // 单例持久化也隔离到临时运行目录，绝不接触项目 data。
     const auto original = std::filesystem::current_path();
     std::filesystem::current_path(root);
-    drogon::app().addListener("127.0.0.1", 0).setThreadNum(1).setClientMaxWebSocketMessageSize(1024 * 1024);
+    drogon::app()
+      .addListener("127.0.0.1", 0)
+      .setThreadNum(1)
+      .setClientMaxWebSocketMessageSize(1024 * 1024)
+      .setClientMaxBodySize(25U * 1024U * 1024U)
+      .setClientMaxMemoryBodySize(25U * 1024U * 1024U);
     drogon::app().registerHandler("/activity-model",
       [](const drogon::HttpRequestPtr &request, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
           const auto body = json::parse(request->body());

@@ -8,6 +8,7 @@
 #include <mutex>
 #include <optional>
 #include <unordered_map>
+#include <vector>
 
 #include <drogon/utils/coroutine.h>
 #include <expected>
@@ -15,6 +16,7 @@
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
+#include <infrastructure/image/Image.hpp>
 #include <workflow/SessionWorkflowState.hpp>
 
 namespace insoulforge {
@@ -83,7 +85,7 @@ namespace insoulforge {
         void enqueueSystemMessage(const SessionId &sessionId, std::string text, std::string senderName = "系统任务");
         /// @brief 活动事件使用会话串行队列；silent 仅记录，judge 路由判断，force 跳过回复判断。
         void enqueueActivityMessage(const SessionId &sessionId, std::string text, std::string name, std::string mode,
-          json origin = json::object());
+          json origin = json::object(), std::vector<Image> attachments = {});
 
     private:
         void enqueueNormalizedMessage(json message);

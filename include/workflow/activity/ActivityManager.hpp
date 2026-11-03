@@ -7,7 +7,10 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
+#include <tuple>
+#include <vector>
 
 #include <drogon/WebSocketConnection.h>
 #include <drogon/utils/coroutine.h>
@@ -17,6 +20,7 @@
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
+#include <infrastructure/image/Image.hpp>
 
 namespace insoulforge {
     class Config;
@@ -30,6 +34,7 @@ namespace insoulforge {
             std::string name;
             std::string text;
             std::string mode; ///< silent / judge / force
+            std::vector<Image> attachments;
             json origin; ///< 最初启动的会话和用户；不替代内部系统发送者。
         };
         using EventSink = std::function<void(Event)>;
@@ -60,6 +65,9 @@ namespace insoulforge {
         auto refresh(std::string name) -> drogon::Task<std::expected<void, std::string>>;
         /// @brief 升级前验证统一接入 Token，不使用管理员 Cookie。
         [[nodiscard]] auto authorized(const std::string &token) const -> bool;
+        /// @brief 缓存当前运行的图片；归属和短期保护均由活动管理器维护。
+        auto uploadFile(const std::string &name, const std::string &runId, std::string_view bytes)
+          -> std::expected<json, std::string>;
         /// @brief 认证连接后等待 register；未在 10 秒内注册就关闭。
         auto connect(const std::string &token, drogon::WebSocketConnectionPtr connection) -> bool;
         /// @brief 处理当前连接的响应、状态事件和心跳，旧连接不具有写入权限。
@@ -130,6 +138,13 @@ namespace insoulforge {
           -> std::expected<void, std::string>;
         void tick();
 
+        struct Upload {
+            Image image;
+            size_t size;
+            std::chrono::steady_clock::time_point expires;
+        };
+        void expireUploadsLocked();
+        std::map<std::tuple<std::string, std::string, std::string>, Upload> m_uploads;
         mutable std::mutex m_mutex;
         Services m_services;
         std::string m_token;
