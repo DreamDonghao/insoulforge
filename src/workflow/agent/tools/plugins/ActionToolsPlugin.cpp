@@ -684,7 +684,7 @@ namespace insoulforge {
                     co_return fmt::format("表情'{}'不存在，先调list_stickers查看可用表情", name);
                 }
 
-                if (!co_await OneBotClient::deleteCustomFace(getStr(emoji, "res_id"), sessionId)) {
+                if (const auto result = co_await ToolRuntime::deleteFavoriteEmoji(getStr(emoji, "res_id"), sessionId); !result) {
                     co_return std::string("删除失败");
                 }
 

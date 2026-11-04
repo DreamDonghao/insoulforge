@@ -701,3 +701,156 @@ test('request record clear prevents an older load from restoring deleted records
   assert.equal(state.entries.length, 0)
   assert.equal(state.clearing, false)
 })
+
+test('emoji add validates URLs, protects draft and blocks duplicate requests and closing while busy', async () => {
+  const state = mount('tools/EmojiManager')
+  await flush()
+  state.openDialog('add')
+  state.addSource = 'url'
+  state.imageUrl = 'file:///tmp/image.png'
+  let posts = 0
+  const pending = deferred()
+  globalThis.fetch = async (_url, options) => {
+    if (options?.method === 'POST') { posts++; return pending.promise }
+    return response([{res_id: 'new'}])
+  }
+  await state.submitMutation()
+  assert.equal(posts, 0)
+  assert.match(state.mutationError, /HTTP/)
+  state.imageUrl = 'https://example.com/image.gif'
+  state.closeDialog()
+  assert.equal(state.dialog, 'add')
+  assert.equal([...guards][0].dirty(), true)
+  const saving = state.submitMutation()
+  assert.equal(state.mutating, true)
+  state.closeDialog()
+  await state.submitMutation()
+  assert.equal(state.dialog, 'add')
+  assert.equal(posts, 1)
+  pending.resolve(response({success: true}))
+  await saving
+  assert.equal(state.dialog, null)
+  assert.equal(state.emojis[0].res_id, 'new')
+  assert.equal(state.mutating, false)
+  assert.equal([...guards][0].dirty(), false)
+})
+
+test('emoji delete confirms selected resource and preserves list on failure; add errors preserve URL', async () => {
+  window.confirm = () => true
+  const state = mount('tools/EmojiManager')
+  await flush()
+  const a = {res_id: 'A', name: 'same', summary: 'original'}
+  const b = {res_id: 'B', name: 'same'}
+  state.emojis = [a, b]
+  state.startEdit(a)
+  state.editingDesc = 'draft'
+  window.confirm = () => false
+  state.openDialog('delete', b)
+  assert.equal(state.dialog, null)
+  assert.equal(state.editingDesc, 'draft')
+  window.confirm = () => true
+  state.openDialog('delete', b)
+  assert.equal(state.deleteTarget.res_id, 'B')
+  let submitted
+  globalThis.fetch = async (_url, options) => {
+    submitted = JSON.parse(options.body)
+    return response({success: false, error: 'QQ offline'})
+  }
+  await state.submitMutation()
+  assert.deepEqual(submitted, {res_id: 'B'})
+  assert.equal(state.emojis.length, 2)
+  assert.equal(state.dialog, 'delete')
+  assert.match(state.mutationError, /QQ offline/)
+  state.closeDialog()
+  state.openDialog('add')
+  state.addSource = 'url'
+  state.imageUrl = 'https://example.com/image.png'
+  await state.submitMutation()
+  assert.equal(state.imageUrl, 'https://example.com/image.png')
+  assert.equal(state.dialog, 'add')
+  assert.equal(state.mutating, false)
+})
+
+test('emoji deletion refreshes server list and retains stale data when refresh fails', async () => {
+  const state = mount('tools/EmojiManager')
+  await flush()
+  const a = {res_id: 'A', name: 'first'}
+  state.emojis = [a]
+  state.openDialog('delete', a)
+  let posts = 0, gets = 0
+  globalThis.fetch = async (url, options) => {
+    if (options?.method === 'POST') {
+      posts++
+      assert.equal(url, '/admin/api/emoji/delete')
+      return response({success: true})
+    }
+    gets++
+    throw new TypeError('offline')
+  }
+  await state.submitMutation()
+  assert.equal(posts, 1)
+  assert.equal(gets, 1)
+  assert.equal(state.dialog, null)
+  assert.equal(state.emojis[0].res_id, 'A')
+  assert.ok(state.loadError)
+  globalThis.fetch = async () => response([])
+  await state.loadEmojis()
+  assert.deepEqual(state.emojis, [])
+  assert.equal(state.loadError, '')
+})
+
+
+test('emoji uploads multipart bytes, protects file draft and retains it on failure', async () => {
+  const state = mount('tools/EmojiManager')
+  await flush()
+  state.openDialog('add')
+  assert.equal(state.addSource, 'file')
+  let posts = 0
+  globalThis.fetch = async (_url, options) => {
+    posts++
+    assert.ok(options.body instanceof FormData)
+    assert.equal(options.headers?.['Content-Type'], undefined)
+    assert.equal(await options.body.get('image').text(), 'GIF89a')
+    return response({success: false, error: 'upload failed'})
+  }
+  await state.submitMutation()
+  assert.equal(posts, 0)
+  state.imageFile = {size: 8 * 1024 * 1024 + 1}
+  await state.submitMutation()
+  assert.equal(posts, 0)
+  state.imageFile = new Blob(['GIF89a'], {type: 'image/gif'})
+  assert.equal([...guards][0].dirty(), true)
+  state.closeDialog()
+  assert.equal(state.dialog, 'add')
+  await state.submitMutation()
+  assert.equal(posts, 1)
+  assert.ok(state.imageFile)
+  assert.match(state.mutationError, /upload failed/)
+})
+
+
+test('emoji file upload blocks busy close and duplicate submission then clears draft on success', async () => {
+  const state = mount('tools/EmojiManager')
+  await flush()
+  state.openDialog('add')
+  const file = new Blob(['GIF89a'], {type: 'image/gif'})
+  state.selectFile({target: {files: [file]}})
+  const pending = deferred()
+  let posts = 0
+  globalThis.fetch = async (_url, options) => {
+    if (options?.method === 'POST') { posts++; return pending.promise }
+    return response([{res_id: 'uploaded'}])
+  }
+  const saving = state.submitMutation()
+  assert.equal(state.mutating, true)
+  state.closeDialog()
+  await state.submitMutation()
+  assert.equal(posts, 1)
+  assert.equal(state.dialog, 'add')
+  pending.resolve(response({success: true}))
+  await saving
+  assert.equal(state.imageFile, null)
+  assert.equal(state.dialog, null)
+  assert.equal(state.emojis[0].res_id, 'uploaded')
+  assert.equal([...guards][0].dirty(), false)
+})

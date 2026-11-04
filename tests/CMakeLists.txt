@@ -156,3 +156,11 @@ target_include_directories(insoulforge_image_tests PRIVATE ${PROJECT_SOURCE_DIR}
 get_target_property(IMAGE_TEST_LIBRARIES insoulforge_activity_tests LINK_LIBRARIES)
 target_link_libraries(insoulforge_image_tests PRIVATE ${IMAGE_TEST_LIBRARIES})
 add_test(NAME image_cache COMMAND insoulforge_image_tests)
+
+add_executable(insoulforge_favorite_emoji_tests EXCLUDE_FROM_ALL
+        FavoriteEmojiTests.cpp $<TARGET_OBJECTS:${PROJECT_NAME}_backend>)
+target_compile_features(insoulforge_favorite_emoji_tests PRIVATE cxx_std_23)
+target_include_directories(insoulforge_favorite_emoji_tests PRIVATE ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(insoulforge_favorite_emoji_tests PRIVATE ${IMAGE_TEST_LIBRARIES})
+add_test(NAME favorite_emojis COMMAND insoulforge_favorite_emoji_tests)
+set_tests_properties(favorite_emojis PROPERTIES TIMEOUT 45)

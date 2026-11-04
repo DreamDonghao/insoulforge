@@ -74,6 +74,10 @@ namespace insoulforge::OneBotClient {
       -> drogon::Task<std::optional<std::string>>;
 
     /// @brief 将图片保存为 QQ 收藏表情
+    /// @brief 使用 NapCat download_file.base64 将原始字节传到协议主机。
+    [[nodiscard]] auto uploadFile(std::string bytes, std::optional<SessionId> sessionId = std::nullopt)
+      -> drogon::Task<std::optional<std::string>>;
+
     /// @note NapCat 扩展: add_custom_face（api.md 未收录）
     [[nodiscard]] auto addCustomFace(std::string file, std::optional<SessionId> sessionId = std::nullopt)
       -> drogon::Task<bool>;

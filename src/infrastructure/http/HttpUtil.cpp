@@ -70,7 +70,7 @@ namespace insoulforge::HttpUtil {
         if (value.is_object()) {
             auto result = json::object();
             for (const auto &[key, item]: value.items()) {
-                if (key == "b64_json" && item.is_string()) {
+                if ((key == "b64_json" || key == "base64") && item.is_string()) {
                     result[key] = std::string(kImageOmitted);
                 } else {
                     result[key] = redactImagePayloads(item);
@@ -104,7 +104,7 @@ namespace insoulforge::HttpUtil {
         // 实际请求保留原始 JSON；调试记录只省略其中的图片数据。
         auto bodyText = body.is_null() ? std::string{} : dumpJson(body);
         const bool containsImageData =
-          bodyText.find(";base64,") != std::string::npos || bodyText.find("base64://") != std::string::npos;
+          body.contains("base64") || bodyText.find(";base64,") != std::string::npos || bodyText.find("base64://") != std::string::npos;
         const auto traceBodyText = containsImageData ? dumpJson(redactImagePayloads(body)) : bodyText;
         const auto bodyLog = truncate(traceBodyText, kBodyLogMax);
 

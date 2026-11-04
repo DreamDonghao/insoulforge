@@ -37,6 +37,19 @@ namespace insoulforge::ToolRuntime {
     /// @brief 在收藏表情列表中按名称查找表情（名称 = desc 或 "表情N"）
     auto findFavoriteEmoji(std::string name, std::optional<SessionId> sessionId = std::nullopt) -> drogon::Task<json>;
 
+    /// @brief 从 HTTP(S) URL 下载到 OneBot 主机并收藏；不依赖聊天消息或本机文件。
+    auto addFavoriteEmoji(std::string url, std::optional<SessionId> sessionId = std::nullopt)
+      -> drogon::Task<std::expected<void, std::string>>;
+
+    inline constexpr size_t kMaxFavoriteEmojiBytes = 8U * 1024U * 1024U;
+    /// @brief 校验图片原始数据并传到 OneBot 主机收藏，不写入图片缓存。
+    auto uploadFavoriteEmoji(std::string bytes, std::optional<SessionId> sessionId = std::nullopt)
+      -> drogon::Task<std::expected<void, std::string>>;
+
+    /// @brief 按 QQ 资源 ID 删除收藏，并使列表缓存失效。
+    auto deleteFavoriteEmoji(std::string resId, std::optional<SessionId> sessionId = std::nullopt)
+      -> drogon::Task<std::expected<void, std::string>>;
+
     /// @brief 使收藏表情缓存失效（修改/删除后调用）
     void invalidateFavoriteEmojiCache();
 } // namespace insoulforge::ToolRuntime

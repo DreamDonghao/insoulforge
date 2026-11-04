@@ -327,3 +327,29 @@ HTTP 响应体仍受 Lua 执行器的 1 MiB 限制，超限时返回错误，而
 
 `ask_images(question, images)` 支持按顺序查询多张原图；`images` 接受图片 ID 字符串、`{image_id}` 或旧 `{message_id, image_index}`。
 ID 必须在当前冻结会话快照中可见，缓存过期时要求重发；旧引用优先读缓存，缺失时回退原始 URL。GIF 仍按播放时间抽帧。
+
+### 管理后台 QQ 收藏表情
+
+“收藏表情”页面直接管理当前机器人 QQ 账号的收藏，不写入本地图片缓存。添加支持 **HTTP(S) 图片直链**（不含 URL 账号密码，最多 4096 字符），不需要聊天消息 ID。后端复用 `OneBotClient::downloadFile` 将图片下载至 OneBot/NapCat 主机，再调用 `addCustomFace` 收藏；不支持浏览器本地文件上传、Base64、后台服务器本地路径或网页分享链接。添加后可使用现有描述编辑功能命名。
+
+[NapCat 收藏接口实现](https://github.com/NapNeko/NapCatQQ/blob/main/packages/napcat-onebot/action/extends/CustomFace.ts) 的 `add_custom_face.file` 要求 NapCat 主机上的本地文件路径，并非通用上传接口，因此未将浏览器文件或后台路径直接传给它。删除通过 `delete_custom_face.res_id` 定位 QQ 资源，不按可能重复的描述名删除；界面必须先确认，删除会影响该账号所有会话的收藏使用。
+
+管理接口均受现有 `/admin/api/` 管理员会话认证保护：
+
+| 方法与路径 | 请求 | 行为 |
+| --- | --- | --- |
+| `POST /admin/api/emoji/add` | `{"url":"https://example.com/image.gif"}` | 下载并提交 QQ 收藏；随后刷新列表，可单独编辑描述 |
+| `POST /admin/api/emoji/add` | `multipart/form-data`，单个 `image` 文件 | 上传本地图片并提交 QQ 收藏 |
+| `POST /admin/api/emoji/delete` | `{"res_id":"QQ资源ID"}` | 删除指定 QQ 收藏 |
+
+成功返回 `{"success":true,"message":"…"}`；校验或 OneBot 失败返回 `{"success":false,"error":"…"}`。收藏变更使用 `ToolRuntime` 域函数并使 `FavoriteEmojiCache` 失效，界面成功后重新请求真实列表。删除工具 `delete_sticker` 共享删除域函数。下载失败不会调用收藏接口；收藏或删除请求失败也会清除缓存，以便核对超时后实际已生效的情况。
+
+QQ 必须在线，OneBot 实现及 QQ 版本必须支持相关扩展；收藏数量、图片格式/大小、重复图片处理和同步延迟由 QQ 决定。接口成功仅表示 QQ 请求被接受，不能保证新增独立条目；请核对刷新后的列表。当前列表接口最多请求 200 项，且沿用原有行为：离线/不支持/查询失败可能返回空数组，不能据此断言 QQ 收藏为空。商城表情展示与删除仍取决于 QQ 返回的数据和能力，不承诺将普通图片导入为商城表情。
+
+验证：`npm --prefix frontend test`、`npm --prefix frontend run build`；后端构建 `insoulforge_favorite_emoji_tests` 后运行 `ctest --test-dir <构建目录> -R '^favorite_emojis$' --output-on-failure`。该测试使用本地模拟 OneBot HTTP 服务，覆盖管理员认证、输入校验、下载路径传递、相同名称按资源 ID 删除、错误反馈及变更后的缓存失效，不触碰真实 QQ 收藏。
+
+本地上传默认启用，直链仍可选择。上传限非空且不超过 8 MiB，按 `Image::mimeType` 检查原始字节，仅允许 GIF（含动图）、PNG、JPEG、WebP，不信任扩展名或客户端 MIME；不创建通用图片缓存文件。格式识别沿用现有签名检查，不保证图片可完整解码，最终接收仍由 QQ 决定。multipart 必须包含恰好一个名为 `image` 的文件；无效 multipart 返回 400，超限返回 413，其他失败沿用 JSON 错误。保留现有管理员认证和全局 25 MiB 请求上限。
+
+传输依据 NapCat 官方 [DownloadFile.ts](https://github.com/NapNeko/NapCatQQ/blob/main/packages/napcat-onebot/action/go-cqhttp/DownloadFile.ts)（`base64` 字段接收标准 Base64）和 [CustomFace.ts](https://github.com/NapNeko/NapCatQQ/blob/main/packages/napcat-onebot/action/extends/CustomFace.ts)（`add_custom_face.file` 仅接受 NapCat 本地路径）：图片字节先经 `download_file.base64` 上传，再用返回的 `data.file` 收藏。不会把管理服务本机路径传给远程 NapCat。旧版本或其他 OneBot 实现可能不支持此扩展，上传失败时不调用收藏；协议端临时文件沿用 NapCat 生命周期管理。上传 Base64、收藏文件参数在日志及 HTTP 调试记录中脱敏。
+
+弹窗保留失败后的文件或 URL 草稿，关闭或离开页面需确认放弃；请求进行中阻止重复提交和关闭。模拟集成测试额外覆盖实际 GIF 二进制、伪造 MIME/扩展名、空文件、截断内容、超限、错误字段、损坏 multipart、上传失败不收藏，以及缓存失效与 Base64 日志脱敏。未连接真实 QQ 验证。

@@ -2,6 +2,7 @@
 /// @brief OneBot API 客户端实现
 
 #include <charconv>
+#include <infrastructure/image/Image.hpp>
 
 #include <regex>
 
@@ -48,7 +49,8 @@ namespace insoulforge::OneBotClient {
                 body = *response;
             } else {
                 const auto response = co_await HttpUtil::send(tag, config.qqHttpHost, "/" + api, drogon::Post,
-                  std::move(params), config.accessToken, timeout, sessionId);
+                  std::move(params), config.accessToken, timeout, sessionId,
+                  api != "download_file" && api != "add_custom_face");
                 if (!response) {
                     co_return std::unexpected(response.error());
                 }
@@ -246,12 +248,21 @@ namespace insoulforge::OneBotClient {
         co_return jsonToString(atOrNull(atOrNull(*resp, "data"), "file"));
     }
 
+    auto uploadFile(std::string bytes, const std::optional<SessionId> sessionId)
+      -> drogon::Task<std::optional<std::string>> {
+        json params;
+        params["base64"] = Image::encode(bytes);
+        const auto resp = co_await callApi("[Sticker]", "download_file", std::move(params), sessionId);
+        if (!resp) co_return std::nullopt;
+        co_return jsonToString(atOrNull(atOrNull(*resp, "data"), "file"));
+    }
+
     auto addCustomFace(std::string file, const std::optional<SessionId> sessionId) -> drogon::Task<bool> {
         json params;
         params["file"] = file;
 
         if (const auto resp = co_await callApi("[Sticker]", "add_custom_face", params, sessionId); !resp) {
-            Logger::error(std::nullopt, "Sticker", fmt::format("保存收藏表情失败: {}", file));
+            Logger::error(std::nullopt, "Sticker", "保存收藏表情失败（文件内容已省略）");
             co_return false;
         }
         co_return true;

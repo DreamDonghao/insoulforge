@@ -1,4 +1,5 @@
 #include <charconv>
+#include <drogon/MultiPart.h>
 #include <filesystem>
 
 #include <admin/access/AdminAccessToken.hpp>
@@ -350,11 +351,62 @@ auto AdminController::getEmojis(HttpRequestPtr req, std::function<void(const Htt
     co_return;
 }
 
+auto AdminController::addEmoji(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
+  -> Task<> {
+    if (req->getHeader("content-type").starts_with("multipart/form-data")) {
+        if (req->body().size() > ToolRuntime::kMaxFavoriteEmojiBytes + 1024U * 1024U) {
+            auto response = jsonResponse(AdminResponse::failJson("图片不得超过 8 MiB"));
+            response->setStatusCode(k413RequestEntityTooLarge);
+            callback(response);
+            co_return;
+        }
+        MultiPartParser parser;
+        if (parser.parse(req) != 0 || parser.getFiles().size() != 1 ||
+            parser.getFiles()[0].getItemName() != "image") {
+            auto response = jsonResponse(AdminResponse::failJson("请以 image 字段上传一张图片"));
+            response->setStatusCode(k400BadRequest);
+            callback(response);
+            co_return;
+        }
+        const auto bytes = parser.getFiles()[0].fileContent();
+        if (bytes.size() > ToolRuntime::kMaxFavoriteEmojiBytes) {
+            auto response = jsonResponse(AdminResponse::failJson("图片不得超过 8 MiB"));
+            response->setStatusCode(k413RequestEntityTooLarge);
+            callback(response);
+            co_return;
+        }
+        const auto result = co_await ToolRuntime::uploadFavoriteEmoji(std::string(bytes));
+        callback(jsonResponse(result ? AdminResponse::okJson("已提交 QQ 收藏，请核对列表，可随后编辑描述")
+                                     : AdminResponse::failJson(result.error())));
+        co_return;
+    }
+    const auto body = parseJsonBody(req);
+    if (!body || !body->is_object() || !body->contains("url") || !(*body)["url"].is_string()) {
+        callback(jsonResponse(AdminResponse::failJson("url字段必须为图片直链字符串")));
+        co_return;
+    }
+    const auto result = co_await ToolRuntime::addFavoriteEmoji(getStr(*body, "url"));
+    callback(jsonResponse(result ? AdminResponse::okJson("已提交 QQ 收藏，请核对列表，可随后编辑描述")
+                                 : AdminResponse::failJson(result.error())));
+}
+
+auto AdminController::deleteEmoji(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
+  -> Task<> {
+    const auto body = parseJsonBody(req);
+    if (!body || !body->is_object() || !body->contains("res_id") || !(*body)["res_id"].is_string()) {
+        callback(jsonResponse(AdminResponse::failJson("res_id字段必须为字符串")));
+        co_return;
+    }
+    const auto result = co_await ToolRuntime::deleteFavoriteEmoji(getStr(*body, "res_id"));
+    callback(jsonResponse(result ? AdminResponse::okJson("已提交 QQ 删除，请核对列表")
+                                 : AdminResponse::failJson(result.error())));
+}
+
 auto AdminController::updateEmojiDesc(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
   -> Task<> {
     const auto body = parseJsonBody(req);
     if (!body || !body->contains("res_id") || !body->contains("desc")) {
-        callback(jsonResponse(AdminResponse::errorJson("缺少必要字段: res_id、desc")));
+        callback(jsonResponse(AdminResponse::failJson("缺少必要字段: res_id、desc")));
         co_return;
     }
 
@@ -362,7 +414,7 @@ auto AdminController::updateEmojiDesc(HttpRequestPtr req, std::function<void(con
     const std::string desc = getStr(*body, "desc");
     if (!co_await OneBotClient::setCustomFaceDesc(body->contains("emoji_id") ? getStr(*body, "emoji_id") : "0", resId,
           body->contains("md5") ? getStr(*body, "md5") : "", desc)) {
-        callback(jsonResponse(AdminResponse::errorJson("修改表情描述失败，请确认 QQ 客户端在线")));
+        callback(jsonResponse(AdminResponse::failJson("修改表情描述失败，请确认 QQ 客户端在线")));
         co_return;
     }
 

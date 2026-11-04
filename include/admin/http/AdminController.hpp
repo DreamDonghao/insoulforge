@@ -41,6 +41,8 @@ namespace insoulforge {
         // 表情包库（QQ 收藏表情）
         ADD_METHOD_TO(AdminController::getEmojis, "/admin/api/emojis", drogon::Get);
 
+        ADD_METHOD_TO(AdminController::addEmoji, "/admin/api/emoji/add", drogon::Post);
+        ADD_METHOD_TO(AdminController::deleteEmoji, "/admin/api/emoji/delete", drogon::Post);
         ADD_METHOD_TO(AdminController::updateEmojiDesc, "/admin/api/emoji/desc", drogon::Post);
 
         // 用量统计
@@ -239,6 +241,11 @@ namespace insoulforge {
         /// @param callback HTTP 响应回调
         auto getEmojis(drogon::HttpRequestPtr req, std::function<void(const drogon::HttpResponsePtr &)> callback) const
           -> drogon::Task<>;
+
+        auto addEmoji(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
+        auto deleteEmoji(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 
         /// @brief 修改收藏表情描述（调用 NapCat set_custom_face_desc）
         /// @param req body: {emoji_id, res_id, md5, desc}
