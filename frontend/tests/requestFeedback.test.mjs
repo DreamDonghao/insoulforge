@@ -176,6 +176,34 @@ for (const success of [true, false]) {
   })
 }
 
+test('activity uncertainty keeps connected idle services syncable and never claims confirmed runtime', async () => {
+  let syncs = 0
+  globalThis.fetch = async (url) => {
+    if (url.endsWith('/sync')) { syncs++; return response({success: true}) }
+    return response({token: 'configured-fixture-secret', servers: []})
+  }
+  const state = mount('tools/Activities')
+  await flush()
+  const service = {name: 'chess', enabled: true, running: true, connected: true, synchronized: false, busy: false}
+  assert.equal(state.stateLabel(service), '状态未确认')
+  assert.equal(state.stateLabel({...service, running: false}), '状态未确认')
+  assert.equal(state.canSync(service), true)
+  await state.syncService(service)
+  assert.equal(syncs, 1)
+  for (const blocked of [{...service, connected: false}, {...service, busy: true}]) {
+    assert.equal(state.canSync(blocked), false)
+    await state.syncService(blocked)
+  }
+  assert.equal(syncs, 1)
+  assert.equal(state.stateLabel({...service, synchronized: true}), '活动运行中')
+  assert.equal(state.stateLabel({...service, synchronized: true, running: false}), '当前无活动')
+  assert.equal(state.stateLabel({...service, synchronized: true, connected: false}), '状态未确认')
+  const source = readFileSync(resolve(root, 'src/features/tools/Activities.vue'), 'utf8')
+  assert.match(source, /:disabled="!canSync\(service\)"/)
+  assert.match(source, /stateLabel\(service\)/)
+  assert.doesNotMatch(source, /连接中，等待同步/)
+})
+
 test('activity token save failure retains the draft', async () => {
   globalThis.fetch = async (_url, options) => options?.method === 'POST'
     ? {...response({success: false, error: '无法保存'}), ok: false, status: 400}

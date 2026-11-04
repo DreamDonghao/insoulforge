@@ -213,7 +213,7 @@ namespace insoulforge {
             // 在释放锁前撤销旧连接的写入与请求权限，避免关闭回调到达前仍接受操作。
             for (const auto &[name, service]: m_services) {
                 service->connection.reset();
-                service->synchronized = service->busy = false;
+                service->ready = service->synchronized = service->busy = false;
             }
         }
         for (const auto &connection: connections) {
@@ -258,7 +258,7 @@ namespace insoulforge {
             return std::unexpected(saved.error().message);
         }
         const auto connection = std::exchange(service->connection, {});
-        service->synchronized = service->busy = false;
+        service->ready = service->synchronized = service->busy = false;
         const auto saved = persistLocked();
         lock.unlock();
         if (connection) {
@@ -360,8 +360,9 @@ namespace insoulforge {
             if (sequence == currentSequence && (running != getBool(service.runtime, "running") ||
                                                  getStr(snapshot, "status") != getStr(service.runtime, "status")))
                 return std::unexpected("同一活动序号的状态不能改变");
-            if (!fromEvent) {
+            if (sequence == currentSequence)
                 service.synchronized = true;
+            if (!fromEvent) {
                 service.runtime["updated_at"] = now();
             }
             return {};
@@ -441,15 +442,14 @@ namespace insoulforge {
             registration->second.name = name;
             registration->second.loop->invalidateTimer(registration->second.timer);
             previous = std::exchange(service->connection, connection);
-            service->synchronized = service->busy = false;
+            service->ready = service->synchronized = service->busy = false;
             service->lastSeen = std::chrono::steady_clock::now();
         }
         if (previous) {
             disconnect(previous);
             previous->shutdown();
         }
-        drogon::async_run(
-          [this, name, connection]() -> drogon::Task<> { co_await synchronize(name, connection, SyncMode::Recovery); });
+        drogon::async_run([this, name, connection]() -> drogon::Task<> { co_await synchronize(name, connection); });
         return {};
     }
 
@@ -543,13 +543,11 @@ namespace insoulforge {
             connection = found->second->connection;
             if (!connection || !connection->connected())
                 co_return std::unexpected("服务未连接，无法同步状态");
-            if (!found->second->synchronized)
-                co_return std::unexpected("请等待连接恢复完成后再同步");
         }
-        co_return co_await synchronize(name, std::move(connection), SyncMode::Check);
+        co_return co_await synchronize(name, std::move(connection));
     }
 
-    auto ActivityManager::synchronize(std::string name, drogon::WebSocketConnectionPtr connection, SyncMode mode)
+    auto ActivityManager::synchronize(std::string name, drogon::WebSocketConnectionPtr connection)
       -> drogon::Task<std::expected<void, std::string>> {
         std::shared_ptr<Service> service;
         {
@@ -557,13 +555,12 @@ namespace insoulforge {
             const auto found = m_services.find(name);
             if (m_stopping || found == m_services.end() || found->second->connection != connection)
                 co_return std::unexpected("活动连接已断开或更换");
-            // 工具确认沿用 invoke 的占用，其他同步独立取得占用。
-            if (mode != SyncMode::AfterOperation && found->second->busy)
+            if (found->second->busy)
                 co_return std::unexpected("活动正在处理请求，请稍后同步");
             service = found->second;
             service->busy = true;
-            service->lastCheck = std::chrono::steady_clock::now();
         }
+        bool sendReady = false;
         std::string error;
         try {
             auto snapshot = co_await request(name, connection, "status", json::object());
@@ -582,13 +579,15 @@ namespace insoulforge {
             service->busy = false;
             if (!error.empty())
                 service->synchronized = false;
+            else if (!service->ready) {
+                service->ready = true;
+                sendReady = true;
+            }
         }
         if (!error.empty()) {
-            Logger::warn(std::nullopt, "Activity", "活动状态同步失败，等待服务重新连接: " + name);
-            disconnect(connection);
-            connection->shutdown();
+            Logger::warn(std::nullopt, "Activity", "活动状态同步失败，等待有效推送或手动同步: " + name);
             co_return std::unexpected(error);
-        } else if (mode == SyncMode::Recovery)
+        } else if (sendReady)
             connection->send(dumpJson(json{{"type", "ready"}}));
         co_return std::expected<void, std::string>{};
     }
@@ -606,7 +605,7 @@ namespace insoulforge {
             const auto found = m_services.find(name);
             if (found != m_services.end() && found->second->connection == connection) {
                 found->second->connection.reset();
-                found->second->synchronized = found->second->busy = false;
+                found->second->ready = found->second->synchronized = found->second->busy = false;
             }
             for (const auto &[id, request]: m_pending)
                 if (request.connection == connection)
@@ -719,7 +718,12 @@ namespace insoulforge {
         auto error = std::string{};
         try {
             result = co_await request(name, connection, operation, std::move(body));
-            if (result.contains("snapshot")) {
+            if (operation != "details" &&
+                (!result.contains("snapshot") || getStr(result["snapshot"], "run_id").empty() ||
+                  !atOrNull(result["snapshot"], "sequence").is_number_integer() ||
+                  !atOrNull(result["snapshot"], "status").is_string()))
+                error = "成功的活动操作必须返回完整 snapshot";
+            if (error.empty() && result.contains("snapshot")) {
                 std::lock_guard lock(m_mutex);
                 if (m_stopping || service->connection != connection)
                     co_return failure("活动连接已更换，操作结果未确认");
@@ -734,15 +738,13 @@ namespace insoulforge {
             std::lock_guard lock(m_mutex);
             if (m_stopping || service->connection != connection)
                 co_return failure("活动连接已断开或更换，操作结果未确认");
+            service->busy = false;
             if (!error.empty())
                 service->synchronized = false;
         }
-        // 无论响应是否完整，都确认真实状态；超时不会自动重发有副作用的请求。
-        const auto synchronized = co_await synchronize(name, connection, SyncMode::AfterOperation);
-        if (!synchronized && error.empty())
-            error = synchronized.error();
         if (!error.empty())
-            co_return failure(error + "；请查询活动状态，不要直接重复启动");
+            co_return json{{"success", false}, {"confirmed", false},
+              {"error", error + "；结果及状态未确认，等待服务推送或管理员立即同步，不要直接重复启动"}};
         co_return result;
     }
 
@@ -793,7 +795,7 @@ namespace insoulforge {
         {
             std::lock_guard lock(m_mutex);
             const auto found = m_services.find(name);
-            if (m_stopping || found == m_services.end() || !found->second->synchronized ||
+            if (m_stopping || found == m_services.end() || !found->second->ready ||
                 found->second->connection != connection)
                 return std::unexpected("活动连接未就绪或已经更换");
             auto &service = *found->second;
@@ -862,7 +864,6 @@ namespace insoulforge {
 
     void ActivityManager::tick() {
         std::vector<drogon::WebSocketConnectionPtr> expired;
-        std::vector<std::pair<std::string, drogon::WebSocketConnectionPtr>> due;
         {
             std::lock_guard lock(m_mutex);
             if (m_stopping)
@@ -874,28 +875,21 @@ namespace insoulforge {
                     continue;
                 if (current - service->lastSeen > std::chrono::seconds(45))
                     expired.push_back(service->connection);
-                else if (service->synchronized && !service->busy && current - service->lastCheck >= m_checkInterval)
-                    due.emplace_back(name, service->connection);
             }
         }
         for (const auto &connection: expired) {
             disconnect(connection);
             connection->shutdown();
         }
-        for (const auto &[name, connection]: due)
-            drogon::async_run([this, name, connection]() -> drogon::Task<> {
-                co_await synchronize(name, connection, SyncMode::Check);
-            });
     }
 
-    void ActivityManager::start(trantor::EventLoop &loop, std::chrono::seconds checkInterval) {
+    void ActivityManager::start(trantor::EventLoop &loop) {
         std::lock_guard lock(m_mutex);
         if (m_loop)
             return;
         m_stopping = false;
         m_loop = &loop;
-        m_checkInterval = std::max(checkInterval, std::chrono::seconds{1});
-        m_timer = loop.runEvery(std::min(5.0, static_cast<double>(m_checkInterval.count())), [this] { tick(); });
+        m_timer = loop.runEvery(5.0, [this] { tick(); });
     }
 
     void ActivityManager::stop() {

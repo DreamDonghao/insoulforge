@@ -92,8 +92,16 @@ async function saveToken(): Promise<void> {
 async function setEnabled(service: Service, enabled: boolean): Promise<void> {
   await mutate('', 'PATCH', {name: service.name, enabled})
 }
+function canSync(service: Service): boolean {
+  return loaded.value && !saving.value && !reading.value && service.connected && !service.busy
+}
+function stateLabel(service: Service): string {
+  if (!service.enabled) return '服务已禁用'
+  if (!service.connected || !service.synchronized) return '状态未确认'
+  return service.running ? '活动运行中' : '当前无活动'
+}
 async function syncService(service: Service): Promise<void> {
-  if (saving.value || reading.value || !loaded.value) return
+  if (!canSync(service)) return
   syncing.value = service.name
   try {
     await mutate('/sync', 'POST', {name: service.name}, '活动状态已同步')
@@ -123,7 +131,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="page-header">
-    <div><h1 class="page-title">实时活动</h1><p class="page-subtitle">服务自动注册，所有会话共享 · {{ runningCount }} 个进行中</p></div>
+    <div><h1 class="page-title">实时活动</h1><p class="page-subtitle">服务自动注册，所有会话共享 · {{ runningCount }} 个运行记录</p></div>
     <button class="btn btn-secondary" :disabled="loading || reading || saving" @click="load()">刷新</button>
   </div>
   <div class="content activity-content">
@@ -153,20 +161,20 @@ onBeforeUnmount(() => {
                        :disabled="saving || reading || locked(service)" @update:model-value="setEnabled(service, $event)" />
         <div class="activity-info">
           <div class="activity-title"><h2>{{ service.name }}</h2>
-            <span :class="{'is-running': service.running}">{{ !service.enabled ? '服务已禁用' : service.running ? '活动运行中' : service.synchronized ? '当前无活动' : '等待状态同步' }}</span>
-            <span :class="{'activity-error': !service.connected || !service.synchronized}">{{ !service.connected ? '服务未连接' : service.synchronized ? '已连接' : '连接中，等待同步' }}</span>
+            <span :class="{'is-running': service.running && service.connected && service.synchronized}">{{ stateLabel(service) }}</span>
+            <span :class="{'activity-error': !service.connected || !service.synchronized}">{{ !service.connected ? '服务未连接' : service.synchronized ? '已连接，状态已确认' : '已连接，状态未确认' }}</span>
           </div>
           <p>{{ service.description || '暂无描述' }}</p>
           <p v-if="service.running" class="activity-status">{{ service.status }}</p>
           <small v-if="service.updatedAt">最近状态：{{ new Date(service.updatedAt * 1000).toLocaleString() }}</small>
         </div>
         <div class="activity-actions">
-          <button class="btn btn-secondary" :disabled="saving || reading || !service.connected || !service.synchronized || service.busy" @click="syncService(service)">{{ syncing === service.name ? '同步中…' : '立即同步' }}</button>
+          <button class="btn btn-secondary" :disabled="!canSync(service)" @click="syncService(service)">{{ syncing === service.name ? '同步中…' : '立即同步' }}</button>
           <button class="btn btn-danger" :disabled="saving || reading" @click="remove(service)">{{ locked(service) || service.connected ? '强制删除' : '删除记录' }}</button>
         </div>
       </article>
     </div>
-    <p class="form-hint">状态通过 WS 实时推送，并每 60 秒核对一次；“立即同步”主动查询服务，“刷新”只读取本地快照。强制删除不会结束独立服务，服务重连会重新登记。</p>
+    <p class="form-hint">状态由服务通过 WS 实时推送，操作响应携带最新快照；“立即同步”主动查询服务，“刷新”和页面每 5 秒刷新只读取本地快照。状态未确认时可立即同步，也可等待有效推送恢复。强制删除不会结束独立服务，服务重连会重新登记。</p>
   </div>
 </template>
 

@@ -59,13 +59,13 @@ Token 只放请求头，不放 URL；错误或空 Token 拒绝升级（HTTP 401�
 
 管理接口均受管理员登录认证保护：
 
-| 接口 | 请求／用途 |
-| --- | --- |
-| `GET /admin/api/activities` | 返回全局 token、登记列表及连接、同步、运行状态 |
-| `POST /admin/api/activities` | 只接受 `{"token":"..."}`，空字符串表示关闭接入 |
-| `PATCH /admin/api/activities` | 只接受 `{"name":"棋局","enabled":true}` |
-| `POST /admin/api/activities/sync` | 接受 `{"name":"棋局"}`，等待实际 status 查询结果，不修改配置 |
-| `DELETE /admin/api/activities` | 接受 `{"name":"棋局"}` 普通删除；显式添加 `"force":true` 可强制清理。force 必须为布尔值 |
+| 接口                              | 请求／用途                                                                              |
+|-----------------------------------|-----------------------------------------------------------------------------------------|
+| `GET /admin/api/activities`       | 返回全局 token、登记列表及连接、同步、运行状态                                          |
+| `POST /admin/api/activities`      | 只接受 `{"token":"..."}`，空字符串表示关闭接入                                          |
+| `PATCH /admin/api/activities`     | 只接受 `{"name":"棋局","enabled":true}`                                                 |
+| `POST /admin/api/activities/sync` | 接受 `{"name":"棋局"}`，等待实际 status 查询结果，不修改配置                            |
+| `DELETE /admin/api/activities`    | 接受 `{"name":"棋局"}` 普通删除；显式添加 `"force":true` 可强制清理。force 必须为布尔值 |
 
 所有保存操作由主程序基于最新登记列表执行，客户端不能提交整张列表覆盖配置，避免后台旧页面误删刚注册的活动。
 
@@ -123,13 +123,13 @@ Token 只放请求头，不放 URL；错误或空 Token 拒绝升级（HTTP 401�
 
 ### 五种操作
 
-| operation | body | 返回 result |
-| --- | --- | --- |
-| `status` | `{}` | **直接返回完整快照**，不包在 `snapshot` 内 |
-| `start` | 通用请求体，新 `run_id` | 可选 `snapshot`、参与 `url` 和业务说明 |
-| `command` | 通用请求体，带指令和可选参数 | 可选 `snapshot` 及操作结果 |
-| `stop` | 通用请求体，参数为空对象 | 可选 `snapshot` 及受理结果 |
-| `details` | 通用请求体，参数为空对象 | 可选 `snapshot`、详细业务状态、规则和可用指令 |
+| operation | body                         | 返回 result                                   |
+|-----------|------------------------------|-----------------------------------------------|
+| `status`  | `{}`                         | **直接返回完整快照**，不包在 `snapshot` 内    |
+| `start`   | 通用请求体，新 `run_id`      | 必需完整 `snapshot`、参与 `url` 和业务说明    |
+| `command` | 通用请求体，带指令和可选参数 | 必需完整 `snapshot` 及操作结果                |
+| `stop`    | 通用请求体，参数为空对象     | 必需完整 `snapshot` 及受理结果                |
+| `details` | 通用请求体，参数为空对象     | 可选 `snapshot`、详细业务状态、规则和可用指令 |
 
 `status` 返回示例：
 
@@ -156,24 +156,24 @@ Token 只放请求头，不放 URL；错误或空 Token 拒绝升级（HTTP 401�
 
 工具参数包装如下：
 
-| 模型工具 | arguments |
-| --- | --- |
-| `start_activity` | `{"parameters": {...}}`，省略时 parameters 为空对象 |
-| `command_activity` | `{"instruction": "...", "parameters": {...}}` |
-| `stop_activity` | `{"parameters": {}}` |
-| `get_activity_details` | `{"parameters": {}}` |
+| 模型工具               | arguments                                           |
+|------------------------|-----------------------------------------------------|
+| `start_activity`       | `{"parameters": {...}}`，省略时 parameters 为空对象 |
+| `command_activity`     | `{"instruction": "...", "parameters": {...}}`       |
+| `stop_activity`        | `{"parameters": {}}`                                |
+| `get_activity_details` | `{"parameters": {}}`                                |
 
 暂停、恢复、落子等是 `command` 的业务指令，服务通过 `details` 告诉模型如何调用。所有会话共享工具权限，具体业务约束由服务判断。`stop` 受理不等于结束；只有快照明确 `running: false` 才从上下文移除，服务本身不退出。
 
 ## 快照与序号
 
-| 字段 | 要求 |
-| --- | --- |
-| `running` | 布尔值；暂停仍为 true |
-| `run_id` | 主程序启动时生成，每次启动不同；服务原样保存 |
-| `sequence` | 非负 64 位有符号整数，状态变化或新通知时递增 |
-| `status` | 简短状态，最多 4096 UTF-8 字节，直接提供给模型 |
-| `origin` | 最初启动来源，恢复时必需 |
+| 字段       | 要求                                           |
+|------------|------------------------------------------------|
+| `running`  | 布尔值；暂停仍为 true                          |
+| `run_id`   | 主程序启动时生成，每次启动不同；服务原样保存   |
+| `sequence` | 非负 64 位有符号整数，状态变化或新通知时递增   |
+| `status`   | 简短状态，最多 4096 UTF-8 字节，直接提供给模型 |
+| `origin`   | 最初启动来源，恢复时必需                       |
 
 读取状态、读取详情、重发同一事件不能增加序号。同一序号不能改变 `running` 或 `status`。旧序号不会覆盖新状态；结束的运行不能用新序号复活，开始新活动必须使用新的 `run_id`。事件不能切换运行标识，连接恢复也需与主程序已保存的运行匹配；服务不可自行启动一个替代实例。
 
@@ -193,12 +193,13 @@ sequenceDiagram
     S->>M: event（当前有效的待确认通知）
     M->>S: event_ack
     M->>S: request command
-    S->>M: response（操作结果）
-    M->>S: request status（确认真实状态）
-    S->>M: response
+    S->>M: response（操作结果 + 最新完整 snapshot）
+    Note over M: 应用快照及结果后进入下一轮模型调用
 ```
 
-每次连接都先自动注册并同步状态，主程序发送 `{"type":"ready"}` 后服务才能推送事件。完成同步前工具不可操作。后台每项服务提供“立即同步”，实际向服务请求 status；页面顶部“刷新”仅重新读取本地快照。手动同步与工具请求互斥，离线或忙碌时返回明确错误；纯状态核对不触发模型回复。状态变化通过 WS 主动推送，同时对已连接服务约每 60 秒执行一次 status 兜底核对，忙碌时跳过并在空闲后核对；每次工具操作后仍查询一次 `status`，失败或超时也会在连接仍有效时确认状态。状态同步失败会关闭连接，等待服务重连。
+每次连接都先自动注册并同步状态，主程序发送 `{"type":"ready"}` 后服务才能推送事件。完成同步前工具不可操作。后台每项服务提供“立即同步”，实际向服务请求 status；页面顶部“刷新”仅重新读取本地快照。手动同步与工具请求互斥，离线或忙碌时返回明确错误；纯状态核对不触发模型回复。服务 MUST 主动推送每一次状态变化，并在 start、command、stop 成功返回前将最新完整 snapshot 放入响应；details 的 snapshot 可选，提供时同样校验并应用。主程序先应用快照与结果，再进入下一轮模型调用，不定时查询、不在操作后或模型请求前查询 status。失败、超时或缺失/无效快照将结果及状态标为未确认，保留最后快照（启动中的 run_id 和过渡状态也保留），不推断 running=false、不重试启动、不额外查询、不因此断开健康连接。未确认时工具暂不可操作，但当前连接的有效事件仍可更新状态并恢复确认，管理员也可立即同步。每次重连服务 MUST 通过初始 status 响应重新发送完整状态；只有连接存活超时、实际断线或协议违规等才关闭连接。
+
+管理接口的 `connected` 表示连接存活，`synchronized` 表示最近状态已确认，两者含义独立。前端将已连接但未确认的服务标为“已连接，状态未确认”，保留运行记录及最后状态，不将其显示为已确认运行或空闲；“立即同步”只要求已连接且非忙碌，不以 `synchronized` 为前提。页面每 5 秒刷新只读取主程序本地快照，不向活动服务查询。
 
 事件示例：
 
@@ -219,11 +220,11 @@ sequenceDiagram
 
 `event` 携带完整快照。可选 `text` 最多 65536 UTF-8 字节；可选 `target_session` 指定规范会话 ID，省略时发往启动会话；可选 `mode` 默认 `silent`：
 
-| mode | 行为 |
-| --- | --- |
+| mode     | 行为                                                       |
+|----------|------------------------------------------------------------|
 | `silent` | 更新状态并记录非空通知，不触发回复判断；仍可能参与记忆维护 |
-| `judge` | 记录非空通知，由 Router 判断是否回复 |
-| `force` | 记录非空通知，直接进入回复流程 |
+| `judge`  | 记录非空通知，由 Router 判断是否回复                       |
+| `force`  | 记录非空通知，直接进入回复流程                             |
 
 没有非空 `text` 且没有附件时只更新状态，不调用模型。图片附件也构成通知，纯图片事件遵循相同的 silent/judge/force 行为。通知仍尊重机器人与会话启用开关，不绕过禁用设置；同会话通过原回复队列处理。通知作为内部系统消息保存，带启动来源，不冒充启动用户。模型决定具体调用哪个工具，`force` 不保证它一定落子或一定发送聊天消息。
 
@@ -267,10 +268,22 @@ curl -X POST http://127.0.0.1:7778/activities/files \
 
 只接受实际字节为 PNG 或 JPEG 的图片，不信任文件名或声明的 Content-Type；完整解码校验，最大 24 MiB、16 MiPixels。服务器请求体上限为 25 MiB（包含 multipart 头）。错误 Token 返回 401，请求或文件过大返回 413，其它上传校验失败返回 400 和 `success: false`、`error`。文件响应不暴露磁盘路径或 Base64。
 
-在原事件中加入可选字段：
+在原事件的 `event` 对象中加入可选的 `attachments` 字段，例如：
 
 ```json
-"attachments": [{"file_id": "img_1234abcd"}]
+{
+  "type": "event",
+  "event": {
+    "running": true,
+    "run_id": "本次活动标识",
+    "sequence": 5,
+    "status": "桌面截图已就绪",
+    "origin": {"session_id": "group:example", "user_id": "starter"},
+    "text": "当前桌面截图",
+    "attachments": [{"file_id": "img_1234abcd"}],
+    "mode": "force"
+  }
+}
 ```
 
 最多 16 个附件，每项只能包含 `file_id`。引用必须来自本服务、本次运行的成功上传；缓存里已有图片也不能绕过上传归属校验。附件或目标会话无效时事件不接受、不推进状态或通知去重序号；修正后可重试同序号。已接受的重复事件仍成功确认，不重复投递；终态事件可引用结束前上传的图片。

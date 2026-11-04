@@ -75,8 +75,8 @@ namespace insoulforge {
           drogon::WebSocketMessageType type);
         /// @brief 使该连接的等待请求失败；只有当前连接断开才改变服务状态。
         void disconnect(const drogon::WebSocketConnectionPtr &connection);
-        /// @brief 检查连接存活并低频核对状态；默认 60 秒，较短间隔用于协议测试。
-        void start(trantor::EventLoop &loop, std::chrono::seconds checkInterval = std::chrono::seconds{60});
+        /// @brief 检查连接存活及上传过期，不主动查询状态。
+        void start(trantor::EventLoop &loop);
         /// @brief 关闭连接并拒绝新操作、事件，不停止独立服务中的活动。
         void stop();
 
@@ -85,10 +85,10 @@ namespace insoulforge {
             json config;
             json runtime = {{"running", false}, {"run_id", ""}, {"sequence", -1}};
             bool busy = false;
-            bool synchronized = false;
+            bool synchronized = false; ///< 最新状态已确认；操作超时后允许有效推送恢复。
+            bool ready = false; ///< 当前连接已完成初始全量同步。
             drogon::WebSocketConnectionPtr connection;
             std::chrono::steady_clock::time_point lastSeen;
-            std::chrono::steady_clock::time_point lastCheck;
         };
         using Services = std::map<std::string, std::shared_ptr<Service>>;
         struct Registration {
@@ -131,8 +131,7 @@ namespace insoulforge {
         void sendRequest(std::string name, drogon::WebSocketConnectionPtr connection, std::string operation, json body,
           trantor::EventLoop *loop, std::function<void(json)> callback);
         void completeRequest(const std::string &id, const drogon::WebSocketConnectionPtr &connection, json response);
-        enum class SyncMode { Recovery, Check, AfterOperation };
-        auto synchronize(std::string name, drogon::WebSocketConnectionPtr connection, SyncMode mode)
+        auto synchronize(std::string name, drogon::WebSocketConnectionPtr connection)
           -> drogon::Task<std::expected<void, std::string>>;
         auto receiveEvent(const std::string &name, const drogon::WebSocketConnectionPtr &connection, const json &event)
           -> std::expected<void, std::string>;
@@ -155,7 +154,6 @@ namespace insoulforge {
         EventSink m_sink;
         trantor::EventLoop *m_loop = nullptr;
         trantor::TimerId m_timer;
-        std::chrono::seconds m_checkInterval{60};
         bool m_stopping = false;
     };
 } // namespace insoulforge

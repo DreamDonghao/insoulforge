@@ -40,6 +40,8 @@ namespace {
     auto lastCommand = json{};
     std::atomic<bool> unavailable{false};
     std::atomic<bool> loseStartResponse{false};
+    std::atomic<bool> omitSnapshot{false};
+    std::atomic<bool> rejectCommand{false};
     std::atomic<bool> delayStart{false};
     std::atomic<bool> delayStatus{false};
     std::atomic<bool> largeDetails{false};
@@ -280,9 +282,11 @@ namespace {
                     lastCommand = body;
                     if (unavailable)
                         return; // 测试真正的请求超时，不执行操作，也不发响应。
-                    result = {{"success", true}};
+                    remote["sequence"] = remote.value("sequence", 0) + 1;
+                    remote["status"] = "指令已应用";
+                    result = {{"success", true}, {"snapshot", remote}};
                 } else if (operation == "stop")
-                    result = {{"accepted", true}};
+                    result = {{"accepted", true}, {"snapshot", remote}};
                 else {
                     result = {{"snapshot", remote}, {"board", {{"turn", "user"}}}};
                     if (largeDetails)
@@ -290,11 +294,13 @@ namespace {
                 }
             }
             if (lost) {
-                source->stop(); // 已启动，但响应丢失。
+                // 已启动但不响应；保持健康连接，等待真正的请求超时。
                 return;
             }
-            const auto response = dumpJson(
-              json{{"type", "response"}, {"request_id", message["request_id"]}, {"success", true}, {"result", result}});
+            if (omitSnapshot)
+                result.erase("snapshot");
+            const auto response = dumpJson(json{{"type", "response"}, {"request_id", message["request_id"]},
+              {"success", !(operation == "command" && rejectCommand)}, {"result", result}});
             if (delayed)
                 source->getLoop()->runAfter(.15, [source, response] { source->getConnection()->send(response); });
             else
@@ -432,6 +438,7 @@ namespace {
               "service not automatically registered");
             require(manager.runningActivities().empty(), "idle service in context");
             require(!(co_await manager.refresh("missing")).has_value(), "unknown service synchronization accepted");
+            const auto beforeOperations = callCount("status");
             delayStart = true;
             std::atomic<bool> done{false};
             json first;
@@ -445,6 +452,7 @@ namespace {
             co_await waitFor([&] { return done.load(); }, "start response missing");
             require(
               first["url"] == "http://fixture/play" && manager.runningActivities().size() == 1, "start not reflected");
+            require(callCount("status") == beforeOperations, "start queried status");
             require(!manager.removeService("chess", store), "running service removed");
             require(!manager.setEnabled("chess", false, store), "running service disabled");
             ActivityManager restored("data/activity-state.json");
@@ -462,13 +470,21 @@ namespace {
               synced->statusCode() == drogon::k200OK && getStr(registered("chess"), "status") == "漏推送，主动核对",
               "manual synchronization did not query actual state");
             delayStart = false;
+            const auto beforeSuccess = callCount("status");
             result = co_await manager.invoke("command", "chess",
               {{"instruction", "暂停"}, {"parameters", {{"cell", 5}}}}, origin("private:caller", "actual-user"));
             require(getBool(result, "success") && lastCommand["caller"] == origin("private:caller", "actual-user") &&
                       lastCommand["origin"] == origin(),
               "caller/origin lost");
+            require(callCount("status") == beforeSuccess && getStr(registered("chess"), "status") == "指令已应用",
+              "command snapshot not applied or queried status");
             require(
               !lastCommand.contains("callback_url") && !lastCommand.contains("name"), "old transport fields leaked");
+            omitSnapshot = true;
+            result = co_await manager.invoke("details", "chess", json::object(), origin());
+            omitSnapshot = false;
+            require(result.contains("board") && callCount("status") == beforeSuccess,
+              "details without snapshot failed or queried status");
             largeDetails = true;
             result = co_await manager.invoke("details", "chess", json::object(), origin());
             largeDetails = false;
@@ -478,10 +494,10 @@ namespace {
             const auto beforeStatus = callCount("status");
             done = false;
             drogon::async_run([&]() -> drogon::Task<> {
-                result = co_await manager.invoke("details", "chess", json::object(), origin());
+                require((co_await manager.refresh("chess")).has_value(), "delayed explicit sync failed");
                 done = true;
             });
-            co_await waitFor([&] { return callCount("status") > beforeStatus; }, "post-operation status not requested");
+            co_await waitFor([&] { return callCount("status") > beforeStatus; }, "explicit status not requested");
             const auto busy = co_await manager.invoke("command", "chess", json::object(), origin());
             require(!getBool(busy, "success", true), "operation overlapped status confirmation");
             require(!(co_await manager.refresh("chess")).has_value(), "manual synchronization overlapped operation");
@@ -598,9 +614,11 @@ namespace {
             clients.push_back(takeover);
             co_await waitFor([&] { return takeover->ready.load(); }, "takeover failed");
             require(getBool(manager.configuration()["servers"][0], "connected"), "old close cleared replacement");
+            const auto beforeStop = callCount("status");
             auto stopped = co_await manager.invoke("stop", "chess", json::object(), origin());
             require(
               getBool(stopped, "accepted") && !manager.runningActivities().empty(), "accepted stop treated as ended");
+            require(callCount("status") == beforeStop, "stop queried status");
             event = changeSnapshot("已结束", false);
             event["mode"] = "silent";
             takeover->event(event);
@@ -615,10 +633,24 @@ namespace {
             require(
               !getBool(takeover->lastAck, "success") && manager.runningActivities().empty(), "ended run reactivated");
             // 已执行启动而未收到响应：只返回不确定，重连恢复，不重复发送启动。
+            const auto beforeLostStart = callCount("status");
             loseStartResponse = true;
             auto uncertain = co_await manager.invoke("start", "chess", json::object(), origin());
             require(!getBool(uncertain, "success", true), "lost response returned success");
             loseStartResponse = false;
+            require(getBool(registered("chess"), "connected") && !getBool(registered("chess"), "synchronized") &&
+                      callCount("status") == beforeLostStart && manager.runningActivities().size() == 1,
+              "start timeout lost transitional state or queried status");
+            require(!getBool(co_await manager.invoke("start", "chess", json::object(), origin()), "success", true) &&
+                      callCount("start") == 2,
+              "timed out start duplicated singleton");
+            auto pendingState = json{};
+            std::ifstream("data/activity-state.json") >> pendingState;
+            require(getBool(pendingState["chess"], "starting") && !getStr(pendingState["chess"], "run_id").empty(),
+              "start timeout did not persist run identity");
+            takeover->event(changeSnapshot("启动超时后恢复"));
+            co_await waitFor(
+              [&] { return getBool(registered("chess"), "synchronized"); }, "start timeout push blocked");
             auto recovered = connectService(endpoint);
             clients.push_back(recovered);
             co_await waitFor([&] { return recovered->ready.load(); }, "uncertain start not recovered");
@@ -629,13 +661,47 @@ namespace {
             recovered->event(crossRun);
             co_await waitFor([&] { return recovered->acks == 1; }, "cross-run attachment ack missing");
             require(!getBool(recovered->lastAck, "success"), "old-run file ID accepted in new run");
-            // 超时只查询状态，不重新发送有副作用的指令。
+            // Missing snapshots and explicit failures preserve state and recover through pushes.
+            auto beforeFailureStatus = callCount("status");
+            const auto lastStatus = getStr(registered("chess"), "status");
+            omitSnapshot = true;
+            uncertain = co_await manager.invoke("command", "chess", json::object(), origin());
+            omitSnapshot = false;
+            require(!getBool(uncertain, "success", true) && !getBool(registered("chess"), "synchronized") &&
+                      getStr(registered("chess"), "status") == lastStatus,
+              "missing snapshot confirmed or lost state");
+            recovered->event(changeSnapshot("缺少快照后恢复"));
+            co_await waitFor([&] { return getBool(registered("chess"), "synchronized"); }, "push recovery blocked");
+            rejectCommand = true;
+            uncertain = co_await manager.invoke("command", "chess", json::object(), origin());
+            rejectCommand = false;
+            require(!getBool(uncertain, "success", true) && callCount("status") == beforeFailureStatus,
+              "failed operation queried status");
+            require((co_await manager.refresh("chess")).has_value(), "unconfirmed state blocked explicit sync");
+            beforeFailureStatus = callCount("status");
+            // 超时不查询状态，不重新发送有副作用的指令。
             unavailable = true;
             const auto beforeCommand = callCount("command");
             uncertain = co_await manager.invoke("command", "chess", json::object(), origin());
             unavailable = false;
             require(!getBool(uncertain, "success", true) && callCount("command") == beforeCommand + 1,
               "timeout retried command");
+            require(callCount("status") == beforeFailureStatus && getBool(registered("chess"), "connected") &&
+                      !getBool(registered("chess"), "synchronized") &&
+                      getStr(manager.runningActivities()[0], "status").find("状态未确认") != std::string::npos,
+              "timeout queried status, disconnected or hid uncertainty");
+            const auto starts = callCount("start");
+            require(!getBool(co_await manager.invoke("start", "chess", json::object(), origin()), "success", true) &&
+                      callCount("start") == starts,
+              "uncertain state retried start");
+            json repeatedSnapshot;
+            {
+                std::lock_guard lock(fixtureMutex);
+                repeatedSnapshot = remote;
+            }
+            recovered->event(repeatedSnapshot);
+            co_await waitFor(
+              [&] { return getBool(registered("chess"), "synchronized"); }, "timeout push recovery failed");
             co_await waitFor(
               [&] { return unregistered->closed.load(); }, "registration deadline did not close idle socket");
             // Token 热更新同时取消已注册及尚未注册连接，不丢失等待操作。
@@ -719,43 +785,9 @@ namespace {
         co_await drogon::sleepCoro(trantor::EventLoop::getEventLoopOfCurrentThread(), .1);
         drogon::app().quit();
     }
-    auto runPeriodic(const std::string endpoint, const std::filesystem::path root, int &exitCode) -> drogon::Task<> {
-        auto &manager = ActivityManager::instance();
-        std::shared_ptr<MockService> service;
-        try {
-            require(Config::instance().initialize((root / "config.json").string()).has_value(),
-              "periodic fixture config failed");
-            require(manager.initialize(configuration()).has_value(), "periodic manager init failed");
-            manager.start(*drogon::app().getLoop(), std::chrono::seconds{1});
-            service = connectService(endpoint);
-            co_await waitFor([&] { return service->ready.load(); }, "periodic service not ready");
-            const auto started = co_await manager.invoke("start", "chess", json::object(), origin());
-            require(started.contains("snapshot"), "periodic fixture start failed");
-            const auto before = callCount("status");
-            changeSnapshot("未推送的最新状态");
-            co_await waitFor(
-              [&] {
-                  return getStr(registered("chess"), "status") == "未推送的最新状态" && callCount("status") > before;
-              },
-              "periodic query did not repair missed push");
-            changeSnapshot("已结束", false);
-            co_await waitFor(
-              [&] { return manager.runningActivities().empty(); }, "periodic query did not detect finish");
-            require(executorRequests == 0 && routerRequests == 0, "periodic query triggered model");
-            exitCode = 0;
-        } catch (const std::exception &error) {
-            std::cerr << error.what() << '\n';
-        }
-        manager.stop();
-        if (service)
-            service->close();
-        co_await drogon::sleepCoro(trantor::EventLoop::getEventLoopOfCurrentThread(), .1);
-        drogon::app().quit();
-    }
 } // namespace
 
-auto main(int argc, char **argv) -> int {
-    const auto periodic = argc > 1 && std::string(argv[1]) == "--periodic";
+auto main() -> int {
     auto root = std::filesystem::temp_directory_path() / ("insoulforge-activities-" + drogon::utils::getUuid());
     std::filesystem::create_directories(root);
     // 单例持久化也隔离到临时运行目录，绝不接触项目 data。
@@ -779,7 +811,9 @@ auto main(int argc, char **argv) -> int {
               if (active > maxConcurrentExecutors)
                   maxConcurrentExecutors = active;
               std::lock_guard lock(fixtureMutex);
-              lastModelContext = json::parse(getStr(body["messages"][1], "content"));
+              for (const auto &message: body["messages"])
+                  if (getStr(message, "role") == "user")
+                      lastModelContext = json::parse(getStr(message, "content"));
           }
           const auto response = jsonResponse({{"choices",
             json::array(
@@ -806,10 +840,7 @@ auto main(int argc, char **argv) -> int {
         const auto endpoint = "http://127.0.0.1:" + std::to_string(drogon::app().getListeners().front().toPort());
         client.getLoop()->queueInLoop([&, endpoint] {
             drogon::async_run([&, endpoint]() -> drogon::Task<> {
-                if (periodic)
-                    co_await runPeriodic(endpoint, root, exitCode);
-                else
-                    co_await run(endpoint, root, exitCode);
+                co_await run(endpoint, root, exitCode);
                 client.getLoop()->quit();
             });
         });
