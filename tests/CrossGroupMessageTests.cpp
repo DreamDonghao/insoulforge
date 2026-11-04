@@ -27,6 +27,7 @@
 #include <workflow/message/MessageContentEnricher.hpp>
 #include <workflow/message/MessageService.hpp>
 #include <workflow/message/image/ImageDescriptionService.hpp>
+#include <workflow/message/image/ImageDescriptionStore.hpp>
 #include <workflow/session/SessionStore.hpp>
 
 namespace {
@@ -209,6 +210,66 @@ namespace {
                   getStr(fixture.messages().back(), "message") ==
                     "[CQ:image,file=base64://" + Image::encode(imageBytes()) + "]",
           "ID send did not directly send Base64");
+        const auto checkSentDescription = [&](const std::string &expected) {
+            const auto records = OneBotEventWorkflow::instance().getSessionMessages(SessionId::group("600"));
+            require(records && !records->empty(), "sent image record missing");
+            const auto &sent = records->back();
+            require(sent["segments"][0]["description"] == expected && sent["segments"][0]["image_id"] == cachedId &&
+                      sent["assets"]["images"][0]["description"] == expected &&
+                      sent["assets"]["images"][0]["image_id"] == cachedId,
+              "sent image description or ID was not recorded");
+        };
+        checkSentDescription("vision answer");
+        const auto beforeCachedSend = fixture.visions().size();
+        co_await registry.executeTool("send_image", sendById, cachedContext);
+        require(fixture.visions().size() == beforeCachedSend, "send bypassed DB description cache");
+        checkSentDescription("vision answer");
+
+        (void) ImageDescriptionStore::clearAll();
+        for (const auto &location: {"assets", "segments"}) {
+            for (const auto &status: {"succeeded", "generated"}) {
+                json entry = {{"type", "image"}, {"image_id", cachedId}, {"recognition_status", status},
+                  {"description", "一只白猫"}};
+                json snapshot = {{"session_id", SessionId::group("600").toString()}};
+                if (std::string_view(location) == "assets")
+                    snapshot["assets"]["images"] = json::array({entry});
+                else
+                    snapshot["segments"] = json::array({entry});
+                const auto beforeReuse = fixture.visions().size();
+                co_await registry.executeTool("send_image", sendById,
+                  {.sessionId = SessionId::group("600"), .messageSnapshot = json::array({snapshot})});
+                require(fixture.visions().size() == beforeReuse, "snapshot description triggered vision");
+                checkSentDescription("一只白猫");
+            }
+        }
+        // A failed description is not reusable; the missing cache must invoke vision.
+        const auto beforeVision = fixture.visions().size();
+        co_await registry.executeTool("send_image", sendById, cachedContext);
+        require(fixture.visions().size() == beforeVision + 1, "missing description did not invoke vision");
+        checkSentDescription("vision answer");
+        for (const auto &entry:
+          {json{{"recognition_status", "failed"}, {"description", "错误描述"}},
+            json{{"recognition_status", "succeeded"}, {"description", " \t\n"}}, json{{"description", "无状态描述"}}}) {
+            (void) ImageDescriptionStore::clearAll();
+            auto invalid = enriched;
+            auto &asset = invalid["assets"]["images"][0];
+            asset = entry;
+            asset["image_id"] = cachedId;
+            const auto beforeInvalid = fixture.visions().size();
+            co_await registry.executeTool("send_image", sendById,
+              {.sessionId = SessionId::group("600"), .messageSnapshot = json::array({invalid})});
+            require(fixture.visions().size() == beforeInvalid + 1, "invalid description was reused");
+            checkSentDescription("vision answer");
+        }
+        for (const auto mode: {1, 2}) {
+            (void) ImageDescriptionStore::clearAll();
+            fixture.visionMode = mode;
+            const auto beforeFallback = fixture.messages().size();
+            co_await registry.executeTool("send_image", sendById, cachedContext);
+            require(fixture.messages().size() == beforeFallback + 1, "description failure prevented send");
+            checkSentDescription("图片描述不可用");
+        }
+        fixture.visionMode = 0;
         const auto beforeRejectedSend = fixture.messages().size();
         co_await registry.executeTool("send_image", {{"url", endpoint + "/reference.png"}}, cachedContext);
         co_await registry.executeTool("send_image", sendById, {.sessionId = SessionId::group("601")});

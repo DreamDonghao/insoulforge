@@ -320,8 +320,42 @@ namespace insoulforge {
                 const auto encoded = image->base64();
                 if (!encoded)
                     co_return encoded.error();
-                const auto sent = co_await MessageService::sendToSession(ctx.requireSession(),
-                  "[CQ:image,file=base64://" + *encoded + "]", std::string("已发送图片"), {}, image->id());
+                std::string description;
+                const auto reuseDescription = [&](const json &entry) {
+                    const auto status = getStr(entry, "recognition_status");
+                    if (description.empty() && getStr(entry, "image_id") == id &&
+                        (status == "succeeded" || status == "generated"))
+                        description = trim(getStr(entry, "description"));
+                };
+                for (const auto &record: ctx.messageSnapshot) {
+                    if (const auto session = getStr(record, "session_id");
+                      !session.empty() && SessionId::parse(session) != ctx.sessionId)
+                        continue;
+                    const auto &assets = atOrNull(atOrNull(record, "assets"), "images");
+                    if (assets.is_array())
+                        for (const auto &asset: assets)
+                            reuseDescription(asset);
+                    const auto &segments = atOrNull(record, "segments");
+                    if (segments.is_array())
+                        for (const auto &segment: segments)
+                            if (getStr(segment, "type") == "image")
+                                reuseDescription(segment);
+                }
+                if (description.empty()) {
+                    try {
+                        if (const auto recognized = co_await ImageDescriptionService::describeGeneratedImage(
+                              image->id(), ctx.requireSession()))
+                            description = trim(recognized->description);
+                    } catch (const std::exception &error) {
+                        Logger::warn(ctx.requireSession(), "Media", fmt::format("发送图片识别失败: {}", error.what()));
+                    } catch (...) {
+                        Logger::warn(ctx.requireSession(), "Media", "发送图片识别失败：未知异常");
+                    }
+                }
+                if (description.empty())
+                    description = "图片描述不可用";
+                const auto sent = co_await MessageService::sendToSession(
+                  ctx.requireSession(), "[CQ:image,file=base64://" + *encoded + "]", description, {}, image->id());
                 co_return sent ? "图片已发送。" : "图片发送失败：" + sent.error();
             }},
           ToolCategory::ACTION);
