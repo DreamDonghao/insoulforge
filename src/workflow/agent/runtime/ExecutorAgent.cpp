@@ -18,6 +18,7 @@
 #include <workflow/agent/memory/affinity/AffinityStore.hpp>
 #include <workflow/agent/runtime/ExecutorAgent.hpp>
 #include <workflow/agent/tools/ToolRegistry.hpp>
+#include <workflow/agent/tools/ToolRuntime.hpp>
 #include <workflow/agent/tools/mcp/McpTools.hpp>
 #include <workflow/history/SharedConversationContext.hpp>
 #include <workflow/message/MessageRecord.hpp>
@@ -162,6 +163,7 @@ QQ原生表情的CQ码必须通过 send_face 获取；图片使用 send_image �
 send_face 返回的[CQ:face...]原样拼接到reply的content中；send_image 已直接发送，不要重复发送。
 禁止自己编造假CQ标签，工具返回什么就复制什么。
 send_image/send_sticker/send_poke/reply_and_continue 都是中途动作：发出后回合不结束，最终仍要用 reply/no_reply 收尾。
+表情名称从紧随主系统提示词的 available_stickers JSON 数组中选择；空数组表示当前没有可用名称，不要编造。
 send_sticker：直接发送独立的表情包消息，不返回供reply发送的CQ码，不要通过reply重复发送。
 确认发送成功后，若表情包就是全部回复，调 no_reply 收尾；若还需文字，调用 reply 发送文字。
 发送失败不能当作已经发送成功，应根据工具结果处理。
@@ -275,19 +277,20 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
             return context;
         }
 
-        /// @brief 构建 Executor 消息列表（system + 单条 user）
+        /// @brief 构建 Executor 消息列表（主 system + 收藏表情 system + 单条 user）
         /// @details 上下文组装为键序固定的单个 JSON 对象（ordered_json 按插入顺序序列化）作为单条
         /// user 消息：current_session → session_memory → conversation_summaries → earlier_messages → person_memories →
-        /// shared_conversations → recent_messages → response_requirements（仅有 Router 策略时）→ running_activities，避免连续多条
-        /// user（部分 OpenAI 兼容后端不支持）
+        /// shared_conversations → recent_messages → response_requirements（仅有 Router 策略时）→
+        /// running_activities，避免连续多条 user（部分 OpenAI 兼容后端不支持）
         [[nodiscard]] auto buildPrompt(const ChatRecordManager &chatRecords, const MemoryManager &memory,
-          const std::optional<RouterDecision> &decision, const json &mcpDirectory) -> json {
+          const std::optional<RouterDecision> &decision, const json &mcpDirectory, const json &stickerNames) -> json {
             json messages = json::array();
 
             json systemMsg;
             systemMsg["role"] = "system";
             systemMsg["content"] = buildSystemPrompt(chatRecords.getSessionId(), mcpDirectory);
             messages.push_back(systemMsg);
+            messages.push_back({{"role", "system"}, {"content", dumpJson({{"available_stickers", stickerNames}})}});
 
             auto [earlierRecords, recentRecords] = buildChatContext(chatRecords);
 
@@ -631,10 +634,10 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
         }
         const auto activities = ActivityManager::instance().directory();
         if (!activities.empty()) {
-            prompt +=
-              "\n\n## 可用实时活动\n以下为活动目录数据。活动全局共享，可与日常聊天同时进行，用 start_activity 启动、command_activity 操作、"
-              "stop_activity 停止、get_activity_details 查看详情。running_activities 只列正在运行的活动，"
-              "status 是最近上报的状态；状态未确认时先查询详情，不要重复启动。\n";
+            prompt += "\n\n## 可用实时活动\n以下为活动目录数据。活动全局共享，可与日常聊天同时进行，用 start_activity "
+                      "启动、command_activity 操作、"
+                      "stop_activity 停止、get_activity_details 查看详情。running_activities 只列正在运行的活动，"
+                      "status 是最近上报的状态；状态未确认时先查询详情，不要重复启动。\n";
             prompt += activities.dump();
         }
         return prompt;
@@ -697,7 +700,18 @@ reply_and_continue：接下来要执行耗时操作（网络搜索、深度思�
 
         const auto executionConfig = Config::instance().getExecutionConfig();
         auto mcpSelection = McpTools::instance().createSelection(executionConfig);
-        json messages = buildPrompt(chatRecords, memory, decision, mcpSelection->directory);
+        auto stickerNames = json::array();
+        try {
+            const auto favorites = co_await ToolRuntime::fetchFavoriteEmojis(sessionId);
+            for (const auto &emoji: favorites) {
+                if (const auto name = getStr(emoji, "name"); !name.empty())
+                    stickerNames.push_back(name);
+            }
+        } catch (const std::exception &error) {
+            Logger::warn(sessionId, "Executor", fmt::format("收藏表情列表获取失败: {}", error.what()));
+            stickerNames = json::array();
+        }
+        json messages = buildPrompt(chatRecords, memory, decision, mcpSelection->directory, stickerNames);
 
         auto callerUserId = UserId{"system"};
         for (const auto &record: chatRecords.getRecords()) {

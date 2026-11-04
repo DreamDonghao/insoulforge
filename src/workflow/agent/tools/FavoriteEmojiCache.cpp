@@ -3,8 +3,8 @@
 
 
 #include <infrastructure/NumericTypes.hpp>
-#include <infrastructure/image/Image.hpp>
 #include <infrastructure/SessionId.hpp>
+#include <infrastructure/image/Image.hpp>
 #include <onebot/transport/OneBotClient.hpp>
 #include <workflow/agent/tools/ToolRuntime.hpp>
 
@@ -37,8 +37,12 @@ namespace insoulforge {
         }
 
         json result(json::array());
-        const json data = co_await OneBotClient::fetchCustomFaceDetail(sessionId);
+        auto data = co_await OneBotClient::fetchCustomFaceDetail(sessionId);
+        if (!data.is_array())
+            data = json::array();
         for (size_t index = 0; const auto &item: data) {
+            if (!item.is_object())
+                continue;
             json emoji;
             const std::string description = sanitizeCqParameter(getStr(item, "desc"));
             const std::string md5 = getStr(item, "md5");
@@ -90,7 +94,8 @@ namespace insoulforge {
         // Invalidate even on failure: a timeout can occur after QQ has applied the change.
         const bool added = co_await OneBotClient::addCustomFace(*path, sessionId);
         invalidateFavoriteEmojiCache();
-        if (!added) co_return std::unexpected("收藏请求失败或结果未确认，请刷新列表核对后再试；确认 QQ 在线且支持收藏接口");
+        if (!added)
+            co_return std::unexpected("收藏请求失败或结果未确认，请刷新列表核对后再试；确认 QQ 在线且支持收藏接口");
         co_return std::expected<void, std::string>{};
     }
 
@@ -106,7 +111,8 @@ namespace insoulforge {
             co_return std::unexpected("上传图片失败，请确认 QQ 在线且协议端支持 download_file.base64");
         const bool added = co_await OneBotClient::addCustomFace(*path, sessionId);
         invalidateFavoriteEmojiCache();
-        if (!added) co_return std::unexpected("收藏请求失败或结果未确认，请刷新列表核对后再试；确认 QQ 在线且支持收藏接口");
+        if (!added)
+            co_return std::unexpected("收藏请求失败或结果未确认，请刷新列表核对后再试；确认 QQ 在线且支持收藏接口");
         co_return std::expected<void, std::string>{};
     }
 
@@ -118,7 +124,8 @@ namespace insoulforge {
         }
         const bool deleted = co_await OneBotClient::deleteCustomFace(resId, sessionId);
         invalidateFavoriteEmojiCache();
-        if (!deleted) co_return std::unexpected("删除请求失败或结果未确认，请刷新列表核对；确认 QQ 在线且支持收藏接口");
+        if (!deleted)
+            co_return std::unexpected("删除请求失败或结果未确认，请刷新列表核对；确认 QQ 在线且支持收藏接口");
         co_return std::expected<void, std::string>{};
     }
 

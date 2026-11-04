@@ -366,7 +366,7 @@ namespace insoulforge {
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": "表情名称（先调list_stickers查看可用名称）"
+                        "description": "表情名称（参见系统消息 available_stickers）"
                     },
                     "group_id": {
                         "type": "string",
@@ -383,7 +383,7 @@ namespace insoulforge {
           {
             .name = "send_sticker",
             .description = "中途发送一张QQ收藏表情包（独立消息直接发出，不经reply；发出后回合不结束，"
-                           "最终仍用reply/no_reply收尾）。先调list_stickers查看可用表情名。"
+                           "最终仍用reply/no_reply收尾）。从系统消息 available_stickers 选择表情名。"
                            "可选group_id指定目标群，或user_id指定私聊用户 ID，不能同时填写。目标必须在后台启用，"
                            "不受跨会话共享开关限制；均省略则发送到当前会话。"
                            "发送失败或超时不要自动重发。",
@@ -399,7 +399,8 @@ namespace insoulforge {
                 const auto destination = messageDestination(args, *target);
                 const json emoji = co_await ToolRuntime::findFavoriteEmoji(name, ctx.requireSession());
                 if (emoji.is_null()) {
-                    co_return fmt::format("{}表情'{}'不存在，先调list_stickers查看可用表情", destination, name);
+                    co_return fmt::format(
+                      "{}表情'{}'不存在，请核对系统消息 available_stickers 中的名称", destination, name);
                 }
 
                 // 商城表情（字段齐全）走 mface；个人收藏表情走 image+sub_type=1（QQ 渲染为表情）
@@ -613,7 +614,7 @@ namespace insoulforge {
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": "要改名的表情当前名称（先用list_stickers查看）"
+                        "description": "要改名的表情当前名称（参见系统消息 available_stickers）"
                     },
                     "new_name": {
                         "type": "string",
@@ -626,8 +627,8 @@ namespace insoulforge {
           {
             .name = "rename_sticker",
             .description = "修改收藏表情的名称/"
-                           "描述。仅在用户明确要求给表情改名时使用。先调list_stickers查看"
-                           "stickers查看当前名称，再把新名称传给new_name。",
+                           "描述。仅在用户明确要求给表情改名时使用。从系统消息 available_stickers 选择"
+                           "当前名称，再把新名称传给new_name。",
             .parameters = renameParams,
             .handler = [](const json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
                 const std::string name = argString(args, "name");
@@ -640,16 +641,17 @@ namespace insoulforge {
                 const auto &sessionId = ctx.requireSession();
                 const json emoji = co_await ToolRuntime::findFavoriteEmoji(name, sessionId);
                 if (emoji.is_null()) {
-                    co_return fmt::format("表情'{}'不存在，先调list_stickers查看可用表情", name);
+                    co_return fmt::format("表情'{}'不存在，请核对系统消息 available_stickers 中的名称", name);
                 }
 
-                if (!co_await OneBotClient::setCustomFaceDesc(
-                      getStr(emoji, "emoji_id").empty() ? "0" : getStr(emoji, "emoji_id"), getStr(emoji, "res_id"),
-                      getStr(emoji, "md5"), newName, sessionId)) {
+                const bool renamed = co_await OneBotClient::setCustomFaceDesc(
+                  getStr(emoji, "emoji_id").empty() ? "0" : getStr(emoji, "emoji_id"), getStr(emoji, "res_id"),
+                  getStr(emoji, "md5"), newName, sessionId);
+                ToolRuntime::invalidateFavoriteEmojiCache();
+                if (!renamed) {
                     co_return std::string("改名失败");
                 }
 
-                ToolRuntime::invalidateFavoriteEmojiCache();
                 Logger::info(sessionId, "Sticker", fmt::format("表情改名: {} -> {}", name, newName));
                 co_return fmt::format("已改名为: {}", newName);
             },
@@ -662,7 +664,7 @@ namespace insoulforge {
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": "要删除的表情名称（先用list_stickers查看）"
+                        "description": "要删除的表情名称（参见系统消息 available_stickers）"
                     }
                 },
                 "required": ["name"]
@@ -681,10 +683,11 @@ namespace insoulforge {
                 const auto &sessionId = ctx.requireSession();
                 const json emoji = co_await ToolRuntime::findFavoriteEmoji(name, sessionId);
                 if (emoji.is_null()) {
-                    co_return fmt::format("表情'{}'不存在，先调list_stickers查看可用表情", name);
+                    co_return fmt::format("表情'{}'不存在，请核对系统消息 available_stickers 中的名称", name);
                 }
 
-                if (const auto result = co_await ToolRuntime::deleteFavoriteEmoji(getStr(emoji, "res_id"), sessionId); !result) {
+                if (const auto result = co_await ToolRuntime::deleteFavoriteEmoji(getStr(emoji, "res_id"), sessionId);
+                  !result) {
                     co_return std::string("删除失败");
                 }
 

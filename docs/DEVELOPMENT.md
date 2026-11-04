@@ -263,7 +263,7 @@ MessageService → OneBot API
 
 - `ToolRegistry` 以进程内插件管理工具，LLM 调用时按类别分组注入 prompt：
     - `REPLY`：回复工具（`reply` / `no_reply` / `reply_with_quote`），调用后结束本轮处理
-    - `INFORMATION`：信息工具（`recall_memory` / `list_stickers` / `deep_think` / `list_scheduled_tasks`），获取数据
+    - `INFORMATION`：信息工具（`recall_memory` / `deep_think` / `list_scheduled_tasks`），获取数据
     - `ACTION`：动作工具（`send_face` / `send_image` / `send_sticker` / `save_sticker` / `rename_sticker` /
       `reply_and_continue` / `delete_sticker` / `at_user` / `ban_user` / `add_to_blacklist` / `send_poke` /
       `recall_message` / `create_scheduled_task` / `cancel_scheduled_task` / `demo_async_task`），执行操作

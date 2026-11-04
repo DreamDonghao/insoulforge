@@ -39,7 +39,6 @@ Executor（`ExecutorAgent`）在单个 Agent 循环中通过工具调用生成�
 
 | 工具                   | 参数       | 说明                                                                                                                                                                                                                                                                            |
 |------------------------|------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `list_stickers`        | 无         | 列出 QQ 收藏表情名称（`ToolRuntime::fetchFavoriteEmojis`，带缓存）                                                                                                                                                                                                              |
 | `get_group_messages`   | `group_id` | 读取已启用目标群当前内存中保留的全部可共享消息；群号为数字字符串，返回 `session` 与按旧到新排列的 `messages`，每条最多 200 个 Unicode 字符                                                                                                                                      |
 | `recall_memory`        | `query`    | 长期记忆检索：`LongTermMemory::searchMemory` 按 Brute-Force 余弦相似度（阈值 0.3）取 top-3，返回"回忆起：…"或"想不起来"                                                                                                                                                         |
 | `deep_think`           | `question` | 深度思考：调用 `executorThinking` 配置的模型求解。上下文由 Executor 经 `ToolCallContext.conversationContext` 传入（system 之后的完整消息列表，含已获取的工具结果），拼上专家求解 system prompt（只产出问题答案，不组织聊天回复）；模型 content 为空时兜底取 `reasoning_content` |
@@ -73,8 +72,9 @@ Executor（`ExecutorAgent`）在单个 Agent 循环中通过工具调用生成�
 | `rename_sticker` | `name`, `new_name`                  | 修改收藏表情的描述名                                                                                                                                                                                                                             |
 | `delete_sticker` | `name`                              | 从 QQ 收藏表情中删除                                                                                                                                                                                                                             |
 
-表情包工具依赖 OneBot 收藏表情接口，操作成功后都会 `invalidateFavoriteEmojiCache()` 使缓存失效。需要表情名称的工具都要求先调
-`list_stickers` 查看可用名称。
+表情包工具依赖 OneBot 收藏表情接口，变更后通过 `invalidateFavoriteEmojiCache()` 使缓存失效。每次 Executor 生成开始时读取缓存，
+将 `{"available_stickers":["名称"]}` 作为独立 system 消息放在主系统提示词之后；空或获取失败时为 `[]`。
+该列表在本次生成的所有工具轮次和模型兜底请求中保持不变，后续生成读取更新后的收藏。需要名称的工具从该数组选择。
 
 ### 用户与群互动
 

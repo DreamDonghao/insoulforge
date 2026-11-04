@@ -106,31 +106,6 @@ namespace insoulforge {
           },
           ToolCategory::INFORMATION);
 
-        // list_stickers
-        registry.registerTool(
-          {
-            .name = "list_stickers",
-            .description = "获取QQ收藏表情中所有可用的表情名称列表。",
-            .parameters = json(),
-            .handler = [](json, const ToolCallContext ctx) -> drogon::Task<std::string> {
-                const auto &sessionId = ctx.requireSession();
-                const json emojis = co_await ToolRuntime::fetchFavoriteEmojis(sessionId);
-                if (emojis.empty()) {
-                    co_return std::string("表情库为空（QQ收藏表情列表获取失败或没有收藏表情）");
-                }
-                std::string result = "可用表情: ";
-                bool first = true;
-                for (const auto &emoji: emojis) {
-                    if (!first)
-                        result += ", ";
-                    result += getStr(emoji, "name");
-                    first = false;
-                }
-                co_return result;
-            },
-          },
-          ToolCategory::INFORMATION);
-
         // recall_memory
         const json memoryParams = json::parse(R"json({
                 "type": "object",
@@ -190,8 +165,7 @@ namespace insoulforge {
                 }
                 const auto question = value.get<std::string>();
 
-                json messages = json::array({
-                  {{"role", "system"}, {"content", buildThinkingSystemPrompt()}},
+                json messages = json::array({{{"role", "system"}, {"content", buildThinkingSystemPrompt()}},
                   {{"role", "user"}, {"content", question}}});
 
                 const auto &config = Config::instance();
