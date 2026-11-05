@@ -1055,15 +1055,17 @@ auto main() -> int {
           const auto state = context;
           bool valid = validStickers && keys == expected && messages[0]["role"] == "system" &&
                        state["execution_state"]["current_round"] == (isPrivate ? executorRequests : 1) &&
-                       context["person_memories"].size() == 1 && context["person_memories"][0]["user_id"] == "11" &&
+                       context["person_memories"].size() == 1 && context["person_memories"][0]["uid"] == "11" &&
                        context["person_memories"][0]["pending_entries"].size() == 3 &&
                        context["shared_conversations"].empty() && context["running_activities"].empty();
           valid =
             valid && (isPrivate ? context["conversation_summaries"].size() == 1 &&
                                     context["conversation_summaries"][0]["summary"] == "讨论了部署方式，等待后续验证。"
                                 : !context["conversation_summaries"].empty());
-          valid = valid && context["session_memory"] == sessionMemory() &&
-                  (isPrivate ? context["current_session"]["user_id"] == "22"
+          auto expectedSessionMemory = sessionMemory();
+          MessageRecord::compactContextUserIds(expectedSessionMemory);
+          valid = valid && context["session_memory"] == expectedSessionMemory &&
+                  (isPrivate ? context["current_session"]["uid"] == "22"
                              : context["current_session"]["group_id"] == "100") &&
                   context["earlier_messages"].size() == 2 && context["earlier_messages"][0] == "legacy text" &&
                   context["earlier_messages"][1]["segments"][0]["text"] == std::string(500, 'x') + "…" &&
@@ -1080,7 +1082,7 @@ auto main() -> int {
                           record["segments"][1]["description"] == "fixture image";
                   if (!Config::instance().affinityEnabled)
                       valid = valid && !record["sender"].contains("affinity");
-                  else if (record["sender"]["user_id"] == "22")
+                  else if (record["sender"]["uid"] == "22")
                       valid = valid && record["sender"]["affinity"] == 5;
               }
           }

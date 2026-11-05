@@ -666,6 +666,30 @@ namespace {
         check(projected["memories"] == insoulforge::json::array({"用户偏好简洁回答"}),
           "agent projection keeps recalled memory content", kTestName);
 
+        auto context = insoulforge::json{
+          {"recent_messages", {projected}},
+          {"current_session", {{"user_id", "22"}}},
+          {"session_memory", {{"aliases", {{{"user_id", "11"}, {"names", {"Alice"}}}}}}},
+          {"person_memories", {{{"user_id", "11"}}}},
+          {"shared_conversations", {{{"session", {{"user_id", "33"}}}, {"messages", {projected}}}}},
+          {"running_activities", {{{"user_id", "44"}}}}};
+        context["recent_messages"][0]["segments"].push_back(
+          {{"type", "at"}, {"target", {{"user_id", "self"}}}});
+        context["recent_messages"][0]["tool_history"] = {{{"arguments", {{"user_id", "11"}}}}};
+        insoulforge::MessageRecord::compactContextUserIds(context);
+        check(context["recent_messages"][0]["sender"]["uid"] == "11" &&
+                !context["recent_messages"][0]["sender"].contains("user_id") &&
+                context["recent_messages"][0]["segments"].back()["target"]["uid"] == "self" &&
+                context["current_session"]["uid"] == "22" &&
+                context["session_memory"]["aliases"][0]["uid"] == "11" &&
+                context["person_memories"][0]["uid"] == "11" &&
+                context["shared_conversations"][0]["session"]["uid"] == "33" &&
+                context["shared_conversations"][0]["messages"][0]["sender"]["uid"] == "11",
+          "executor context uses compact user identities", kTestName);
+        check(context["recent_messages"][0]["tool_history"][0]["arguments"]["user_id"] == "11" &&
+                context["running_activities"][0]["user_id"] == "44" && projected["sender"]["user_id"] == "11",
+          "compaction preserves opaque data and original records", kTestName);
+
         const auto source = insoulforge::MessageRecord::findImageSource(record, 0);
         check(source && source->file == "cat.jpg", "tool can resolve image source", kTestName);
         check(insoulforge::MessageRecord::extractRecallText(record).contains("一只蓝色的猫"),

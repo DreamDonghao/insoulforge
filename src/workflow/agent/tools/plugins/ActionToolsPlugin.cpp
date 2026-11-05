@@ -704,7 +704,7 @@ namespace insoulforge {
                 "properties": {
                     "user_id": {
                         "type": "string",
-                        "description": "要@的用户 ID（从聊天记录JSON的sender.user_id字段获取）。使用 'all' @全体成员"
+                        "description": "要@的用户 ID（从聊天记录JSON的sender.uid字段获取）。使用 'all' @全体成员"
                     }
                 },
                 "required": ["user_id"]
@@ -714,7 +714,7 @@ namespace insoulforge {
             .name = "at_user",
             .description =
               "@某人。返回CQ码嵌入reply的content中。聊天记录格式为JSON：{\"sender\":{\"name\":\"小明\","
-              "\"user_id\":\"123456\"}}，用 at_user(user_id=\"123456\") 来@他。@自己用 self，@全体成员用 all。",
+              "\"uid\":\"123456\"}}，用 at_user(user_id=\"123456\") 来@他。@自己用 self，@全体成员用 all。",
             .parameters = atParams,
             .handler = [](const json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
                 if (ctx.requireSession().isPrivate()) {
@@ -746,7 +746,7 @@ namespace insoulforge {
                 "properties": {
                     "user_id": {
                         "type": "string",
-                        "description": "要禁言的用户 ID（从聊天记录JSON的sender.user_id字段获取）"
+                        "description": "要禁言的用户 ID（从聊天记录JSON的sender.uid字段获取）"
                     },
                     "duration": {
                         "type": "integer",
@@ -786,7 +786,7 @@ namespace insoulforge {
                 "properties": {
                     "user_id": {
                         "type": "string",
-                        "description": "要加入全局黑名单的用户 ID，必须来自当前会话聊天记录的sender.user_id"
+                        "description": "要加入全局黑名单的用户 ID，必须来自当前会话聊天记录的sender.uid"
                     }
                 },
                 "required": ["user_id"]
@@ -836,7 +836,7 @@ namespace insoulforge {
                 "properties": {
                     "user_id": {
                         "type": "string",
-                        "description": "要拍一拍的用户 ID（从聊天记录JSON的sender.user_id字段获取）"
+                        "description": "要拍一拍的用户 ID（从聊天记录JSON的sender.uid字段获取）"
                     }
                 },
                 "required": ["user_id"]
@@ -846,7 +846,7 @@ namespace insoulforge {
             .name = "send_poke",
             .description =
               "中途拍一拍群成员（发出后回合不结束，最终仍用reply/no_reply收尾）。用于打招呼、引起注意、"
-              "开玩笑等轻松互动场景。聊天记录格式为JSON：{\"sender\":{\"name\":\"小明\",\"user_id\":\"123456\"}}，"
+              "开玩笑等轻松互动场景。聊天记录格式为JSON：{\"sender\":{\"name\":\"小明\",\"uid\":\"123456\"}}，"
               "用 send_poke(user_id=\"123456\") 来拍他。",
             .parameters = pokeParams,
             .handler = [](const json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
