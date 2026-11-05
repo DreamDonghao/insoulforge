@@ -107,10 +107,10 @@ namespace insoulforge {
 
         struct DefaultToolsTokenUsage {
             std::size_t count{};
-            std::uint32_t average{};
+            u32 tokens{};
             auto operator==(const DefaultToolsTokenUsage &) const -> bool = default;
         };
-        /// @brief 缓存默认工具定义的平均 Token 数；按群聊、私聊分别统计，不含 MCP。
+        /// @brief 缓存默认工具定义的 Token 数；按群聊、私聊分别统计，不含 MCP。
         /// @details 变更后按需更新，序列化文本相同则复用计数；失败通过 expected 返回。
         auto getDefaultToolsTokenUsage(bool isPrivateSession) const
           -> std::expected<DefaultToolsTokenUsage, std::string>;

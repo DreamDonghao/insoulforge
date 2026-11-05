@@ -108,7 +108,7 @@ auto main() -> int {
             std::fprintf(stderr, "%s\n", result.error().c_str());
             return EXIT_FAILURE;
         }
-        if (auto result = TokenCounter::initialize(); !result) {
+        if (auto result = initializeTokenCounter("resources/tokenizers"); !result) {
             Logger::error(std::nullopt, "TokenCounter", result.error());
             return EXIT_FAILURE;
         }

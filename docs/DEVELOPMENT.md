@@ -666,23 +666,18 @@ OneBot 11 的数字要求仅保留在协议适配层，目标无法转换时不�
 角色形象图仍独立存放在 `data/character-image`，不进入图片缓存；收藏表情和 QQ 空间 URL 发送方式保持原有逻辑。
 
 本地 Token 估算：包含 `infrastructure/tokenizer/TokenCounter.hpp`，调用
-`TokenCounter::load("resources/tokenizers")`，成功后复用实例的 `estimate(text)`。
-结果的 counts 按 names 顺序返回，average 为向上取整平均值，maximum 为最大值。
-这是文本估算，不含聊天模板、图片和工具协议开销，不保证与闭源模型一致。
-词表在构建时复制到部署目录；运行时离线，无需模型权重。三个词表必须齐全。
-资源来自固定 llama.cpp 版本的 models 目录；再分发时应保留上游许可证及对应模型
-（Llama、Qwen、Gemma）的适用许可条款，llama.cpp 的代码许可不替代模型资源许可。
-
-业务代码也可直接调用 `insoulforge::estimateTokens(text)`，返回
-`std::expected<TokenEstimate, std::string>`。全局实例首次调用时从工作目录的
-`resources/tokenizers` 加载词表，并缓存加载结果（包括错误）；后续调用复用词表，支持并发。
+`insoulforge::countTokens(text)`，返回 `std::expected<u32, std::string>`。
+仅使用 Qwen2 词表，空文本返回 0；不含聊天模板、图片和工具协议开销，不保证与其他模型一致。
+启动时调用 `initializeTokenCounter("resources/tokenizers")` 加载 `resources/tokenizers/ggml-vocab-qwen2.gguf`；
+加载结果（包括错误）缓存至进程退出，后续计数支持并发、复用同一词表；未初始化时计数返回错误，不隐式加载。
+资源在构建时从固定 llama.cpp 版本复制，运行时离线，无需模型权重；再分发时保留 Qwen 资源适用许可。
 
 Executor System 由 `ExecutorSystemPrompt` 单例按六部分构建并缓存，工具定义由 `ToolRegistry` 独立统计。
 提示词写入应通过 `PromptService::setPrompt`，以同步失效缓存；`PromptStore` 仅负责数据库操作。
 公共统计使用 `buildPublicSnapshot`，不需要虚拟会话；实际会话使用 `buildSnapshot`。
 `/admin/api/system-tokens` 返回分项估算及默认工具定义占用，不返回提示词原文。
-分项 Token 为三个词表计数的向上取整平均值，合计为分项相加，不等同于服务端实际用量。
+分项 Token 为Qwen2 词表计数，合计为分项相加，不等同于服务端实际用量。
 
 ### 人物记忆 Token 估算
 
-`person_memories.estimated_tokens` 保存实际加入 Executor 上下文的人物 JSON 的三个词表平均 Token 数，包含 `person_memory_entries` 中的待整理内容、来源和时间。统计字段本身不发送给模型。v26 迁移为已有档案初始化为 0，不补算；自动追加、编辑和整理导致上下文内容变化时在写入事务内更新。0 也可能表示尚未计算或计算失败。
+`person_memories.estimated_tokens` 保存实际加入 Executor 上下文的人物 JSON 的Qwen2 词表 Token 数，包含 `person_memory_entries` 中的待整理内容、来源和时间。统计字段本身不发送给模型。v26 迁移为已有档案初始化为 0，不补算；自动追加、编辑和整理导致上下文内容变化时在写入事务内更新。0 也可能表示尚未计算或计算失败。

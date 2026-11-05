@@ -177,3 +177,6 @@ add_executable(insoulforge_token_counter_tests EXCLUDE_FROM_ALL TokenCounterTest
 target_include_directories(insoulforge_token_counter_tests PRIVATE ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(insoulforge_token_counter_tests PRIVATE llama)
 add_test(NAME token_counter COMMAND insoulforge_token_counter_tests "${llama_cpp_SOURCE_DIR}/models")
+
+add_test(NAME token_counter_missing COMMAND insoulforge_token_counter_tests "${CMAKE_CURRENT_BINARY_DIR}/missing-tokenizer")
+set_tests_properties(token_counter_missing PROPERTIES WILL_FAIL TRUE)

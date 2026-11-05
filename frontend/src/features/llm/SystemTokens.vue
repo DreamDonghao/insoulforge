@@ -67,7 +67,7 @@ watch(type, () => { id.value = ''; void load() })
       </div>
     </template>
     <div v-else-if="!busy && !error" class="card muted">正在准备 System 用量数据。</div>
-    <p class="note">使用三个词表的平均值估算。合计为各部分估算之和，与整体分词可能略有差异；默认工具定义按完整 JSON 估算。总计不包含 MCP、User、工具调用历史和服务端聊天模板，也不是实际计费用量。</p>
+    <p class="note">使用 Qwen2 词表估算。合计为各部分估算之和，与整体分词可能略有差异；默认工具定义按完整 JSON 估算。总计不包含 MCP、User、工具调用历史和服务端聊天模板，也不是实际计费用量。</p>
   </div>
 </template>
 

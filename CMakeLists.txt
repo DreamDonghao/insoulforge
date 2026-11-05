@@ -202,10 +202,8 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 set(TOKENIZER_RESOURCE_DIR "${DEPLOY_DIR}/resources/tokenizers")
 add_custom_target(tokenizer_resources ALL
         COMMAND ${CMAKE_COMMAND} -E make_directory "${TOKENIZER_RESOURCE_DIR}")
-foreach(vocab llama-bpe qwen2 gemma-4)
-    add_custom_command(TARGET tokenizer_resources POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${llama_cpp_SOURCE_DIR}/models/ggml-vocab-${vocab}.gguf"
-            "${TOKENIZER_RESOURCE_DIR}/ggml-vocab-${vocab}.gguf")
-endforeach()
+add_custom_command(TARGET tokenizer_resources POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${llama_cpp_SOURCE_DIR}/models/ggml-vocab-qwen2.gguf"
+        "${TOKENIZER_RESOURCE_DIR}/ggml-vocab-qwen2.gguf")
 add_dependencies(${PROJECT_NAME} tokenizer_resources)

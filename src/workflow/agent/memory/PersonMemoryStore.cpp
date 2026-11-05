@@ -290,15 +290,17 @@ namespace insoulforge::PersonMemoryStore {
 
     void updateTokenEstimate(const UserId &userId, const json &before) {
         const auto after = contextSnapshot(userId);
-        if (before == after)
+        if (before == after) {
             return;
-        const auto estimate = after.is_null() ? std::expected<TokenEstimate, std::string>{TokenEstimate{}}
-                                             : estimateTokens(dumpJson(after));
-        if (!estimate)
+        }
+        const auto estimate = after.is_null() ? std::expected<u32, std::string>{0}
+                                             : countTokens(dumpJson(after));
+        if (!estimate) {
             Logger::error(std::nullopt, "PersonMemory", estimate.error());
+        }
         const Statement update(
           Database::instance().handle(), "UPDATE person_memories SET estimated_tokens = ? WHERE user_id = ?");
-        update.bind(1, static_cast<i64>(estimate ? estimate->average : 0));
+        update.bind(1, static_cast<i64>(estimate ? *estimate : 0));
         update.bind(2, userId.toString());
         update.execOrThrow();
     }

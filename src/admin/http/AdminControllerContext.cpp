@@ -31,7 +31,7 @@ namespace insoulforge {
             json result = {{"parts", json::array()}, {"total", 0}, {"warning", warning}};
             std::uint64_t total = 0;
             for (std::size_t i = 0; i < (includeGroup ? snapshot.parts.size() : snapshot.parts.size() - 1); ++i) {
-                const auto &count = snapshot.parts[i].average;
+                const auto &count = snapshot.parts[i].tokens;
                 if (!count)
                     throw std::runtime_error(count.error());
                 total += *count;
@@ -43,8 +43,8 @@ namespace insoulforge {
             const auto tools = ToolRegistry::instance().getDefaultToolsTokenUsage(type == "private");
             if (!tools)
                 throw std::runtime_error(tools.error());
-            result["defaultTools"] = {{"count", tools->count}, {"tokens", tools->average}};
-            result["combinedTotal"] = total + tools->average;
+            result["defaultTools"] = {{"count", tools->count}, {"tokens", tools->tokens}};
+            result["combinedTotal"] = total + tools->tokens;
             callback(jsonResponse(result));
         } catch (const std::exception &error) {
             auto response = jsonResponse(AdminResponse::errorJson(error.what()));

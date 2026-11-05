@@ -216,18 +216,20 @@ execution_status=finish_turn 表示当时选择不回复；failed/send_failed �
         ++m_generation;
     }
     void ExecutorSystemPrompt::updatePart(CachedPart &part, std::string text) {
-        if (part.initialized && part.text == text)
+        if (part.initialized && part.text == text) {
             return;
+        }
         part.text = std::move(text);
         part.initialized = true;
         if (part.text.empty()) {
-            part.average = 0;
+            part.tokens = 0;
             return;
         }
-        if (auto result = estimateTokens(part.text))
-            part.average = result->average;
-        else
-            part.average = std::unexpected(result.error());
+        if (auto result = countTokens(part.text)) {
+            part.tokens = *result;
+        } else {
+            part.tokens = std::unexpected(result.error());
+        }
     }
 
     auto ExecutorSystemPrompt::build(const SessionId &sessionId) -> std::string {
@@ -281,9 +283,10 @@ execution_status=finish_turn 表示当时选择不回复；failed/send_failed �
             if (includeParts)
                 snapshot.parts[kPublicPartCount] = static_cast<Part>(part);
         } else {
-            if (groupSession)
+            if (groupSession) {
                 m_groupParts.erase(groupSession->toString());
-            snapshot.parts[kPublicPartCount].average = 0;
+            }
+            snapshot.parts[kPublicPartCount].tokens = 0;
         }
         return snapshot;
     }

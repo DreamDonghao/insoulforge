@@ -174,13 +174,14 @@ namespace insoulforge {
         const auto text = dumpJson(tools);
         if (cache.text != text) {
             cache.text = text;
-            if (tools.empty())
+            if (tools.empty()) {
                 cache.result = DefaultToolsTokenUsage{};
-            else {
-                if (const auto estimate = estimateTokens(text))
-                    cache.result = DefaultToolsTokenUsage{.count = tools.size(), .average = estimate->average};
-                else
+            } else {
+                if (const auto estimate = countTokens(text)) {
+                    cache.result = DefaultToolsTokenUsage{.count = tools.size(), .tokens = *estimate};
+                } else {
                     cache.result = std::unexpected(estimate.error());
+                }
             }
         }
         cache.revision = revision;

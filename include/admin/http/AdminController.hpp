@@ -13,7 +13,7 @@ namespace insoulforge {
     /// @details 提供管理后台的认证、配置、会话、工具、用量和运行诊断接口。
     class AdminController : public drogon::HttpController<AdminController> {
     public:
-        /// @brief 查看 Executor system 六部分平均 Token 估算，不返回提示词原文。
+        /// @brief 查看 Executor system 六部分Token 估算，不返回提示词原文。
         auto getSystemTokens(drogon::HttpRequestPtr req,
           std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<>;
 

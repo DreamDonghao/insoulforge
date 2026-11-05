@@ -13,7 +13,6 @@
 #pragma once
 
 #include <array>
-#include <cstdint>
 #include <map>
 #include <mutex>
 
@@ -23,6 +22,8 @@
 #include <infrastructure/SessionId.hpp>
 
 /// @brief 组装单条 system 消息的文本，不负责 user 上下文或工具消息。
+#include <infrastructure/NumericTypes.hpp>
+
 namespace insoulforge {
     class ExecutorSystemPrompt {
     public:
@@ -32,7 +33,7 @@ namespace insoulforge {
         /// @brief 六个部分按 system 拼接顺序排列；失败通过 expected 保留，不冒充零用量。
         struct Part {
             std::string text;
-            std::expected<std::uint32_t, std::string> average = std::unexpected("尚未计算");
+            std::expected<u32, std::string> tokens = std::unexpected("尚未计算");
         };
         struct Snapshot {
             std::string text;
@@ -50,7 +51,7 @@ namespace insoulforge {
             "MCP 服务与实时活动的名称、描述及使用说明；不含完整工具定义和活动运行状态。"},
           {"stickers", "可用表情名称列表", "可用收藏表情的名称及说明文本，不含表情图片。"},
           {"group-setting", "群聊附加设定", "当前群单独配置的附加提示词及其说明文本。"}}};
-        /// @brief 返回完整文本和六部分平均 Token 估算；仅变化的部分重新分词。
+        /// @brief 返回完整文本和六部分 Token 估算；仅变化的部分重新分词。
         /// @note 各部分之和可能与完整文本分词结果不同；不含 user 或工具定义开销。
         /// @param includeGroupSetting 为 false 时仅返回公共部分，不读取或更新群附加设定缓存。
         auto buildSnapshot(const SessionId &sessionId, bool includeGroupSetting = true) -> Snapshot;

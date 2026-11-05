@@ -3356,7 +3356,7 @@ namespace {
           "six part texts reconstruct the unchanged system", kTestName);
         const auto repeated = insoulforge::ExecutorSystemPrompt::instance().buildSnapshot(insoulforge::SessionId::group("100"));
         for (std::size_t i = 0; i < snapshot.parts.size(); ++i)
-            check(snapshot.parts[i].average == repeated.parts[i].average,
+            check(snapshot.parts[i].tokens == repeated.parts[i].tokens,
               "unchanged parts reuse their token results", kTestName);
 
         check(combined.starts_with(base) && combined.ends_with(prompt), "appends without replacing global prompt",
