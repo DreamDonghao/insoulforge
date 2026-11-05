@@ -7,12 +7,6 @@
 #include <workflow/agent/llm/prompts/PromptStore.hpp>
 
 namespace insoulforge {
-    namespace {
-        constexpr std::string_view kProjectInfo =
-          "你由开源项目 InSoulForge 驱动。这是一个基于 Agent 架构的 QQ 聊天机器人项目，"
-          "项目地址：https://github.com/DreamDonghao/insoulforge。\n\n";
-    }
-
     void PromptService::initialize(const Database &database) {
 
         // 定义默认提示词
@@ -229,11 +223,11 @@ reply 的场景：
     }
 
     auto PromptService::getExecutorSystemPrompt() -> std::string {
-        return std::string{kProjectInfo} + getPrompt("executor_system");
+        return getPrompt("executor_system");
     }
 
     auto PromptService::getExecutorPrivateSystemPrompt() -> std::string {
-        return std::string{kProjectInfo} + getPrompt("executor_private_system");
+        return getPrompt("executor_private_system");
     }
 
     auto PromptService::getRouterSystemPrompt() -> std::string { return getPrompt("router_system"); }

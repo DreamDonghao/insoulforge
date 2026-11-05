@@ -18,6 +18,7 @@ const PeopleManager = defineAsyncComponent(() => import('./features/conversation
 const MemoryConfig = defineAsyncComponent(() => import('./features/conversation/MemoryConfig.vue'))
 const LLMConfig = defineAsyncComponent(() => import('./features/llm/LLMConfig.vue'))
 const PromptEditor = defineAsyncComponent(() => import('./features/llm/PromptEditor.vue'))
+const SystemTokens = defineAsyncComponent(() => import('./features/llm/SystemTokens.vue'))
 const UsageStats = defineAsyncComponent(() => import('./features/llm/UsageStats.vue'))
 const OneBotConfig = defineAsyncComponent(() => import('./features/onebot/OneBotConfig.vue'))
 const CustomTools = defineAsyncComponent(() => import('./features/tools/CustomTools.vue'))
@@ -53,6 +54,7 @@ const dailyNavItems: NavItem[] = [
   {key: 'people', label: '人物信息', icon: 'admins'},
   {key: 'logs', label: '运行日志', icon: 'logs'},
   {key: 'requestDebug', label: '请求调试', icon: 'requestDebug'},
+  {key: 'system-tokens', label: '上下文占用', icon: 'prompts'},
   {key: 'usage', label: '用量统计', icon: 'memory'}
 ]
 
@@ -463,6 +465,7 @@ onUnmounted(disconnectWebSocket)
           <RequestDebug v-else-if="currentView === 'requestDebug'"/>
           <MemoryConfig v-else-if="currentView === 'memoryConfig'"/>
           <OneBotConfig v-else-if="currentView === 'qqConfig'"/>
+          <SystemTokens v-else-if="currentView === 'system-tokens'"/>
           <UsageStats v-else-if="currentView === 'usage'"/>
           <About v-else-if="currentView === 'about'"/>
         </div>

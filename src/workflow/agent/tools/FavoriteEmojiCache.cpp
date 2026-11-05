@@ -1,3 +1,4 @@
+#include <workflow/agent/llm/prompts/ExecutorSystemPrompt.hpp>
 /// @file FavoriteEmojiCache.cpp
 /// @brief QQ 收藏表情查询与缓存实现
 
@@ -10,11 +11,13 @@
 
 namespace insoulforge {
     namespace {
-        constexpr auto kFavoriteEmojiCacheTtl = std::chrono::seconds(60);
+
 
         std::mutex favoriteEmojiCacheMutex;
         json favoriteEmojiCache(nullptr);
-        std::chrono::steady_clock::time_point favoriteEmojiCacheTime{};
+        bool favoriteEmojiDirty = true;
+        std::uint64_t favoriteEmojiGeneration = 0;
+        std::uint64_t favoriteEmojiRequest = 0;
 
         /// @brief 清理 CQ 码参数中不允许出现的字符
         [[nodiscard]] auto sanitizeCqParameter(std::string value) -> std::string {
@@ -28,18 +31,19 @@ namespace insoulforge {
     } // namespace
 
     auto ToolRuntime::fetchFavoriteEmojis(const std::optional<SessionId> sessionId) -> drogon::Task<json> {
+        std::uint64_t generation, request;
         {
             std::lock_guard lock(favoriteEmojiCacheMutex);
-            if (!favoriteEmojiCache.is_null() &&
-                std::chrono::steady_clock::now() - favoriteEmojiCacheTime < kFavoriteEmojiCacheTtl) {
+            if (!favoriteEmojiCache.is_null() && !favoriteEmojiDirty) {
                 co_return favoriteEmojiCache;
             }
+            generation = favoriteEmojiGeneration;
+            request = ++favoriteEmojiRequest;
         }
 
         json result(json::array());
         auto data = co_await OneBotClient::fetchCustomFaceDetail(sessionId);
-        if (!data.is_array())
-            data = json::array();
+        if (!data.is_array()) throw std::runtime_error("收藏表情获取失败");
         for (size_t index = 0; const auto &item: data) {
             if (!item.is_object())
                 continue;
@@ -62,8 +66,13 @@ namespace insoulforge {
 
         {
             std::lock_guard lock(favoriteEmojiCacheMutex);
-            favoriteEmojiCache = result;
-            favoriteEmojiCacheTime = std::chrono::steady_clock::now();
+            if (generation == favoriteEmojiGeneration && request == favoriteEmojiRequest) {
+                favoriteEmojiCache = result;
+                favoriteEmojiDirty = false;
+                auto names = json::array();
+                for (const auto &emoji : result) names.push_back(getStr(emoji, "name"));
+                ExecutorSystemPrompt::instance().updateStickerNames(std::move(names));
+            }
         }
         co_return result;
     }
@@ -131,6 +140,7 @@ namespace insoulforge {
 
     void ToolRuntime::invalidateFavoriteEmojiCache() {
         std::lock_guard lock(favoriteEmojiCacheMutex);
-        favoriteEmojiCache = json(nullptr);
+        favoriteEmojiDirty = true;
+        ++favoriteEmojiGeneration;
     }
 } // namespace insoulforge

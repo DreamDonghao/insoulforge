@@ -58,6 +58,7 @@
 #include <workflow/agent/memory/maintenance/PersonMemoryConsolidator.hpp>
 #include <workflow/agent/runtime/AgentSystem.hpp>
 #include <workflow/agent/runtime/ExecutorAgent.hpp>
+#include <workflow/agent/llm/prompts/ExecutorSystemPrompt.hpp>
 #include <workflow/agent/tools/ToolRegistry.hpp>
 #include <workflow/agent/tools/custom/LuaToolExecutor.hpp>
 #include <workflow/agent/tools/custom/ToolStore.hpp>
@@ -1604,15 +1605,23 @@ namespace {
 
         const auto first = insoulforge::ExecutorAgent::buildIterationMessages(history, 1, 8);
         const auto middle = insoulforge::ExecutorAgent::buildIterationMessages(history, 3, 8);
+        const auto updated = insoulforge::ExecutorAgent::buildIterationMessages(first, 3, 8);
+        check(updated == middle, "updating state replaces the previous round without duplication", kTestName);
+        const auto userContext = insoulforge::json::parse(middle[1]["content"].get<std::string>());
+        check(userContext.items().begin().key() == "response_requirements" &&
+                (--userContext.end()).key() == "execution_state",
+          "execution state is the last field", kTestName);
+
         const auto last = insoulforge::ExecutorAgent::buildIterationMessages(history, 8, 8);
-        check(first.size() == history.size() + 1 && middle.size() == first.size() && last.size() == first.size(),
-          "each request adds one transient execution-state message", kTestName);
+        check(first.size() == history.size() && middle.size() == first.size() && last.size() == first.size(),
+          "each request updates user context without adding messages", kTestName);
         for (size_t index = 0; index < history.size(); ++index) {
+            if (index == 1) continue;
             check(first[index] == history[index] && middle[index] == history[index] && last[index] == history[index],
               "request status preserves the full history and tool results", kTestName);
         }
         const auto context = [](const insoulforge::json &messages) {
-            return insoulforge::json::parse(messages.back()["content"].get<std::string>());
+            return insoulforge::json::parse(messages[1]["content"].get<std::string>());
         };
         const auto firstContext = context(first);
         check(firstContext["execution_state"]["remaining_rounds"] == 7 &&
@@ -1627,8 +1636,8 @@ namespace {
         const auto single = insoulforge::ExecutorAgent::buildIterationMessages(history, 1, 1);
         check(context(single)["execution_state"]["reply_only"] == true,
           "a one-round limit is immediately reply-only", kTestName);
-        check(first.back()["role"] == "system" && firstContext.size() == 1,
-          "transient system message contains structured data only", kTestName);
+        check(first.front()["role"] == "system" && firstContext.size() == 3,
+          "user context retains its fields alongside execution state", kTestName);
         const insoulforge::json mcp = {{"page_size", 10}, {"max_per_enable", 4},
           {"max_per_reply", 12}, {"selected_count", 2}};
         const auto withMcp = insoulforge::ExecutorAgent::buildIterationMessages(history, 2, 8, mcp);
@@ -1830,6 +1839,13 @@ namespace {
             }
             return nullptr;
         };
+        const auto defaultDefinitions = registry.getTools({.defaultDefinitionsOnly = true});
+        bool includesBuiltin = false;
+        for (const auto &tool : defaultDefinitions)
+            includesBuiltin = includesBuiltin || tool["function"]["name"] == "contract_builtin";
+        check(includesBuiltin, "default token input includes enabled builtin definitions", kTestName);
+        const auto cachedUsage = registry.getDefaultToolsTokenUsage(false);
+        check(cachedUsage == registry.getDefaultToolsTokenUsage(false), "reuses cached count or error", kTestName);
         check(definition()["description"] == "default description", "default description preserved", kTestName);
         check(!registry.isToolDisabled("missing_builtin"), "unknown tool is not explicitly disabled", kTestName);
         check(registry.saveBuiltinToolConfig("contract_builtin", {{"enabled", false}, {"description", "custom description"}}).has_value(),
@@ -3300,6 +3316,19 @@ namespace {
         insoulforge::SessionStore::setAutoReply(insoulforge::SessionId::group("100"), false);
         insoulforge::SessionStore::incrementMessageCount(insoulforge::SessionId::group("100"));
         const auto combined = insoulforge::ExecutorAgent::buildSystemPrompt(insoulforge::SessionId::group("100"));
+        const auto snapshot = insoulforge::ExecutorSystemPrompt::instance().buildSnapshot(insoulforge::SessionId::group("100"));
+        std::string reconstructed;
+        for (const auto &part : snapshot.parts) {
+            check(part.initialized, "all six parts have calculated or error results", kTestName);
+            reconstructed += part.text;
+        }
+        check(reconstructed == combined && snapshot.text == combined && snapshot.parts[5].text.ends_with(prompt),
+          "six part texts reconstruct the unchanged system", kTestName);
+        const auto repeated = insoulforge::ExecutorSystemPrompt::instance().buildSnapshot(insoulforge::SessionId::group("100"));
+        for (std::size_t i = 0; i < snapshot.parts.size(); ++i)
+            check(snapshot.parts[i].average == repeated.parts[i].average,
+              "unchanged parts reuse their token results", kTestName);
+
         check(combined.starts_with(base) && combined.ends_with(prompt), "appends without replacing global prompt",
           kTestName);
         check(insoulforge::ExecutorAgent::buildSystemPrompt(insoulforge::SessionId::group("200")) == base,

@@ -2,6 +2,7 @@
 /// @brief 工具注册中心 - 实现
 
 #include <mutex>
+#include <infrastructure/tokenizer/TokenCounter.hpp>
 
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
@@ -56,6 +57,7 @@ namespace insoulforge {
             return false;
         }
         std::unique_lock lock(m_mutex);
+        ++m_tokenRevision;
         for (const auto &name: staged.m_tools | std::views::keys) {
             if (const auto existing = m_tools.find(name);
               existing != m_tools.end() && existing->second.pluginId != pluginId) {
@@ -79,6 +81,7 @@ namespace insoulforge {
 
     void ToolRegistry::unregisterPlugin(const std::string &pluginId) {
         std::unique_lock lock(m_mutex);
+        ++m_tokenRevision;
         const auto it = m_pluginTools.find(pluginId);
         if (it == m_pluginTools.end())
             return;
@@ -89,6 +92,7 @@ namespace insoulforge {
 
     auto ToolRegistry::registerTool(const Tool &tool, const ToolCategory category) -> bool {
         std::unique_lock lock(m_mutex);
+        ++m_tokenRevision;
         if (tool.name.empty() || !tool.handler) {
             Logger::error(std::nullopt, "Tool", fmt::format("工具注册失败：工具名称或处理器为空"));
             if (!m_activePluginId.empty())
@@ -119,6 +123,9 @@ namespace insoulforge {
         std::vector<const RegisteredTool *> visibleTools;
         visibleTools.reserve(m_tools.size());
         for (const auto &registered: m_tools | std::views::values) {
+            if (query.defaultDefinitionsOnly &&
+                (registered.tool.mcpVersion != 0 || registered.tool.mcpManagement ||
+                 (!registered.pluginId.starts_with("builtin.") && registered.pluginId != "custom"))) continue;
             if (!isEnabled(registered))
                 continue;
             if (!query.includeAllMcp) {
@@ -153,6 +160,27 @@ namespace insoulforge {
         }
 
         return tools;
+    }
+
+    auto ToolRegistry::getDefaultToolsTokenUsage(bool isPrivateSession) const
+      -> std::expected<DefaultToolsTokenUsage, std::string> {
+        std::lock_guard lock(m_tokenMutex);
+        auto &cache = m_tokenCaches[isPrivateSession ? 1 : 0];
+        const auto revision = m_tokenRevision.load();
+        if (cache.revision == revision) return cache.result;
+        const auto tools = getTools({.isPrivateSession = isPrivateSession, .defaultDefinitionsOnly = true});
+        const auto text = dumpJson(tools);
+        if (cache.text != text) {
+            cache.text = text;
+            if (tools.empty()) cache.result = DefaultToolsTokenUsage{};
+            else {
+                const auto estimate = estimateTokens(text);
+                if (estimate) cache.result = DefaultToolsTokenUsage{tools.size(), estimate->average};
+                else cache.result = std::unexpected(estimate.error());
+            }
+        }
+        cache.revision = revision;
+        return cache.result;
     }
 
     auto ToolRegistry::getAllTools() const -> json { return getTools({.includeAllMcp = true}); }
@@ -212,6 +240,7 @@ namespace insoulforge {
 
     void ToolRegistry::loadBuiltinToolsConfig(json config) {
         std::unique_lock lock(m_mutex);
+        ++m_tokenRevision;
         m_builtinConfig = config.is_object() ? std::move(config) : json::object();
     }
 
@@ -241,6 +270,7 @@ namespace insoulforge {
                 return std::unexpected("不支持的工具配置字段: " + key);
         }
         std::unique_lock lock(m_mutex);
+        ++m_tokenRevision;
         if (const auto it = m_tools.find(name); it == m_tools.end() || !it->second.pluginId.starts_with("builtin.")) {
             return std::unexpected("内置工具不存在: " + name);
         }
@@ -258,6 +288,7 @@ namespace insoulforge {
 
     void ToolRegistry::unregisterTool(const std::string &name) {
         std::unique_lock lock(m_mutex);
+        ++m_tokenRevision;
         m_tools.erase(name);
         for (auto iterator = m_pluginTools.begin(); iterator != m_pluginTools.end();) {
             auto &names = iterator->second;
