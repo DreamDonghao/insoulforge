@@ -34,7 +34,8 @@ namespace insoulforge {
                 co_return std::nullopt;
             }
             json body = LlmClient::buildChatRequestBody(api, params, std::move(messages));
-            const auto resp = co_await LlmClient::sendModelRequest("LLM", api, std::move(body), sessionId, true, control);
+            const auto resp =
+              co_await LlmClient::sendModelRequest("LLM", api, std::move(body), sessionId, true, control);
             if (!resp || (control && control->isCancelled())) {
                 co_return std::nullopt;
             }
@@ -88,10 +89,12 @@ namespace insoulforge {
             return !api.baseUrl.empty() && !api.path.empty() && !api.model.empty();
         }
 
-        auto buildChatRequestBody(const LLMApiConfig &api, const LLMModelParams &params, json messages, json tools)
-          -> json {
+        auto buildChatRequestBody(const LLMApiConfig &api, const LLMModelParams &params, json messages, json tools,
+          const std::optional<SessionId> sessionId) -> json {
             json body;
             body["model"] = api.model;
+            if (params.promptCacheKeyEnabled && sessionId)
+                body["prompt_cache_key"] = "insoulforge:executor:" + sessionId->toString();
             body["messages"] = std::move(messages);
             if (!tools.is_null())
                 body["tools"] = std::move(tools);
@@ -121,8 +124,8 @@ namespace insoulforge {
             for (i32 attempt = 0;; ++attempt) {
                 if (control && control->isCancelled())
                     co_return std::unexpected("模型请求已取消");
-                auto response = co_await HttpUtil::send(label, api.baseUrl, api.path, drogon::Post, body,
-                  api.apiKey, api.timeoutSeconds, sessionId, traceResponse);
+                auto response = co_await HttpUtil::send(label, api.baseUrl, api.path, drogon::Post, body, api.apiKey,
+                  api.timeoutSeconds, sessionId, traceResponse);
                 if (control && control->isCancelled())
                     co_return std::unexpected("模型请求已取消");
                 if (attempt >= api.maxRetries ||
@@ -139,7 +142,8 @@ namespace insoulforge {
                 Logger::warn(sessionId, label, "未配置服务地址、请求路径或模型名，跳过请求");
                 co_return std::nullopt;
             }
-            const json body = buildChatRequestBody(apiConfig, params, std::move(messages), std::move(tools));
+            const json body = buildChatRequestBody(apiConfig, params, std::move(messages), std::move(tools),
+              usageRole == "executor" || usageRole == "executorFallback" ? sessionId : std::nullopt);
             const auto resp = co_await sendModelRequest(label, apiConfig, body, sessionId);
             if (!resp) {
                 Logger::warn(sessionId, label, "网络异常");
@@ -149,8 +153,9 @@ namespace insoulforge {
                 logUsage(*respJson, apiConfig.model, usageRole, sessionId);
                 co_return respJson;
             }
-            Logger::error(sessionId, label, fmt::format("请求失败: status={} body={}",
-              static_cast<i32>((*resp)->getStatusCode()), std::string((*resp)->getBody()).substr(0, kErrorBodyMaxChars)));
+            Logger::error(sessionId, label,
+              fmt::format("请求失败: status={} body={}", static_cast<i32>((*resp)->getStatusCode()),
+                std::string((*resp)->getBody()).substr(0, kErrorBodyMaxChars)));
             co_return std::nullopt;
         }
     } // namespace LlmClient

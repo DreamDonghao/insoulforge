@@ -19,8 +19,8 @@ namespace insoulforge {
                   ConfigError{.type = ConfigErrorType::InvalidArgument, .message = "配置必须是 JSON 对象"});
             }
             for (const auto &[key, field]: value.items()) {
-                constexpr std::array floatFields{"temperature", "topP", "minConfidence",
-                  "longTermRecallThreshold", "longTermInjectThreshold"};
+                constexpr std::array floatFields{
+                  "temperature", "topP", "minConfidence", "longTermRecallThreshold", "longTermInjectThreshold"};
                 constexpr std::array stringFields{"apiKey", "baseUrl", "path", "model", "reasoningEffort",
                   "accessToken", "oneBotTransport", "qqHttpHost", "qqWebSocketHost", "botName"};
                 constexpr std::array integerFields{"maxTokens", "contextWindowLimit", "memorySummaryTriggerCount",
@@ -58,7 +58,8 @@ namespace insoulforge {
                     if (!field.is_string() || trim(field.get<std::string>()).empty())
                         return std::unexpected(ConfigError{
                           .type = ConfigErrorType::InvalidArgument, .message = "editPath 必须是非空字符串"});
-                } else if (key == "defaultPrivateEnabled" || key == "affinityEnabled" || key == "routeWhileReplying") {
+                } else if (key == "defaultPrivateEnabled" || key == "affinityEnabled" || key == "routeWhileReplying" ||
+                           key == "promptCacheKeyEnabled") {
                     if (!field.is_boolean()) {
                         return std::unexpected(
                           ConfigError{.type = ConfigErrorType::InvalidArgument, .message = key + " 必须是布尔值"});
@@ -113,6 +114,8 @@ namespace insoulforge {
                 modelParams->maxTokens = getInt(cfg, "maxTokens");
                 modelParams->temperature = getDouble(cfg, "temperature");
                 modelParams->topP = getDouble(cfg, "topP");
+                modelParams->promptCacheKeyEnabled =
+                  (name == "executor" || name == "executorFallback") && getBool(cfg, "promptCacheKeyEnabled", false);
             }
         }
     } // namespace
@@ -156,8 +159,8 @@ namespace insoulforge {
         execution.maxToolRounds.store(
           getInt(value.at("execution"), "maxToolRounds", ExecutionSettings::kDefaultMaxToolRounds),
           std::memory_order_relaxed);
-        execution.routeWhileReplying.store(getBool(value.at("execution"), "routeWhileReplying"),
-          std::memory_order_relaxed);
+        execution.routeWhileReplying.store(
+          getBool(value.at("execution"), "routeWhileReplying"), std::memory_order_relaxed);
 
         // 加载记忆配置
         if (const auto &memCfg = value.at("memory"); !memCfg.is_null()) {

@@ -227,6 +227,28 @@ namespace {
             require(Database::instance().initialize(":memory:").has_value(), "test database failed");
             co_await testJevWindow(endpoint);
             const json messages = json::array({{{"role", "user"}, {"content", "test"}}});
+            LLMModelParams cacheParams;
+            const auto group = SessionId::group("123456");
+            require(!LlmClient::buildChatRequestBody(apiFor(endpoint, "cache"), cacheParams, messages, {}, group)
+                       .contains("prompt_cache_key"), "disabled cache key was sent");
+            cacheParams.promptCacheKeyEnabled = true;
+            require(!LlmClient::buildChatRequestBody(apiFor(endpoint, "cache"), cacheParams, messages)
+                       .contains("prompt_cache_key"), "cache key without session was sent");
+            for (const auto *role: {"executor", "executorFallback", "executorThinking", "router", "memory"}) {
+                const std::string key = std::string("cache-") + role;
+                require((co_await LlmClient::requestChat("test", role, apiFor(endpoint, key), cacheParams,
+                          messages, {}, group)).has_value(), "cache request failed");
+                std::lock_guard lock(fixture.mutex);
+                const auto &body = fixture.bodies.at(key);
+                if (std::string_view(role) == "executor" || std::string_view(role) == "executorFallback")
+                    require(body.at("prompt_cache_key") == "insoulforge:executor:group:123456",
+                      "reply cache key is incorrect");
+                else
+                    require(!body.contains("prompt_cache_key"), "cache key leaked to another model role");
+            }
+            require(LlmClient::buildChatRequestBody(apiFor(endpoint, "cache"), cacheParams, messages, {},
+                      SessionId::privateChat(UserId{"123456"}))["prompt_cache_key"] ==
+                      "insoulforge:executor:private:123456", "private cache key collides with group key");
             for (const auto *key: {"chat", "fallback", "status429", "status500", "status503"}) {
                 const auto response = co_await LlmClient::requestChat("test", "executor", apiFor(endpoint, key),
                   LLMModelParams{}, messages);

@@ -37,6 +37,7 @@ namespace insoulforge {
         // 用 f64 保证 JSON 序列化输出 0.7 而非 0.699999988079071
         f64 temperature = 0.7;
         f64 topP = 0.9;
+        bool promptCacheKeyEnabled = false; ///< 仅回复生成模型使用；按会话发送 prompt_cache_key。
     };
 
     /// @brief 回复执行流程的参数；后台保存与 Executor 读取可并发进行。

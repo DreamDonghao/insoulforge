@@ -19,6 +19,7 @@ export interface LLMConfig {
     maxTokens: number
     temperature: number
     topP: number
+    promptCacheKeyEnabled?: boolean
     reasoningEffort: string
     timeoutSeconds?: number
     maxRetries?: number

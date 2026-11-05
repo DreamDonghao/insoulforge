@@ -10,8 +10,8 @@
 
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
-#include <infrastructure/config/ConfigStore.hpp>
 #include <infrastructure/config/ConfigMigration.hpp>
+#include <infrastructure/config/ConfigStore.hpp>
 #include <infrastructure/logging/Logger.hpp>
 
 
@@ -30,10 +30,13 @@ namespace insoulforge::ConfigStore {
         }
 
         auto defaultChatConfig(const i32 maxTokens, const f64 temperature, const f64 topP,
-          const i32 timeoutSeconds = 90, const i32 maxRetries = 3) -> json {
-            return {{"apiKey", ""}, {"baseUrl", ""}, {"path", "/chat/completions"}, {"model", ""},
+          const i32 timeoutSeconds = 90, const i32 maxRetries = 3, const bool replyModel = false) -> json {
+            json result = {{"apiKey", ""}, {"baseUrl", ""}, {"path", "/chat/completions"}, {"model", ""},
               {"maxTokens", maxTokens}, {"temperature", temperature}, {"topP", topP}, {"reasoningEffort", ""},
               {"timeoutSeconds", timeoutSeconds}, {"maxRetries", maxRetries}};
+            if (replyModel)
+                result["promptCacheKeyEnabled"] = false;
+            return result;
         }
 
         auto defaultEmbeddingConfig() -> json {
@@ -54,14 +57,14 @@ namespace insoulforge::ConfigStore {
         }
 
         auto defaultConfig() -> json {
-            return {
-              {"llm", {{"router", defaultChatConfig(100, 0.3, 0.9)}, {"executor", defaultChatConfig(150, 0.7, 0.9)},
-                        {"executorFallback", defaultChatConfig(150, 0.7, 0.9)},
-                        {"executorThinking", defaultChatConfig(512, 0.7, 0.9)},
-                        {"image", defaultChatConfig(1024, 0.7, 0.9, 90, 0)},
-                        {"imageGeneration", defaultImageGenerationConfig()},
-                        {"memory", defaultChatConfig(4000, 0.4, 0.9, 180, 0)}, {"embedding", defaultEmbeddingConfig()},
-                        {"jev", defaultJevConfig()}}},
+            return {{"llm", {{"router", defaultChatConfig(100, 0.3, 0.9)},
+                              {"executor", defaultChatConfig(150, 0.7, 0.9, 90, 3, true)},
+                              {"executorFallback", defaultChatConfig(150, 0.7, 0.9, 90, 3, true)},
+                              {"executorThinking", defaultChatConfig(512, 0.7, 0.9)},
+                              {"image", defaultChatConfig(1024, 0.7, 0.9, 90, 0)},
+                              {"imageGeneration", defaultImageGenerationConfig()},
+                              {"memory", defaultChatConfig(4000, 0.4, 0.9, 180, 0)},
+                              {"embedding", defaultEmbeddingConfig()}, {"jev", defaultJevConfig()}}},
               {"qq", {{"accessToken", ""}, {"selfQQNumber", 0}, {"oneBotTransport", "websocket"},
                        {"qqHttpHost", "http://127.0.0.1:3000"}, {"qqWebSocketHost", "ws://127.0.0.1:3001"},
                        {"botName", "机器人"}, {"defaultPrivateEnabled", false}}},
@@ -314,6 +317,13 @@ namespace insoulforge::ConfigStore {
         for (const auto *key: {"timeoutSeconds", "maxRetries"}) {
             if (!persistedConfig.contains(key) && atOrNull(llm, name.c_str()).contains(key))
                 persistedConfig[key] = llm[name][key];
+        }
+        if (name == "executor" || name == "executorFallback") {
+            if (!persistedConfig.contains("promptCacheKeyEnabled"))
+                persistedConfig["promptCacheKeyEnabled"] =
+                  getBool(atOrNull(llm, name.c_str()), "promptCacheKeyEnabled", false);
+        } else {
+            persistedConfig.erase("promptCacheKeyEnabled");
         }
         if (name == "imageGeneration") {
             const auto &current = atOrNull(llm, "imageGeneration");

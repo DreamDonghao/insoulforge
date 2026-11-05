@@ -9,6 +9,7 @@ import type {ApiResponse, LLMConfig} from '../../vite-env'
 const props = defineProps<{name: string, initialConfig: LLMConfig, title?: string}>()
 const hasParameters = computed(() => !['embedding', 'imageGeneration'].includes(props.name))
 const hasGenerationParameters = computed(() => hasParameters.value && props.name !== 'jev')
+const supportsPromptCacheKey = computed(() => ['executor', 'executorFallback'].includes(props.name))
 const emit = defineEmits<{saved: [name: string, config: LLMConfig]}>()
 const showToast = inject<(msg: string, isError?: boolean) => void>('showToast')
 const llmConfig = reactive<LLMConfig>({...props.initialConfig})
@@ -57,6 +58,7 @@ const saveLLMConfig = async (): Promise<void> => {
   saving.value = true
   try {
     const config: Partial<LLMConfig> = {...snapshot, name}
+    if (!supportsPromptCacheKey.value) delete config.promptCacheKeyEnabled
     if (!hasGenerationParameters.value) {
       delete config.maxTokens
       delete config.temperature
@@ -181,6 +183,13 @@ const saveLLMConfig = async (): Promise<void> => {
           <FieldError :field="fieldId('minConfidence')" :message="errors[fieldId('minConfidence')]"/>
           <p :id="fieldId('minConfidence') + '-hint'" class="form-hint">0～1，允许小数。低于此值时由 Router LLM 判断，默认 0.60</p>
         </div>
+      </div>
+      <div v-if="supportsPromptCacheKey" class="form-group">
+        <label :for="fieldId('promptCacheKeyEnabled')" class="form-label">
+          <input :id="fieldId('promptCacheKeyEnabled')" v-model="llmConfig.promptCacheKeyEnabled" type="checkbox" :disabled="saving" :aria-describedby="fieldId('promptCacheKeyEnabled') + '-hint'">
+          发送提示词缓存键
+        </label>
+        <p :id="fieldId('promptCacheKeyEnabled') + '-hint'" class="form-hint">默认关闭。开启后发送按会话生成的 prompt_cache_key，例如 insoulforge:executor:group:123456。需接口支持，是否命中缓存由服务端决定。</p>
       </div>
       <div v-if="hasGenerationParameters" class="form-row">
         <div class="form-group">

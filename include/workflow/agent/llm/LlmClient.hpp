@@ -49,8 +49,9 @@ namespace insoulforge::LlmClient {
 
     /// @brief 构建 OpenAI 兼容 chat 请求体（model/messages/采样参数；reasoningEffort 非空才附带）
     /// @param tools 工具定义；非 null 时附带 tools 字段
-    auto buildChatRequestBody(const LLMApiConfig &api, const LLMModelParams &params, json messages, json tools = {})
-      -> json;
+    /// @param sessionId 开启缓存键时使用的会话；缺省时不发送 prompt_cache_key。
+    auto buildChatRequestBody(const LLMApiConfig &api, const LLMModelParams &params, json messages, json tools = {},
+      std::optional<SessionId> sessionId = std::nullopt) -> json;
 
     /// @brief 校验 chat 响应：200 + JSON body + choices 为非空数组
     /// @return 合法时返回完整响应 JSON；否则 nullopt（错误日志由调用方按上下文输出）

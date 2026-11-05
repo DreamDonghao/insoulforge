@@ -3696,6 +3696,31 @@ namespace {
                                        {"temperature", 0.4}, {"topP", 0.9}, {"reasoningEffort", "none"}})
             .has_value(),
           "saves memory model config", kTestName);
+        auto cacheConfig = insoulforge::Config::instance().getLLMConfig("executor");
+        check(!insoulforge::Config::instance().executorParams.promptCacheKeyEnabled,
+          "cache key defaults to disabled", kTestName);
+        cacheConfig["promptCacheKeyEnabled"] = true;
+        check(insoulforge::Config::instance().saveLLMConfig("executor", cacheConfig).has_value() &&
+                insoulforge::Config::instance().executorParams.promptCacheKeyEnabled,
+          "cache key setting persists and loads", kTestName);
+        auto unchangedCacheConfig = cacheConfig;
+        unchangedCacheConfig.erase("promptCacheKeyEnabled");
+        check(insoulforge::Config::instance().saveLLMConfig("executor", unchangedCacheConfig).has_value() &&
+                insoulforge::Config::instance().executorParams.promptCacheKeyEnabled,
+          "older clients preserve the cache key setting when omitted", kTestName);
+        cacheConfig["promptCacheKeyEnabled"] = "true";
+        check(!insoulforge::Config::instance().saveLLMConfig("executor", cacheConfig),
+          "cache key setting rejects non-boolean values", kTestName);
+        cacheConfig["promptCacheKeyEnabled"] = false;
+        check(insoulforge::Config::instance().saveLLMConfig("executor", cacheConfig).has_value() &&
+                !insoulforge::Config::instance().executorParams.promptCacheKeyEnabled,
+          "cache key can be disabled", kTestName);
+        auto nonReplyConfig = insoulforge::Config::instance().getLLMConfig("memory");
+        nonReplyConfig["promptCacheKeyEnabled"] = true;
+        check(insoulforge::Config::instance().saveLLMConfig("memory", nonReplyConfig).has_value() &&
+                !insoulforge::Config::instance().memoryParams.promptCacheKeyEnabled &&
+                !insoulforge::Config::instance().getLLMConfig("memory").contains("promptCacheKeyEnabled"),
+          "non-reply models do not persist or load cache key settings", kTestName);
         const auto primaryExecutor = insoulforge::Config::instance().getLLMConfig("executor");
         check(insoulforge::Config::instance()
                 .saveLLMConfig(
