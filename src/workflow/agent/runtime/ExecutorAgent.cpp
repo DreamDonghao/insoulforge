@@ -18,10 +18,12 @@
 #include <workflow/agent/memory/affinity/AffinityStore.hpp>
 #include <workflow/agent/runtime/ExecutorAgent.hpp>
 #include <workflow/agent/tools/ToolRegistry.hpp>
+#include <workflow/agent/tools/ToolArgument.hpp>
 #include <workflow/agent/tools/ToolRuntime.hpp>
 #include <workflow/agent/tools/mcp/McpTools.hpp>
 #include <workflow/history/SharedConversationContext.hpp>
 #include <workflow/message/MessageRecord.hpp>
+#include <workflow/message/MessageService.hpp>
 #include <workflow/session/SessionStore.hpp>
 
 namespace insoulforge::ExecutorAgent {
@@ -186,43 +188,6 @@ namespace insoulforge::ExecutorAgent {
             return content;
         }
 
-        enum class ReplyToolResult {
-            NotReplyTool,
-            Applied,
-            InvalidArguments,
-        };
-
-        /// @brief 校验并处理回复工具（no_reply / reply / reply_with_quote）
-        /// @return 已生成决策、参数无效或非回复工具；参数无效由调用方回传错误给模型。
-        [[nodiscard]] auto applyReplyTool(const std::string &name, const json &args,
-          const std::string &accumulatedCQCodes, ReplyDecision &decision) -> ReplyToolResult {
-            if (name == "no_reply") {
-                decision.shouldReply = false;
-                return ReplyToolResult::Applied;
-            }
-            if (name == "reply") {
-                if (!args.is_object() || !args.contains("content"))
-                    return ReplyToolResult::InvalidArguments;
-                decision.content = finalizeContent(jsonToString(args["content"]), accumulatedCQCodes);
-                if (decision.content.empty())
-                    return ReplyToolResult::InvalidArguments;
-                decision.shouldReply = true;
-                return ReplyToolResult::Applied;
-            }
-            if (name == "reply_with_quote") {
-                if (!args.is_object() || !args.contains("content") || !args.contains("message_id"))
-                    return ReplyToolResult::InvalidArguments;
-                const std::string messageId = jsonToString(args["message_id"]);
-                const std::string content = finalizeContent(jsonToString(args["content"]), accumulatedCQCodes);
-                if (messageId.empty() || content.empty())
-                    return ReplyToolResult::InvalidArguments;
-                decision.shouldReply = true;
-                decision.content = fmt::format("[CQ:reply,id={}]", messageId) + content;
-                return ReplyToolResult::Applied;
-            }
-            return ReplyToolResult::NotReplyTool;
-        }
-
         /// @brief 向模型回传单个工具调用的执行结果或参数错误
         void appendToolResult(json &messages, const json &toolCall, std::string content) {
             json toolMsg;
@@ -286,10 +251,14 @@ namespace insoulforge::ExecutorAgent {
                 const std::string name = jsonToString(atOrNull(atOrNull(toolCall, "function"), "name"));
                 Logger::info(sessionId, "Executor", fmt::format("工具: {}", name));
 
+                if (hasDecision) {
+                    appendToolResult(messages, toolCall, "回合已结束，未执行: " + name);
+                    continue;
+                }
                 const json args = parseToolArguments(toolCall);
                 const auto recordCall = [&](const std::string &status) -> void {
                     // 正文和引用目标已保存在助手消息中，不重复记录发送内容的回复工具。
-                    if (name == "reply" || name == "reply_with_quote") {
+                    if (name == "send_message" || name == "send_message_and_finish") {
                         return;
                     }
                     toolHistory.push_back(MessageRecord::createToolHistoryEntry(name, args, status));
@@ -300,32 +269,40 @@ namespace insoulforge::ExecutorAgent {
                     appendToolResult(messages, toolCall, "工具已关闭，未执行: " + name);
                     continue;
                 }
-                const ReplyToolResult replyResult = applyReplyTool(name, args, accumulatedCQCodes, decision);
-                if (replyResult == ReplyToolResult::Applied) {
+                if (name == "finish_turn") {
+                    decision.shouldReply = false;
                     recordCall("decision");
-                    hasDecision = true; // 回复工具：结束本轮，不回传工具结果
+                    hasDecision = true;
                     continue;
                 }
-                if (replyResult == ReplyToolResult::InvalidArguments) {
-                    // 部分兼容接口会把最终文本放在 assistant content，却返回 reply({})。
-                    if (name == "reply") {
-                        const std::string fallback =
-                          finalizeContent(jsonToString(atOrNull(message, "content")), accumulatedCQCodes);
-                        if (!fallback.empty()) {
-                            Logger::warn(sessionId, "Executor", "reply 参数为空，使用 assistant content 兜底");
-                            decision.shouldReply = true;
-                            decision.content = fallback;
-                            recordCall("decision");
-                            hasDecision = true;
+                if (name == "send_message_and_finish") {
+                    auto content = finalizeContent(argString(args, "content"), accumulatedCQCodes);
+                    if (content.empty()) {
+                        appendToolResult(messages, toolCall, "content 必须是非空消息正文");
+                        continue;
+                    }
+                    const auto quote = argString(args, "quote_message_id");
+                    if (!quote.empty()) {
+                        bool found = false;
+                        for (const auto &record: messageSnapshot)
+                            if (getStr(record, "message_id") == quote) found = true;
+                        if (!found) {
+                            appendToolResult(messages, toolCall, "quote_message_id 必须来自当前会话可见消息");
                             continue;
                         }
+                        content = "[CQ:reply,id=" + quote + "]" + content;
                     }
-                    const std::string error = name == "reply_with_quote"
-                                                ? "reply_with_quote 需要非空 content 和 message_id，请重新调用。"
-                                                : "reply 需要非空 content，请重新调用。";
-                    Logger::warn(sessionId, "Executor", fmt::format("回复工具参数无效: {}", name));
-                    recordCall("invalid_arguments");
-                    appendToolResult(messages, toolCall, error);
+                    const auto sent = co_await MessageService::sendToSession(sessionId, content);
+                    accumulatedCQCodes.clear();
+                    if (!sent) {
+                        recordCall("send_failed");
+                        appendToolResult(messages, toolCall, "发送失败或结果未知：" + sent.error() +
+                          "。本轮未结束，由你决定重发、继续处理或 finish_turn；超时不代表确定未送达。");
+                        continue;
+                    }
+                    recordCall("succeeded");
+                    decision.shouldReply = false;
+                    hasDecision = true;
                     continue;
                 }
 
@@ -460,7 +437,7 @@ namespace insoulforge::ExecutorAgent {
             throw std::invalid_argument("执行轮次必须在 1 到总轮数之间，消息必须是数组");
         }
         json state = {{"current_round", currentRound}, {"max_rounds", maxToolRounds},
-          {"remaining_rounds", maxToolRounds - currentRound}, {"reply_only", currentRound == maxToolRounds}};
+          {"remaining_rounds", maxToolRounds - currentRound}, {"reply_only", currentRound == maxToolRounds}, {"current_time", currentDateTime()}};
         if (!mcpState.is_null() && currentRound != maxToolRounds) {
             state["mcp"] = std::move(mcpState);
         }
@@ -491,7 +468,7 @@ namespace insoulforge::ExecutorAgent {
           {std::regex(R"(<\/?[|｜]*DSML[|｜]+[^>]*>)", std::regex::icase), ""},
           // </think> 与 function(...) 调用残留
           {std::regex("</think>", std::regex::icase), ""},
-          {std::regex(R"((reply_with_quote|reply|no_reply)\s*\([^)]*\))"), ""},
+          {std::regex(R"((send_message_and_finish|send_message|finish_turn|reply_with_quote|reply|no_reply)\s*\([^)]*\))"), ""},
           // 压缩空白：去除首尾空白与 3 个以上连续换行
           {std::regex("^\\s+|\\s+$"), ""},
           {std::regex("\n{3,}"), "\n\n"},

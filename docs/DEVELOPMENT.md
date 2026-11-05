@@ -252,7 +252,7 @@ MessageService → OneBot API
   实际范围受 `contextWindowLimit` 限制。Router LLM 仍使用原有分段窗口；各自在窗口内计算机器人静默状态，不修改冻结快照。
   Jev 使用压平的消息段，并保留
   `message_id` / `reply_to` 供引用关系判断。
-- Jev 一次请求给出 `action`、`tone` 和 `maxLength`。仅当 `answers.action.choice` 为 `reply` / `skip` 且
+- Jev 一次请求给出 `action`、`tone` 和 `maxLength`。仅当 `answers.action.choice` 为 `send_message_and_finish` / `skip` 且
   `answers.action.confidence` 有效并达到 `jevMinConfidence` 时采纳；`unclear`、低置信度、响应异常或请求失败均交给原有
   Router LLM。`probabilities.reply` 不是当前阈值的比较对象。Jev 默认超时 10 秒、不重试，可在模型配置中调整；Router LLM 兜底仍保留原有
   fail-open 行为。
@@ -264,10 +264,10 @@ MessageService → OneBot API
 ### 工具系统
 
 - `ToolRegistry` 以进程内插件管理工具，LLM 调用时按类别分组注入 prompt：
-    - `REPLY`：回复工具（`reply` / `no_reply` / `reply_with_quote`），调用后结束本轮处理
+    - `REPLY`：回复工具（`send_message_and_finish` / `finish_turn`），直接结束或发送成功后结束本轮处理
     - `INFORMATION`：信息工具（`recall_memory` / `deep_think` / `list_scheduled_tasks`），获取数据
     - `ACTION`：动作工具（`send_face` / `send_image` / `send_sticker` / `save_sticker` / `rename_sticker` /
-      `reply_and_continue` / `delete_sticker` / `at_user` / `ban_user` / `add_to_blacklist` / `send_poke` /
+      `send_message` / `delete_sticker` / `at_user` / `ban_user` / `add_to_blacklist` / `send_poke` /
       `recall_message` / `create_scheduled_task` / `cancel_scheduled_task` / `demo_async_task`），执行操作
 - 内置工具分为 `builtin.reply`、`builtin.info`、`builtin.action` 三个 `ToolPlugin` 实现，注册代码按类别拆分在
   `src/workflow/agent/tools/plugins/ReplyToolsPlugin.cpp` / `InfoToolsPlugin.cpp` / `ActionToolsPlugin.cpp`。`ToolPluginCatalog`
@@ -295,7 +295,7 @@ MessageService → OneBot API
 - 每轮复制当前请求上下文，在末尾追加一条 system 执行状态，说明当前轮次和后续剩余轮数；状态不进入持久上下文，
   不影响已有 assistant/tool 配对，也不会累积到下一轮或传给 `deep_think`。最后一轮仅提供 REPLY 类工具，
   `ToolCallContext.replyOnly` 同时在注册中心拒绝非回复处理器执行；上限为 1 时首轮即应用此规则。
-- `reply` / `reply_with_quote` / `no_reply` 是回复工具，调用后结束本轮处理；它们在 `ExecutorAgent::processToolCalls`
+- `send_message_and_finish` / `finish_turn` 是回复工具，直接结束或发送成功后结束本轮处理；它们在 `ExecutorAgent::processToolCalls`
   中被拦截，不走普通工具返回值路径。
 - `ReplyDecision.toolHistory` 跨迭代累计工具名、脱敏参数和处理状态，成功发送时经 MessageService 附在助手记录上。
   发送失败同样保存尝试发送的正文和工具历史，额外添加字符串字段 `send_error`，保留 OneBot 错误码及说明；
@@ -303,13 +303,13 @@ MessageService → OneBot API
   网络超时仅表示结果未知，不能据此推断被禁言；记录失败本身不触发新一轮回复或自动重发。
   MessageService 使用 `std::expected<u64, std::string>` 返回发送结果，工具直接把具体错误反馈给模型；
   工作流不再重复追加发送失败记录。助手消息构造函数接受可选消息 ID，缺失时直接省略该字段。
-  不累计 `reply`、`reply_with_quote` 的调用参数，避免重复保存正文和引用目标；`no_reply` 与其他工具继续记录。
-  `no_reply` 及有工具历史的流程失败通过 `appendAssistantExecutionRecord` 直接写入 MessageList，不进入入站队列。
+  不累计 `send_message_and_finish`、`send_message_and_finish` 的调用参数，避免重复保存正文和引用目标；`finish_turn` 与其他工具继续记录。
+  `finish_turn` 及有工具历史的流程失败通过 `appendAssistantExecutionRecord` 直接写入 MessageList，不进入入站队列。
   内部记录标记 `record_type=tool_execution` 和执行状态，没有 QQ 消息 ID；仅 Executor 使用包含历史的投影，
   Router、记忆和好感度仍使用默认投影。正常退出持久化和启动恢复沿用现有消息列表机制，不增加数据库表。
-- `send_sticker` / `send_poke` / `reply_and_continue` 是中途动作，执行后本轮不结束，最终仍需用回复工具收尾；一次对话需要连续多条消息时，用
-  `reply_and_continue` 发送前置消息，再用 `reply` 或 `no_reply` 收尾。
-- `send_sticker` 与 `reply_and_continue` 通过 `MessageService` 直接发送，成功后自动写入聊天记录并推送
+- `send_sticker` / `send_poke` / `send_message` 是中途动作，执行后本轮不结束，最终仍需用回复工具收尾；一次对话需要连续多条消息时，用
+  `send_message` 发送前置消息，再用 `send_message_and_finish` 或 `finish_turn` 收尾。
+- `send_sticker` 与 `send_message` 通过 `MessageService` 直接发送，成功后自动写入聊天记录并推送
   WebSocket；主流程只负责发送最终文字回复。
 - `deep_think` 是信息工具，不是全局思考模式。Executor 只在复杂问题需要额外推理时调用，工具结果再回到 Executor 组织成聊天回复。
 - `add_to_blacklist` 复用全局黑名单存储；仅接受当前会话快照中的发送者 用户 ID，并拒绝管理员与机器人自身。

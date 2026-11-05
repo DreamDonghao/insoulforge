@@ -79,12 +79,15 @@ namespace insoulforge {
 
     auto ToolRuntime::findFavoriteEmoji(const std::string name, const std::optional<SessionId> sessionId)
       -> drogon::Task<json> {
+        json match = nullptr;
         for (const json emojis = co_await fetchFavoriteEmojis(sessionId); const auto &emoji: emojis) {
             if (getStr(emoji, "name") == name || getStr(emoji, "summary") == name) {
-                co_return emoji;
+                if (!match.is_null())
+                    co_return json(nullptr); // Ambiguous names must never select an arbitrary resource.
+                match = emoji;
             }
         }
-        co_return json(nullptr);
+        co_return match;
     }
 
     auto ToolRuntime::addFavoriteEmoji(std::string url, const std::optional<SessionId> sessionId)

@@ -77,7 +77,7 @@ namespace insoulforge {
 
     /// @brief 工具分类
     enum class ToolCategory {
-        REPLY, // 回复工具：reply, no_reply, reply_with_quote（结束处理）
+        REPLY, // 回复工具：send_message_and_finish, finish_turn（结束处理）
         INFORMATION, // 信息工具：recall_memory（获取数据）
         ACTION // 动作工具：send_face, send_sticker, ban_user, send_poke 等（执行操作）
     };

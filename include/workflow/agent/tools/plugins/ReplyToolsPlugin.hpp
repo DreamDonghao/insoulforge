@@ -6,7 +6,7 @@
 #include <workflow/agent/tools/ToolPlugin.hpp>
 
 namespace insoulforge {
-    /// @brief 注册 reply、reply_with_quote、no_reply 等终结本轮的回复工具
+    /// @brief 注册 send_message_and_finish、finish_turn 等终结本轮的回复工具
     class ReplyToolsPlugin final : public ToolPlugin {
     public:
         /// @brief 获取固定插件 ID builtin.reply

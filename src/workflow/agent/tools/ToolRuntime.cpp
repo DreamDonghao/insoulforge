@@ -79,7 +79,7 @@ namespace insoulforge {
                             fmt::format("ToolRuntime: 跳过不支持的自定义工具 '{}' ({})", tool.name, tool.executorType));
                           continue;
                       }
-                      if (pluginRegistry.registerTool(*definition, ToolCategory::INFORMATION)) {
+                      if (pluginRegistry.registerTool(*definition, ToolCategory::ACTION)) {
                           ++registeredCount;
                           Logger::info(std::nullopt, "Tool",
                             fmt::format("ToolRuntime: 注册自定义工具 '{}' ({})", tool.name, tool.executorType));

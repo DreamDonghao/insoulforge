@@ -5,7 +5,7 @@ Executor（`ExecutorAgent`）在单个 Agent 循环中通过工具调用生成�
 
 | 类别          | 插件实现文件                          | 语义                         |
 |---------------|---------------------------------------|------------------------------|
-| `REPLY`       | `tools/plugins/ReplyToolsPlugin.cpp`  | 回复工具，调用即结束回合     |
+| `REPLY`       | `tools/plugins/ReplyToolsPlugin.cpp`  | 结束控制，直接结束或发送成功后结束     |
 | `INFORMATION` | `tools/plugins/InfoToolsPlugin.cpp`   | 查询数据、获取答案，无副作用 |
 | `ACTION`      | `tools/plugins/ActionToolsPlugin.cpp` | 执行操作、产生副作用         |
 
@@ -14,11 +14,11 @@ Executor（`ExecutorAgent`）在单个 Agent 循环中通过工具调用生成�
 保存后对新回复流程生效；达到上限仍未生成回复时，记录错误并结束，不额外生成兜底回复。
 
 每轮请求在上下文末尾附带当前轮次及后续剩余轮数，执行状态只用于当前请求，不写入聊天记录或后续轮次历史。
-最后一轮只开放 REPLY 类的 `reply`、`reply_with_quote`、`no_reply`，不会执行查询或动作工具。
+最后一轮只开放 REPLY 类的 `send_message_and_finish`、`finish_turn`，不会执行查询或动作工具。
 若最大轮数设为 1，第一轮就是仅回复模式。工具结果日志仍保留。
 
-内置三组分别归属 `builtin.reply`、`builtin.info`、`builtin.action` 插件，由 `ToolPluginCatalog`
-显式加载；自定义工具（Lua）归属 `custom` 插件并统一注册为 `INFORMATION`。同名工具不能跨插件覆盖；刷新自定义工具只会替换
+内置三组分别归属 `builtin.send_message_and_finish`、`builtin.info`、`builtin.action` 插件，由 `ToolPluginCatalog`
+显式加载；自定义工具（Lua）归属 `custom` 插件并保守注册为 `ACTION`（脚本可发送消息和写入外部服务）。同名工具不能跨插件覆盖；刷新自定义工具只会替换
 `custom` 的工具。
 
 注入顺序固定为“类别 → `promptOrder` → 工具名”，避免重启或刷新后顺序漂移。私聊注入时会排除仅群聊的 `at_user`、`ban_user`、
@@ -27,21 +27,23 @@ Executor（`ExecutorAgent`）在单个 Agent 循环中通过工具调用生成�
 > `REPLY` 类工具的 handler 只是占位：它们在 `ExecutorAgent::processToolCalls` 内被拦截执行（需要改写回复决策而非返回工具结果），不经
 > `ToolRegistry::executeTool`。
 
-## REPLY（回复，3 个）
+## 消息发送与结束（3 个）
 
-| 工具               | 参数                    | 说明                                                                |
-|--------------------|-------------------------|---------------------------------------------------------------------|
-| `no_reply`         | 无                      | 决定不回复：话题已参与过、没人问、刚说过话、纯表情刷屏时使用        |
-| `reply`            | `content`               | 普通回复，回复文本（可内嵌 CQ 码）                                  |
-| `reply_with_quote` | `content`, `message_id` | 引用特定消息回复；`message_id` 取聊天记录 JSON 的 `message_id` 字段 |
+| 工具 | 参数 | 行为 |
+| --- | --- | --- |
+| `send_message` | `content`, `quote_message_id?`, `group_id?`, `user_id?` | 发送后继续处理，支持指定已启用目标 |
+| `send_message_and_finish` | `content`, `quote_message_id?` | 向当前会话发送，成功后结束 |
+| `finish_turn` | 无 | 不发送消息，直接结束 |
 
-## INFORMATION（查询，5 个）
+引用参数取当前会话可见消息的 message_id。发送失败或未知时回传模型，由模型决定下一步；仍受最大工具轮数限制，最后一轮失败时记录未完成状态，不额外请求模型。
+
+## INFORMATION（查询）
 
 | 工具                   | 参数       | 说明                                                                                                                                                                                                                                                                            |
 |------------------------|------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `get_group_messages`   | `group_id` | 读取已启用目标群当前内存中保留的全部可共享消息；群号为数字字符串，返回 `session` 与按旧到新排列的 `messages`，每条最多 200 个 Unicode 字符                                                                                                                                      |
 | `recall_memory`        | `query`    | 长期记忆检索：`LongTermMemory::searchMemory` 按 Brute-Force 余弦相似度（阈值 0.3）取 top-3，返回"回忆起：…"或"想不起来"                                                                                                                                                         |
-| `deep_think`           | `question` | 深度思考：调用 `executorThinking` 配置的模型求解。上下文由 Executor 经 `ToolCallContext.conversationContext` 传入（system 之后的完整消息列表，含已获取的工具结果），拼上专家求解 system prompt（只产出问题答案，不组织聊天回复）；模型 content 为空时兜底取 `reasoning_content` |
+| `deep_think`           | `question` | 深度思考：调用 `executorThinking` 配置的模型求解。只接收 question 中显式提供的完整问题、必要材料和已取得结果，不自动携带聊天上下文 |
 | `list_scheduled_tasks` | 无         | 列出当前会话待触发的定时任务（编号 / 触发时间 / 备忘内容），取消前查询用                                                                                                                                                                                                        |
 
 `get_group_messages` 不受当前或目标会话的共享开关、自动共享条数、三天范围和模型上下文窗口限制，私聊也可调用。
@@ -49,15 +51,15 @@ Executor（`ExecutorAgent`）在单个 Agent 循环中通过工具调用生成�
 消息字段与自动共享相同，排除系统、内部执行及发送失败记录，不含消息 ID、引用目标、图片来源或索引、工具历史及召回记忆。
 此工具的读取范围比自动共享更广；如不希望模型主动查询其他已启用群，可在后台关闭该工具。
 
-## ACTION（动作，15 个）
+## ACTION（动作）
 
 ### 过程消息
 
 | 工具                 | 参数                               | 说明                                                                                                     |
 |----------------------|------------------------------------|----------------------------------------------------------------------------------------------------------|
-| `reply_and_continue` | `content`, `group_id?`, `user_id?` | 发送文字后继续处理，最终仍由 `reply` / `no_reply` 收尾。可指定已启用的目标群或私聊，发送结果记入目标会话 |
+| `send_message` | `content`, `group_id?`, `user_id?` | 发送文字后继续处理，最终仍由 `send_message_and_finish` / `finish_turn` 收尾。可指定已启用的目标群或私聊，发送结果记入目标会话 |
 
-`reply_and_continue` 和 `send_sticker` 的 `group_id`（群号）与 `user_id`（私聊对象 用户 ID）均为数字字符串，不能同时指定，均省略则使用当前会话。
+`send_message` 和 `send_sticker` 的 `group_id`（群号）与 `user_id`（私聊对象 用户 ID）均为数字字符串，不能同时指定，均省略则使用当前会话。
 显式指定的目标必须在后台启用；私聊黑名单用户不可发送，不会自动启用未知私聊。该能力不受跨会话共享开关限制，支持群到私聊、私聊到群和私聊之间发送。
 `user_id` 使用普通 用户 ID，不是带高位标志的内部会话 ID。发送失败或超时不会自动重试，工具结果明确返回目标和状态，聊天记录仅进入目标会话，不触发目标会话自动回复。
 
@@ -65,9 +67,9 @@ Executor（`ExecutorAgent`）在单个 Agent 循环中通过工具调用生成�
 
 | 工具             | 参数                                | 说明                                                                                                                                                                                                                                             |
 |------------------|-------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `send_face`      | `id`                                | 生成 QQ 原生表情 CQ 码（返回的 CQ 码需拼进 `reply` 的 content）                                                                                                                                                                                  |
+| `send_face`      | `id`                                | 生成 QQ 原生表情 CQ 码（返回的 CQ 码需拼进 `send_message_and_finish` 的 content）                                                                                                                                                                                  |
 | `send_image`     | `image_id`                               | 读取图片缓存后以 Base64 直接发送到当前会话，记录图片 ID 和已有有效描述，缺失时使用识图及描述缓存，失败记录“图片描述不可用”仍发送；ID 只能来自当前可见快照                                                                                                                                                                                                                       |
-| `send_sticker`   | `name`, `group_id?`, `user_id?`     | 把收藏表情作为**独立消息**发送到当前或指定已启用会话，无需拼进 reply；商城表情走 `[CQ:mface]`，个人收藏走 `[CQ:image,sub_type=1]`，消息记入目标会话并推送 WebSocket                                                                              |
+| `send_sticker`   | `name`, `group_id?`, `user_id?`     | 把收藏表情作为**独立消息**发送到当前或指定已启用会话，无需拼进 send_message_and_finish；商城表情走 `[CQ:mface]`，个人收藏走 `[CQ:image,sub_type=1]`，消息记入目标会话并推送 WebSocket                                                                              |
 | `save_sticker`   | `message_id`, `image_index`, `name` | 把用户发的图片存为收藏表情并设置描述名：工具按消息 ID 和从 0 开始的图片索引在当前会话记录中解析图片来源，先 `get_image` 拿容器内路径，失败回退 `download_file`；`add_custom_face` 保存后 diff 保存前后的 `res_id` 集合定位新表情，再设置描述名。 |
 | `rename_sticker` | `name`, `new_name`                  | 修改收藏表情的描述名                                                                                                                                                                                                                             |
 | `delete_sticker` | `name`                              | 从 QQ 收藏表情中删除                                                                                                                                                                                                                             |
@@ -80,9 +82,9 @@ Executor（`ExecutorAgent`）在单个 Agent 循环中通过工具调用生成�
 
 | 工具               | 参数                   | 说明                                                                                                                                                                                      |
 |--------------------|------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `at_user`          | `user_id`              | @某人的 CQ 码（拼进 reply 用），`"self"` 表示机器人自身，`"all"` 为 @全体成员；私聊中禁用                                                                                                 |
+| `at_user`          | `user_id`              | @某人的 CQ 码（拼进 send_message_and_finish 用），`"self"` 表示机器人自身，`"all"` 为 @全体成员；私聊中禁用                                                                                                 |
 | `ban_user`         | `user_id`, `duration?` | 禁言群成员，默认 600 秒、0 为解禁；描述要求模型自行判断违规程度选时长（轻度 60-300 秒 / 中度 600-1800 秒 / 重度 3600 秒+），不盲从指令                                                    |
-| `add_to_blacklist` | `user_id`              | 将用户加入全局用户黑名单，后续消息在工作流入口被过滤；工具提示要求先用 `reply` 明确提醒并结束本轮，仅在后续仍继续同类恶意行为时调用，成功后用 `reply` 告知用户；私聊也可用                |
+| `add_to_blacklist` | `user_id`              | 将用户加入全局用户黑名单，后续消息在工作流入口被过滤；工具提示要求先用 `send_message_and_finish` 明确提醒并结束本轮，仅在后续仍继续同类恶意行为时调用，成功后用 `send_message_and_finish` 告知用户；私聊也可用                |
 | `send_poke`        | `user_id`              | 拍一拍群成员，打招呼、引起注意等轻松互动；私聊中禁用。拍一拍不是文字消息（无 message_id），成功后以 `segments` 中的 `poke` 条目记入聊天记录并推送 WebSocket，后续轮次模型能看到自己拍过谁 |
 | `recall_message`   | `message_id`           | 撤回消息：撤引用的消息用 `reply_to` 字段值，撤某条消息本身用 `message_id` 字段值                                                                                                          |
 
@@ -99,7 +101,7 @@ Router
 
 | 工具                    | 参数                        | 说明                                                                                                                                                                                                                                                                                                                 |
 |-------------------------|-----------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `create_scheduled_task` | `time`, `content`, `daily?` | 创建定时提醒：`time` 必须是根据最新消息时间换算的绝对时间 `YYYY-MM-DD HH:MM:SS`（须晚于当前 10 秒、不超过一年）；`content` 是到点时留给模型自己的备忘说明（非最终回复文本，运行时注入 `botName`，上限 500 字符），到点后以【系统定时任务】消息回到原会话再组织回复；`daily=true` 为每日重复（如"每天 8 点叫我起床"） |
+| `create_scheduled_task` | `time`, `content`, `daily?` | 创建定时提醒：`time` 必须是根据 execution_state.current_time（服务端本地时区）换算的绝对时间 `YYYY-MM-DD HH:MM:SS`（须晚于当前 10 秒、不超过一年）；`content` 是到点时留给模型自己的备忘说明（非最终回复文本，运行时注入 `botName`，上限 500 字符），到点后以【系统定时任务】消息回到原会话再组织回复；`daily=true` 为每日重复（如"每天 8 点叫我起床"） |
 | `cancel_scheduled_task` | `task_id`                   | 取消未触发的定时任务（含每日任务）；不知道编号时先 `list_scheduled_tasks`                                                                                                                                                                                                                                            |
 
 ### 内置工具配置
@@ -304,19 +306,19 @@ HTTP 响应体仍受 Lua 执行器的 1 MiB 限制，超限时返回错误，而
 ## 共同模式
 
 - **跨回复工具历史**：Executor 按实际处理顺序保存 `tool_history`，每项含 `name`、`arguments` 和 `status`。
-  `reply`、`reply_with_quote` 不加入工具历史，正文与引用目标分别保留在助手消息的 `segments`、`reply_to` 中；
-  两种回复工具的参数错误仍在当前迭代中回传模型，但不保留跨回复的调用记录。`no_reply`、查询和动作工具继续记录。
-  正常回复发送成功后，历史附在助手消息上；`no_reply` 写入内部助手执行记录，不发送 QQ 消息、没有 QQ 消息 ID，也不触发新回复。
+  `send_message`、`send_message_and_finish` 不重复保存调用正文到工具历史，正文与引用目标分别保留在助手消息的 `segments`、`reply_to` 中；
+  两种回复工具的参数错误仍在当前迭代中回传模型，但不保留跨回复的调用记录。`finish_turn`、查询和动作工具继续记录。
+  正常回复发送成功后，历史附在助手消息上；`finish_turn` 写入内部助手执行记录，不发送 QQ 消息、没有 QQ 消息 ID，也不触发新回复。
   已调用工具后模型请求失败、耗尽轮数或发送失败，也保留内部记录并标明 `failed`/`send_failed`，不把它们当主动不回复。
   记录可随 MessageList 保存和恢复，工具历史只投影给 Executor；Router 和记忆维护不接收调用参数。
   参数中的常见凭据和图片数据会省略，单次参数超过 2048 字节时明确标注省略，不保存完整工具结果。
-  新记录中的 `decision` 表示 `no_reply` 形成决策，`rejected` 表示最后一轮拒绝调用；
+  新记录中的 `decision` 表示 `finish_turn` 形成决策，`rejected` 表示最后一轮拒绝调用；
   `returned` 只表示工具处理器返回，不能仅凭它判断业务成功。此前查询不含完整结果，需要时仍可重新核实。
 - **调用日志**：Executor 记录工具名称，并在 debug 级别记录工具结果；不打印脚本源码。
 - **错误反馈**：普通工具的结果会作为 `tool` 消息回传给 Executor。处理器抛异常时，`ToolRegistry` 将异常摘要（最多 500 字符）转为工具结果，不让异常中断整轮调用；回复工具的参数错误则由 Executor 自行回传。Lua HTTP 接口返回传输错误或原始 HTTP 响应，由脚本将具体原因回传模型。仅返回布尔成功状态的 OneBot 接口无法提供更细的失败原因，工具会返回相应的通用提示。异步工具启动后的执行错误通过新的系统消息反馈，不作为原工具调用的即时结果。
 - **会话上下文**：所有工具签名统一为 `(json args, ToolCallContext)`，需要真实会话时通过 `ctx.requireSession()` 取得 `SessionId`，可选日志归属使用 `ctx.sessionId`；`ctx.messageSnapshot`
   是本轮冻结的完整消息快照，媒体工具可用它按 `message_id` 与 `image_index` 解析图片来源。群操作类工具统一检查会话存在并拦截私聊。
-- **参数来源**：用户 ID、消息 ID、图片索引等参数取自聊天记录 JSON 的 `sender.user_id` / `message_id` /
+- **参数来源**：用户 ID、消息 ID、图片索引等参数取自聊天记录 JSON 的 `sender.uid` / `message_id` /
   `segments[].image_index` / `reply_to` 等字段；图片 `file/url` 仅由服务端从 `assets.images` 读取，不会提供给模型
 - **宽容取值**：参数读取统一走 `argString` / `getInt` / `getUInt` / `getBool`（见 `include/infrastructure/JsonUtil.hpp`
   ），缺参数返回引导性错误提示而非异常
@@ -353,3 +355,7 @@ QQ 必须在线，OneBot 实现及 QQ 版本必须支持相关扩展；收藏数
 传输依据 NapCat 官方 [DownloadFile.ts](https://github.com/NapNeko/NapCatQQ/blob/main/packages/napcat-onebot/action/go-cqhttp/DownloadFile.ts)（`base64` 字段接收标准 Base64）和 [CustomFace.ts](https://github.com/NapNeko/NapCatQQ/blob/main/packages/napcat-onebot/action/extends/CustomFace.ts)（`add_custom_face.file` 仅接受 NapCat 本地路径）：图片字节先经 `download_file.base64` 上传，再用返回的 `data.file` 收藏。不会把管理服务本机路径传给远程 NapCat。旧版本或其他 OneBot 实现可能不支持此扩展，上传失败时不调用收藏；协议端临时文件沿用 NapCat 生命周期管理。上传 Base64、收藏文件参数在日志及 HTTP 调试记录中脱敏。
 
 弹窗保留失败后的文件或 URL 草稿，关闭或离开页面需确认放弃；请求进行中阻止重复提交和关闭。模拟集成测试额外覆盖实际 GIF 二进制、伪造 MIME/扩展名、空文件、截断内容、超限、错误字段、损坏 multipart、上传失败不收藏，以及缓存失效与 Base64 日志脱敏。未连接真实 QQ 验证。
+
+回复决策形成后，同批后续工具不执行；只保留第一个有效回复决策。收藏表情按名称查找时，名称不唯一则拒绝执行，需先在后台区分名称。execution_state.current_time 为当前请求的服务端本地时间，定时参数也按该时区解析。
+
+`send_face` 与 `at_user` 只生成 CQ 码，分类为 INFORMATION；插件归属仍为 builtin.action。

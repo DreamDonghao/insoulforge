@@ -56,8 +56,13 @@ const visibleBuiltins = computed(() => {
   return builtinTools.value.filter(tool => `${tool.name} ${tool.description}`.toLowerCase().includes(query))
 })
 const builtinGroups = computed(() => {
-  const groups = new Map<string, BuiltinTool[]>([['回复', []], ['信息', []], ['动作', []]])
-  for (const tool of visibleBuiltins.value) groups.get(tool.category)?.push(tool)
+  const groups = new Map<string, BuiltinTool[]>([['消息发送与结束', []], ['信息', []], ['动作', []]])
+  for (const tool of visibleBuiltins.value) {
+    const category = ['send_message', 'send_message_and_finish', 'finish_turn'].includes(tool.name)
+      ? '消息发送与结束' : tool.category
+    if (!groups.has(category)) groups.set(category, [])
+    groups.get(category)!.push(tool)
+  }
   return Array.from(groups, ([category, tools]) => ({category, tools}))
 })
 const enabledBuiltinCount = computed(() => builtinTools.value.filter(tool => tool.enabled).length)
@@ -509,6 +514,10 @@ onMounted(() => {
             <template v-else>
               <section v-for="group in builtinGroups" :key="group.category" class="builtin-group">
                 <h3>{{ group.category }}工具 <span>{{ group.tools.length }}</span></h3>
+                <p v-if="group.category === '消息发送与结束'" class="form-hint">
+                  send_message 发送后继续；send_message_and_finish 发送成功后结束；finish_turn 不发送直接结束。
+                  两种发送工具均可选填 quote_message_id 引用当前会话消息。发送失败或结果未知时不结束，由模型决定重发、继续处理或终止。
+                </p>
                 <div v-for="tool in group.tools" :key="tool.name"
                      class="builtin-row">
                   <EnabledSwitch :model-value="tool.enabled" :disabled="pendingTools.has(`builtin:${tool.name}`)"

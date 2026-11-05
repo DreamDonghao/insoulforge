@@ -65,7 +65,7 @@ namespace insoulforge {
         void invalidate();
 
         /// @brief MCP 配置生效后更新目录片段，使两份公共缓存失效；不协调进行中的工具调用。
-        void updateMcpDirectory(json directory);
+        void updateMcpDirectory(const json &directory);
 
         /// @brief 收藏表情成功刷新后更新名称数组；名称变化时使两份公共缓存失效。
         void updateStickerNames(json names);

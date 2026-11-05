@@ -162,6 +162,12 @@ namespace {
             for (const auto &tool: registry.getTools({}))
                 require(tool["function"]["name"] != "list_stickers", "list_stickers is not advertised");
             require(registry.hasTool("send_sticker"), "name-based sticker sender remains registered");
+            const auto ambiguous = co_await registry.executeTool(
+              "rename_sticker", {{"name", "same"}, {"new_name", "unsafe"}}, {.sessionId = SessionId::group("100")});
+            require(ambiguous.find("名称不唯一") != std::string::npos, "ambiguous rename is rejected");
+            favorites = json::array({json{{"resId", "old"}, {"desc", "same"}, {"md5", "abc"}}});
+            ToolRuntime::invalidateFavoriteEmojiCache();
+            co_await ToolRuntime::fetchFavoriteEmojis();
             const auto beforeRenameLists = lists;
             auto renamed = co_await registry.executeTool(
               "rename_sticker", {{"name", "same"}, {"new_name", "updated"}}, {.sessionId = SessionId::group("100")});
@@ -172,7 +178,7 @@ namespace {
             failRename = true;
             renamed = co_await registry.executeTool("rename_sticker", {{"name", "updated"}, {"new_name", "uncertain"}},
               {.sessionId = SessionId::group("100")});
-            require(renamed == "改名失败", "failed rename reported");
+            require(renamed.find("结果未确认") != std::string::npos, "failed rename reported");
             refreshed = co_await ToolRuntime::fetchFavoriteEmojis();
             require(lists == beforeRenameLists + 2 && refreshed[0]["name"] == "updated",
               "uncertain rename invalidates cache for reconciliation");
