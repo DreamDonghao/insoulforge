@@ -11,6 +11,7 @@
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 #include <infrastructure/storage/Transaction.hpp>
+#include <workflow/agent/memory/PersonMemoryStore.hpp>
 #include <workflow/agent/memory/maintenance/MemoryMaintenanceStore.hpp>
 
 namespace insoulforge::MemoryMaintenanceStore {
@@ -66,6 +67,7 @@ namespace insoulforge::MemoryMaintenanceStore {
             const Statement entry(
               handle, "INSERT INTO person_memory_entries (user_id, source_session, content) VALUES (?, ?, ?)");
             for (const auto &[userId, content]: result.personEntries) {
+                const auto beforeTokens = PersonMemoryStore::contextSnapshot(userId);
                 profile.bind(1, userId.toString());
                 profile.execOrThrow();
                 profile.reset();
@@ -74,6 +76,7 @@ namespace insoulforge::MemoryMaintenanceStore {
                 entry.bind(3, content);
                 entry.execOrThrow();
                 entry.reset();
+                PersonMemoryStore::updateTokenEstimate(userId, beforeTokens);
             }
         }
 

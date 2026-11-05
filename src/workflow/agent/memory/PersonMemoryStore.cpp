@@ -10,9 +10,11 @@
 #include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/UserId.hpp>
 #include <infrastructure/config/Config.hpp>
+#include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 #include <infrastructure/storage/Transaction.hpp>
+#include <infrastructure/tokenizer/TokenCounter.hpp>
 #include <workflow/agent/memory/PersonMemoryStore.hpp>
 
 namespace insoulforge::PersonMemoryStore {
@@ -77,6 +79,7 @@ namespace insoulforge::PersonMemoryStore {
         std::unique_lock lock(db.mutex());
         const auto handle = db.handle();
         Transaction transaction(handle);
+        const auto beforeTokens = contextSnapshot(snapshot.userId);
         const auto current = readPerson(snapshot.userId);
         json entries = json::array();
         if (!current.is_null()) {
@@ -102,6 +105,7 @@ namespace insoulforge::PersonMemoryStore {
         remove.bind(1, snapshot.userId.toString());
         remove.bind(2, snapshot.lastEntryId);
         remove.execOrThrow();
+        updateTokenEstimate(snapshot.userId, beforeTokens);
         transaction.commit();
     }
 
@@ -131,14 +135,16 @@ namespace insoulforge::PersonMemoryStore {
         std::shared_lock lock(db.mutex());
         const Statement query(db.handle(),
           "WITH people AS (SELECT user_id FROM person_memories UNION SELECT user_id FROM person_affinity) "
-          "SELECT p.user_id, COALESCE(a.affinity, 0), COUNT(e.id), MAX(e.created_at) "
-          "FROM people p LEFT JOIN person_affinity a ON a.user_id = p.user_id "
+          "SELECT p.user_id, COALESCE(a.affinity, 0), COUNT(e.id), MAX(e.created_at), COALESCE(m.estimated_tokens, 0) "
+          "FROM people p LEFT JOIN person_memories m ON m.user_id = p.user_id LEFT JOIN person_affinity a ON a.user_id "
+          "= p.user_id "
           "LEFT JOIN person_memory_entries e ON e.user_id = p.user_id "
           "GROUP BY p.user_id ORDER BY p.user_id");
         json result = json::array();
         while (query.step()) {
-            result.push_back({{"user_id", query.getText(0)}, {"affinity", query.getInt64(1)},
-              {"pending_count", query.getInt64(2)}, {"updated_at", query.isNull(3) ? "" : query.getText(3)}});
+            result.push_back(
+              {{"user_id", query.getText(0)}, {"affinity", query.getInt64(1)}, {"estimated_tokens", query.getInt64(4)},
+                {"pending_count", query.getInt64(2)}, {"updated_at", query.isNull(3) ? "" : query.getText(3)}});
             if (!affinityEnabled)
                 result.back().erase("affinity");
         }
@@ -167,6 +173,9 @@ namespace insoulforge::PersonMemoryStore {
                 return nullptr;
             json result = {{"user_id", userId.toString()}, {"affinity", query.getInt64(3)}};
             result.update(readProfile(userId, query));
+            const Statement tokens(db.handle(), "SELECT estimated_tokens FROM person_memories WHERE user_id = ?");
+            tokens.bind(1, userId.toString());
+            result["estimated_tokens"] = tokens.step() ? tokens.getInt64(0) : 0;
             const Statement entries(db.handle(), "SELECT content, source_session, created_at, id FROM "
                                                  "person_memory_entries WHERE user_id = ? ORDER BY id DESC");
             entries.bind(1, userId.toString());
@@ -206,6 +215,7 @@ namespace insoulforge::PersonMemoryStore {
                 transaction.rollback();
                 return false;
             }
+            const auto beforeTokens = contextSnapshot(userId);
             if (replacement) {
                 const Statement profile(handle,
                   "INSERT INTO person_memories (user_id, profile, relationship, recent_interactions) VALUES (?, "
@@ -249,6 +259,8 @@ namespace insoulforge::PersonMemoryStore {
                     remove.execOrThrow();
                 }
             }
+            if (replacement)
+                updateTokenEstimate(userId, beforeTokens);
             transaction.commit();
             return true;
         }
@@ -259,6 +271,36 @@ namespace insoulforge::PersonMemoryStore {
     }
     auto deletePerson(const UserId &userId, const json &expected) -> bool {
         return mutatePerson(userId, expected, nullptr);
+    }
+
+    auto contextSnapshot(const UserId &userId) -> json {
+        const auto person = readPerson(userId);
+        if (person.is_null())
+            return nullptr;
+        json result = {{"profile", person["profile"]}, {"relationship", person["relationship"]},
+          {"recent_interactions", person["recent_interactions"]}, {"pending_entries", json::array()}};
+        for (auto it = person["pending_entries"].rbegin(); it != person["pending_entries"].rend(); ++it)
+            result["pending_entries"].push_back({{"created_at", (*it)["time"]},
+              {"source_session", (*it)["source_session"]}, {"content", (*it)["content"]}});
+        if (result["profile"].empty() && result["relationship"].empty() &&
+            result["recent_interactions"].empty() && result["pending_entries"].empty()) return nullptr;
+        result["uid"] = userId.toString();
+        return result;
+    }
+
+    void updateTokenEstimate(const UserId &userId, const json &before) {
+        const auto after = contextSnapshot(userId);
+        if (before == after)
+            return;
+        const auto estimate = after.is_null() ? std::expected<TokenEstimate, std::string>{TokenEstimate{}}
+                                             : estimateTokens(dumpJson(after));
+        if (!estimate)
+            Logger::error(std::nullopt, "PersonMemory", estimate.error());
+        const Statement update(
+          Database::instance().handle(), "UPDATE person_memories SET estimated_tokens = ? WHERE user_id = ?");
+        update.bind(1, static_cast<i64>(estimate ? estimate->average : 0));
+        update.bind(2, userId.toString());
+        update.execOrThrow();
     }
 
     auto getForSenders(const json &recentConversation) -> json {

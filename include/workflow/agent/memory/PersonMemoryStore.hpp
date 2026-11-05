@@ -22,6 +22,11 @@ namespace insoulforge::PersonMemoryStore {
     auto updatePerson(const UserId &userId, const json &expected, const json &replacement) -> bool;
     auto deletePerson(const UserId &userId, const json &expected) -> bool;
 
+    /// @brief 事务内读取实际上下文投影；调用方须持有数据库锁。
+    [[nodiscard]] auto contextSnapshot(const UserId &userId) -> json;
+    /// @brief 同一写入事务内，投影变化时刷新统计；调用方须持有数据库锁。
+    void updateTokenEstimate(const UserId &userId, const json &before);
+
     struct PendingSnapshot {
         UserId userId;
         i64 lastEntryId = 0;

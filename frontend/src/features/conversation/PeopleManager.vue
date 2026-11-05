@@ -7,6 +7,7 @@ import {sessionIdLabel} from '../../utils/session'
 interface PersonIdentity {
   user_id: string
   name: string
+  estimated_tokens: number
   name_pending: boolean
   affinity?: number
 }
@@ -271,7 +272,7 @@ onUnmounted(() => {
                 :class="{selected: selected === person.user_id}" :aria-pressed="selected === person.user_id"
                 :disabled="consolidating || saving"
                 @click="selectPerson(person.user_id)">
-          <span class="person-identity"><strong>{{ person.name || '未知' }}</strong><small>{{ person.user_id }} · {{ person.pending_count }} 条待整理</small></span>
+          <span class="person-identity"><strong>{{ person.name || '未知' }}</strong><small>{{ person.user_id }} · {{ person.pending_count }} 条待整理 · {{ person.estimated_tokens ?? 0 }} 预估 Token</small></span>
           <span v-if="affinityEnabled" :class="scoreClass(person.affinity)">{{ (person.affinity ?? 0) > 0 ? '+' : '' }}{{ person.affinity }}</span>
         </button>
       </aside>
@@ -307,6 +308,7 @@ onUnmounted(() => {
             <p v-else class="muted">暂无记录</p>
           </section>
           <section class="memory-section">
+            <p class="muted">预估 Token：{{ detail.estimated_tokens ?? 0 }}（0 可能表示尚未计算，内容变化后更新）</p>
             <h3>待整理记忆 <small>{{ detail.pending_entries.length }}</small></h3>
             <p v-if="!detail.pending_entries.length" class="muted">暂无记录</p>
             <article v-for="(entry, index) in detail.pending_entries" :key="index" class="memory-entry">

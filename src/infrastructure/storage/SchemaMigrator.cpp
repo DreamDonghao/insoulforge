@@ -117,7 +117,8 @@ namespace insoulforge {
         user_id TEXT NOT NULL PRIMARY KEY,
         profile TEXT NOT NULL DEFAULT '[]',
         recent_interactions TEXT NOT NULL DEFAULT '[]',
-        relationship TEXT NOT NULL DEFAULT '[]'
+        relationship TEXT NOT NULL DEFAULT '[]',
+        estimated_tokens INTEGER NOT NULL DEFAULT 0
     ))",
           R"(CREATE TABLE IF NOT EXISTS person_memory_entries (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -171,17 +172,24 @@ namespace insoulforge {
 
             // 在执行任何写入前检查兼容范围，旧库必须先用 v1.7.x 完成中转升级。
             if (version < kMinimumSupportedVersion)
-                throw DbError(fmt::format("数据库版本 v{} 过旧，最低支持 v{}（InSoulForge v1.7.0）。"
-                                         "请先运行支持旧库迁移的 InSoulForge v1.7.x（例如 v1.7.2）完成数据库升级，再安装当前版本。",
+                throw DbError(fmt::format(
+                  "数据库版本 v{} 过旧，最低支持 v{}（InSoulForge v1.7.0）。"
+                  "请先运行支持旧库迁移的 InSoulForge v1.7.x（例如 v1.7.2）完成数据库升级，再安装当前版本。",
                   version, kMinimumSupportedVersion));
             if (version > kLatestVersion)
-                throw DbError(fmt::format("数据库版本 v{} 高于当前程序支持的 v{}，请使用匹配或更新的程序版本。",
-                  version, kLatestVersion));
+                throw DbError(fmt::format(
+                  "数据库版本 v{} 高于当前程序支持的 v{}，请使用匹配或更新的程序版本。", version, kLatestVersion));
             if (version == kLatestVersion)
                 return;
 
             // steps[i] 将 kMinimumSupportedVersion + i 升级到下一版本。
-            constexpr std::array steps = {&migrateV24ToV25};
+            constexpr std::array steps = {
+              &migrateV24ToV25, +[](sqlite3 *db) {
+                  const Statement columns(db, "PRAGMA table_info(person_memories)");
+                  while (columns.step())
+                      if (columns.getText(1) == "estimated_tokens") return;
+                  execSQL(db, "ALTER TABLE person_memories ADD COLUMN estimated_tokens INTEGER NOT NULL DEFAULT 0");
+              }};
             static_assert(steps.size() == kLatestVersion - kMinimumSupportedVersion);
             Logger::info(
               std::nullopt, "Storage", fmt::format("数据库版本 v{}，开始迁移到 v{}", version, kLatestVersion));

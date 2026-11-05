@@ -2318,6 +2318,13 @@ namespace {
           {{"sender", {{"user_id", "self"}}}}, {{"sender", {{"user_id", "system"}}}}, {{"sender", {{"user_id", "33"}}}},
           {{"segments", {{{"type", "at"}, {"target", {{"user_id", "22"}}}}}}}});
         const auto profiles = PersonMemoryStore::getForSenders(senders);
+        if (!profiles.empty()) {
+            auto expected = profiles.front();
+            MessageRecord::compactContextUserIds(expected);
+            std::shared_lock lock(db.mutex());
+            check(PersonMemoryStore::contextSnapshot(UserId{11}) == expected,
+              "token snapshot matches actual context including pending entries", kTestName);
+        }
         check(profiles.size() == 1 && profiles[0]["user_id"] == "11" && profiles[0]["pending_entries"].size() == 2 &&
                 profiles[0]["pending_entries"][1]["source_session"] == privateId.toString() &&
                 AffinityStore::getAffinityMap().at(insoulforge::UserId{11}) == 12,

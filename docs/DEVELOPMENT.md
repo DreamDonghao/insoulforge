@@ -682,3 +682,7 @@ Executor System 由 `ExecutorSystemPrompt` 单例按六部分构建并缓存，�
 公共统计使用 `buildPublicSnapshot`，不需要虚拟会话；实际会话使用 `buildSnapshot`。
 `/admin/api/system-tokens` 返回分项估算及默认工具定义占用，不返回提示词原文。
 分项 Token 为三个词表计数的向上取整平均值，合计为分项相加，不等同于服务端实际用量。
+
+### 人物记忆 Token 估算
+
+`person_memories.estimated_tokens` 保存实际加入 Executor 上下文的人物 JSON 的三个词表平均 Token 数，包含 `person_memory_entries` 中的待整理内容、来源和时间。统计字段本身不发送给模型。v26 迁移为已有档案初始化为 0，不补算；自动追加、编辑和整理导致上下文内容变化时在写入事务内更新。0 也可能表示尚未计算或计算失败。
