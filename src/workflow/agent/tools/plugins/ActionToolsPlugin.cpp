@@ -322,8 +322,8 @@ namespace insoulforge {
                     co_return encoded.error();
                 std::string description;
                 const auto reuseDescription = [&](const json &entry) {
-                    const auto status = getStr(entry, "recognition_status");
-                    if (description.empty() && getStr(entry, "image_id") == id &&
+                    if (const auto status = getStr(entry, "recognition_status");
+                      description.empty() && getStr(entry, "image_id") == id &&
                         (status == "succeeded" || status == "generated"))
                         description = trim(getStr(entry, "description"));
                 };
@@ -335,8 +335,7 @@ namespace insoulforge {
                     if (assets.is_array())
                         for (const auto &asset: assets)
                             reuseDescription(asset);
-                    const auto &segments = atOrNull(record, "segments");
-                    if (segments.is_array())
+                    if (const auto &segments = atOrNull(record, "segments"); segments.is_array())
                         for (const auto &segment: segments)
                             if (getStr(segment, "type") == "image")
                                 reuseDescription(segment);
@@ -454,7 +453,7 @@ namespace insoulforge {
                            "quote_message_id 可选，仅支持引用当前会话可见消息。"
                            "返回发送结果；失败或结果未知时本轮不结束，由模型决定重发、继续处理或 finish_turn。"
                            "超时不代表确定未送达。",
-            .parameters = [&] { auto params = continueParams;
+            .parameters = [&] -> json { auto params = continueParams;
                 params["properties"]["quote_message_id"] = {{"type", "string"}, {"description", "可选，当前目标为本会话时可引用可见消息的 message_id"}};
                 return params; }(),
             .handler = [](const json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
@@ -712,7 +711,7 @@ namespace insoulforge {
                 "properties": {
                     "user_id": {
                         "type": "string",
-                        "description": "要@的用户 ID（从聊天记录JSON的sender.uid字段获取）。使用 'all' @全体成员"
+                        "description": "目标用户 ID，取聊天记录的 sender.uid；self 表示机器人自身，all 表示全体成员。"
                     }
                 },
                 "required": ["user_id"]
@@ -720,9 +719,7 @@ namespace insoulforge {
         registry.registerTool(
           {
             .name = "at_user",
-            .description =
-              "@某人。返回CQ码嵌入发送工具的content中。聊天记录格式为JSON：{\"sender\":{\"name\":\"小明\","
-              "\"uid\":\"123456\"}}，用 at_user(user_id=\"123456\") 来@他。@自己用 self，@全体成员用 all。",
+            .description = "生成群聊 @ 的 CQ 码，不直接发送；将返回值原样放入消息发送工具的 content。",
             .parameters = atParams,
             .handler = [](const json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
                 if (ctx.requireSession().isPrivate()) {
