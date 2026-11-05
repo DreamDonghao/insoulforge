@@ -292,7 +292,7 @@ namespace insoulforge::ExecutorAgent {
                         }
                         content = "[CQ:reply,id=" + quote + "]" + content;
                     }
-                    const auto sent = co_await MessageService::sendToSession(sessionId, content);
+                    const auto sent = co_await MessageService::sendToSession(sessionId, content, std::nullopt, toolHistory);
                     accumulatedCQCodes.clear();
                     if (!sent) {
                         recordCall("send_failed");
@@ -301,6 +301,7 @@ namespace insoulforge::ExecutorAgent {
                         continue;
                     }
                     recordCall("succeeded");
+                    decision.messageSent = true;
                     decision.shouldReply = false;
                     hasDecision = true;
                     continue;

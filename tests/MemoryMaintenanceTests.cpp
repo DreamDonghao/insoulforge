@@ -24,6 +24,8 @@
 #include <infrastructure/storage/Statement.hpp>
 #include <infrastructure/tokenizer/TokenCounter.hpp>
 #include <workflow/MessageList.hpp>
+#include <workflow/OneBotEventWorkflow.hpp>
+#include <workflow/agent/runtime/AgentSystem.hpp>
 #include <workflow/agent/llm/prompts/PromptService.hpp>
 #include <workflow/agent/memory/LongTermMemoryStore.hpp>
 #include <workflow/agent/memory/MemoryManager.hpp>
@@ -694,7 +696,23 @@ namespace {
               "disabled affinity leaked into the executor context or prompt");
             require(favoriteRequests == 4, "failed favorites request does not prevent execution");
             config.affinityEnabled = true;
+            auto &agent = AgentSystem::instance();
+            require(agent.initialize(database, config.botName).has_value() &&
+              OneBotEventWorkflow::instance().initialize(database, config, agent).has_value(),
+              "send fixture workflow initialization failed");
+            config.executor.path = "/executor-send-fixture";
+            const auto sentReply = co_await ExecutorAgent::execute(records, memory);
+            require(sentReply && sentReply->messageSent && !sentReply->shouldReply && sentReply->content.empty(),
+              "successful terminal send must be distinguished from no reply");
+            const auto delivered = OneBotEventWorkflow::instance().getSessionMessages(privateId);
+            require(delivered && !delivered->empty() && delivered->back()["tool_history"][0]["name"] == "contract_context" &&
+              !delivered->back().contains("execution_status"), "sent message must retain tool history without no_reply");
+            config.executor.path = "/executor-finish-fixture";
+            const auto silentReply = co_await ExecutorAgent::execute(records, memory);
+            require(silentReply && !silentReply->messageSent && !silentReply->shouldReply,
+              "finish_turn must remain a no reply decision");
             registry.unregisterPlugin("contract.context");
+            registry.unregisterPlugin("builtin.info");
             require(registry.registerPlugin(
                       "contract.thinking", [](ToolRegistry &staged) { InfoToolsPlugin{}.registerTools(staged); }),
               "thinking fixture tool registration failed");
@@ -1096,6 +1114,24 @@ auto main() -> int {
           callback(response);
       },
       {drogon::Post});
+    drogon::app().registerHandler("/send_private_msg",
+      [](const drogon::HttpRequestPtr &, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+          auto response = drogon::HttpResponse::newHttpResponse();
+          response->setBody(R"({"status":"ok","retcode":0,"data":{"message_id":123456}})");
+          callback(response);
+      }, {drogon::Post});
+    drogon::app().registerHandler("/executor-send-fixture",
+      [](const drogon::HttpRequestPtr &, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+          auto response = drogon::HttpResponse::newHttpResponse();
+          response->setBody(R"({"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"context","type":"function","function":{"name":"contract_context","arguments":"{}"}},{"id":"send","type":"function","function":{"name":"send_message_and_finish","arguments":"{\"content\":\"已发送测试\"}"}}]}}]})");
+          callback(response);
+      }, {drogon::Post});
+    drogon::app().registerHandler("/executor-finish-fixture",
+      [](const drogon::HttpRequestPtr &, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+          auto response = drogon::HttpResponse::newHttpResponse();
+          response->setBody(R"({"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"finish","type":"function","function":{"name":"finish_turn","arguments":"{}"}}]}}]})");
+          callback(response);
+      }, {drogon::Post});
     drogon::app().registerHandler("/executor-fixture",
       [&executorRequests, &frozenUser, &frozenStickers, &fallbackMessages](
         const drogon::HttpRequestPtr &request, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {

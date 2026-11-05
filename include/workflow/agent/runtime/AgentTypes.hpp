@@ -6,13 +6,13 @@
 
 #pragma once
 
-#include <fmt/format.h>
-
 #include <array>
 #include <format>
 #include <optional>
 #include <string>
 #include <string_view>
+
+#include <fmt/format.h>
 
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
@@ -43,7 +43,8 @@ namespace insoulforge {
 
     /// @brief Executor Agent 回复结果
     struct ReplyDecision {
-        bool shouldReply = false;
+        bool shouldReply = false; ///< 是否仍需由工作流发送正文
+        bool messageSent = false; ///< 终结回复工具已成功发送；不再追加 no_reply 记录
         std::string content;
         json toolHistory = json::array(); ///< 按实际处理顺序记录工具与参数，不保留工具完整输出
         std::string failureReason; ///< 无法完成回复流程时的原因，与主动 no_reply 区分

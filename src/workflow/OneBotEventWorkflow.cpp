@@ -423,6 +423,9 @@ namespace insoulforge {
                         if (replyDecision && replyDecision->shouldReply && !replyDecision->content.empty()) {
                             co_await MessageService::sendToSession(
                               sessionId, replyDecision->content, std::nullopt, replyDecision->toolHistory);
+                        } else if (replyDecision && replyDecision->messageSent) {
+                            // 发送结果和工具历史已经写入助手消息，不再追加未回复记录。
+                            Logger::debug(sessionId, "Executor", "回复已通过工具发送，本轮结束");
                         } else {
                             Logger::info(sessionId, "Executor", "未生成可发送的回复");
                             if (replyDecision) {
