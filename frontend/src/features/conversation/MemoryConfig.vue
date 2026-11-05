@@ -26,6 +26,8 @@ const memoryConfig = reactive<MemoryConfig>({
   personMemoryEntryMaxChars: 30,
   longTermMemoryEntryMaxChars: 100,
   personProfileEntryMaxChars: 50,
+  personCompressionTriggerTokens: 0,
+  personCompressionTargetTokens: 1500,
   personProfileMaxChars: 300,
   personRelationshipEntryMaxChars: 60,
   personRelationshipMaxChars: 150,
@@ -79,11 +81,12 @@ const {errors, fieldAttrs, validateForm} = useFormValidation(() => {
   for (const [key, value] of Object.entries(memoryConfig)) {
     if (key === 'affinityEnabled') continue
     const threshold = key === 'longTermRecallThreshold' || key === 'longTermInjectThreshold'
-    result[`memory-${key}`] = numberError(value, threshold || key === 'memorySummaryContextCount' ? 0 : 1, threshold ? 1 : I32_MAX, !threshold)
+    result[`memory-${key}`] = numberError(value, threshold || key === 'memorySummaryContextCount' || key === 'personCompressionTriggerTokens' || key === 'personCompressionTargetTokens' ? 0 : 1, threshold ? 1 : I32_MAX, !threshold)
     if (threshold && typeof value === 'number' && (value <= 0 || value >= 1)) result[`memory-${key}`] = '请输入大于 0 且小于 1 的数值'
   }
   if (memoryConfig.memorySummaryBatchSize > memoryConfig.memorySummaryTriggerCount) result['memory-memorySummaryBatchSize'] = '每批总结条数不能超过总结触发条数'
   if (memoryConfig.routerWindowKeepCount >= memoryConfig.routerWindowTriggerCount) result['memory-routerWindowKeepCount'] = '保留条数必须小于触发条数'
+  if (memoryConfig.personCompressionTriggerTokens > 0 && (memoryConfig.personCompressionTargetTokens <= 0 || memoryConfig.personCompressionTargetTokens >= memoryConfig.personCompressionTriggerTokens)) result['memory-personCompressionTargetTokens'] = '目标必须大于 0 且小于触发 Token'
   return result
 })
 
@@ -208,6 +211,20 @@ const saveMemoryConfig = async (): Promise<void> => {
         <input v-bind="fieldAttrs('memory-conversationSummaryMaxCount', 'memory-conversationSummaryMaxCount-hint')" :disabled="saving" v-model.number="memoryConfig.conversationSummaryMaxCount" class="form-input" type="number" min="1" :max="I32_MAX" step="1">
           <FieldError field="memory-conversationSummaryMaxCount" :message="errors['memory-conversationSummaryMaxCount']"/>
         <p id="memory-conversationSummaryMaxCount-hint" class="form-hint">1～2147483647，整数。每次消息总结时生成摘要，按时间保留每个会话最近 N 条，放在回复上下文的历史消息之前。</p>
+      </div>
+      <h3 class="card-title">人物记忆超限压缩</h3>
+      <p class="form-hint">每日人物整理后执行，使用 Memory 模型。触发值为 0 时关闭；已有统计为 0 的人物不补算。目标是篇幅参考，实际结果可能超出。</p>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="memory-personCompressionTriggerTokens" class="form-label">压缩触发 Token（0 关闭）</label>
+          <input v-model.number="memoryConfig.personCompressionTriggerTokens" v-bind="fieldAttrs('memory-personCompressionTriggerTokens')" :disabled="saving" class="form-input" type="number" min="0" :max="I32_MAX" step="1">
+          <FieldError field="memory-personCompressionTriggerTokens" :message="errors['memory-personCompressionTriggerTokens']"/>
+        </div>
+        <div class="form-group">
+          <label for="memory-personCompressionTargetTokens" class="form-label">压缩目标 Token</label>
+          <input v-model.number="memoryConfig.personCompressionTargetTokens" v-bind="fieldAttrs('memory-personCompressionTargetTokens')" :disabled="saving" class="form-input" type="number" min="0" :max="I32_MAX" step="1">
+          <FieldError field="memory-personCompressionTargetTokens" :message="errors['memory-personCompressionTargetTokens']"/>
+        </div>
       </div>
       <h3 class="card-title">总结篇幅（字）</h3>
       <p class="form-hint">字数为模型生成的目标上限，实际长度受模型遵守指令的程度影响，可能超出。程序不会强行截断。</p>

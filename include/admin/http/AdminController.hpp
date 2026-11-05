@@ -134,6 +134,7 @@ namespace insoulforge {
         ADD_METHOD_TO(AdminController::getSessionAffinity, "/admin/api/affinity/{sessionId}", drogon::Get);
         ADD_METHOD_TO(AdminController::getPeople, "/admin/api/people", drogon::Get);
         ADD_METHOD_TO(AdminController::getPerson, "/admin/api/people/{userId}", drogon::Get);
+        ADD_METHOD_TO(AdminController::compressPerson, "/admin/api/people/{userId}/compress", drogon::Post);
         ADD_METHOD_TO(AdminController::consolidatePerson, "/admin/api/people/{userId}/consolidate", drogon::Post);
         ADD_METHOD_TO(AdminController::updatePerson, "/admin/api/people/{userId}", drogon::Put);
         ADD_METHOD_TO(AdminController::deletePerson, "/admin/api/people/{userId}", drogon::Delete);
@@ -481,6 +482,9 @@ namespace insoulforge {
         auto getPerson(drogon::HttpRequestPtr req,
           std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &userId) const -> drogon::Task<>;
         auto updatePerson(drogon::HttpRequestPtr req,
+          std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &userId) const -> drogon::Task<>;
+        /// @brief 手动压缩人物，忽略每日触发阈值。
+        auto compressPerson(drogon::HttpRequestPtr req,
           std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &userId) const -> drogon::Task<>;
         auto consolidatePerson(drogon::HttpRequestPtr req,
           std::function<void(const drogon::HttpResponsePtr &)> callback, const std::string &userId) const -> drogon::Task<>;

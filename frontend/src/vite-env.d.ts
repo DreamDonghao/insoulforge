@@ -40,6 +40,8 @@ export interface MemoryConfig {
     personMemoryEntryMaxChars: number
     longTermMemoryEntryMaxChars: number
     personProfileEntryMaxChars: number
+    personCompressionTriggerTokens: number
+    personCompressionTargetTokens: number
     personProfileMaxChars: number
     personRelationshipEntryMaxChars: number
     personRelationshipMaxChars: number

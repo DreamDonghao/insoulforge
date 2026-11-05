@@ -1,6 +1,7 @@
 #include <charconv>
-#include <drogon/MultiPart.h>
 #include <filesystem>
+
+#include <drogon/MultiPart.h>
 
 #include <admin/access/AdminAccessToken.hpp>
 #include <admin/http/AdminController.hpp>
@@ -347,7 +348,8 @@ auto AdminController::setBotStatus(HttpRequestPtr req, std::function<void(const 
 
 auto AdminController::getEmojis(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
   -> Task<> {
-    if (req->getParameter("refresh") == "1") ToolRuntime::invalidateFavoriteEmojiCache();
+    if (req->getParameter("refresh") == "1")
+        ToolRuntime::invalidateFavoriteEmojiCache();
     callback(jsonResponse(co_await ToolRuntime::fetchFavoriteEmojis()));
     co_return;
 }
@@ -362,8 +364,7 @@ auto AdminController::addEmoji(HttpRequestPtr req, std::function<void(const Http
             co_return;
         }
         MultiPartParser parser;
-        if (parser.parse(req) != 0 || parser.getFiles().size() != 1 ||
-            parser.getFiles()[0].getItemName() != "image") {
+        if (parser.parse(req) != 0 || parser.getFiles().size() != 1 || parser.getFiles()[0].getItemName() != "image") {
             auto response = jsonResponse(AdminResponse::failJson("请以 image 字段上传一张图片"));
             response->setStatusCode(k400BadRequest);
             callback(response);
@@ -399,8 +400,8 @@ auto AdminController::deleteEmoji(HttpRequestPtr req, std::function<void(const H
         co_return;
     }
     const auto result = co_await ToolRuntime::deleteFavoriteEmoji(getStr(*body, "res_id"));
-    callback(jsonResponse(result ? AdminResponse::okJson("已提交 QQ 删除，请核对列表")
-                                 : AdminResponse::failJson(result.error())));
+    callback(jsonResponse(
+      result ? AdminResponse::okJson("已提交 QQ 删除，请核对列表") : AdminResponse::failJson(result.error())));
 }
 
 auto AdminController::updateEmojiDesc(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
@@ -475,8 +476,8 @@ auto AdminController::addAdmin(HttpRequestPtr req, std::function<void(const Http
     co_return;
 }
 
-auto AdminController::removeAdmin(
-  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &userId) const -> Task<> {
+auto AdminController::removeAdmin(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
+  const std::string &userId) const -> Task<> {
     const auto id = UserId::parse(userId);
     if (!id) {
         callback(jsonResponse(AdminResponse::errorJson(id.error())));
@@ -512,8 +513,8 @@ auto AdminController::addBlacklistEntry(HttpRequestPtr req, std::function<void(c
     co_return;
 }
 
-auto AdminController::removeBlacklistEntry(
-  HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback, const std::string &userId) const -> Task<> {
+auto AdminController::removeBlacklistEntry(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
+  const std::string &userId) const -> Task<> {
     const auto parsedQq = UserId::parse(userId);
     if (!parsedQq) {
         callback(jsonResponse(AdminResponse::errorJson("无效的用户 ID")));
@@ -902,7 +903,8 @@ auto AdminController::getSessionMemory(HttpRequestPtr req, std::function<void(co
     const auto gid = *parsedSession;
     std::string memory = MemoryStore::getShortTermMemory(gid);
     if (json parsed; tryParseJson(memory, parsed)) {
-        if (auto structured = MemoryStore::normalizeSessionMemory(parsed)) memory = dumpJson(*structured, true, 2);
+        if (auto structured = MemoryStore::normalizeSessionMemory(parsed))
+            memory = dumpJson(*structured, true, 2);
     }
 
     json resp;
@@ -928,13 +930,15 @@ auto AdminController::updateSessionMemory(HttpRequestPtr req, std::function<void
         callback(response);
         co_return;
     }
-    const auto gid = *parsedSession;
+    const auto& gid = *parsedSession;
     std::string memory = getStr(*body, "memory");
-    if (trim(memory).starts_with("{")) {
+    if (trim(memory).starts_with('{')) {
         json parsed;
-        const auto structured = tryParseJson(memory, parsed) ? MemoryStore::normalizeSessionMemory(parsed) : std::nullopt;
+        const auto structured =
+          tryParseJson(memory, parsed) ? MemoryStore::normalizeSessionMemory(parsed) : std::nullopt;
         if (!structured) {
-            auto response = jsonResponse(AdminResponse::errorJson("会话记忆 JSON 需要有效的 aliases 数组；pending_entries 如存在必须为字符串数组，仅接受当前格式"));
+            auto response = jsonResponse(AdminResponse::errorJson(
+              "会话记忆 JSON 需要有效的 aliases 数组；pending_entries 如存在必须为字符串数组，仅接受当前格式"));
             response->setStatusCode(drogon::k400BadRequest);
             callback(response);
             co_return;
@@ -975,8 +979,8 @@ auto AdminController::getPerson(HttpRequestPtr req, std::function<void(const Htt
     co_return;
 }
 
-auto AdminController::consolidatePerson(HttpRequestPtr req,
-  std::function<void(const HttpResponsePtr &)> callback, const std::string &userId) const -> Task<> {
+auto AdminController::consolidatePerson(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
+  const std::string &userId) const -> Task<> {
     auto status = drogon::k400BadRequest;
     std::string message = "无效的用户 ID";
     const auto id = UserId::parse(userId);
@@ -988,34 +992,89 @@ auto AdminController::consolidatePerson(HttpRequestPtr req,
             using Result = PersonMemoryConsolidator::Result;
             const auto result = co_await PersonMemoryConsolidator::instance().runPerson(*id);
             switch (result) {
-            case Result::Updated:
-                status = drogon::k200OK;
-                message = "人物记忆已整理";
-                break;
-            case Result::NoMemory:
-                status = drogon::k200OK;
-                message = "暂无需要整理的记忆";
-                break;
-            case Result::Busy:
-                status = drogon::k409Conflict;
-                message = "人物整理正在进行，请稍后重试";
-                break;
-            case Result::Conflict:
-                status = drogon::k409Conflict;
-                message = "人物记忆在整理期间已变化，本次结果未保存，请刷新后重试";
-                break;
-            case Result::Stopped:
-                status = drogon::k503ServiceUnavailable;
-                message = "人物整理服务已停止，请稍后重试";
-                break;
-            case Result::Failed:
-                status = drogon::k502BadGateway;
-                message = "人物整理失败，模型请求失败或结果无效，原记忆已保留";
-                break;
+                case Result::Updated:
+                    status = drogon::k200OK;
+                    message = "人物记忆已整理";
+                    break;
+                case Result::Unchanged:
+                    status = drogon::k200OK;
+                    message = "Token 未减少，已保留原内容";
+                    break;
+                case Result::NoMemory:
+                    status = drogon::k200OK;
+                    message = "暂无需要整理的记忆";
+                    break;
+                case Result::Busy:
+                    status = drogon::k409Conflict;
+                    message = "人物整理正在进行，请稍后重试";
+                    break;
+                case Result::Conflict:
+                    status = drogon::k409Conflict;
+                    message = "人物记忆在整理期间已变化，本次结果未保存，请刷新后重试";
+                    break;
+                case Result::Stopped:
+                    status = drogon::k503ServiceUnavailable;
+                    message = "人物整理服务已停止，请稍后重试";
+                    break;
+                case Result::Failed:
+                    status = drogon::k502BadGateway;
+                    message = "人物整理失败，模型请求失败或结果无效，原记忆已保留";
+                    break;
             }
         }
     }
-    auto response = jsonResponse(status == drogon::k200OK ? AdminResponse::okJson(message) : AdminResponse::errorJson(message));
+    auto response =
+      jsonResponse(status == drogon::k200OK ? AdminResponse::okJson(message) : AdminResponse::errorJson(message));
+    response->setStatusCode(status);
+    callback(response);
+    co_return;
+}
+auto AdminController::compressPerson(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
+  const std::string &userId) const -> Task<> {
+    auto status = drogon::k400BadRequest;
+    std::string message = "无效的用户 ID";
+    const auto id = UserId::parse(userId);
+    if (id && id->toString() != "self" && id->toString() != "system") {
+        if (PersonMemoryStore::getPerson(*id).is_null()) {
+            status = drogon::k404NotFound;
+            message = "没有该人物的记录";
+        } else {
+            using Result = PersonMemoryConsolidator::Result;
+            const auto result = co_await PersonMemoryConsolidator::instance().runPerson(*id, true);
+            switch (result) {
+                case Result::Updated:
+                    status = drogon::k200OK;
+                    message = "人物记忆已压缩";
+                    break;
+                case Result::Unchanged:
+                    status = drogon::k200OK;
+                    message = "Token 未减少，已保留原内容";
+                    break;
+                case Result::NoMemory:
+                    status = drogon::k200OK;
+                    message = "暂无需要压缩的记忆";
+                    break;
+                case Result::Busy:
+                    status = drogon::k409Conflict;
+                    message = "人物压缩正在进行，请稍后重试";
+                    break;
+                case Result::Conflict:
+                    status = drogon::k409Conflict;
+                    message = "人物记忆在压缩期间已变化，本次结果未保存，请刷新后重试";
+                    break;
+                case Result::Stopped:
+                    status = drogon::k503ServiceUnavailable;
+                    message = "人物压缩服务已停止，请稍后重试";
+                    break;
+                case Result::Failed:
+                    status = drogon::k502BadGateway;
+                    message = "人物压缩失败，模型请求失败或结果无效，原记忆已保留";
+                    break;
+            }
+        }
+    }
+    auto response =
+      jsonResponse(status == drogon::k200OK ? AdminResponse::okJson(message) : AdminResponse::errorJson(message));
     response->setStatusCode(status);
     callback(response);
     co_return;

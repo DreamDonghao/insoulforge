@@ -24,9 +24,10 @@ namespace insoulforge {
           -> std::optional<std::string>;
         /// @brief 执行到期的一轮；同一进程不允许重叠，停止后不再访问数据库。
         auto runDue(std::time_t now) -> drogon::Task<>;
-        enum class Result { Updated, NoMemory, Busy, Stopped, Failed, Conflict };
-        /// @brief 立即整理一个人物，与每日整理互斥，不改变每日执行标记。
-        auto runPerson(UserId userId) -> drogon::Task<Result>;
+        enum class Result { Updated, NoMemory, Busy, Stopped, Failed, Conflict, Unchanged };
+        /// @brief 立即整理或压缩一个人物，与每日任务互斥，不改变每日执行标记。
+        /// @param compress 为 true 时忽略触发阈值，先整理待处理条目，再按配置目标压缩。
+        auto runPerson(UserId userId, bool compress = false) -> drogon::Task<Result>;
 
     private:
         struct BusyGuard {
@@ -36,6 +37,10 @@ namespace insoulforge {
         void poll();
         auto consolidatePerson(UserId userId, std::shared_ptr<LlmClient::MaintenanceRequestControl> control,
           bool includeExisting = false) -> drogon::Task<Result>;
+        /// @brief 使用独立提示词压缩三个分类，失败保留已整理结果。
+        /// @param trigger 自动压缩阈值；nullopt 表示手动操作，不检查阈值。
+        auto compressPerson(UserId userId, std::shared_ptr<LlmClient::MaintenanceRequestControl> control,
+          std::optional<i32> trigger, i32 target) -> drogon::Task<Result>;
         std::mutex m_mutex;
         bool m_busy = false;
         std::shared_ptr<LlmClient::MaintenanceRequestControl> m_requestControl =

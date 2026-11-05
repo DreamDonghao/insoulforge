@@ -109,6 +109,38 @@ namespace insoulforge::PersonMemoryStore {
         transaction.commit();
     }
 
+    auto applyCompression(const PendingSnapshot &snapshot, const json &profile) -> bool {
+        const auto &db = Database::instance();
+        std::unique_lock lock(db.mutex());
+        const auto handle = db.handle();
+        Transaction transaction(handle);
+        const auto current = readPerson(snapshot.userId);
+        if (current.is_null()) {
+            throw ConsolidationConflict("人物档案已删除");
+        }
+        for (const auto *field: {"profile", "relationship", "recent_interactions"}) {
+            if (current.at(field) != snapshot.profile.at(field)) {
+                throw ConsolidationConflict("人物档案已修改，丢弃压缩结果");
+            }
+        }
+        const auto before = contextSnapshot(snapshot.userId);
+        const auto beforeTokens = getInt(current, "estimated_tokens");
+        const Statement update(handle,
+          "UPDATE person_memories SET profile = ?, relationship = ?, recent_interactions = ? WHERE user_id = ?");
+        update.bind(1, profile.at("profile").dump());
+        update.bind(2, profile.at("relationship").dump());
+        update.bind(3, profile.at("recent_interactions").dump());
+        update.bind(4, snapshot.userId.toString());
+        update.execOrThrow();
+        updateTokenEstimate(snapshot.userId, before);
+        const auto afterTokens = getInt(readPerson(snapshot.userId), "estimated_tokens");
+        if (afterTokens <= 0 || afterTokens >= beforeTokens) {
+            return false;
+        }
+        transaction.commit();
+        return true;
+    }
+
     auto dailyState() -> DailyState {
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
@@ -282,8 +314,9 @@ namespace insoulforge::PersonMemoryStore {
         for (auto it = person["pending_entries"].rbegin(); it != person["pending_entries"].rend(); ++it)
             result["pending_entries"].push_back({{"created_at", (*it)["time"]},
               {"source_session", (*it)["source_session"]}, {"content", (*it)["content"]}});
-        if (result["profile"].empty() && result["relationship"].empty() &&
-            result["recent_interactions"].empty() && result["pending_entries"].empty()) return nullptr;
+        if (result["profile"].empty() && result["relationship"].empty() && result["recent_interactions"].empty() &&
+            result["pending_entries"].empty())
+            return nullptr;
         result["uid"] = userId.toString();
         return result;
     }
@@ -293,8 +326,7 @@ namespace insoulforge::PersonMemoryStore {
         if (before == after) {
             return;
         }
-        const auto estimate = after.is_null() ? std::expected<u32, std::string>{0}
-                                             : countTokens(dumpJson(after));
+        const auto estimate = after.is_null() ? std::expected<u32, std::string>{0} : countTokens(dumpJson(after));
         if (!estimate) {
             Logger::error(std::nullopt, "PersonMemory", estimate.error());
         }

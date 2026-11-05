@@ -180,3 +180,5 @@ add_test(NAME token_counter COMMAND insoulforge_token_counter_tests "${llama_cpp
 
 add_test(NAME token_counter_missing COMMAND insoulforge_token_counter_tests "${CMAKE_CURRENT_BINARY_DIR}/missing-tokenizer")
 set_tests_properties(token_counter_missing PROPERTIES WILL_FAIL TRUE)
+
+target_compile_definitions(insoulforge_memory_tests PRIVATE TEST_TOKENIZER_DIRECTORY="${llama_cpp_SOURCE_DIR}/models")

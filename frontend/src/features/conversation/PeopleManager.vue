@@ -40,6 +40,7 @@ const saving = ref(false)
 const savedDraft = ref('')
 const isDirty = (): boolean => editing.value && draftText.value !== savedDraft.value
 const consolidating = ref(false)
+const compressing = ref(false)
 const consolidationMessage = ref('')
 useUnsavedChanges(isDirty, () => saving.value || consolidating.value)
 const editError = ref('')
@@ -229,22 +230,23 @@ async function deletePerson() {
   } finally { saving.value = false }
   if (!disposed) await loadPeople()
 }
-async function consolidatePerson() {
+async function consolidatePerson(compress = false) {
   if (!detail.value || editing.value || saving.value || consolidating.value) return
   clearTimeout(nameTimer)
   consolidating.value = true
+  compressing.value = compress
   consolidationMessage.value = ''
   editError.value = ''
   try {
-    const data = await fetchPeopleJson(`/admin/api/people/${encodeURIComponent(selected.value)}/consolidate`,
+    const data = await fetchPeopleJson(`/admin/api/people/${encodeURIComponent(selected.value)}/${compress ? 'compress' : 'consolidate'}`,
       new AbortController().signal, {method: 'POST'})
     consolidating.value = false
     if (!disposed) {
       await loadPeople()
-      consolidationMessage.value = data.message || '人物记忆已整理'
+      consolidationMessage.value = data.message || (compress ? '人物记忆已压缩' : '人物记忆已整理')
     }
   } catch (cause) {
-    if (!disposed) editError.value = cause instanceof Error ? cause.message : '整理失败，原记忆已保留'
+    if (!disposed) editError.value = cause instanceof Error ? cause.message : '处理失败，原记忆已保留'
   } finally { consolidating.value = false }
 }
 onMounted(loadPeople)
@@ -289,7 +291,8 @@ onUnmounted(() => {
         <p v-else-if="detailError" role="alert">{{ detailError }}</p>
         <template v-else-if="detail">
           <div class="person-actions" v-if="!editing">
-            <button class="btn btn-secondary" :disabled="saving || consolidating" @click="consolidatePerson">{{ consolidating ? '整理中...' : '立即整理' }}</button>
+            <button class="btn btn-secondary" :disabled="saving || consolidating" @click="consolidatePerson()">{{ consolidating && !compressing ? '整理中...' : '立即整理' }}</button>
+            <button class="btn btn-secondary" :disabled="saving || consolidating" @click="consolidatePerson(true)">{{ consolidating && compressing ? '压缩中...' : '直接压缩' }}</button>
             <button class="btn btn-secondary" :disabled="saving || consolidating" @click="beginEdit"><Pencil :size="16"/>编辑</button>
             <button class="btn btn-danger icon-button" title="删除人物" aria-label="删除人物" :disabled="saving || consolidating" @click="deletePerson"><Trash2 :size="16"/></button>
           </div>

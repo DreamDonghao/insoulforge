@@ -22,6 +22,7 @@
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
+#include <infrastructure/tokenizer/TokenCounter.hpp>
 #include <workflow/MessageList.hpp>
 #include <workflow/agent/llm/prompts/PromptService.hpp>
 #include <workflow/agent/memory/LongTermMemoryStore.hpp>
@@ -109,7 +110,64 @@ namespace {
         if (personFixture.requests != 7)
             throw std::runtime_error("empty daily run called model");
 
+        // 仅有旧档案也能进入第二阶段，且超限压缩只进行一次。
+        const auto original = PersonMemoryStore::getPerson(UserId{88001});
+        auto large = original;
+        large["profile"] = json::array({std::string(8000, 'a')});
+        if (!PersonMemoryStore::updatePerson(UserId{88001}, original, large)) {
+            throw std::runtime_error("cannot prepare large profile");
+        }
+        config.personCompressionTriggerTokens = 200;
+        config.personCompressionTargetTokens = 100;
+        const auto beforeCompression = personFixture.requests.load();
+        ++local.tm_mday;
+        co_await restarted.runDue(std::mktime(&local));
+        if (personFixture.requests != beforeCompression + 1 ||
+            getInt(PersonMemoryStore::getPerson(UserId{88001}), "estimated_tokens") >= 200) {
+            throw std::runtime_error("daily compression did not shrink existing profile");
+        }
+        config.personCompressionTriggerTokens = 0;
+        // 相同内容不能作为有效压缩提交，过期快照不能覆盖修改。
+        const auto snapshot = PersonMemoryStore::pendingSnapshot(UserId{88001}, true);
+        const auto current = PersonMemoryStore::getPerson(UserId{88001});
+        if (!snapshot || PersonMemoryStore::applyCompression(*snapshot, current)) {
+            throw std::runtime_error("unchanged compression was accepted");
+        }
+        auto edited = current;
+        edited["relationship"] = json::array({"并发编辑"});
+        PersonMemoryStore::updatePerson(UserId{88001}, current, edited);
+        bool conflict = false;
+        try {
+            (void) PersonMemoryStore::applyCompression(*snapshot, current);
+        } catch (const PersonMemoryStore::ConsolidationConflict &) {
+            conflict = true;
+        }
+        if (!conflict) {
+            throw std::runtime_error("compression overwrote concurrent edit");
+        }
+
+        // 压缩等待期间追加的待整理条目必须完整保留。
+        auto expanded = PersonMemoryStore::getPerson(UserId{88001});
+        auto expandedReplacement = expanded;
+        expandedReplacement["profile"] = json::array({std::string(8000, 'b')});
+        PersonMemoryStore::updatePerson(UserId{88001}, expanded, expandedReplacement);
+        const auto compressionSnapshot = PersonMemoryStore::pendingSnapshot(UserId{88001}, true);
+        MemoryMaintenanceStore::apply(db, SessionId::group("100"),
+          {.personEntries = {{UserId{88001}, "压缩请求期间新增的约定"}}});
+        if (!compressionSnapshot || !PersonMemoryStore::applyCompression(*compressionSnapshot, current) ||
+          PersonMemoryStore::getPerson(UserId{88001})["pending_entries"].size() != 1) {
+            throw std::runtime_error("compression consumed new pending entry");
+        }
+
         using Result = PersonMemoryConsolidator::Result;
+        const auto beforeDirect = personFixture.requests.load();
+        config.personCompressionTargetTokens = 10000;
+        if (co_await restarted.runPerson(UserId{88001}, true) != Result::Unchanged ||
+          personFixture.requests != beforeDirect + 2) {
+            throw std::runtime_error("manual compression must consolidate pending then ignore automatic threshold");
+        }
+        config.personCompressionTargetTokens = 1500;
+
         const auto checkpoint = PersonMemoryStore::dailyState();
         const auto beforeManual = personFixture.requests.load();
         if (co_await restarted.runPerson(insoulforge::UserId{999999}) != Result::NoMemory ||
@@ -195,11 +253,11 @@ namespace {
               insoulforge::SessionId::group("99999"))) != durableMemory["conversation_summaries"])
             throw std::runtime_error("database reopen lost conversation summaries");
         if (PersonMemoryStore::getPerson(insoulforge::UserId{88004})["pending_entries"].empty() ||
-            PersonMemoryStore::dailyState().runningDay != "2026-10-23")
+            PersonMemoryStore::dailyState().runningDay != "2026-10-24")
             throw std::runtime_error("stopped service committed late result or completed unfinished run");
         PersonMemoryConsolidator resumed;
         co_await resumed.runDue(interruptedDay);
-        if (!PersonMemoryStore::pendingPeople().empty() || PersonMemoryStore::dailyState().completedDay != "2026-10-23")
+        if (!PersonMemoryStore::pendingPeople().empty() || PersonMemoryStore::dailyState().completedDay != "2026-10-24")
             throw std::runtime_error("unfinished daily run did not resume");
         const auto afterResume = usageCount();
         auto control = std::make_shared<LlmClient::MaintenanceRequestControl>();
@@ -748,6 +806,9 @@ namespace {
 } // namespace
 
 auto main() -> int {
+    if (!insoulforge::initializeTokenCounter(TEST_TOKENIZER_DIRECTORY)) {
+        return 1;
+    }
     const auto configPath = std::filesystem::temp_directory_path() /
                             ("insoulforge-joint-memory-" +
                               std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".json");
@@ -791,6 +852,12 @@ auto main() -> int {
           const auto body = json::parse(request->body());
           const auto profile = json::parse(body["messages"][1]["content"].get<std::string>());
           const auto user_id = profile["user_id"].get<std::string>();
+          const auto prompt = body["messages"][0]["content"].get<std::string>();
+          if (prompt.find("人物记忆压缩器") != std::string::npos && personFixture.requests > 0 &&
+            Config::instance().personCompressionTargetTokens == 10000 && prompt.find("100.0%") == std::string::npos) {
+              throw std::runtime_error("manual compression ratio was not capped at 100 percent");
+          }
+
           if (!profile.contains("relationship") || profile.contains("stable_memory"))
               throw std::runtime_error("consolidation receives obsolete person schema");
           if (user_id == "88001" && personFixture.injectNew.exchange(false)) {
@@ -1036,7 +1103,8 @@ auto main() -> int {
           const auto body = json::parse(request->body());
           const auto &messages = body["messages"];
           const auto context = json::parse(messages[1]["content"].get<std::string>());
-          const auto stickers = json::parse(messages[0]["content"].get<std::string>().substr(messages[0]["content"].get<std::string>().rfind("\n") + 1));
+          const auto stickers = json::parse(messages[0]["content"].get<std::string>().substr(
+            messages[0]["content"].get<std::string>().rfind("\n") + 1));
           const auto expectedNames = executorRequests <= 2   ? json::array({escapedSticker})
                                      : executorRequests == 3 ? json::array({"renamed"})
                                                              : json::array();
@@ -1064,13 +1132,13 @@ auto main() -> int {
                                 : !context["conversation_summaries"].empty());
           auto expectedSessionMemory = sessionMemory();
           MessageRecord::compactContextUserIds(expectedSessionMemory);
-          valid = valid && context["session_memory"] == expectedSessionMemory &&
-                  (isPrivate ? context["current_session"]["uid"] == "22"
-                             : context["current_session"]["group_id"] == "100") &&
-                  context["earlier_messages"].size() == 2 && context["earlier_messages"][0] == "legacy text" &&
-                  context["earlier_messages"][1]["segments"][0]["text"] == std::string(500, 'x') + "…" &&
-                  context["recent_messages"].size() == 12 &&
-                  context["recent_messages"][0]["segments"][0]["text"] == std::string(501, 'x');
+          valid =
+            valid && context["session_memory"] == expectedSessionMemory &&
+            (isPrivate ? context["current_session"]["uid"] == "22" : context["current_session"]["group_id"] == "100") &&
+            context["earlier_messages"].size() == 2 && context["earlier_messages"][0] == "legacy text" &&
+            context["earlier_messages"][1]["segments"][0]["text"] == std::string(500, 'x') + "…" &&
+            context["recent_messages"].size() == 12 &&
+            context["recent_messages"][0]["segments"][0]["text"] == std::string(501, 'x');
           for (const auto key: {"earlier_messages", "recent_messages"}) {
               for (const auto &record: context[key]) {
                   if (record.is_string())
@@ -1120,13 +1188,12 @@ auto main() -> int {
               frozenStickers = messages[0];
               // A cache invalidation between tool rounds must not mutate this generation's prefix.
               ToolRuntime::invalidateFavoriteEmojiCache();
-          } else if (isPrivate)
-              {
-                  auto stableContext = context;
-                  stableContext.erase("execution_state");
-                  valid = valid && messages[0] == frozenStickers && stableContext == frozenUser && messages.size() == 4 &&
+          } else if (isPrivate) {
+              auto stableContext = context;
+              stableContext.erase("execution_state");
+              valid = valid && messages[0] == frozenStickers && stableContext == frozenUser && messages.size() == 4 &&
                       messages[3]["role"] == "tool" && messages[3]["content"] == "source";
-              }
+          }
           auto reply = drogon::HttpResponse::newHttpResponse();
           reply->setContentTypeCode(drogon::CT_APPLICATION_JSON);
           if (!valid || executorRequests == 2) {

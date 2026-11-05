@@ -40,6 +40,9 @@ namespace insoulforge::PersonMemoryStore {
     /// @brief 手动整理可包含没有待整理条目的现有档案；空档案不请求模型。
     [[nodiscard]] auto pendingSnapshot(const UserId &userId, bool includeExisting = false)
       -> std::optional<PendingSnapshot>;
+    /// @brief 替换压缩快照的三个分类；并发修改时抛冲突，Token 未减少则回滚并返回 false。
+    /// @note 不消费待整理条目；统计失败也不保存。
+    [[nodiscard]] auto applyCompression(const PendingSnapshot &snapshot, const json &profile) -> bool;
     void applyConsolidation(const PendingSnapshot &snapshot, const json &profile);
     [[nodiscard]] auto dailyState() -> DailyState;
     void saveDailyState(const DailyState &state);

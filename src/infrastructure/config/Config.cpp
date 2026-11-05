@@ -29,7 +29,8 @@ namespace insoulforge {
                   "personMemoryEntryMaxChars", "longTermMemoryEntryMaxChars", "personProfileEntryMaxChars",
                   "personProfileMaxChars", "personRelationshipEntryMaxChars", "personRelationshipMaxChars",
                   "personInteractionEntryMaxChars", "personInteractionMaxChars", "jevWindowSize", "maxToolRounds",
-                  "sharedConversationMessageCount", "timeoutSeconds", "maxRetries"};
+                  "sharedConversationMessageCount", "timeoutSeconds", "maxRetries", "personCompressionTriggerTokens",
+                  "personCompressionTargetTokens"};
                 if (std::ranges::find(integerFields, key) != integerFields.end()) {
                     if (!field.is_number_integer() ||
                         (field.is_number_unsigned()
@@ -39,7 +40,9 @@ namespace insoulforge {
                         return std::unexpected(ConfigError{
                           .type = ConfigErrorType::InvalidArgument, .message = key + " 必须是 i32 范围内的整数"});
                     }
-                    if ((key == "timeoutSeconds" && (field < 1 || field > 3600)) ||
+                    if (((key == "personCompressionTriggerTokens" || key == "personCompressionTargetTokens") &&
+                          field < 0) ||
+                        (key == "timeoutSeconds" && (field < 1 || field > 3600)) ||
                         (key == "maxRetries" && (field < 0 || field > 10)) ||
                         ((key == "jevWindowSize" || key == "conversationSummaryMaxChars" ||
                            key == "conversationSummaryMaxCount" || key == "personMemoryEntryMaxChars" ||
@@ -85,6 +88,14 @@ namespace insoulforge {
                         return std::unexpected(
                           ConfigError{.type = ConfigErrorType::InvalidArgument, .message = key + " 必须是字符串"});
                     }
+                }
+            }
+            if (value.contains("personCompressionTriggerTokens") && value.contains("personCompressionTargetTokens")) {
+                const auto trigger = getInt(value, "personCompressionTriggerTokens");
+                const auto target = getInt(value, "personCompressionTargetTokens");
+                if (trigger > 0 && (target <= 0 || target >= trigger)) {
+                    return std::unexpected(ConfigError{
+                      .type = ConfigErrorType::InvalidArgument, .message = "人物压缩目标必须大于 0 且小于触发 Token"});
                 }
             }
             return {};
@@ -179,6 +190,10 @@ namespace insoulforge {
               getInt(memCfg, "longTermMemoryEntryMaxChars", 100), std::memory_order_relaxed);
             personProfileEntryMaxChars.store(
               getInt(memCfg, "personProfileEntryMaxChars", 50), std::memory_order_relaxed);
+            personCompressionTriggerTokens.store(
+              getInt(memCfg, "personCompressionTriggerTokens", 0), std::memory_order_relaxed);
+            personCompressionTargetTokens.store(
+              getInt(memCfg, "personCompressionTargetTokens", 1500), std::memory_order_relaxed);
             personProfileMaxChars.store(getInt(memCfg, "personProfileMaxChars", 300), std::memory_order_relaxed);
             personRelationshipEntryMaxChars.store(
               getInt(memCfg, "personRelationshipEntryMaxChars", 60), std::memory_order_relaxed);
@@ -303,6 +318,10 @@ namespace insoulforge {
           value.longTermMemoryEntryMaxChars.load(std::memory_order_relaxed), std::memory_order_relaxed);
         personProfileEntryMaxChars.store(
           value.personProfileEntryMaxChars.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        personCompressionTriggerTokens.store(
+          value.personCompressionTriggerTokens.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        personCompressionTargetTokens.store(
+          value.personCompressionTargetTokens.load(std::memory_order_relaxed), std::memory_order_relaxed);
         personProfileMaxChars.store(
           value.personProfileMaxChars.load(std::memory_order_relaxed), std::memory_order_relaxed);
         personRelationshipEntryMaxChars.store(
@@ -398,6 +417,13 @@ namespace insoulforge {
             return result;
         }
         json normalized = value;
+        if (!normalized.contains("personCompressionTriggerTokens")) {
+            normalized["personCompressionTriggerTokens"] =
+              personCompressionTriggerTokens.load(std::memory_order_relaxed);
+        }
+        if (!normalized.contains("personCompressionTargetTokens")) {
+            normalized["personCompressionTargetTokens"] = personCompressionTargetTokens.load(std::memory_order_relaxed);
+        }
         if (!normalized.contains("conversationSummaryMaxChars"))
             normalized["conversationSummaryMaxChars"] = conversationSummaryMaxChars.load(std::memory_order_relaxed);
         if (!normalized.contains("conversationSummaryMaxCount"))
@@ -424,6 +450,9 @@ namespace insoulforge {
             normalized["jevWindowSize"] = jevWindowSize.load(std::memory_order_relaxed);
         if (!normalized.contains("affinityEnabled"))
             normalized["affinityEnabled"] = affinityEnabled.load(std::memory_order_relaxed);
+        if (auto result = validateFields(normalized); !result) {
+            return result;
+        }
         if (normalized.contains("sharedConversationMessageCount") &&
             getInt(normalized, "sharedConversationMessageCount") <= 0) {
             return std::unexpected(

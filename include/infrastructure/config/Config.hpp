@@ -86,6 +86,8 @@ namespace insoulforge {
         std::atomic<i32> personMemoryEntryMaxChars{30}; // 人物记忆提取单条目标字数
         std::atomic<i32> longTermMemoryEntryMaxChars{100}; // 长期记忆单条目标字数
         std::atomic<i32> personProfileEntryMaxChars{50}; // 人物档案单条目标字数
+        std::atomic<i32> personCompressionTriggerTokens{0}; ///< 人物压缩触发 Token，0 关闭。
+        std::atomic<i32> personCompressionTargetTokens{1500}; ///< 人物压缩目标 Token。
         std::atomic<i32> personProfileMaxChars{300}; // 人物档案合计目标字数
         std::atomic<i32> personRelationshipEntryMaxChars{60}; // 机器人关系单条目标字数
         std::atomic<i32> personRelationshipMaxChars{150}; // 机器人关系合计目标字数

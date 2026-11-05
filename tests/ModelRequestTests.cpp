@@ -83,6 +83,18 @@ namespace {
         }
         require(config.jevWindowSize.load() == 10 && config.getMemoryConfig()["jevWindowSize"] == 10,
           "legacy Jev window did not default to ten");
+        const auto compressionDefaults = config.getMemoryConfig();
+        require(config.personCompressionTriggerTokens == 0, "compression must default off");
+        auto compression = compressionDefaults;
+        compression["personCompressionTriggerTokens"] = 2000;
+        compression["personCompressionTargetTokens"] = 1500;
+        require(config.saveMemoryConfig(compression).has_value(), "valid compression config rejected");
+        for (const auto &bad: json::array({-1, 0, 2000, 3000, 1.5, true, "1500", nullptr, 2147483648ULL})) {
+            auto invalid = compression;
+            invalid["personCompressionTargetTokens"] = bad;
+            require(!config.saveMemoryConfig(invalid), "invalid compression target accepted");
+        }
+        require(config.saveMemoryConfig(compressionDefaults).has_value(), "compression defaults restore failed");
         auto memorySettings = config.getMemoryConfig();
         memorySettings["jevWindowSize"] = 4;
         require(config.saveMemoryConfig(memorySettings).has_value() && config.jevWindowSize.load() == 4,

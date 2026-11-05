@@ -166,3 +166,14 @@ test('person detail heading displays estimated tokens including zero when affini
     assert.match(await view.html(), /<span>预估 Token<\/span><strong>0<\/strong>/)
   } finally { view.dispose() }
 })
+
+test('manual compression uses its endpoint and refreshes token details', async () => {
+  const view = page(async () => ({status: 200, body: {success: true, message: 'Token 未减少，已保留原内容'}}))
+  try {
+    assert.ok((await view.html()).includes('直接压缩'))
+    await view.state.consolidatePerson(true)
+    assert.equal(view.requests[0].url, '/admin/api/people/42/compress')
+    assert.equal(view.state.consolidating, false)
+    assert.equal(view.state.consolidationMessage, 'Token 未减少，已保留原内容')
+  } finally { view.dispose() }
+})

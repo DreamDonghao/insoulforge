@@ -73,6 +73,7 @@ namespace insoulforge::ConfigStore {
                   {"memorySummaryTriggerCount", 100}, {"memorySummaryBatchSize", 50}, {"memorySummaryContextCount", 10},
                   {"conversationSummaryMaxChars", 100}, {"conversationSummaryMaxCount", 10},
                   {"personMemoryEntryMaxChars", 30}, {"longTermMemoryEntryMaxChars", 100},
+                  {"personCompressionTriggerTokens", 0}, {"personCompressionTargetTokens", 1500},
                   {"personProfileEntryMaxChars", 50}, {"personProfileMaxChars", 300},
                   {"personRelationshipEntryMaxChars", 60}, {"personRelationshipMaxChars", 150},
                   {"personInteractionEntryMaxChars", 60}, {"personInteractionMaxChars", 250}, {"jevWindowSize", 10},
@@ -138,7 +139,8 @@ namespace insoulforge::ConfigStore {
                 auto value = config.find(key);
                 // 显式填写的严格校验字段不能悄悄修复错误类型。
                 if (value != config.end() &&
-                    (key == "timeoutSeconds" || key == "maxRetries" || key == "affinityEnabled" ||
+                    (key == "personCompressionTriggerTokens" || key == "personCompressionTargetTokens" ||
+                      key == "timeoutSeconds" || key == "maxRetries" || key == "affinityEnabled" ||
                       key == "jevWindowSize" || key == "conversationSummaryMaxChars" ||
                       key == "conversationSummaryMaxCount" || key == "personMemoryEntryMaxChars" ||
                       key == "longTermMemoryEntryMaxChars" || key == "personProfileEntryMaxChars" ||
