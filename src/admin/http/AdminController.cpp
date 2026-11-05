@@ -347,6 +347,7 @@ auto AdminController::setBotStatus(HttpRequestPtr req, std::function<void(const 
 
 auto AdminController::getEmojis(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback) const
   -> Task<> {
+    if (req->getParameter("refresh") == "1") ToolRuntime::invalidateFavoriteEmojiCache();
     callback(jsonResponse(co_await ToolRuntime::fetchFavoriteEmojis()));
     co_return;
 }

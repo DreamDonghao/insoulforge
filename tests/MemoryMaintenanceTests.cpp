@@ -1035,13 +1035,12 @@ auto main() -> int {
           ++executorRequests;
           const auto body = json::parse(request->body());
           const auto &messages = body["messages"];
-          const auto context = json::parse(messages[2]["content"].get<std::string>());
-          const auto stickers = json::parse(messages[1]["content"].get<std::string>());
+          const auto context = json::parse(messages[1]["content"].get<std::string>());
+          const auto stickers = json::parse(messages[0]["content"].get<std::string>().substr(messages[0]["content"].get<std::string>().rfind("\n") + 1));
           const auto expectedNames = executorRequests <= 2   ? json::array({escapedSticker})
                                      : executorRequests == 3 ? json::array({"renamed"})
                                                              : json::array();
-          const bool validStickers = messages[0]["role"] == "system" && messages[1]["role"] == "system" &&
-                                     messages[2]["role"] == "user" &&
+          const bool validStickers = messages[0]["role"] == "system" && messages[1]["role"] == "user" &&
                                      stickers == json{{"available_stickers", expectedNames}};
           std::vector<std::string> keys;
           for (const auto &[key, value]: context.items())
@@ -1052,18 +1051,21 @@ auto main() -> int {
           if (!isPrivate)
               expected.push_back("response_requirements");
           expected.push_back("running_activities");
-          const auto state = json::parse(messages.back()["content"].get<std::string>());
-          bool valid = validStickers && keys == expected && messages.back()["role"] == "system" && state.size() == 1 &&
+          expected.push_back("execution_state");
+          const auto state = context;
+          bool valid = validStickers && keys == expected && messages[0]["role"] == "system" &&
                        state["execution_state"]["current_round"] == (isPrivate ? executorRequests : 1) &&
-                       context["person_memories"].size() == 1 && context["person_memories"][0]["user_id"] == "11" &&
+                       context["person_memories"].size() == 1 && context["person_memories"][0]["uid"] == "11" &&
                        context["person_memories"][0]["pending_entries"].size() == 3 &&
                        context["shared_conversations"].empty() && context["running_activities"].empty();
           valid =
             valid && (isPrivate ? context["conversation_summaries"].size() == 1 &&
                                     context["conversation_summaries"][0]["summary"] == "讨论了部署方式，等待后续验证。"
                                 : !context["conversation_summaries"].empty());
-          valid = valid && context["session_memory"] == sessionMemory() &&
-                  (isPrivate ? context["current_session"]["user_id"] == "22"
+          auto expectedSessionMemory = sessionMemory();
+          MessageRecord::compactContextUserIds(expectedSessionMemory);
+          valid = valid && context["session_memory"] == expectedSessionMemory &&
+                  (isPrivate ? context["current_session"]["uid"] == "22"
                              : context["current_session"]["group_id"] == "100") &&
                   context["earlier_messages"].size() == 2 && context["earlier_messages"][0] == "legacy text" &&
                   context["earlier_messages"][1]["segments"][0]["text"] == std::string(500, 'x') + "…" &&
@@ -1080,7 +1082,7 @@ auto main() -> int {
                           record["segments"][1]["description"] == "fixture image";
                   if (!Config::instance().affinityEnabled)
                       valid = valid && !record["sender"].contains("affinity");
-                  else if (record["sender"]["user_id"] == "22")
+                  else if (record["sender"]["uid"] == "22")
                       valid = valid && record["sender"]["affinity"] == 5;
               }
           }
@@ -1098,7 +1100,9 @@ auto main() -> int {
           std::vector<std::string> exampleKeys;
           for (const auto &[key, value]: example.items())
               exampleKeys.push_back(key);
-          valid = valid && exampleKeys == expected;
+          auto exampleExpected = expected;
+          exampleExpected.pop_back(); // 执行状态由每轮请求动态注入，不属于静态示例。
+          valid = valid && exampleKeys == exampleExpected;
           if (isPrivate) {
               valid =
                 valid && !context.contains("response_requirements") && systemPrompt.contains("这是私聊，直接回复即可");
@@ -1111,13 +1115,18 @@ auto main() -> int {
               valid = valid && requirements == expectedRequirements && !systemPrompt.contains("这是私聊，直接回复即可");
           }
           if (executorRequests == 1) {
-              frozenUser = messages[2];
-              frozenStickers = messages[1];
+              frozenUser = context;
+              frozenUser.erase("execution_state");
+              frozenStickers = messages[0];
               // A cache invalidation between tool rounds must not mutate this generation's prefix.
               ToolRuntime::invalidateFavoriteEmojiCache();
           } else if (isPrivate)
-              valid = valid && messages[1] == frozenStickers && messages[2] == frozenUser && messages.size() == 6 &&
-                      messages[4]["role"] == "tool" && messages[4]["content"] == "source";
+              {
+                  auto stableContext = context;
+                  stableContext.erase("execution_state");
+                  valid = valid && messages[0] == frozenStickers && stableContext == frozenUser && messages.size() == 4 &&
+                      messages[3]["role"] == "tool" && messages[3]["content"] == "source";
+              }
           auto reply = drogon::HttpResponse::newHttpResponse();
           reply->setContentTypeCode(drogon::CT_APPLICATION_JSON);
           if (!valid || executorRequests == 2) {

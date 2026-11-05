@@ -100,11 +100,11 @@ const submitMutation = async (): Promise<void> => {
 
 const loadError = ref('')
 const loaded = ref(false)
-const loadEmojis = async (): Promise<void> => {
+const loadEmojis = async (refresh = false): Promise<void> => {
   if (loading.value) return
   loading.value = true
   try {
-    const data = await requestJson<Emoji[]>('/admin/api/emojis')
+    const data = await requestJson<Emoji[]>(refresh ? '/admin/api/emojis?refresh=1' : '/admin/api/emojis')
     if (!Array.isArray(data)) throw new Error('表情列表数据无效')
     emojis.value = data
     loaded.value = true
@@ -162,7 +162,7 @@ const saveDesc = async (emoji: Emoji): Promise<void> => {
   }
 }
 
-onMounted(loadEmojis)
+onMounted(() => loadEmojis())
 </script>
 
 <template>
@@ -176,12 +176,12 @@ onMounted(loadEmojis)
       <div class="card-header">
         <h3 class="card-title">收藏表情 ({{ emojis.length }})</h3>
         <div class="emoji-actions">
-          <button :disabled="busy || loading" class="btn btn-secondary" @click="loadEmojis">{{ loading ? '加载中…' : '刷新' }}</button>
+          <button :disabled="busy || loading" class="btn btn-secondary" @click="loadEmojis(true)">{{ loading ? '加载中…' : '刷新' }}</button>
           <button :disabled="busy || loading" class="btn btn-primary" @click="openDialog('add')">添加收藏表情</button>
         </div>
       </div>
       <p class="emoji-hint">需要 QQ 在线且 OneBot 实现支持收藏扩展接口。仅显示接口返回的前 200 项；未返回表情也可能是离线或接口不可用。添加支持本地图片上传或图片直链，成功后可编辑描述；QQ 收藏限制、重复图片及同步延迟以客户端为准。</p>
-      <RequestError :message="loadError" :busy="loading" :stale="loaded" @retry="loadEmojis"/>
+      <RequestError :message="loadError" :busy="loading" :stale="loaded" @retry="loadEmojis(true)"/>
       <p v-if="loading && loaded" role="status">刷新中…</p>
       <div class="table-container">
         <template v-if="loading && !loaded">

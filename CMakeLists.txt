@@ -1,11 +1,45 @@
 cmake_minimum_required(VERSION 3.20)
-project(insoulforge VERSION 1.8.0 LANGUAGES CXX)
+project(insoulforge VERSION 1.8.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(BUILD_SHARED_LIBS OFF)
 set(DEPLOY_DIR ${CMAKE_CURRENT_SOURCE_DIR}/build/insoulforge)
+
+# 固定上游版本；源码由 CMake 下载到构建目录，不进入项目仓库。
+include(FetchContent)
+# 显示首次下载/解压进度，避免配置阶段长时间没有输出。
+set(FETCHCONTENT_QUIET OFF)
+if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW)
+endif()
+set(LLAMA_BUILD_COMMON OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_APP OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_UI OFF CACHE BOOL "" FORCE)
+set(LLAMA_CONNECT OFF CACHE BOOL "" FORCE)
+set(GGML_CUDA OFF CACHE BOOL "" FORCE)
+set(GGML_METAL OFF CACHE BOOL "" FORCE)
+set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
+set(GGML_BLAS OFF CACHE BOOL "" FORCE)
+set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
+set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(llama_cpp
+        # b11278：避开后续 kpool_layout 在 AppleClang 下的编译问题。
+        URL https://codeload.github.com/ggml-org/llama.cpp/tar.gz/931351ea50dfdd3ee249606f655eef2e9a629daf
+        URL_HASH SHA256=d095b9128252182ee78ff1e18865eba44f58b8d6b446ee073e8ccda9c7ee8f6b
+        DOWNLOAD_DIR "${FETCHCONTENT_BASE_DIR}/downloads"
+        DOWNLOAD_NAME llama.cpp-931351ea50dfdd3ee249606f655eef2e9a629daf.tar.gz
+        TLS_VERIFY TRUE
+        TIMEOUT 600
+        INACTIVITY_TIMEOUT 60)
+message(STATUS "Preparing llama.cpp (b11278): downloading/verifying source if needed")
+FetchContent_MakeAvailable(llama_cpp)
+message(STATUS "llama.cpp source ready: ${llama_cpp_SOURCE_DIR}")
 
 # 禁用 nlohmann/json 的隐式转换运算符（官方开关）：std::string s = j; / return j; 等代码
 # 直接编译报错，而不是编译通过、运行时抛 type_error.302；取值一律走 get<T>()/JsonUtil 宽容取值器
@@ -68,6 +102,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 
 # 7. 链接库
 target_link_libraries(${PROJECT_NAME} PRIVATE
+        llama
         Drogon::Drogon
         spdlog::spdlog_header_only
         fmt::fmt-header-only
@@ -77,6 +112,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
         ${GIFLIB_LIBRARY}
 )
 target_link_libraries(${PROJECT_NAME}_backend PRIVATE
+        llama
         Drogon::Drogon
         spdlog::spdlog_header_only
         fmt::fmt-header-only
@@ -161,3 +197,15 @@ add_dependencies(${PROJECT_NAME} frontend)
 # 可执行文件直接输出到部署目录 build/insoulforge/exe
 set_target_properties(${PROJECT_NAME} PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${DEPLOY_DIR}/exe)
+
+# 复用固定上游版本自带的纯词表资源，不需要模型权重。
+set(TOKENIZER_RESOURCE_DIR "${DEPLOY_DIR}/resources/tokenizers")
+add_custom_target(tokenizer_resources ALL
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${TOKENIZER_RESOURCE_DIR}")
+foreach(vocab llama-bpe qwen2 gemma-4)
+    add_custom_command(TARGET tokenizer_resources POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${llama_cpp_SOURCE_DIR}/models/ggml-vocab-${vocab}.gguf"
+            "${TOKENIZER_RESOURCE_DIR}/ggml-vocab-${vocab}.gguf")
+endforeach()
+add_dependencies(${PROJECT_NAME} tokenizer_resources)

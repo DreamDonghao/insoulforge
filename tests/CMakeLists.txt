@@ -162,3 +162,18 @@ target_include_directories(insoulforge_favorite_emoji_tests PRIVATE ${PROJECT_SO
 target_link_libraries(insoulforge_favorite_emoji_tests PRIVATE ${IMAGE_TEST_LIBRARIES})
 add_test(NAME favorite_emojis COMMAND insoulforge_favorite_emoji_tests)
 set_tests_properties(favorite_emojis PROPERTIES TIMEOUT 45)
+
+# 后端对象包含 TokenCounter 的 llama API 引用。
+get_property(test_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+foreach(test_target IN LISTS test_targets)
+    get_target_property(test_type ${test_target} TYPE)
+    get_target_property(test_sources ${test_target} SOURCES)
+    if(test_type STREQUAL "EXECUTABLE" AND "${test_sources}" MATCHES "TARGET_OBJECTS:.*_backend")
+        target_link_libraries(${test_target} PRIVATE llama)
+    endif()
+endforeach()
+add_executable(insoulforge_token_counter_tests EXCLUDE_FROM_ALL TokenCounterTests.cpp
+        ${PROJECT_SOURCE_DIR}/src/infrastructure/tokenizer/TokenCounter.cpp)
+target_include_directories(insoulforge_token_counter_tests PRIVATE ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(insoulforge_token_counter_tests PRIVATE llama)
+add_test(NAME token_counter COMMAND insoulforge_token_counter_tests "${llama_cpp_SOURCE_DIR}/models")

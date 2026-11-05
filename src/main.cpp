@@ -26,6 +26,7 @@
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/monitoring/ProcessMetrics.hpp>
 #include <infrastructure/storage/Database.hpp>
+#include <infrastructure/tokenizer/TokenCounter.hpp>
 #include <onebot/transport/OneBotWebSocketClient.hpp>
 #include <workflow/OneBotEventWorkflow.hpp>
 #include <workflow/activity/ActivityManager.hpp>
@@ -43,19 +44,19 @@ namespace {
     /// @brief 仅向服务终端输出当前登录凭据，不经过应用日志系统。
     void printLoginInstructions() {
         // 登录引导只直接输出到服务终端，不进入文件日志、日志缓存或 WebSocket 推送。
-        std::string loginInstructions = std::format(
-          "管理后台访问令牌（重启后失效）: {}\n也可尝试一下链接访问\n", AdminAccessToken::token());
+        std::string loginInstructions =
+          std::format("管理后台访问令牌（重启后失效）: {}\n也可尝试一下链接访问\n", AdminAccessToken::token());
         // 枚举当前进程可见的 IPv4 地址；容器内不能据此获取宿主机的局域网地址。
         for (const auto &url: AdminAccessToken::loginUrls(7778)) {
-            loginInstructions.append(url+'\n');
-    }
-    // 与 info 日志使用相同的终端绿色；重定向输出时保持纯文本。
-    if (isatty(STDOUT_FILENO)) {
-        fmt::print(stdout, fmt::fg(fmt::terminal_color::green), "{}", loginInstructions);
-    } else {
-        fmt::print(stdout, "{}", loginInstructions);
-    }
-    std::fflush(stdout);
+            loginInstructions.append(url + '\n');
+        }
+        // 与 info 日志使用相同的终端绿色；重定向输出时保持纯文本。
+        if (isatty(STDOUT_FILENO)) {
+            fmt::print(stdout, fmt::fg(fmt::terminal_color::green), "{}", loginInstructions);
+        } else {
+            fmt::print(stdout, "{}", loginInstructions);
+        }
+        std::fflush(stdout);
     }
 
     /// @brief 处理控制台的退出、登录凭据和日志等级命令；输入关闭或收到停止请求时结束。
@@ -105,6 +106,10 @@ auto main() -> int {
         if (auto result = Logger::initialize(); !result) {
             // 日志系统尚不可用，启动错误直接写入标准错误输出。
             std::fprintf(stderr, "%s\n", result.error().c_str());
+            return EXIT_FAILURE;
+        }
+        if (auto result = TokenCounter::initialize(); !result) {
+            Logger::error(std::nullopt, "TokenCounter", result.error());
             return EXIT_FAILURE;
         }
         if (auto result = AdminAccessToken::initialize(); !result) {
@@ -176,7 +181,7 @@ auto main() -> int {
         ProcessMetrics::instance().start(*drogon::app().getLoop());
         PersonMemoryConsolidator::instance().start(*drogon::app().getLoop());
         ActivityManager::instance().start(*drogon::app().getLoop());
-        const auto cleanImages = [] {
+        const auto cleanImages = [] -> void {
             if (auto result = Image::cleanup(); !result)
                 Logger::warn(std::nullopt, "Image", result.error());
         };

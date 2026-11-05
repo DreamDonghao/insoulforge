@@ -20,6 +20,8 @@
 
 `ninja` 不是必需依赖，但与 Dockerfile 一致，推荐作为 CMake 生成器使用。
 
+llama.cpp 通过 CMake `FetchContent` 下载固定 commit 的源码压缩包、校验 SHA-256 并静态链接，首次配置需要访问 GitHub（不克隆 Git 历史）；源码缓存于构建目录的 `_deps`，不提交到本仓库。当前仅构建 CPU 库，关闭附带工具、服务、测试和 GPU 后端，不需要 Rust、Python 或 GPU SDK。此接入尚不包含分词功能和词表资源。离线构建可通过 `-DFETCHCONTENT_SOURCE_DIR_LLAMA_CPP=/path/to/llama.cpp` 指定对应 commit 的本地源码。更新版本时修改 根 `CMakeLists.txt` 的下载 URL 和 `URL_HASH`，并重新验证构建。
+
 ### Ubuntu 24.04
 
 先安装与 Dockerfile `builder` 阶段相同的系统依赖：
@@ -662,3 +664,21 @@ OneBot 11 的数字要求仅保留在协议适配层，目标无法转换时不�
 `ask_images.images` 与 `generate_image.reference_images` 支持 ID 字符串或 `{image_id}`；ID 必须属于本次冻结的可见会话快照，不能凭全局缓存或其他会话访问。
 旧 `{message_id, image_index}` 引用继续按当前会话读取，优先使用缓存 ID，缓存缺失时回退原图 URL。显式过期 ID 返回错误并要求重发。
 角色形象图仍独立存放在 `data/character-image`，不进入图片缓存；收藏表情和 QQ 空间 URL 发送方式保持原有逻辑。
+
+本地 Token 估算：包含 `infrastructure/tokenizer/TokenCounter.hpp`，调用
+`TokenCounter::load("resources/tokenizers")`，成功后复用实例的 `estimate(text)`。
+结果的 counts 按 names 顺序返回，average 为向上取整平均值，maximum 为最大值。
+这是文本估算，不含聊天模板、图片和工具协议开销，不保证与闭源模型一致。
+词表在构建时复制到部署目录；运行时离线，无需模型权重。三个词表必须齐全。
+资源来自固定 llama.cpp 版本的 models 目录；再分发时应保留上游许可证及对应模型
+（Llama、Qwen、Gemma）的适用许可条款，llama.cpp 的代码许可不替代模型资源许可。
+
+业务代码也可直接调用 `insoulforge::estimateTokens(text)`，返回
+`std::expected<TokenEstimate, std::string>`。全局实例首次调用时从工作目录的
+`resources/tokenizers` 加载词表，并缓存加载结果（包括错误）；后续调用复用词表，支持并发。
+
+Executor System 由 `ExecutorSystemPrompt` 单例按六部分构建并缓存，工具定义由 `ToolRegistry` 独立统计。
+提示词写入应通过 `PromptService::setPrompt`，以同步失效缓存；`PromptStore` 仅负责数据库操作。
+公共统计使用 `buildPublicSnapshot`，不需要虚拟会话；实际会话使用 `buildSnapshot`。
+`/admin/api/system-tokens` 返回分项估算及默认工具定义占用，不返回提示词原文。
+分项 Token 为三个词表计数的向上取整平均值，合计为分项相加，不等同于服务端实际用量。

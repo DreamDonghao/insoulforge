@@ -6,6 +6,7 @@
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
+#include <infrastructure/tokenizer/TokenCounter.hpp>
 #include <workflow/agent/tools/ToolRegistry.hpp>
 
 using insoulforge::json;
@@ -70,6 +71,7 @@ namespace insoulforge {
             }
             m_pluginTools.erase(old);
         }
+        ++m_tokenRevision;
         for (auto &[name, tool]: staged.m_tools) {
             m_tools.emplace(name, std::move(tool));
             m_pluginTools[pluginId].push_back(name);
@@ -85,6 +87,7 @@ namespace insoulforge {
         for (const auto &name: it->second)
             m_tools.erase(name);
         m_pluginTools.erase(it);
+        ++m_tokenRevision;
     }
 
     auto ToolRegistry::registerTool(const Tool &tool, const ToolCategory category) -> bool {
@@ -106,6 +109,7 @@ namespace insoulforge {
             return false;
         }
 
+        ++m_tokenRevision;
         m_tools.insert_or_assign(tool.name, RegisteredTool{.tool = tool, .category = category, .pluginId = pluginId});
         if (auto &names = m_pluginTools[pluginId]; !std::ranges::contains(names, tool.name))
             names.push_back(tool.name);
@@ -119,6 +123,10 @@ namespace insoulforge {
         std::vector<const RegisteredTool *> visibleTools;
         visibleTools.reserve(m_tools.size());
         for (const auto &registered: m_tools | std::views::values) {
+            if (query.defaultDefinitionsOnly &&
+                (registered.tool.mcpVersion != 0 || registered.tool.mcpManagement ||
+                  (!registered.pluginId.starts_with("builtin.") && registered.pluginId != "custom")))
+                continue;
             if (!isEnabled(registered))
                 continue;
             if (!query.includeAllMcp) {
@@ -153,6 +161,30 @@ namespace insoulforge {
         }
 
         return tools;
+    }
+
+    auto ToolRegistry::getDefaultToolsTokenUsage(const bool isPrivateSession) const
+      -> std::expected<DefaultToolsTokenUsage, std::string> {
+        std::lock_guard lock(m_tokenMutex);
+        auto &cache = m_tokenCaches[isPrivateSession ? 1 : 0];
+        const auto revision = m_tokenRevision.load();
+        if (cache.revision == revision)
+            return cache.result;
+        const auto tools = getTools({.isPrivateSession = isPrivateSession, .defaultDefinitionsOnly = true});
+        const auto text = dumpJson(tools);
+        if (cache.text != text) {
+            cache.text = text;
+            if (tools.empty())
+                cache.result = DefaultToolsTokenUsage{};
+            else {
+                if (const auto estimate = estimateTokens(text))
+                    cache.result = DefaultToolsTokenUsage{.count = tools.size(), .average = estimate->average};
+                else
+                    cache.result = std::unexpected(estimate.error());
+            }
+        }
+        cache.revision = revision;
+        return cache.result;
     }
 
     auto ToolRegistry::getAllTools() const -> json { return getTools({.includeAllMcp = true}); }
@@ -212,7 +244,11 @@ namespace insoulforge {
 
     void ToolRegistry::loadBuiltinToolsConfig(json config) {
         std::unique_lock lock(m_mutex);
-        m_builtinConfig = config.is_object() ? std::move(config) : json::object();
+        auto next = config.is_object() ? std::move(config) : json::object();
+        if (next == m_builtinConfig)
+            return;
+        m_builtinConfig = std::move(next);
+        ++m_tokenRevision;
     }
 
     auto ToolRegistry::getBuiltinTools() const -> json {
@@ -249,16 +285,21 @@ namespace insoulforge {
             next[name] = {{"enabled", true}, {"description", nullptr}};
         }
         next[name].update(patch);
+        if (next == m_builtinConfig)
+            return {};
         if (const auto saved = Config::instance().saveBuiltinToolsConfig(next); !saved) {
             return std::unexpected(saved.error().message);
         }
         m_builtinConfig = std::move(next);
+        ++m_tokenRevision;
         return {};
     }
 
     void ToolRegistry::unregisterTool(const std::string &name) {
         std::unique_lock lock(m_mutex);
-        m_tools.erase(name);
+        if (m_tools.erase(name) == 0)
+            return;
+        ++m_tokenRevision;
         for (auto iterator = m_pluginTools.begin(); iterator != m_pluginTools.end();) {
             auto &names = iterator->second;
             std::erase(names, name);

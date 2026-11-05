@@ -178,8 +178,12 @@ namespace {
               "uncertain rename invalidates cache for reconciliation");
             malformedList = true;
             ToolRuntime::invalidateFavoriteEmojiCache();
-            require((co_await ToolRuntime::fetchFavoriteEmojis()).empty(),
-              "malformed list response cannot fabricate sticker names");
+            bool rejected = false;
+            try { co_await ToolRuntime::fetchFavoriteEmojis(); }
+            catch (const std::exception &) { rejected = true; }
+            require(rejected, "malformed list response must report failure");
+            malformedList = false;
+            require(!(co_await ToolRuntime::fetchFavoriteEmojis()).empty(), "failed refresh can be retried");
             std::cout << "Favorite emoji tests passed\n";
             exitCode = 0;
         } catch (const std::exception &error) {

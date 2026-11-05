@@ -348,6 +348,28 @@ namespace insoulforge::MessageRecord {
         return projected;
     }
 
+    void compactContextUserIds(json &context) {
+        if (context.is_array()) {
+            for (auto &item: context) {
+                compactContextUserIds(item);
+            }
+        } else if (context.is_object()) {
+            // 白名单限定上下文结构，工具调用的原始参数必须与工具 schema 保持一致。
+            if (const auto it = context.find("user_id"); it != context.end()) {
+                auto id = std::move(*it);
+                context.erase(it);
+                context["uid"] = std::move(id);
+            }
+            for (const auto *key: {"current_session", "session_memory", "aliases", "earlier_messages",
+                   "recent_messages", "person_memories", "shared_conversations", "session", "messages", "sender",
+                   "segments", "target", "operator", "reply_to"}) {
+                if (const auto it = context.find(key); it != context.end()) {
+                    compactContextUserIds(*it);
+                }
+            }
+        }
+    }
+
     auto extractRecallText(const json &record) -> std::string {
         std::string text;
         for (const json projected = projectForAgent(record); const auto &segment: atOrNull(projected, "segments")) {

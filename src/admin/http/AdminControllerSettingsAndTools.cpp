@@ -7,6 +7,7 @@
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <infrastructure/storage/Database.hpp>
+#include <workflow/agent/llm/prompts/PromptService.hpp>
 #include <workflow/agent/llm/prompts/PromptStore.hpp>
 #include <workflow/agent/tools/ToolRegistry.hpp>
 #include <workflow/agent/tools/ToolRuntime.hpp>
@@ -144,7 +145,7 @@ auto AdminController::savePrompt(HttpRequestPtr req, std::function<void(const Ht
         co_return;
     }
 
-    PromptStore::setPrompt(key, content, description);
+    PromptService::setPrompt(key, content, description);
     Logger::warn(std::nullopt, "Admin", fmt::format("管理后台更新提示词: key={}, 长度={}", key, content.size()));
 
     callback(jsonResponse(AdminResponse::okJson("提示词已保存")));

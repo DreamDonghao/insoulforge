@@ -1,3 +1,4 @@
+#include <workflow/agent/llm/prompts/ExecutorSystemPrompt.hpp>
 #include <algorithm>
 #include <cmath>
 #include <set>
@@ -209,6 +210,7 @@ namespace insoulforge {
                 m_registry->get().unregisterPlugin("mcp:" + old->name);
         }
         m_servers = std::move(servers);
+        ExecutorSystemPrompt::instance().updateMcpDirectory(directoryLocked());
     }
 
     auto McpTools::saveConfig(json config, Config &store) -> std::expected<void, ConfigError> {

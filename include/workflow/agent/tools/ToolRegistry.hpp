@@ -8,6 +8,9 @@
 #pragma once
 
 #include <functional>
+#include <atomic>
+#include <array>
+#include <mutex>
 #include <map>
 #include <memory>
 #include <optional>
@@ -55,6 +58,7 @@ namespace insoulforge {
         bool replyOnly = false; ///< 仅返回 REPLY 类工具的定义
         std::map<std::string, u64> mcpTools;
         bool mcpManagement = false; ///< 有可用服务时开放查询和启用工具。
+        bool defaultDefinitionsOnly = false; ///< 仅用于占用统计：已启用的内置及自定义工具，不含 MCP。
         bool includeAllMcp = false; ///< 仅用于管理诊断，不可用于模型请求。
     };
 
@@ -101,6 +105,16 @@ namespace insoulforge {
         /// @details 输出顺序固定为：分类、promptOrder、名称，避免请求间顺序漂移。
         [[nodiscard]] auto getTools(const ToolQuery &query) const -> json;
 
+        struct DefaultToolsTokenUsage {
+            std::size_t count{};
+            std::uint32_t average{};
+            auto operator==(const DefaultToolsTokenUsage &) const -> bool = default;
+        };
+        /// @brief 缓存默认工具定义的平均 Token 数；按群聊、私聊分别统计，不含 MCP。
+        /// @details 变更后按需更新，序列化文本相同则复用计数；失败通过 expected 返回。
+        auto getDefaultToolsTokenUsage(bool isPrivateSession) const
+          -> std::expected<DefaultToolsTokenUsage, std::string>;
+
         /// @brief 获取所有工具定义（兼容管理与诊断用途）
         [[nodiscard]] auto getAllTools() const -> json;
 
@@ -122,6 +136,14 @@ namespace insoulforge {
 
     private:
         ToolRegistry() = default;
+        struct TokenCache {
+            std::uint64_t revision = static_cast<std::uint64_t>(-1);
+            std::string text;
+            std::expected<DefaultToolsTokenUsage, std::string> result = std::unexpected("尚未计算");
+        };
+        std::atomic<std::uint64_t> m_tokenRevision{0};
+        mutable std::mutex m_tokenMutex;
+        mutable std::array<TokenCache, 2> m_tokenCaches;
 
         /// @brief 带归属信息的内部工具记录
         struct RegisteredTool {

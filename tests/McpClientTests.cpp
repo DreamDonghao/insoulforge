@@ -136,7 +136,7 @@ namespace {
             require(selection->enabled.empty() && selection->directory[0].value("description", std::string{}) == "",
               "Old description default missing");
             const auto prompt = insoulforge::ExecutorAgent::buildSystemPrompt(
-              insoulforge::SessionId::privateChat(insoulforge::UserId{42}), selection->directory);
+              insoulforge::SessionId::privateChat(insoulforge::UserId{42}));
             require(prompt.find("mcp_list_tools") != std::string::npos && prompt.find(endpoint) == std::string::npos &&
                       prompt.find("inputSchema") == std::string::npos,
               "Directory prompt exposed connection or full tool definitions");
@@ -312,7 +312,7 @@ namespace {
                       registry.getTools({.mcpManagement = !noServices->services.empty()}).empty(),
               "Helpers exposed without services");
             const auto promptWithoutMcp = insoulforge::ExecutorAgent::buildSystemPrompt(
-              insoulforge::SessionId::privateChat(insoulforge::UserId{42}), noServices->directory);
+              insoulforge::SessionId::privateChat(insoulforge::UserId{42}));
             require(
               promptWithoutMcp.find("## 可用 MCP 服务") == std::string::npos, "Empty directory injected into prompt");
             require(insoulforge::json::parse(mcp.enableTools({{"server", "fixture"}, {"names", {"echo"}}}, *selection))
