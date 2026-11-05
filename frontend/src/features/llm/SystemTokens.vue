@@ -2,16 +2,16 @@
 import {computed, ref, onMounted, watch} from 'vue'
 import {requestJson, requestError} from '../../utils/api'
 import RequestError from '../../components/RequestError.vue'
-interface Usage {warning?: string; total: number; combinedTotal: number; defaultTools: {count: number; tokens: number}; parts: {name: string; description: string; tokens: number}[]}
+interface Usage {warning?: string; total: number; combinedTotal: number; defaultTools: {count: number; tokens: number}; parts: {id: string; name: string; description: string; tokens: number}[]}
 const type = ref('group')
 const id = ref('')
 const busy = ref(false)
 const error = ref('')
 const data = ref<Usage | null>(null)
 const label = ref('')
-const colors = ['#6366f1', '#a855f7', '#0891b2', '#10b981', '#f59e0b', '#f43f5e', '#0d9488']
+const colors: Record<string, string> = {project: '#6366f1', persona: '#a855f7', structure: '#0891b2', services: '#10b981', stickers: '#f59e0b', 'group-setting': '#f43f5e', tools: '#0d9488'}
 const parts = computed(() => data.value ? [...data.value.parts, {
-  name: '默认工具定义', tokens: data.value.defaultTools.tokens,
+  id: 'tools', name: '默认工具定义', tokens: data.value.defaultTools.tokens,
   description: `${data.value.defaultTools.count} 个已启用的内置工具和自定义工具，包含名称、描述及参数结构，不含 MCP 工具及 MCP 管理工具。`
 }] : [])
 const largest = computed(() => parts.value.reduce<(typeof parts.value)[number] | undefined>((a, b) => !a || b.tokens > a.tokens ? b : a, undefined))
@@ -21,10 +21,12 @@ async function load(): Promise<void> {
   busy.value = true
   error.value = ''
   data.value = null
+  const queryType = type.value
+  const queryId = id.value.trim()
   try {
-    const next = await requestJson<Usage>(`/admin/api/system-tokens?type=${type.value}&id=${encodeURIComponent(id.value.trim())}`)
+    const next = await requestJson<Usage>(`/admin/api/system-tokens?type=${queryType}&id=${encodeURIComponent(queryId)}`)
     data.value = next
-    label.value = type.value === 'private' ? '私聊 · 公共 System' : id.value.trim() ? `群聊 · ${id.value.trim()}（含群聊附加设定）` : '群聊 · 公共 System（不含群聊附加设定）'
+    label.value = queryType === 'private' ? '私聊 · 公共 System' : queryId ? `群聊 · ${queryId}（含群聊附加设定）` : '群聊 · 公共 System（不含群聊附加设定）'
   } catch (e) { error.value = requestError(e, '读取 System Token 占用失败') }
   finally { busy.value = false }
 }
@@ -54,12 +56,12 @@ watch(type, () => { id.value = ''; void load() })
       </div>
       <div class="card distribution">
         <h3>System 与默认工具定义组成</h3>
-        <div class="stack" role="img" aria-label="System 各部分和默认工具定义的 Token 占比分布"><div v-for="(part, i) in parts" :key="part.name" :style="{width: percent(part.tokens) + '%', background: colors[i]}" :title="`${part.name}：${part.tokens} Token`"/></div>
+        <div class="stack" role="img" aria-label="System 各部分和默认工具定义的 Token 占比分布"><div v-for="part in parts" :key="part.id" :style="{width: percent(part.tokens) + '%', background: colors[part.id]}" :title="`${part.name}：${part.tokens} Token`"/></div>
         <div class="parts-grid">
-        <div v-for="(part, i) in parts" :key="part.name" class="part">
-          <div class="part-heading"><span><i :style="{background: colors[i]}"/>{{ part.name }}</span><span>{{ part.tokens.toLocaleString() }} <small>Token · {{ percent(part.tokens).toFixed(1) }}%</small></span></div>
+        <div v-for="part in parts" :key="part.id" class="part">
+          <div class="part-heading"><span><i :style="{background: colors[part.id]}"/>{{ part.name }}</span><span>{{ part.tokens.toLocaleString() }} <small>Token · {{ percent(part.tokens).toFixed(1) }}%</small></span></div>
           <p class="part-description">{{ part.description }}</p>
-          <div class="track"><div :style="{width: percent(part.tokens) + '%', background: colors[i]}"/></div>
+          <div class="track"><div :style="{width: percent(part.tokens) + '%', background: colors[part.id]}"/></div>
         </div>
         </div>
       </div>

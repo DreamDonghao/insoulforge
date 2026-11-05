@@ -4,8 +4,6 @@
 
 #include <admin/access/AdminAccessToken.hpp>
 #include <admin/http/AdminController.hpp>
-#include <workflow/agent/tools/ToolRegistry.hpp>
-#include <workflow/agent/llm/prompts/ExecutorSystemPrompt.hpp>
 #include <admin/http/AdminResponse.hpp>
 #include <admin/http/PersonNameResolver.hpp>
 #include <infrastructure/CommonUtil.hpp>
@@ -1253,46 +1251,4 @@ auto AdminController::saveQQConfig(HttpRequestPtr req, std::function<void(const 
 
     callback(jsonResponse(AdminResponse::okJson("QQ Bot 配置已保存")));
     co_return;
-}
-
-namespace insoulforge {
-    auto AdminController::getSystemTokens(drogon::HttpRequestPtr req,
-      std::function<void(const drogon::HttpResponsePtr &)> callback) const -> drogon::Task<> {
-        const auto type = req->getParameter("type").empty() ? std::string{"group"} : req->getParameter("type");
-        const auto id = req->getParameter("id");
-        if (type != "group" && type != "private") {
-            auto response = jsonResponse(AdminResponse::errorJson("无效的会话类型"));
-            response->setStatusCode(drogon::k400BadRequest);
-            callback(response);
-            co_return;
-        }
-        try {
-            const bool includeGroup = type == "group" && !id.empty();
-            const auto session = type == "group" ? SessionId::group(includeGroup ? id : "system-preview") : SessionId::privateChat(UserId{"system-preview"});
-            std::string warning;
-            try { co_await ToolRuntime::fetchFavoriteEmojis(); }
-            catch (const std::exception &) {
-                warning = "表情列表暂不可用，使用现有名称缓存；尚未加载时按空列表估算。";
-            }
-            const auto snapshot = ExecutorSystemPrompt::instance().buildSnapshot(session, includeGroup);
-            json result = {{"parts", json::array()}, {"total", 0}, {"warning", warning}};
-            std::uint64_t total = 0;
-            for (std::size_t i = 0; i < (includeGroup ? snapshot.parts.size() : snapshot.parts.size() - 1); ++i) {
-                const auto &count = snapshot.parts[i].average;
-                if (!count) throw std::runtime_error(count.error());
-                total += *count;
-                result["parts"].push_back({{"name", std::string(ExecutorSystemPrompt::partNames[i])}, {"tokens", *count}, {"description", std::string(ExecutorSystemPrompt::partDescriptions[i])}});
-            }
-            result["total"] = total;
-            const auto tools = ToolRegistry::instance().getDefaultToolsTokenUsage(type == "private");
-            if (!tools) throw std::runtime_error(tools.error());
-            result["defaultTools"] = {{"count", tools->count}, {"tokens", tools->average}};
-            result["combinedTotal"] = total + tools->average;
-            callback(jsonResponse(result));
-        } catch (const std::exception &error) {
-            auto response = jsonResponse(AdminResponse::errorJson(error.what()));
-            response->setStatusCode(drogon::k503ServiceUnavailable);
-            callback(response);
-        }
-    }
 }

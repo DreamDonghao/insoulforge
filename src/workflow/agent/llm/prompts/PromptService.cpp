@@ -3,11 +3,13 @@
 
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
+#include <workflow/agent/llm/prompts/ExecutorSystemPrompt.hpp>
 #include <workflow/agent/llm/prompts/PromptService.hpp>
 #include <workflow/agent/llm/prompts/PromptStore.hpp>
 
 namespace insoulforge {
     void PromptService::initialize(const Database &database) {
+        ExecutorSystemPrompt::instance().invalidate();
 
         // 定义默认提示词
         const struct {
@@ -217,18 +219,15 @@ reply 的场景：
         return content;
     }
 
-    void PromptService::setPrompt(const std::string &key, const std::string &content) {
-        PromptStore::setPrompt(key, content);
+    void PromptService::setPrompt(const std::string &key, const std::string &content, const std::string &description) {
+        PromptStore::setPrompt(key, content, description);
+        ExecutorSystemPrompt::instance().invalidate();
         Logger::info(std::nullopt, "Prompt", fmt::format("提示词已更新: {}", key));
     }
 
-    auto PromptService::getExecutorSystemPrompt() -> std::string {
-        return getPrompt("executor_system");
-    }
+    auto PromptService::getExecutorSystemPrompt() -> std::string { return getPrompt("executor_system"); }
 
-    auto PromptService::getExecutorPrivateSystemPrompt() -> std::string {
-        return getPrompt("executor_private_system");
-    }
+    auto PromptService::getExecutorPrivateSystemPrompt() -> std::string { return getPrompt("executor_private_system"); }
 
     auto PromptService::getRouterSystemPrompt() -> std::string { return getPrompt("router_system"); }
 

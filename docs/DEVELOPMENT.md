@@ -676,3 +676,9 @@ OneBot 11 的数字要求仅保留在协议适配层，目标无法转换时不�
 业务代码也可直接调用 `insoulforge::estimateTokens(text)`，返回
 `std::expected<TokenEstimate, std::string>`。全局实例首次调用时从工作目录的
 `resources/tokenizers` 加载词表，并缓存加载结果（包括错误）；后续调用复用词表，支持并发。
+
+Executor System 由 `ExecutorSystemPrompt` 单例按六部分构建并缓存，工具定义由 `ToolRegistry` 独立统计。
+提示词写入应通过 `PromptService::setPrompt`，以同步失效缓存；`PromptStore` 仅负责数据库操作。
+公共统计使用 `buildPublicSnapshot`，不需要虚拟会话；实际会话使用 `buildSnapshot`。
+`/admin/api/system-tokens` 返回分项估算及默认工具定义占用，不返回提示词原文。
+分项 Token 为三个词表计数的向上取整平均值，合计为分项相加，不等同于服务端实际用量。

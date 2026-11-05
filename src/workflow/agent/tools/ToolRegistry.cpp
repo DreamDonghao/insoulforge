@@ -2,11 +2,11 @@
 /// @brief 工具注册中心 - 实现
 
 #include <mutex>
-#include <infrastructure/tokenizer/TokenCounter.hpp>
 
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
+#include <infrastructure/tokenizer/TokenCounter.hpp>
 #include <workflow/agent/tools/ToolRegistry.hpp>
 
 using insoulforge::json;
@@ -57,7 +57,6 @@ namespace insoulforge {
             return false;
         }
         std::unique_lock lock(m_mutex);
-        ++m_tokenRevision;
         for (const auto &name: staged.m_tools | std::views::keys) {
             if (const auto existing = m_tools.find(name);
               existing != m_tools.end() && existing->second.pluginId != pluginId) {
@@ -72,6 +71,7 @@ namespace insoulforge {
             }
             m_pluginTools.erase(old);
         }
+        ++m_tokenRevision;
         for (auto &[name, tool]: staged.m_tools) {
             m_tools.emplace(name, std::move(tool));
             m_pluginTools[pluginId].push_back(name);
@@ -81,18 +81,17 @@ namespace insoulforge {
 
     void ToolRegistry::unregisterPlugin(const std::string &pluginId) {
         std::unique_lock lock(m_mutex);
-        ++m_tokenRevision;
         const auto it = m_pluginTools.find(pluginId);
         if (it == m_pluginTools.end())
             return;
         for (const auto &name: it->second)
             m_tools.erase(name);
         m_pluginTools.erase(it);
+        ++m_tokenRevision;
     }
 
     auto ToolRegistry::registerTool(const Tool &tool, const ToolCategory category) -> bool {
         std::unique_lock lock(m_mutex);
-        ++m_tokenRevision;
         if (tool.name.empty() || !tool.handler) {
             Logger::error(std::nullopt, "Tool", fmt::format("工具注册失败：工具名称或处理器为空"));
             if (!m_activePluginId.empty())
@@ -110,6 +109,7 @@ namespace insoulforge {
             return false;
         }
 
+        ++m_tokenRevision;
         m_tools.insert_or_assign(tool.name, RegisteredTool{.tool = tool, .category = category, .pluginId = pluginId});
         if (auto &names = m_pluginTools[pluginId]; !std::ranges::contains(names, tool.name))
             names.push_back(tool.name);
@@ -125,7 +125,8 @@ namespace insoulforge {
         for (const auto &registered: m_tools | std::views::values) {
             if (query.defaultDefinitionsOnly &&
                 (registered.tool.mcpVersion != 0 || registered.tool.mcpManagement ||
-                 (!registered.pluginId.starts_with("builtin.") && registered.pluginId != "custom"))) continue;
+                  (!registered.pluginId.starts_with("builtin.") && registered.pluginId != "custom")))
+                continue;
             if (!isEnabled(registered))
                 continue;
             if (!query.includeAllMcp) {
@@ -162,21 +163,24 @@ namespace insoulforge {
         return tools;
     }
 
-    auto ToolRegistry::getDefaultToolsTokenUsage(bool isPrivateSession) const
+    auto ToolRegistry::getDefaultToolsTokenUsage(const bool isPrivateSession) const
       -> std::expected<DefaultToolsTokenUsage, std::string> {
         std::lock_guard lock(m_tokenMutex);
         auto &cache = m_tokenCaches[isPrivateSession ? 1 : 0];
         const auto revision = m_tokenRevision.load();
-        if (cache.revision == revision) return cache.result;
+        if (cache.revision == revision)
+            return cache.result;
         const auto tools = getTools({.isPrivateSession = isPrivateSession, .defaultDefinitionsOnly = true});
         const auto text = dumpJson(tools);
         if (cache.text != text) {
             cache.text = text;
-            if (tools.empty()) cache.result = DefaultToolsTokenUsage{};
+            if (tools.empty())
+                cache.result = DefaultToolsTokenUsage{};
             else {
-                const auto estimate = estimateTokens(text);
-                if (estimate) cache.result = DefaultToolsTokenUsage{tools.size(), estimate->average};
-                else cache.result = std::unexpected(estimate.error());
+                if (const auto estimate = estimateTokens(text))
+                    cache.result = DefaultToolsTokenUsage{.count = tools.size(), .average = estimate->average};
+                else
+                    cache.result = std::unexpected(estimate.error());
             }
         }
         cache.revision = revision;
@@ -240,8 +244,11 @@ namespace insoulforge {
 
     void ToolRegistry::loadBuiltinToolsConfig(json config) {
         std::unique_lock lock(m_mutex);
+        auto next = config.is_object() ? std::move(config) : json::object();
+        if (next == m_builtinConfig)
+            return;
+        m_builtinConfig = std::move(next);
         ++m_tokenRevision;
-        m_builtinConfig = config.is_object() ? std::move(config) : json::object();
     }
 
     auto ToolRegistry::getBuiltinTools() const -> json {
@@ -270,7 +277,6 @@ namespace insoulforge {
                 return std::unexpected("不支持的工具配置字段: " + key);
         }
         std::unique_lock lock(m_mutex);
-        ++m_tokenRevision;
         if (const auto it = m_tools.find(name); it == m_tools.end() || !it->second.pluginId.starts_with("builtin.")) {
             return std::unexpected("内置工具不存在: " + name);
         }
@@ -279,17 +285,21 @@ namespace insoulforge {
             next[name] = {{"enabled", true}, {"description", nullptr}};
         }
         next[name].update(patch);
+        if (next == m_builtinConfig)
+            return {};
         if (const auto saved = Config::instance().saveBuiltinToolsConfig(next); !saved) {
             return std::unexpected(saved.error().message);
         }
         m_builtinConfig = std::move(next);
+        ++m_tokenRevision;
         return {};
     }
 
     void ToolRegistry::unregisterTool(const std::string &name) {
         std::unique_lock lock(m_mutex);
+        if (m_tools.erase(name) == 0)
+            return;
         ++m_tokenRevision;
-        m_tools.erase(name);
         for (auto iterator = m_pluginTools.begin(); iterator != m_pluginTools.end();) {
             auto &names = iterator->second;
             std::erase(names, name);

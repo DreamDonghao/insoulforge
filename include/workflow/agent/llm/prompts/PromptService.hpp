@@ -24,10 +24,11 @@ namespace insoulforge::PromptService {
     /// @return 提示词内容，已替换 {botName} 等占位符
     auto getPrompt(const std::string &key) -> std::string;
 
-    /// @brief 设置提示词（运行时修改）
+    /// @brief 保存提示词及描述，成功后通知 Executor 系统提示词缓存失效。
+    /// @param description 后台展示用说明，默认空串保持既有保存语义。
     /// @param key 提示词键名
     /// @param content 提示词内容
-    void setPrompt(const std::string &key, const std::string &content);
+    void setPrompt(const std::string &key, const std::string &content, const std::string &description = {});
 
     /// @brief 获取 Executor 系统提示词（群聊）
     /// @return Executor 角色系统提示词

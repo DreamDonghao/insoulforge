@@ -2,7 +2,6 @@
 /// @brief 提示词存储 - 实现
 
 #include <infrastructure/storage/Database.hpp>
-#include <workflow/agent/llm/prompts/ExecutorSystemPrompt.hpp>
 #include <infrastructure/storage/Statement.hpp>
 #include <workflow/agent/llm/prompts/PromptStore.hpp>
 
@@ -24,8 +23,6 @@ namespace insoulforge::PromptStore {
         stmt.bind(2, content);
         stmt.bind(3, description);
         stmt.exec();
-        lock.unlock();
-        ExecutorSystemPrompt::instance().invalidate();
     }
 
     auto hasPrompt(const Database &database, const std::string &key) -> bool {

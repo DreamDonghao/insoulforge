@@ -26,30 +26,34 @@
 namespace insoulforge {
     class ExecutorSystemPrompt {
     public:
+        enum class PartKind { Project, Persona, Structure, Services, Stickers, GroupSetting, Count };
+        static constexpr auto kPartCount = static_cast<std::size_t>(PartKind::Count);
+        static constexpr auto kPublicPartCount = static_cast<std::size_t>(PartKind::GroupSetting);
         /// @brief 六个部分按 system 拼接顺序排列；失败通过 expected 保留，不冒充零用量。
         struct Part {
             std::string text;
             std::expected<std::uint32_t, std::string> average = std::unexpected("尚未计算");
-            bool initialized = false;
         };
         struct Snapshot {
             std::string text;
-            std::array<Part, 6> parts;
+            std::array<Part, kPartCount> parts;
         };
-        static constexpr std::array<std::string_view, 6> partNames{
-          "项目说明", "人设与行为设定", "上下文结构与工具规则", "MCP 与实时活动服务说明", "可用表情名称列表", "群聊附加设定"};
-        /// @brief 各部分实际统计范围，与 partNames 使用相同顺序。
-        static constexpr std::array<std::string_view, 6> partDescriptions{
-          "项目身份介绍及仓库地址。",
-          "后台配置的群聊或私聊提示词，包含角色、语气及行为要求。",
-          "上下文 JSON 与聊天记录字段说明、工具使用规则及会话类型和好感度说明；不含实际聊天记录或工具调用历史。",
-          "MCP 服务与实时活动的名称、描述及使用说明；不含完整工具定义和活动运行状态。",
-          "可用收藏表情的名称及说明文本，不含表情图片。",
-          "当前群单独配置的附加提示词及其说明文本。"};
+        /// @brief 稳定分项标识、名称和统计范围，按 system 拼接顺序排列。
+        struct PartInfo {
+            std::string_view id, name, description;
+        };
+        static constexpr std::array<PartInfo, kPartCount> partInfo{{{"project", "项目说明", "项目身份介绍及仓库地址。"},
+          {"persona", "人设与行为设定", "后台配置的群聊或私聊提示词，包含角色、语气及行为要求。"},
+          {"structure", "上下文结构与工具规则",
+            "上下文 JSON 与聊天记录字段说明、工具使用规则及会话类型和好感度说明；不含实际聊天记录或工具调用历史。"},
+          {"services", "MCP 与实时活动服务说明",
+            "MCP 服务与实时活动的名称、描述及使用说明；不含完整工具定义和活动运行状态。"},
+          {"stickers", "可用表情名称列表", "可用收藏表情的名称及说明文本，不含表情图片。"},
+          {"group-setting", "群聊附加设定", "当前群单独配置的附加提示词及其说明文本。"}}};
         /// @brief 返回完整文本和六部分平均 Token 估算；仅变化的部分重新分词。
         /// @note 各部分之和可能与完整文本分词结果不同；不含 user 或工具定义开销。
         /// @param includeGroupSetting 为 false 时仅返回公共部分，不读取或更新群附加设定缓存。
-    auto buildSnapshot(const SessionId &sessionId, bool includeGroupSetting = true) -> Snapshot;
+        auto buildSnapshot(const SessionId &sessionId, bool includeGroupSetting = true) -> Snapshot;
         /// @brief 获取进程唯一实例，首次初始化支持并发。
         static auto instance() -> ExecutorSystemPrompt &;
         ExecutorSystemPrompt(const ExecutorSystemPrompt &) = delete;
@@ -75,21 +79,30 @@ namespace insoulforge {
         /// @note 可并发调用。调用方应在一次回复开始时构建一次，并在后续工具轮次和兜底请求中
         /// 复用返回值；本模块不自动维护一次回复的生命周期，也不将数据源异常转换为错误返回值。
         auto build(const SessionId &sessionId) -> std::string;
+        /// @brief 查看群聊或私聊公共部分，不构造虚拟会话，也不读取群设定。
+        auto buildPublicSnapshot(bool isPrivateSession) -> Snapshot;
 
     private:
         ExecutorSystemPrompt() = default;
-        auto assemble(const SessionId &sessionId, const json &activities) -> std::array<std::string, 5>;
-        static void updatePart(Part &part, std::string text);
+        auto assemble(bool isPrivateSession, const json &activities) -> std::array<std::string, kPublicPartCount>;
+        auto makeSnapshot(bool isPrivateSession, const SessionId *groupSession, bool includeParts) -> Snapshot;
+        struct CachedPart : Part {
+            bool initialized = false;
+        };
+        static void updatePart(CachedPart &part, std::string text);
         struct Cache {
             std::size_t version = static_cast<std::size_t>(-1);
+            std::size_t personaGeneration = static_cast<std::size_t>(-1);
+            std::string persona;
             bool affinity{};
             std::string botName;
             json activities;
-            std::array<Part, 5> parts;
+            std::array<CachedPart, kPublicPartCount> parts;
         };
-        std::map<std::string, Part> m_groupParts;
+        std::map<std::string, CachedPart> m_groupParts;
         std::mutex m_mutex;
         std::size_t m_generation = 0;
+        std::size_t m_personaGeneration = 0;
         std::array<Cache, 2> m_caches;
         std::string m_mcpSection;
         json m_stickerNames = json::array();

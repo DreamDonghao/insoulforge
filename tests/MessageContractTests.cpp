@@ -3319,7 +3319,6 @@ namespace {
         const auto snapshot = insoulforge::ExecutorSystemPrompt::instance().buildSnapshot(insoulforge::SessionId::group("100"));
         std::string reconstructed;
         for (const auto &part : snapshot.parts) {
-            check(part.initialized, "all six parts have calculated or error results", kTestName);
             reconstructed += part.text;
         }
         check(reconstructed == combined && snapshot.text == combined && snapshot.parts[5].text.ends_with(prompt),

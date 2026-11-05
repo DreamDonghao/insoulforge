@@ -186,7 +186,9 @@ namespace {
             auto keys = std::vector<std::string>{};
             for (const auto &[key, value]: lastModelContext.items())
                 keys.push_back(key);
-            require(keys.back() == "running_activities", "activities must be the last context field");
+            require(
+              keys.size() >= 2 && keys[keys.size() - 2] == "running_activities" && keys.back() == "execution_state",
+              "activities precede the per-request execution state");
             require(
               std::ranges::any_of(lastModelContext["recent_messages"],
                 [](const json &message) { return atOrNull(atOrNull(message, "activity"), "origin") == origin(); }),
