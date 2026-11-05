@@ -11,6 +11,7 @@
 .DS_Store
 .mcp.json
 CLAUDE.md
+/AGENTS.md
 /debugtest/
 /.codex
 __pycache__/
