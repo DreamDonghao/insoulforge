@@ -365,6 +365,11 @@ onMounted(loadUsage)
 </template>
 
 <style scoped>
+/* 横向溢出的表格会成为滚动容器；纵向滚动仍需传递给页面。 */
+.table-container {
+  overscroll-behavior-y: auto;
+}
+
 /* ====== 概览卡片 ====== */
 .overview-grid {
   display: grid;
