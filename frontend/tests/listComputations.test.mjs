@@ -299,3 +299,20 @@ test('opening a new custom tool restores all defaults without replacing the reac
     }
   } finally { view.dispose(); if (originalWindow === undefined) delete globalThis.window; else globalThis.window = originalWindow }
 })
+
+ test('people token sorting supports both directions, missing counts and deterministic ties', () => {
+  const view = setup('conversation/PeopleManager')
+  try {
+    view.state.people = [
+      {user_id: '3', estimated_tokens: 50}, {user_id: '2', estimated_tokens: 100},
+      {user_id: '1', estimated_tokens: 50}, {user_id: '4'}
+    ]
+    view.state.sortBy = 'tokens'
+    assert.deepEqual(view.state.filtered.map(p => p.user_id), ['2', '1', '3', '4'])
+    view.state.ascending = true
+    assert.deepEqual(view.state.filtered.map(p => p.user_id), ['4', '1', '3', '2'])
+    view.state.sortBy = 'affinity'
+    view.state.affinityEnabled = false
+    assert.deepEqual(view.state.filtered.map(p => p.user_id), ['4', '1', '3', '2'])
+  } finally { view.dispose() }
+})

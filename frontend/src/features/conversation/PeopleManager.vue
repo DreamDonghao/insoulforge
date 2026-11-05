@@ -31,6 +31,8 @@ const detailLoading = ref(false)
 const error = ref('')
 const detailError = ref('')
 const ascending = ref(false)
+const sortBy = ref<'affinity' | 'tokens'>('affinity')
+const sortLabel = computed(() => sortBy.value === 'tokens' || !affinityEnabled.value ? '预估 Token' : '好感度')
 const affinityEnabled = ref(true)
 const editing = ref(false)
 const draftText = ref('')
@@ -51,7 +53,9 @@ let detailController: AbortController | undefined
 const sortedPeople = computed(() => {
   const direction = ascending.value ? 1 : -1
   return [...people.value]
-    .sort((a, b) => (affinityEnabled.value ? direction * ((a.affinity ?? 0) - (b.affinity ?? 0)) : 0) ||
+    .sort((a, b) => direction * (sortBy.value === 'tokens' || !affinityEnabled.value
+      ? (a.estimated_tokens ?? 0) - (b.estimated_tokens ?? 0)
+      : (a.affinity ?? 0) - (b.affinity ?? 0)) ||
       (a.user_id < b.user_id ? -1 : a.user_id > b.user_id ? 1 : 0))
 })
 const filtered = computed(() => {
@@ -259,7 +263,11 @@ onUnmounted(() => {
       <label for="people-search" class="form-label">搜索人物</label>
       <input id="people-search" v-model="search" class="form-input" placeholder="搜索昵称或用户 ID" aria-label="搜索人物">
       <span>{{ filtered.length }} / {{ people.length }} 人</span>
-      <button v-if="affinityEnabled" class="btn btn-secondary icon-button" :title="ascending ? '好感度：从低到高' : '好感度：从高到低'" :aria-label="ascending ? '好感度：从低到高' : '好感度：从高到低'" @click="ascending = !ascending"><ArrowUpNarrowWide v-if="ascending" :size="18"/><ArrowDownWideNarrow v-else :size="18"/></button>
+      <div class="sort-options" role="group" aria-label="人物排序依据">
+        <button v-if="affinityEnabled" class="btn btn-secondary" :aria-pressed="sortBy === 'affinity'" @click="sortBy = 'affinity'">好感度</button>
+        <button class="btn btn-secondary" :aria-pressed="sortBy === 'tokens' || !affinityEnabled" @click="sortBy = 'tokens'">预估 Token</button>
+      </div>
+      <button class="btn btn-secondary icon-button" :title="sortLabel + (ascending ? '：从低到高' : '：从高到低')" :aria-label="sortLabel + (ascending ? '：从低到高' : '：从高到低')" @click="ascending = !ascending"><ArrowUpNarrowWide v-if="ascending" :size="18"/><ArrowDownWideNarrow v-else :size="18"/></button>
       <button class="btn btn-secondary" :disabled="loading || editing || saving || consolidating" @click="loadPeople()">刷新</button>
     </div>
     <p v-if="error" role="alert">{{ error }}</p>
@@ -300,7 +308,8 @@ onUnmounted(() => {
           <template v-else>
           <header class="person-heading">
             <div><h2>{{ detailName }}</h2><span>用户 ID {{ detail.user_id }}</span></div>
-            <div v-if="affinityEnabled" class="score"><span>全局好感度</span><strong :class="scoreClass(detail.affinity)">{{ (detail.affinity ?? 0) > 0 ? '+' : '' }}{{ detail.affinity }}</strong></div>
+            <div class="person-stats"><div class="score" title="按实际人物上下文估算；0 可能表示尚未计算"><span>预估 Token</span><strong>{{ (detail.estimated_tokens ?? 0).toLocaleString() }}</strong></div>
+            <div v-if="affinityEnabled" class="score"><span>全局好感度</span><strong :class="scoreClass(detail.affinity)">{{ (detail.affinity ?? 0) > 0 ? '+' : '' }}{{ detail.affinity }}</strong></div></div>
           </header>
           <section v-for="section in memorySections" :key="section.key" class="memory-section">
             <h3>{{ section.title }} <small>{{ section.items.length }}</small></h3>
@@ -308,7 +317,6 @@ onUnmounted(() => {
             <p v-else class="muted">暂无记录</p>
           </section>
           <section class="memory-section">
-            <p class="muted">预估 Token：{{ detail.estimated_tokens ?? 0 }}（0 可能表示尚未计算，内容变化后更新）</p>
             <h3>待整理记忆 <small>{{ detail.pending_entries.length }}</small></h3>
             <p v-if="!detail.pending_entries.length" class="muted">暂无记录</p>
             <article v-for="(entry, index) in detail.pending_entries" :key="index" class="memory-entry">
@@ -331,6 +339,8 @@ onUnmounted(() => {
 .person-editor fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .person-json { display: block; width: 100%; min-height: 360px; height: 55vh; resize: vertical; font-family: monospace; font-size: 14px; line-height: 1.7; tab-size: 2; }
 .editor-footer { padding-top: 16px; margin: 0; }
+.sort-options, .person-stats { display: flex; gap: 12px; }
+.sort-options .btn[aria-pressed="true"] { border-color: var(--primary); background: var(--bg-secondary); box-shadow: inset 0 -2px var(--primary); }
 .people-toolbar { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
 .people-toolbar input { max-width: 420px; min-width: 0; flex: 1; }
 .people-toolbar span, .muted, small, .person-heading span { color: var(--text-secondary); }
@@ -342,7 +352,7 @@ onUnmounted(() => {
 .person-row.selected { box-shadow: inset 3px 0 var(--primary); }
 .person-identity { display: grid; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
 .person-detail { min-width: 0; padding: 24px 32px; }
-.person-heading { display: flex; justify-content: space-between; gap: 24px; align-items: center; padding-bottom: 24px; overflow-wrap: anywhere; }
+.person-heading { flex-wrap: wrap; display: flex; justify-content: space-between; gap: 24px; align-items: center; padding-bottom: 24px; overflow-wrap: anywhere; }
 h2, h3, p { margin-top: 0; }
 h2 { font-size: 22px; margin-bottom: 8px; }
 h3 { font-size: 16px; margin-bottom: 16px; }

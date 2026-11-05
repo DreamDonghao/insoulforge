@@ -155,3 +155,14 @@ test('invalid JSON identifies and focuses its editor, retains the draft and clea
     assert.equal(view.state.editing, false)
   } finally { view.dispose() }
 })
+
+test('person detail heading displays estimated tokens including zero when affinity is disabled', async () => {
+  const view = page(async () => ({status: 200, body: {success: true}}), {affinityEnabled: false})
+  try {
+    view.state.detail.estimated_tokens = 1234
+    const html = await view.html()
+    assert.match(html, /class="person-heading"[\s\S]*?<span>预估 Token<\/span><strong>1,234<\/strong>/)
+    view.state.detail.estimated_tokens = 0
+    assert.match(await view.html(), /<span>预估 Token<\/span><strong>0<\/strong>/)
+  } finally { view.dispose() }
+})
