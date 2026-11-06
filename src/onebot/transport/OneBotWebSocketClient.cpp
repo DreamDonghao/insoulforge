@@ -18,15 +18,17 @@ namespace insoulforge {
     }
 
     OneBotWebSocketClient::ApiResponseAwaiter::ApiResponseAwaiter(
-      OneBotWebSocketClient &client, std::string action, json params, const f64 timeout) :
-        m_client(client), m_action(std::move(action)), m_params(std::move(params)), m_timeout(timeout) {}
+      OneBotWebSocketClient &client, std::string action, json params, const f64 timeout, json expectedConnection) :
+        m_client(client), m_action(std::move(action)), m_params(std::move(params)), m_timeout(timeout),
+        m_expectedConnection(std::move(expectedConnection)) {}
 
     auto OneBotWebSocketClient::ApiResponseAwaiter::await_suspend(const std::coroutine_handle<> continuation) -> bool {
         if (m_client.sendApiRequest(std::move(m_action), std::move(m_params), m_timeout,
               [this, continuation](std::optional<json> response) mutable -> void {
                   setValue(std::move(response));
                   continuation.resume();
-              })) {
+              },
+              m_expectedConnection)) {
             return true;
         }
         setValue(std::nullopt);
@@ -78,23 +80,26 @@ namespace insoulforge {
         return m_connection && m_connection->connected();
     }
 
-    auto OneBotWebSocketClient::callApi(std::string action, json params, const f64 timeout)
+    auto OneBotWebSocketClient::callApi(std::string action, json params, const f64 timeout, json expectedConnection)
       -> drogon::Task<std::optional<json>> {
-        co_return co_await ApiResponseAwaiter(*this, std::move(action), std::move(params), timeout);
+        co_return co_await ApiResponseAwaiter(
+          *this, std::move(action), std::move(params), timeout, std::move(expectedConnection));
     }
 
     void OneBotWebSocketClient::connect(const u64 generation) {
-        const auto &config = Config::instance();
+        const auto connectionConfig = Config::instance().oneBotSnapshot();
         std::string origin;
         std::string path;
         {
             std::scoped_lock lock(m_mutex);
-            if (!m_running || generation != m_generation || config.oneBotTransport != "websocket") {
+            if (!m_running || generation != m_generation ||
+                getStr(connectionConfig, "oneBotTransport") != "websocket") {
                 return;
             }
         }
-        if (!splitWebSocketUrl(config.qqWebSocketHost, origin, path)) {
-            Logger::error(std::nullopt, "OneBot", fmt::format("OneBot WebSocket 地址无效: {}", config.qqWebSocketHost));
+        if (!splitWebSocketUrl(getStr(connectionConfig, "qqWebSocketHost"), origin, path)) {
+            Logger::error(std::nullopt, "OneBot",
+              fmt::format("OneBot WebSocket 地址无效: {}", getStr(connectionConfig, "qqWebSocketHost")));
             return;
         }
 
@@ -102,11 +107,11 @@ namespace insoulforge {
         const auto request = drogon::HttpRequest::newHttpRequest();
         request->setMethod(drogon::Get);
         request->setPathEncode(false);
-        if (!config.accessToken.empty()) {
+        if (!getStr(connectionConfig, "accessToken").empty()) {
             // OneBot 实现通常支持请求头或 access_token 查询参数，二者同时提供以兼容常见实现。
             path += path.contains('?') ? "&" : "?";
-            path += "access_token=" + drogon::utils::urlEncodeComponent(config.accessToken);
-            request->addHeader("Authorization", "Bearer " + config.accessToken);
+            path += "access_token=" + drogon::utils::urlEncodeComponent(getStr(connectionConfig, "accessToken"));
+            request->addHeader("Authorization", "Bearer " + getStr(connectionConfig, "accessToken"));
         }
         request->setPath(path);
 
@@ -136,7 +141,7 @@ namespace insoulforge {
         }
 
         client->connectToServer(request,
-          [this, generation](const drogon::ReqResult result, const drogon::HttpResponsePtr &,
+          [this, generation, connectionConfig](const drogon::ReqResult result, const drogon::HttpResponsePtr &,
             const drogon::WebSocketClientPtr &connectedClient) -> void {
               if (result != drogon::ReqResult::Ok) {
                   handleConnectionClosed(connectedClient, result);
@@ -147,6 +152,7 @@ namespace insoulforge {
               {
                   std::scoped_lock lock(m_mutex);
                   if (m_running && generation == m_generation && m_client == connectedClient) {
+                      m_connectionConfig = connectionConfig;
                       m_connection = connectedClient->getConnection();
                       recovered = m_reconnectLog.recover();
                       accepted = true;
@@ -172,13 +178,22 @@ namespace insoulforge {
         drogon::app().getLoop()->runAfter(kReconnectDelaySeconds, [this, generation] -> void { connect(generation); });
     }
 
-    auto OneBotWebSocketClient::sendApiRequest(
-      std::string action, json params, const f64 timeout, ResponseCallback callback) -> bool {
+    auto OneBotWebSocketClient::sendApiRequest(std::string action, json params, const f64 timeout,
+      ResponseCallback callback, const json &expectedConnection) -> bool {
+        const bool currentConfig =
+          expectedConnection.is_null() || expectedConnection == Config::instance().oneBotSnapshot();
         drogon::WebSocketConnectionPtr connection;
         std::string echo;
         {
             std::scoped_lock lock(m_mutex);
-            if (!m_running || !m_connection || !m_connection->connected()) {
+            bool matchesConnection = currentConfig;
+            if (!expectedConnection.is_null()) {
+                for (const auto *key:
+                  {"oneBotImplementation", "oneBotTransport", "qqWebSocketHost", "accessToken", "selfQQNumber"})
+                    matchesConnection =
+                      matchesConnection && atOrNull(expectedConnection, key) == atOrNull(m_connectionConfig, key);
+            }
+            if (!matchesConnection || !m_running || !m_connection || !m_connection->connected()) {
                 Logger::warn(std::nullopt, "OneBot", fmt::format("OneBot WebSocket 未连接，无法调用动作: {}", action));
                 return false;
             }

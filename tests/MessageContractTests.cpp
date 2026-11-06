@@ -3446,6 +3446,31 @@ namespace {
                 .has_value(),
           "saves execution config", kTestName);
 
+        check(insoulforge::Config::instance().saveExecutionConfig({{"maxToolRounds", 8}, {"defaultPrivateEnabled", true}}).has_value() &&
+                insoulforge::Config::instance().defaultPrivateEnabled.load() &&
+                insoulforge::Config::instance().getExecutionConfig()["defaultPrivateEnabled"] == true,
+          "execution page updates private default", kTestName);
+        check(insoulforge::Config::instance().saveExecutionConfig({{"maxToolRounds", 8}, {"defaultPrivateEnabled", false}}).has_value(),
+          "restore private default", kTestName);
+        auto &oneBotConfig = insoulforge::Config::instance();
+        const auto originalQQConfig = oneBotConfig.getQQConfig();
+        check(
+          oneBotConfig.getQQConfig()["oneBotImplementation"] == "napcat", "old configs default to NapCat", kTestName);
+        check(oneBotConfig.saveQQConfig({{"oneBotImplementation", "snowluma"}}).has_value(), "SnowLuma can be saved",
+          kTestName);
+        check(oneBotConfig.oneBotImplementation == "snowluma" &&
+                oneBotConfig.getQQConfig()["oneBotImplementation"] == "snowluma",
+          "implementation round trips", kTestName);
+        check(oneBotConfig.saveQQConfig({{"botName", "fixture"}}).has_value() &&
+                oneBotConfig.oneBotImplementation == "snowluma",
+          "old client preserves selected implementation", kTestName);
+        const auto connectionBeforeInvalid = oneBotConfig.oneBotSnapshot();
+        for (const auto &invalid: insoulforge::json::array({"unknown", "", 1, true, nullptr}))
+            check(!oneBotConfig.saveQQConfig({{"oneBotImplementation", invalid}}) &&
+                    oneBotConfig.oneBotSnapshot() == connectionBeforeInvalid,
+              "invalid implementation cannot change runtime", kTestName);
+        check(oneBotConfig.saveQQConfig(originalQQConfig).has_value(), "restore NapCat", kTestName);
+
         const insoulforge::AdminController controller;
         drogon::HttpResponsePtr response;
         const auto callback = [&response](const drogon::HttpResponsePtr &value) -> void { response = value; };
@@ -3521,12 +3546,14 @@ namespace {
         qqRequest->setContentTypeCode(drogon::CT_APPLICATION_JSON);
         qqRequest->setBody(insoulforge::dumpJson({{"botName", "not-applied"}, {"selfQQNumber", 123},
           {"oneBotTransport", "http"}, {"qqHttpHost", "http://not-applied"}}));
+        const auto oldOneBotSnapshot = insoulforge::Config::instance().oneBotSnapshot();
         const auto oldBotName = insoulforge::Config::instance().botName;
         const auto oldTransport = insoulforge::Config::instance().oneBotTransport;
         drogon::sync_wait(controller.saveQQConfig(qqRequest, callback));
         check(response->getStatusCode() == drogon::k500InternalServerError &&
                 insoulforge::Config::instance().botName == oldBotName &&
-                insoulforge::Config::instance().oneBotTransport == oldTransport,
+                insoulforge::Config::instance().oneBotTransport == oldTransport &&
+                insoulforge::Config::instance().oneBotSnapshot() == oldOneBotSnapshot,
           "QQ HTTP write failure does not apply runtime settings", kTestName);
         check(!insoulforge::Config::instance().saveQQConfig({{"botName", "not-saved"}}) &&
                 insoulforge::Config::instance().getQQConfig() == oldQQ,

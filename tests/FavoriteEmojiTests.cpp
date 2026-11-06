@@ -11,6 +11,7 @@
 #include <infrastructure/http/HttpTrace.hpp>
 #include <infrastructure/image/Image.hpp>
 #include <infrastructure/logging/LogBuffer.hpp>
+#include <onebot/messaging/MessageFormatter.hpp>
 #include <onebot/transport/OneBotClient.hpp>
 #include <workflow/agent/tools/ToolRegistry.hpp>
 #include <workflow/agent/tools/ToolRuntime.hpp>
@@ -22,6 +23,12 @@ namespace {
     json favorites = json::array({json{{"resId", "old"}, {"desc", "same"}, {"md5", "abc"}}});
     const std::string gif = drogon::utils::base64Decode("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==");
     int uploads = 0;
+    bool snowMode = false;
+    bool switchDuringDownload = false;
+    bool switchDuringList = false;
+    int savedSequence = 0;
+    int snowRenames = 0;
+    int napRenames = 0;
     bool failUpload = false;
     bool failRename = false;
     bool malformedList = false;
@@ -185,11 +192,90 @@ namespace {
             malformedList = true;
             ToolRuntime::invalidateFavoriteEmojiCache();
             bool rejected = false;
-            try { co_await ToolRuntime::fetchFavoriteEmojis(); }
-            catch (const std::exception &) { rejected = true; }
+            try {
+                co_await ToolRuntime::fetchFavoriteEmojis();
+            } catch (const std::exception &) {
+                rejected = true;
+            }
             require(rejected, "malformed list response must report failure");
             malformedList = false;
             require(!(co_await ToolRuntime::fetchFavoriteEmojis()).empty(), "failed refresh can be retried");
+            failRename = false;
+            failDelete = false;
+            failAdd = false;
+            snowMode = true;
+            const auto oldConnection = Config::instance().oneBotSnapshot();
+            Config::instance().oneBotImplementation = "snowluma";
+            favorites = json::array({json{{"emoji_id", "snow-1"}, {"resId", "snow-1"}, {"desc", "snow"},
+              {"url", "https://example.com/image.gif"}, {"md5", "abc"}}});
+            auto market = json{{"is_mark_face", true}, {"emoji_id", "market-id"}, {"emoji_package_id", "123"},
+              {"key", "market-key"}, {"summary", "market"}, {"url", "https://example.com/image.gif"}};
+            auto formatted = MessageFormatter::favoriteEmojiToCQCode(market);
+            require(formatted && formatted->starts_with("[CQ:mface,"), "complete market fields retain native mface");
+            market.erase("key");
+            formatted = MessageFormatter::favoriteEmojiToCQCode(market);
+            require(formatted && formatted->starts_with("[CQ:image,"), "incomplete market fields fall back to URL");
+            market.erase("url");
+            require(!MessageFormatter::favoriteEmojiToCQCode(market), "missing sending fields report failure");
+            const auto listsBeforeSwitch = lists;
+            auto snowFavorites = co_await ToolRuntime::fetchFavoriteEmojis();
+            require(lists == listsBeforeSwitch + 1 && snowFavorites[0]["emoji_id"] == "snow-1" &&
+                      snowFavorites[0]["res_id"] == "snow-1",
+              "provider switch refreshes and maps SnowLuma IDs");
+            require(!getBool(snowFavorites[0], "is_mark_face"), "missing market fields do not fabricate mface");
+            const auto napBefore = napRenames;
+            renamed = co_await registry.executeTool("rename_sticker", {{"name", "snow"}, {"new_name", "snow renamed"}},
+              {.sessionId = SessionId::group("100")});
+            require(renamed.find("已改名") != std::string::npos && snowRenames == 1 && napRenames == napBefore,
+              "SnowLuma rename uses modify_custom_face only");
+            auto adminRename = co_await request(client, "/admin/api/emoji/desc",
+              {{"emoji_id", "snow-1"}, {"res_id", "snow-1"}, {"md5", "abc"}, {"desc", "admin snow"}});
+            require(json::parse(adminRename->body()).value("success", false), "SnowLuma admin rename succeeds");
+            require(co_await OneBotClient::setCustomFaceDesc("snow-1", "snow-1", "abc", "snow final"),
+              "SnowLuma adapter accepts unified rename arguments");
+            added = co_await request(client, "/admin/api/emoji/add", {{"url", "https://example.com/image.gif"}});
+            require(json::parse(added->body()).value("success", false), "SnowLuma URL add succeeds");
+            uploaded = co_await upload(client, gif);
+            require(json::parse(uploaded->body()).value("success", false), "SnowLuma upload succeeds");
+            removed = co_await request(client, "/admin/api/emoji/delete", {{"res_id", "snow-1"}});
+            require(
+              json::parse(removed->body()).value("success", false), "SnowLuma delete maps resource ID to emoji_id");
+            const auto snapshot = json::array({json{{"message_id", "123"}, {"sender", {{"user_id", "42"}}},
+              {"assets", {{"images", json::array({json{{"source",
+                                       {{"file", "cached-image"}, {"url", "https://example.com/image.gif"}}}}})}}}}});
+            const auto saveArgs = json{{"message_id", "123"}, {"image_index", 0}, {"name", "saved snow"}};
+            auto savedSticker = co_await registry.executeTool(
+              "save_sticker", saveArgs, {.sessionId = SessionId::group("100"), .messageSnapshot = snapshot});
+            require(savedSticker.find("名称: saved snow") != std::string::npos, "SnowLuma save sets requested name");
+            failRename = true;
+            savedSticker = co_await registry.executeTool(
+              "save_sticker", saveArgs, {.sessionId = SessionId::group("100"), .messageSnapshot = snapshot});
+            require(savedSticker.find("未确认名称设置成功") != std::string::npos &&
+                      savedSticker.find("名称: saved snow") == std::string::npos,
+              "save reports partial success on rename failure");
+            failRename = false;
+            const auto deletesBeforeStale = deletes;
+            require(!co_await OneBotClient::deleteCustomFace("old", std::nullopt, oldConnection) &&
+                      deletes == deletesBeforeStale,
+              "stale operation cannot write after implementation switch");
+            const auto addsBeforeSwitch = adds;
+            switchDuringDownload = true;
+            added = co_await request(client, "/admin/api/emoji/add", {{"url", "https://example.com/image.gif"}});
+            require(!json::parse(added->body()).value("success", true) && adds == addsBeforeSwitch,
+              "switch during download prevents subsequent add on new provider");
+            Config::instance().oneBotImplementation = "snowluma";
+            switchDuringList = true;
+            ToolRuntime::invalidateFavoriteEmojiCache();
+            rejected = false;
+            try {
+                co_await ToolRuntime::fetchFavoriteEmojis();
+            } catch (const std::exception &) {
+                rejected = true;
+            }
+            require(rejected, "old response after switch is rejected");
+            const auto listsAfterStale = lists;
+            co_await ToolRuntime::fetchFavoriteEmojis();
+            require(lists == listsAfterStale + 1, "old response cannot populate current cache");
             std::cout << "Favorite emoji tests passed\n";
             exitCode = 0;
         } catch (const std::exception &error) {
@@ -202,6 +288,11 @@ int main() {
     if (!AdminAccessToken::initialize())
         return 1;
     drogon::app().registerPreRoutingAdvice(AdminAccessToken::checkRequestAccess);
+    drogon::app().registerHandler("/get_image",
+      [](const drogon::HttpRequestPtr &, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+          callback(jsonResponse({{"status", "ok"}, {"data", {{"file", "/napcat/image.gif"}}}}));
+      },
+      {drogon::Post});
     drogon::app().registerHandler("/download_file",
       [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
           const auto body = json::parse(req->body());
@@ -213,6 +304,10 @@ int main() {
                 jsonResponse({{"status", failUpload ? "failed" : "ok"}, {"data", {{"file", "/napcat/image.gif"}}}}));
               return;
           }
+          if (switchDuringDownload) {
+              switchDuringDownload = false;
+              Config::instance().oneBotImplementation = "napcat";
+          }
           ++downloads;
           require(body["url"] == "https://example.com/image.gif", "download receives original URL");
           callback(
@@ -222,18 +317,26 @@ int main() {
     drogon::app().registerHandler("/add_custom_face",
       [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
           ++adds;
-          require(json::parse(req->body())["file"] == "/napcat/image.gif" ||
+          require(json::parse(req->body())["file"] == (snowMode ? "file:///napcat/image.gif" : "/napcat/image.gif") ||
                     (failAdd && json::parse(req->body())["file"] == "base64://PRIVATE_IMAGE_PAYLOAD"),
             "save receives NapCat local path");
-          if (!failAdd)
-              favorites.push_back({{"resId", "new"}, {"desc", "same"}});
+          if (!failAdd) {
+              if (snowMode) {
+                  const auto id = "snow-new-" + std::to_string(++savedSequence);
+                  favorites.push_back(
+                    {{"emoji_id", id}, {"resId", id}, {"desc", "same"}, {"url", "https://example.com/image.gif"}});
+              } else
+                  favorites.push_back({{"resId", "new"}, {"desc", "same"}});
+          }
           callback(jsonResponse({{"status", failAdd ? "failed" : "ok"}}));
       },
       {drogon::Post});
     drogon::app().registerHandler("/delete_custom_face",
       [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
           ++deletes;
-          const auto id = json::parse(req->body()).at("res_id");
+          const auto body = json::parse(req->body());
+          require(!snowMode || !body.contains("res_id"), "SnowLuma delete must not send res_id");
+          const auto id = body.at(snowMode ? "emoji_id" : "res_id");
           if (!failDelete) {
               for (auto it = favorites.begin(); it != favorites.end(); ++it) {
                   if ((*it)["resId"] == id) {
@@ -247,6 +350,8 @@ int main() {
       {drogon::Post});
     drogon::app().registerHandler("/set_custom_face_desc",
       [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+          ++napRenames;
+          require(!snowMode, "SnowLuma never uses NapCat rename action");
           const auto body = json::parse(req->body());
           if (!failRename) {
               for (auto &item: favorites) {
@@ -257,9 +362,26 @@ int main() {
           callback(jsonResponse({{"status", failRename ? "failed" : "ok"}}));
       },
       {drogon::Post});
+    drogon::app().registerHandler("/modify_custom_face",
+      [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+          ++snowRenames;
+          const auto body = json::parse(req->body());
+          require(
+            body.size() == 2 && body.contains("emoji_id") && body.contains("desc"), "SnowLuma rename wire contract");
+          if (!failRename)
+              for (auto &item: favorites)
+                  if (getStr(item, "emoji_id") == getStr(body, "emoji_id"))
+                      item["desc"] = body["desc"];
+          callback(jsonResponse({{"status", failRename ? "failed" : "ok"}}));
+      },
+      {drogon::Post});
     drogon::app().registerHandler("/fetch_custom_face_detail",
       [](const drogon::HttpRequestPtr &, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
           ++lists;
+          if (switchDuringList) {
+              switchDuringList = false;
+              Config::instance().oneBotImplementation = "napcat";
+          }
           callback(
             jsonResponse({{"status", "ok"}, {"data", malformedList ? json{{"error", "unavailable"}} : favorites}}));
       },

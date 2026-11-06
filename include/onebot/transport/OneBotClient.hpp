@@ -1,5 +1,5 @@
 /// @file OneBotClient.hpp
-/// @brief OneBot API 客户端 - 统一封装对 QQ 客户端(NapCat)的调用
+/// @brief OneBot API 客户端 - 统一封装 NapCat / SnowLuma 调用
 /// @details 所有与 QQ 客户端的交互统一走这里：
 ///          - callApi() 通用调用：按配置使用 HTTP 或 WebSocket、携带 accessToken、校验 status=ok、记录失败日志
 ///          - 按操作封装的类型化方法（发消息、禁言、戳一拍、表情管理等）
@@ -20,21 +20,24 @@
 /// @brief OneBot API 客户端
 /// @details 根据 OneBot 配置，通过 HTTP 或 WebSocket 与 OneBot 实现通信。
 namespace insoulforge::OneBotClient {
-    /// @brief 发布空间说说（NapCat 扩展 send_qzone_msg）；返回 tid，失败保留错误详情。
+    // 收藏操作可传入 Config::oneBotSnapshot()，固定多步操作使用的实现和连接。
+    // 配置发生变化后拒绝旧快照，避免旧标识发送到新服务。
+    /// @brief 发布空间说说（NapCat / SnowLuma 扩展 send_qzone_msg）；返回 tid，失败保留错误详情。
     [[nodiscard]] auto sendQzoneMsg(json params, std::optional<SessionId> sessionId = std::nullopt)
       -> drogon::Task<std::expected<std::string, std::string>>;
 
     /// @brief 发送群消息（群号即会话 ID，无需单独传 sessionId）
     /// @note OneBot 11: send_group_msg
     /// @return message_id；失败返回具体错误
-    [[nodiscard]] auto sendGroupMsg(SessionId groupId, std::string message)
+    [[nodiscard]] auto sendGroupMsg(SessionId groupId, std::string message, json connection = nullptr)
       -> drogon::Task<std::expected<u64, std::string>>;
 
     /// @brief 发送私聊消息
     /// @note OneBot 11: send_private_msg
     /// @return message_id；失败返回具体错误
-    [[nodiscard]] auto sendPrivateMsg(UserId userId, std::string message,
-      std::optional<SessionId> sessionId = std::nullopt) -> drogon::Task<std::expected<u64, std::string>>;
+    [[nodiscard]] auto sendPrivateMsg(
+      UserId userId, std::string message, std::optional<SessionId> sessionId = std::nullopt, json connection = nullptr)
+      -> drogon::Task<std::expected<u64, std::string>>;
 
     /// @brief 群组单人禁言
     /// @note OneBot 11: set_group_ban（duration=0 解除禁言）
@@ -64,36 +67,37 @@ namespace insoulforge::OneBotClient {
     /// @brief 获取图片在 QQ 客户端容器内的路径
     /// @note OneBot 11: get_image
     /// @return data.file 路径；失败返回 nullopt（15 秒超时，商城表情等会失败）
-    [[nodiscard]] auto getImage(std::string file, std::optional<SessionId> sessionId = std::nullopt)
-      -> drogon::Task<std::optional<std::string>>;
+    [[nodiscard]] auto getImage(std::string file, std::optional<SessionId> sessionId = std::nullopt,
+      json connection = nullptr) -> drogon::Task<std::optional<std::string>>;
 
     /// @brief 下载文件到 QQ 客户端缓存目录
     /// @note go-cqhttp: download_file
     /// @return data.file 路径；失败返回 nullopt
-    [[nodiscard]] auto downloadFile(std::string url, std::optional<SessionId> sessionId = std::nullopt)
-      -> drogon::Task<std::optional<std::string>>;
+    [[nodiscard]] auto downloadFile(std::string url, std::optional<SessionId> sessionId = std::nullopt,
+      json connection = nullptr) -> drogon::Task<std::optional<std::string>>;
 
     /// @brief 将图片保存为 QQ 收藏表情
-    /// @brief 使用 NapCat download_file.base64 将原始字节传到协议主机。
-    [[nodiscard]] auto uploadFile(std::string bytes, std::optional<SessionId> sessionId = std::nullopt)
-      -> drogon::Task<std::optional<std::string>>;
+    /// @brief 使用 download_file.base64 将原始字节传到协议主机。
+    [[nodiscard]] auto uploadFile(std::string bytes, std::optional<SessionId> sessionId = std::nullopt,
+      json connection = nullptr) -> drogon::Task<std::optional<std::string>>;
 
     /// @note NapCat 扩展: add_custom_face（api.md 未收录）
-    [[nodiscard]] auto addCustomFace(std::string file, std::optional<SessionId> sessionId = std::nullopt)
-      -> drogon::Task<bool>;
+    [[nodiscard]] auto addCustomFace(std::string file, std::optional<SessionId> sessionId = std::nullopt,
+      json connection = nullptr) -> drogon::Task<bool>;
 
     /// @brief 设置收藏表情描述
-    /// @note NapCat 扩展: set_custom_face_desc（api.md 未收录）
+    /// @note NapCat: set_custom_face_desc；SnowLuma: modify_custom_face
     [[nodiscard]] auto setCustomFaceDesc(std::string emojiId, std::string resId, std::string md5, std::string desc,
-      std::optional<SessionId> sessionId = std::nullopt) -> drogon::Task<bool>;
+      std::optional<SessionId> sessionId = std::nullopt, json connection = nullptr) -> drogon::Task<bool>;
 
     /// @brief 从收藏表情中删除
-    /// @note NapCat 扩展: delete_custom_face（api.md 未收录）
-    [[nodiscard]] auto deleteCustomFace(std::string resId, std::optional<SessionId> sessionId = std::nullopt)
-      -> drogon::Task<bool>;
+    /// @note delete_custom_face：NapCat 传 res_id；SnowLuma 传 emoji_id
+    [[nodiscard]] auto deleteCustomFace(std::string resId, std::optional<SessionId> sessionId = std::nullopt,
+      json connection = nullptr) -> drogon::Task<bool>;
 
     /// @brief 获取收藏表情详情列表
-    /// @note NapCat 扩展（与 api.md 收录的 NapCat fetch_custom_face 同族）
+    /// @note fetch_custom_face_detail；SnowLuma 列表映射为统一字段
     /// @return data 数组；失败返回空数组
-    [[nodiscard]] auto fetchCustomFaceDetail(std::optional<SessionId> sessionId = std::nullopt) -> drogon::Task<json>;
+    [[nodiscard]] auto fetchCustomFaceDetail(
+      std::optional<SessionId> sessionId = std::nullopt, json connection = nullptr) -> drogon::Task<json>;
 } // namespace insoulforge::OneBotClient

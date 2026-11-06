@@ -72,15 +72,22 @@ QQ 交流群：1097487360
 
 | 参数               | 说明                                   |
 |--------------------|----------------------------------------|
+| 实现类型           | NapCat（默认）或 SnowLuma，保存后生效 |
 | Access Token       | OneBot API 访问令牌                    |
 | Bot 用户 ID          | 机器人自身的 用户 ID                     |
 | 传输方式           | HTTP 或正向 WebSocket，两者互斥        |
 | HTTP 服务地址      | HTTP 模式下的 OneBot HTTP 服务地址     |
 | WebSocket 服务地址 | WebSocket 模式下的 OneBot 正向连接地址 |
 | Bot 名称           | 机器人在群聊中的名称                   |
-| 新私聊默认启用     | 默认关闭，仅影响首次收到消息的新私聊   |
 
-`qq.defaultPrivateEnabled` 保存后立即对新私聊生效，不改变已有会话的启用或禁用状态；
+
+`qq.oneBotImplementation` 可设为 `napcat` 或 `snowluma`，旧配置默认使用 NapCat。切换实现不会自动修改地址和 Token；
+按所选服务设置 HTTP 或正向 WebSocket 连接，HTTP 模式还需配置事件 POST 上报。
+切换实现、账号或连接配置会使收藏缓存失效；进行中的收藏多步操作若遇配置切换，将停止后续请求并提示刷新重试。
+收藏的删除、改名与列表字段由适配层转换；SnowLuma 支持原生商城表情发送，但其收藏列表缺少完整商城字段，
+因此仅有 URL 的收藏按图片表情发送，不新增从聊天消息收集商城字段的机制。详见[工具参考](docs/TOOLS.md#表情包)。
+
+「执行配置 → 私聊」管理新私聊默认启用；兼容保存在 `qq.defaultPrivateEnabled`，保存后立即对新私聊生效，不改变已有会话的启用或禁用状态；
 已有私聊可在「会话管理」中单独启用。私聊直接进入回复生成，不经过 Router，也不附加 Router 回复策略。
 
 ### LLM 配置

@@ -3,6 +3,7 @@
 export interface QQConfig {
     accessToken: string
     selfQQNumber: string
+    oneBotImplementation: 'napcat' | 'snowluma'
     oneBotTransport: 'http' | 'websocket'
     qqHttpHost: string
     qqWebSocketHost: string
@@ -56,6 +57,7 @@ export interface MemoryConfig {
 
 export interface ExecutionConfig {
     maxToolRounds: number
+  defaultPrivateEnabled?: boolean
   routeWhileReplying: boolean
   mcpToolPageSize: number
   mcpMaxToolsPerEnable: number

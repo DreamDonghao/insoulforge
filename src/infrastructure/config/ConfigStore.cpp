@@ -65,9 +65,10 @@ namespace insoulforge::ConfigStore {
                               {"imageGeneration", defaultImageGenerationConfig()},
                               {"memory", defaultChatConfig(4000, 0.4, 0.9, 180, 0)},
                               {"embedding", defaultEmbeddingConfig()}, {"jev", defaultJevConfig()}}},
-              {"qq", {{"accessToken", ""}, {"selfQQNumber", 0}, {"oneBotTransport", "websocket"},
-                       {"qqHttpHost", "http://127.0.0.1:3000"}, {"qqWebSocketHost", "ws://127.0.0.1:3001"},
-                       {"botName", "机器人"}, {"defaultPrivateEnabled", false}}},
+              {"qq",
+                {{"accessToken", ""}, {"selfQQNumber", 0}, {"oneBotImplementation", "napcat"},
+                  {"oneBotTransport", "websocket"}, {"qqHttpHost", "http://127.0.0.1:3000"},
+                  {"qqWebSocketHost", "ws://127.0.0.1:3001"}, {"botName", "机器人"}, {"defaultPrivateEnabled", false}}},
               {"memory",
                 {{"affinityEnabled", true}, {"contextWindowLimit", 100}, {"sharedConversationMessageCount", 10},
                   {"memorySummaryTriggerCount", 100}, {"memorySummaryBatchSize", 50}, {"memorySummaryContextCount", 10},
@@ -425,7 +426,12 @@ namespace insoulforge::ConfigStore {
         std::scoped_lock lock(fileState.mutex);
         requireInitializedLocked();
         auto nextConfig = fileState.content;
-        nextConfig["execution"].update(config);
+        auto executionConfig = config;
+        if (executionConfig.contains("defaultPrivateEnabled")) {
+            nextConfig["qq"]["defaultPrivateEnabled"] = executionConfig["defaultPrivateEnabled"];
+            executionConfig.erase("defaultPrivateEnabled");
+        }
+        nextConfig["execution"].update(executionConfig);
         if (!validMcpLimits(nextConfig["execution"])) {
             return std::unexpected(ConfigError{.type = ConfigErrorType::InvalidArgument,
               .message = "MCP 每页数量须为 1～50，单次启用数量须为 1～20，总启用数量须为 1～64，且单次不能超过总数"});

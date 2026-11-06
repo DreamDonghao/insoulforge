@@ -1,7 +1,6 @@
 /// @file OneBotReconnectTests.cpp
 /// @brief 离线日志限频、底层警告过滤与真实 WebSocket 重连回归测试。
 #include <atomic>
-#include <cerrno>
 #include <filesystem>
 #include <iostream>
 #include <memory>
@@ -9,9 +8,10 @@
 #include <stdexcept>
 #include <vector>
 
-#include <drogon/drogon.h>
+#include <cerrno>
 #include <drogon/HttpFilter.h>
 #include <drogon/WebSocketController.h>
+#include <drogon/drogon.h>
 #include <trantor/net/EventLoopThread.h>
 
 #include <admin/http/AdminController.hpp>
@@ -135,12 +135,30 @@ namespace {
         co_await waitFor([&] { return action->finished; }, "pending action did not finish after renaming");
         require(action->response.has_value(), "renaming must not interrupt an in-flight action");
 
+        qq["qqHttpHost"] = "http://unused-fixture:3000";
+        co_await saveQQConfig(qq);
+        require(client.isConnected() && attempts.load() == previousAttempts &&
+          (co_await client.callApi("get_version", json::object(), 1.0, Config::instance().oneBotSnapshot())).has_value(),
+          "inactive HTTP address change must not invalidate the active WebSocket");
+
         qq["accessToken"] = "fixture-token";
         co_await saveQQConfig(qq);
         co_await waitFor([&] { return attempts.load() > previousAttempts && client.isConnected(); },
           "changing token must safely destroy the old domain client and reconnect");
         require((co_await client.callApi("get_version", json::object(), 1.0)).has_value(),
           "API calls must work after reloading domain connection settings");
+
+        const auto oldConnection = Config::instance().oneBotSnapshot();
+        previousAttempts = attempts.load();
+        qq["oneBotImplementation"] = "snowluma";
+        co_await saveQQConfig(qq);
+        co_await waitFor([&] { return attempts.load() > previousAttempts && client.isConnected(); },
+          "implementation change reconnects even at the same address");
+        require(!(co_await client.callApi("get_version", json::object(), 1.0, oldConnection)).has_value(),
+          "old snapshot cannot use replacement WebSocket");
+        require((co_await client.callApi("get_version", json::object(), 1.0, Config::instance().oneBotSnapshot()))
+                  .has_value(),
+          "new snapshot works after implementation switch");
 
         qq["oneBotTransport"] = "http";
         co_await saveQQConfig(qq);

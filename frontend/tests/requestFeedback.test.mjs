@@ -250,7 +250,7 @@ for (const [page, load, dataKey, errorKey, url] of [
 
 for (const [page, load, save, key, data] of [
   ['conversation/MemoryConfig', 'loadConfig', 'saveMemoryConfig', 'memoryConfig', {contextWindowLimit: 123, affinityEnabled: false}],
-  ['onebot/OneBotConfig', 'refreshActiveTransport', 'saveQQConfig', 'qqConfig', {oneBotTransport: 'http', botName: 'loaded', accessToken: 'fixture', selfQQNumber: '42', qqHttpHost: 'http://localhost:3000'}]
+  ['onebot/OneBotConfig', 'refreshActiveTransport', 'saveQQConfig', 'qqConfig', {oneBotImplementation: 'napcat', oneBotTransport: 'http', botName: 'loaded', accessToken: 'fixture', selfQQNumber: '42', qqHttpHost: 'http://localhost:3000'}]
 ]) {
   test(`${page}: failed initial load prevents saving defaults; retry succeeds and failed saves preserve input`, async () => {
     let posts = 0
@@ -881,4 +881,38 @@ test('emoji file upload blocks busy close and duplicate submission then clears d
   assert.equal(state.dialog, null)
   assert.equal(state.emojis[0].res_id, 'uploaded')
   assert.equal([...guards][0].dirty(), false)
+})
+
+test('OneBot implementation loads, saves and preserves drafts on failure without changing connection fields', async () => {
+  const config = {oneBotImplementation: 'snowluma', oneBotTransport: 'http', selfQQNumber: '42',
+    qqHttpHost: 'https://example.com:3000', qqWebSocketHost: 'wss://example.com:3001', accessToken: 'fixture'}
+  globalThis.fetch = async () => response(config)
+  const state = mount('onebot/OneBotConfig')
+  await flush()
+  assert.equal(state.loaded, true)
+  assert.equal(state.qqConfig.oneBotImplementation, 'snowluma')
+  state.qqConfig.oneBotImplementation = 'napcat'
+  let submitted
+  globalThis.fetch = async (_url, options) => {
+    submitted = JSON.parse(options.body)
+    return response({success: true})
+  }
+  await state.saveQQConfig()
+  assert.equal(submitted.oneBotImplementation, 'napcat')
+  assert.equal(submitted.qqHttpHost, config.qqHttpHost)
+  assert.equal(submitted.qqWebSocketHost, config.qqWebSocketHost)
+  assert.equal(submitted.accessToken, config.accessToken)
+  state.qqConfig.oneBotImplementation = 'snowluma'
+  globalThis.fetch = async () => { throw new TypeError('offline') }
+  await state.saveQQConfig()
+  assert.equal(state.qqConfig.oneBotImplementation, 'snowluma')
+  assert.equal([...guards][0].dirty(), true)
+})
+
+test('OneBot rejects unknown implementation returned by the server', async () => {
+  globalThis.fetch = async () => response({oneBotImplementation: 'unknown', oneBotTransport: 'http'})
+  const state = mount('onebot/OneBotConfig')
+  await flush()
+  assert.equal(state.loaded, false)
+  assert.match(state.loadError, /实现类型/)
 })

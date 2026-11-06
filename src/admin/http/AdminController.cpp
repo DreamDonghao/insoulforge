@@ -414,13 +414,15 @@ auto AdminController::updateEmojiDesc(HttpRequestPtr req, std::function<void(con
 
     const std::string resId = getStr(*body, "res_id");
     const std::string desc = getStr(*body, "desc");
-    if (!co_await OneBotClient::setCustomFaceDesc(body->contains("emoji_id") ? getStr(*body, "emoji_id") : "0", resId,
-          body->contains("md5") ? getStr(*body, "md5") : "", desc)) {
+    const bool renamed =
+      co_await OneBotClient::setCustomFaceDesc(body->contains("emoji_id") ? getStr(*body, "emoji_id") : "0", resId,
+        body->contains("md5") ? getStr(*body, "md5") : "", desc);
+    ToolRuntime::invalidateFavoriteEmojiCache();
+    if (!renamed) {
         callback(jsonResponse(AdminResponse::failJson("修改表情描述失败，请确认 QQ 客户端在线")));
         co_return;
     }
 
-    ToolRuntime::invalidateFavoriteEmojiCache();
     Logger::info(std::nullopt, "Admin", fmt::format("已修改表情描述: res_id={} desc={}", resId, desc));
 
     callback(jsonResponse(AdminResponse::okJson("描述已修改")));
@@ -1108,7 +1110,7 @@ namespace {
         }
         return true;
     }
-}
+} // namespace
 
 auto AdminController::updatePerson(HttpRequestPtr req, std::function<void(const HttpResponsePtr &)> callback,
   const std::string &userId) const -> Task<> {
@@ -1300,8 +1302,16 @@ auto AdminController::saveQQConfig(HttpRequestPtr req, std::function<void(const 
     // 更新机器人自己的自定义昵称
     QQNameDirectory::setCustomName(UserId{config.selfQQNumber}, config.botName + "(我)");
     const auto savedConfig = config.getQQConfig();
+    const bool implementationChanged = previousConfig["oneBotImplementation"] != savedConfig["oneBotImplementation"];
+    if (implementationChanged || previousConfig["selfQQNumber"] != savedConfig["selfQQNumber"] ||
+        previousConfig["oneBotTransport"] != savedConfig["oneBotTransport"] ||
+        previousConfig["qqHttpHost"] != savedConfig["qqHttpHost"] ||
+        previousConfig["qqWebSocketHost"] != savedConfig["qqWebSocketHost"] ||
+        previousConfig["accessToken"] != savedConfig["accessToken"])
+        ToolRuntime::invalidateFavoriteEmojiCache();
     // 名称和私聊默认状态不影响连接，不应中断正在等待的 OneBot 动作。
-    if (previousConfig["oneBotTransport"] != savedConfig["oneBotTransport"] ||
+    if (implementationChanged || previousConfig["selfQQNumber"] != savedConfig["selfQQNumber"] ||
+        previousConfig["oneBotTransport"] != savedConfig["oneBotTransport"] ||
         (savedConfig["oneBotTransport"] == "websocket" &&
           (previousConfig["qqWebSocketHost"] != savedConfig["qqWebSocketHost"] ||
             previousConfig["accessToken"] != savedConfig["accessToken"]))) {

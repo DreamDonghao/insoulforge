@@ -136,6 +136,7 @@ const {notifications, toastTarget, showToast, dismissToast} = useToast()
 const qqConfig = reactive<QQConfigType>({
   accessToken: '',
   selfQQNumber: '0',
+  oneBotImplementation: 'napcat',
   oneBotTransport: 'http',
   qqHttpHost: '',
   qqWebSocketHost: '',

@@ -13,6 +13,7 @@
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/image/Image.hpp>
 #include <infrastructure/logging/Logger.hpp>
+#include <onebot/messaging/MessageFormatter.hpp>
 #include <onebot/transport/OneBotClient.hpp>
 #include <workflow/OneBotEventWorkflow.hpp>
 #include <workflow/access/AdminStore.hpp>
@@ -388,6 +389,7 @@ namespace insoulforge {
                            "发送失败或超时由模型决定重发、继续处理或结束；超时不代表确定未送达。",
             .parameters = stickerParams,
             .handler = [](const json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
+                const auto connection = Config::instance().oneBotSnapshot();
                 std::string name = argString(args, "name");
                 if (name.empty()) {
                     co_return std::string("请提供表情名称");
@@ -396,27 +398,22 @@ namespace insoulforge {
                 if (!target)
                     co_return target.error();
                 const auto destination = messageDestination(args, *target);
-                const json emoji = co_await ToolRuntime::findFavoriteEmoji(name, ctx.requireSession());
+                const json emoji = co_await ToolRuntime::findFavoriteEmoji(name, ctx.requireSession(), connection);
                 if (emoji.is_null()) {
                     co_return fmt::format(
-                      "{}表情'{}'不存在、名称不唯一或列表获取失败，请核对系统消息 available_stickers 中的名称", destination, name);
+                      "{}表情'{}'不存在、名称不唯一或列表获取失败，请核对系统消息 available_stickers 中的名称",
+                      destination, name);
                 }
 
-                // 商城表情（字段齐全）走 mface；个人收藏表情走 image+sub_type=1（QQ 渲染为表情）
-                std::string cqCode;
-                if (getBool(emoji, "is_mark_face") && !getStr(emoji, "emoji_id").empty() &&
-                    !getStr(emoji, "key").empty()) {
-                    cqCode = fmt::format("[CQ:mface,summary={},emoji_id={},emoji_package_id={},key={}]",
-                      getStr(emoji, "summary"), getStr(emoji, "emoji_id"), getStr(emoji, "emoji_package_id"),
-                      getStr(emoji, "key"));
-                } else if (const std::string url = getStr(emoji, "url"); !url.empty()) {
-                    cqCode = fmt::format("[CQ:image,file={},sub_type=1,summary={}]", url, getStr(emoji, "summary"));
-                } else {
-                    co_return fmt::format("{}表情'{}'缺少图片地址，无法发送", destination, name);
-                }
+                const auto cqCode = MessageFormatter::favoriteEmojiToCQCode(emoji);
+                if (!cqCode)
+                    co_return fmt::format("{}表情'{}'{}", destination, name, cqCode.error());
 
+                if (connection != Config::instance().oneBotSnapshot())
+                    co_return std::string("OneBot 配置已切换，请刷新收藏列表后重试");
                 // 消息由 MessageService 记入目标会话，当前调用方通过工具结果获知发送状态。
-                if (const auto messageId = co_await MessageService::sendToSession(*target, std::move(cqCode));
+                if (const auto messageId =
+                      co_await MessageService::sendToSession(*target, *cqCode, std::nullopt, {}, {}, connection);
                   !messageId) {
                     co_return fmt::format("{}表情发送未确认成功：{}。由模型决定重发、继续处理或结束；超时不代表确定未送达。", destination, messageId.error());
                 }
@@ -477,7 +474,9 @@ namespace insoulforge {
                 }
                 const auto destination = messageDestination(args, *target);
                 if (const auto messageId = co_await MessageService::sendToSession(*target, content); !messageId) {
-                    co_return fmt::format("{}消息发送未确认成功：{}。请继续处理，不要认为该消息已送达，由模型决定重发、继续处理或结束；超时不代表确定未送达。",
+                    co_return fmt::format(
+                      "{}消息发送未确认成功：{}"
+                      "。请继续处理，不要认为该消息已送达，由模型决定重发、继续处理或结束；超时不代表确定未送达。",
                       destination, messageId.error());
                 }
                 co_return destination +
@@ -514,6 +513,7 @@ namespace insoulforge {
                            "name必须起一个能体现图片内容的名字，方便以后用send_sticker引用。",
             .parameters = saveParams,
             .handler = [](json args, ToolCallContext ctx) -> drogon::Task<std::string> {
+                const auto connection = Config::instance().oneBotSnapshot();
                 const auto sessionId = ctx.requireSession();
                 const u64 messageId = parseUInt64(argString(args, "message_id"));
                 const i32 imageIndex = getInt(args, "image_index", -1);
@@ -556,7 +556,7 @@ namespace insoulforge {
 
                 // 优先获取容器内的图片路径；商城表情可能无法通过 get_image 获取。
                 std::string containerPath;
-                if (const auto path = co_await OneBotClient::getImage(file, sessionId)) {
+                if (const auto path = co_await OneBotClient::getImage(file, sessionId, connection)) {
                     containerPath = *path;
                 }
 
@@ -565,7 +565,7 @@ namespace insoulforge {
                     if (url.empty()) {
                         co_return std::string("获取图片失败，请确认图片仍可访问");
                     }
-                    if (const auto path = co_await OneBotClient::downloadFile(url, sessionId)) {
+                    if (const auto path = co_await OneBotClient::downloadFile(url, sessionId, connection)) {
                         containerPath = *path;
                     }
                     if (containerPath.empty()) {
@@ -576,7 +576,7 @@ namespace insoulforge {
                 // 记录已有表情的 res_id，以便保存后找出新表情。
                 ToolRuntime::invalidateFavoriteEmojiCache();
                 std::set<std::string> beforeIds;
-                for (const auto beforeEmojis = co_await ToolRuntime::fetchFavoriteEmojis(sessionId);
+                for (const auto beforeEmojis = co_await ToolRuntime::fetchFavoriteEmojis(sessionId, connection);
                   const auto &e: beforeEmojis) {
                     if (const std::string rid = getStr(e, "res_id"); !rid.empty()) {
                         beforeIds.insert(rid);
@@ -584,32 +584,43 @@ namespace insoulforge {
                 }
 
                 // 将图片保存为 QQ 收藏表情。
-                if (!co_await OneBotClient::addCustomFace(containerPath, sessionId)) {
-                    co_return std::string("保存为收藏表情失败");
-                }
-
-                // 找到新增的表情并设置描述。
+                const bool added = co_await OneBotClient::addCustomFace(containerPath, sessionId, connection);
                 ToolRuntime::invalidateFavoriteEmojiCache();
+                if (!added) co_return std::string("收藏请求失败或结果未确认，请刷新收藏列表核对");
+
+                // 找到新增的表情并设置描述；查询失败也不能抹掉已经收藏的事实。
+                json afterEmojis;
+                try {
+                    afterEmojis = co_await ToolRuntime::fetchFavoriteEmojis(sessionId, connection);
+                } catch (const std::exception &) {
+                    co_return std::string("已保存为收藏表情，但未确认名称设置成功，请刷新收藏列表后修改名称");
+                }
                 json newItem;
-                for (const auto afterEmojis = co_await ToolRuntime::fetchFavoriteEmojis(sessionId);
-                  const auto &e: afterEmojis) {
+                for (const auto &e: afterEmojis) {
                     if (const std::string rid = getStr(e, "res_id"); !rid.empty() && !beforeIds.contains(rid)) {
+                        if (!newItem.is_null()) {
+                            newItem = nullptr;
+                            break;
+                        }
                         newItem = e;
-                        break;
                     }
                 }
+                bool named = false;
                 if (!newItem.is_null()) {
                     if (const std::string emojiId =
                           getStr(newItem, "emoji_id").empty() ? "0" : getStr(newItem, "emoji_id");
                       co_await OneBotClient::setCustomFaceDesc(
-                        emojiId, getStr(newItem, "res_id"), getStr(newItem, "md5"), name, sessionId)) {
-                        ToolRuntime::invalidateFavoriteEmojiCache();
+                        emojiId, getStr(newItem, "res_id"), getStr(newItem, "md5"), name, sessionId, connection)) {
+                        named = true;
                     } else {
                         Logger::warn(
                           sessionId, "Sticker", fmt::format("设置表情描述失败: {}", getStr(newItem, "res_id")));
                     }
                 }
 
+                ToolRuntime::invalidateFavoriteEmojiCache();
+                if (!named)
+                    co_return std::string("已保存为收藏表情，但未确认名称设置成功，请刷新收藏列表后修改名称");
                 Logger::info(sessionId, "Sticker", fmt::format("已保存收藏表情: {} ({})", containerPath, name));
                 co_return fmt::format("已保存为收藏表情，名称: {}", name);
             },
@@ -639,6 +650,7 @@ namespace insoulforge {
                            "当前名称，再把新名称传给new_name。",
             .parameters = renameParams,
             .handler = [](const json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
+                const auto connection = Config::instance().oneBotSnapshot();
                 const std::string name = argString(args, "name");
                 const std::string newName = argString(args, "new_name");
                 if (name.empty())
@@ -647,14 +659,14 @@ namespace insoulforge {
                     co_return std::string("请提供新名称(new_name)");
 
                 const auto &sessionId = ctx.requireSession();
-                const json emoji = co_await ToolRuntime::findFavoriteEmoji(name, sessionId);
+                const json emoji = co_await ToolRuntime::findFavoriteEmoji(name, sessionId, connection);
                 if (emoji.is_null()) {
                     co_return fmt::format("表情'{}'不存在、名称不唯一或列表获取失败，请核对系统消息 available_stickers 中的名称", name);
                 }
 
                 const bool renamed = co_await OneBotClient::setCustomFaceDesc(
                   getStr(emoji, "emoji_id").empty() ? "0" : getStr(emoji, "emoji_id"), getStr(emoji, "res_id"),
-                  getStr(emoji, "md5"), newName, sessionId);
+                  getStr(emoji, "md5"), newName, sessionId, connection);
                 ToolRuntime::invalidateFavoriteEmojiCache();
                 if (!renamed) {
                     co_return std::string("改名请求失败或结果未确认，请核对收藏列表后再试");
@@ -680,20 +692,24 @@ namespace insoulforge {
         registry.registerTool(
           {
             .name = "delete_sticker",
-            .description = "从QQ收藏表情中删除表情。仅在用户明确要求删除表情时使用，删除前先确认名称无误。从系统消息 available_stickers 查看名称；重名时不执行。",
+            .description = "从QQ收藏表情中删除表情。仅在用户明确要求删除表情时使用，删除前先确认名称无误。从系统消息 "
+                           "available_stickers 查看名称；重名时不执行。",
             .parameters = delParams,
             .handler = [](const json args, const ToolCallContext ctx) -> drogon::Task<std::string> {
+                const auto connection = Config::instance().oneBotSnapshot();
                 std::string name = argString(args, "name");
                 if (name.empty())
                     co_return std::string("请提供表情名称(name)");
 
                 const auto &sessionId = ctx.requireSession();
-                const json emoji = co_await ToolRuntime::findFavoriteEmoji(name, sessionId);
+                const json emoji = co_await ToolRuntime::findFavoriteEmoji(name, sessionId, connection);
                 if (emoji.is_null()) {
-                    co_return fmt::format("表情'{}'不存在、名称不唯一或列表获取失败，请核对系统消息 available_stickers 中的名称", name);
+                    co_return fmt::format(
+                      "表情'{}'不存在、名称不唯一或列表获取失败，请核对系统消息 available_stickers 中的名称", name);
                 }
 
-                if (const auto result = co_await ToolRuntime::deleteFavoriteEmoji(getStr(emoji, "res_id"), sessionId);
+                if (const auto result =
+                      co_await ToolRuntime::deleteFavoriteEmoji(getStr(emoji, "res_id"), sessionId, connection);
                   !result) {
                     co_return std::string("删除失败");
                 }
@@ -852,7 +868,8 @@ namespace insoulforge {
           {
             .name = "send_poke",
             .description =
-              "中途拍一拍群成员（发出后回合不结束，最终仍用send_message_and_finish/finish_turn收尾）。用于打招呼、引起注意、"
+              "中途拍一拍群成员（发出后回合不结束，最终仍用send_message_and_finish/"
+              "finish_turn收尾）。用于打招呼、引起注意、"
               "开玩笑等轻松互动场景。聊天记录格式为JSON：{\"sender\":{\"name\":\"小明\",\"uid\":\"123456\"}}，"
               "用 send_poke(user_id=\"123456\") 来拍他。",
             .parameters = pokeParams,

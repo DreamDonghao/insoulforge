@@ -31,6 +31,7 @@ const refreshActiveTransport = async (): Promise<void> => {
   try {
     const config = await requestJson<QQConfig>('/admin/api/qq-config')
     if (config.oneBotTransport !== 'http' && config.oneBotTransport !== 'websocket') throw new Error('OneBot 配置数据无效')
+    if (config.oneBotImplementation !== 'napcat' && config.oneBotImplementation !== 'snowluma') throw new Error('OneBot 实现类型无效')
     Object.assign(qqConfig!, config, {selfQQNumber: String(config.selfQQNumber ?? '0')})
     activeTransport.value = config.oneBotTransport
     loaded.value = true
@@ -116,8 +117,18 @@ onMounted(() => {
       </section>
 
       <section class="config-section">
-        <h3 class="section-title">新私聊默认启用</h3>
-        <label class="form-checkbox"><input v-model="qqConfig!.defaultPrivateEnabled" type="checkbox" :disabled="saving">新私聊默认启用（保存后生效）</label>
+        <h3 class="section-title">OneBot 实现</h3>
+        <div class="form-group">
+          <fieldset class="transport-switch" :disabled="saving">
+            <legend class="sr-only">OneBot 实现类型（保存后生效）</legend>
+            <label v-for="implementation in ['napcat', 'snowluma'] as const" :key="implementation" :class="{active: qqConfig!.oneBotImplementation === implementation}">
+              <input class="sr-only" v-model="qqConfig!.oneBotImplementation" type="radio" name="onebot-implementation" :value="implementation">
+              <span class="choice-mark" aria-hidden="true">{{ qqConfig!.oneBotImplementation === implementation ? '✓' : '' }}</span>
+              {{ implementation === 'napcat' ? 'NapCat' : 'SnowLuma' }}
+            </label>
+          </fieldset>
+          <p class="form-hint">保存后切换扩展接口。连接地址和 Token 请按所选服务填写，不会自动更改。</p>
+        </div>
       </section>
 
       <section class="config-section connection-section">
@@ -264,6 +275,9 @@ onMounted(() => {
 }
 
 .transport-switch {
+  margin: 0;
+  padding: 0;
+  min-inline-size: 0;
   display: inline-grid;
   grid-template-columns: repeat(2, 128px);
   overflow: hidden;

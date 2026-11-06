@@ -2,7 +2,6 @@
 /// @brief OneBot API 客户端实现
 
 #include <charconv>
-#include <infrastructure/image/Image.hpp>
 
 #include <regex>
 
@@ -11,6 +10,7 @@
 #include <infrastructure/UserId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/http/HttpUtil.hpp>
+#include <infrastructure/image/Image.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <onebot/transport/OneBotClient.hpp>
 #include <onebot/transport/OneBotWebSocketClient.hpp>
@@ -37,19 +37,23 @@ namespace insoulforge::OneBotClient {
         /// @param timeout 超时秒数
         /// @return 成功响应 JSON；失败返回错误详情，不丢弃 OneBot 的错误码与说明。
         [[nodiscard]] auto callApi(std::string_view tag, std::string api, json params,
-          const std::optional<SessionId> sessionId = std::nullopt, const f64 timeout = 30.0)
+          const std::optional<SessionId> sessionId = std::nullopt, const f64 timeout = 30.0, json connection = nullptr)
           -> drogon::Task<std::expected<json, std::string>> {
+            if (connection.is_null())
+                connection = Config::instance().oneBotSnapshot();
+            if (connection != Config::instance().oneBotSnapshot())
+                co_return std::unexpected("OneBot 配置已切换，请刷新收藏列表后重试");
             json body;
-            if (const auto &config = Config::instance(); config.oneBotTransport == "websocket") {
+            if (getStr(connection, "oneBotTransport") == "websocket") {
                 const auto response =
-                  co_await OneBotWebSocketClient::instance().callApi(api, std::move(params), timeout);
+                  co_await OneBotWebSocketClient::instance().callApi(api, std::move(params), timeout, connection);
                 if (!response) {
                     co_return std::unexpected("OneBot 请求失败或超时，无法确认发送结果");
                 }
                 body = *response;
             } else {
-                const auto response = co_await HttpUtil::send(tag, config.qqHttpHost, "/" + api, drogon::Post,
-                  std::move(params), config.accessToken, timeout, sessionId,
+                const auto response = co_await HttpUtil::send(tag, getStr(connection, "qqHttpHost"), "/" + api,
+                  drogon::Post, std::move(params), getStr(connection, "accessToken"), timeout, sessionId,
                   api != "download_file" && api != "add_custom_face");
                 if (!response) {
                     co_return std::unexpected(response.error());
@@ -79,12 +83,14 @@ namespace insoulforge::OneBotClient {
 
         /// @brief 发送消息的公共实现（群聊/私聊共用，仅 API 名与目标字段不同）
         auto sendMessage(std::string api, const std::string targetKey, const u64 targetId, std::string message,
-          const std::optional<SessionId> sessionId) -> drogon::Task<std::expected<u64, std::string>> {
+          const std::optional<SessionId> sessionId, json connection) -> drogon::Task<std::expected<u64, std::string>> {
+            if (connection.is_null())
+                connection = Config::instance().oneBotSnapshot();
             const bool isBase64Image = message.starts_with("[CQ:image,file=base64://");
             // 内部 CQ 提及可以使用 self；仅在协议请求体中还原真实账号。
             static const std::regex selfMention(R"(\[CQ:at,qq=self(?=[,\]]))");
             if (!isBase64Image && std::regex_search(message, selfMention)) {
-                const auto selfId = Config::instance().selfQQNumber;
+                const auto selfId = jsonToUInt64(atOrNull(connection, "selfQQNumber"));
                 if (selfId == 0)
                     co_return std::unexpected("未配置机器人账号，无法将 self 提及转换为 OneBot 用户 ID");
                 message = std::regex_replace(message, selfMention, fmt::format("[CQ:at,qq={}", selfId));
@@ -97,8 +103,8 @@ namespace insoulforge::OneBotClient {
                 params["timeout"] = 120000; // NapCat 发送确认超时，单位毫秒。
             }
 
-            const auto resp =
-              co_await callApi("[Msg]", std::move(api), std::move(params), sessionId, isBase64Image ? 150.0 : 30.0);
+            const auto resp = co_await callApi(
+              "[Msg]", std::move(api), std::move(params), sessionId, isBase64Image ? 150.0 : 30.0, connection);
             if (!resp) {
                 Logger::error(sessionId, "OneBot",
                   fmt::format("发送消息错误: msgLen={}, preview={}", message.size(),
@@ -126,19 +132,22 @@ namespace insoulforge::OneBotClient {
         co_return tid;
     }
 
-    auto sendGroupMsg(const SessionId groupId, std::string message) -> drogon::Task<std::expected<u64, std::string>> {
+    auto sendGroupMsg(const SessionId groupId, std::string message, json connection)
+      -> drogon::Task<std::expected<u64, std::string>> {
         const auto number = numericGroupId(groupId);
         if (!number)
             co_return std::unexpected("OneBot 11 要求有效的数字群 ID");
-        co_return co_await sendMessage("send_group_msg", "group_id", *number, std::move(message), groupId);
+        co_return co_await sendMessage(
+          "send_group_msg", "group_id", *number, std::move(message), groupId, std::move(connection));
     }
 
-    auto sendPrivateMsg(const UserId userId, std::string message, const std::optional<SessionId> sessionId)
-      -> drogon::Task<std::expected<u64, std::string>> {
+    auto sendPrivateMsg(const UserId userId, std::string message, const std::optional<SessionId> sessionId,
+      json connection) -> drogon::Task<std::expected<u64, std::string>> {
         const auto number = userId.toU64();
         if (!number || *number == 0)
             co_return std::unexpected("OneBot 11 要求非零数字用户 ID");
-        co_return co_await sendMessage("send_private_msg", "user_id", *number, std::move(message), sessionId);
+        co_return co_await sendMessage(
+          "send_private_msg", "user_id", *number, std::move(message), sessionId, std::move(connection));
     }
 
     auto setGroupBan(const SessionId groupId, const UserId userId, const u64 duration) -> drogon::Task<bool> {
@@ -224,44 +233,59 @@ namespace insoulforge::OneBotClient {
         co_return true;
     }
 
-    auto getImage(std::string file, const std::optional<SessionId> sessionId)
+    auto getImage(std::string file, const std::optional<SessionId> sessionId, json connection)
       -> drogon::Task<std::optional<std::string>> {
+        if (connection.is_null())
+            connection = Config::instance().oneBotSnapshot();
         json params;
         params["file"] = std::move(file);
 
-        const auto resp = co_await callApi("[Sticker]", "get_image", params, sessionId, 15.0);
+        const auto resp = co_await callApi("[Sticker]", "get_image", params, sessionId, 15.0, connection);
         if (!resp) {
             co_return std::nullopt;
         }
         co_return jsonToString(atOrNull(atOrNull(*resp, "data"), "file"));
     }
 
-    auto downloadFile(std::string url, const std::optional<SessionId> sessionId)
+    auto downloadFile(std::string url, const std::optional<SessionId> sessionId, json connection)
       -> drogon::Task<std::optional<std::string>> {
+        if (connection.is_null())
+            connection = Config::instance().oneBotSnapshot();
         json params;
         params["url"] = std::move(url);
 
-        const auto resp = co_await callApi("[Sticker]", "download_file", params, sessionId);
+        const auto resp = co_await callApi("[Sticker]", "download_file", params, sessionId, 30.0, connection);
         if (!resp) {
             co_return std::nullopt;
         }
         co_return jsonToString(atOrNull(atOrNull(*resp, "data"), "file"));
     }
 
-    auto uploadFile(std::string bytes, const std::optional<SessionId> sessionId)
+    auto uploadFile(std::string bytes, const std::optional<SessionId> sessionId, json connection)
       -> drogon::Task<std::optional<std::string>> {
+        if (connection.is_null())
+            connection = Config::instance().oneBotSnapshot();
         json params;
         params["base64"] = Image::encode(bytes);
-        const auto resp = co_await callApi("[Sticker]", "download_file", std::move(params), sessionId);
-        if (!resp) co_return std::nullopt;
+        const auto resp =
+          co_await callApi("[Sticker]", "download_file", std::move(params), sessionId, 30.0, connection);
+        if (!resp)
+            co_return std::nullopt;
         co_return jsonToString(atOrNull(atOrNull(*resp, "data"), "file"));
     }
 
-    auto addCustomFace(std::string file, const std::optional<SessionId> sessionId) -> drogon::Task<bool> {
+    auto addCustomFace(std::string file, const std::optional<SessionId> sessionId, json connection)
+      -> drogon::Task<bool> {
+        if (connection.is_null())
+            connection = Config::instance().oneBotSnapshot();
         json params;
+        // SnowLuma accepts file:// sources; download_file returns an absolute native path.
+        if (getStr(connection, "oneBotImplementation") == "snowluma" && file.starts_with('/'))
+            file = "file://" + file;
         params["file"] = file;
 
-        if (const auto resp = co_await callApi("[Sticker]", "add_custom_face", params, sessionId); !resp) {
+        if (const auto resp = co_await callApi("[Sticker]", "add_custom_face", params, sessionId, 30.0, connection);
+          !resp) {
             Logger::error(std::nullopt, "Sticker", "保存收藏表情失败（文件内容已省略）");
             co_return false;
         }
@@ -269,33 +293,54 @@ namespace insoulforge::OneBotClient {
     }
 
     auto setCustomFaceDesc(std::string emojiId, std::string resId, std::string md5, std::string desc,
-      const std::optional<SessionId> sessionId) -> drogon::Task<bool> {
+      const std::optional<SessionId> sessionId, json connection) -> drogon::Task<bool> {
+        if (connection.is_null())
+            connection = Config::instance().oneBotSnapshot();
         json params;
         params["emoji_id"] = std::move(emojiId);
         params["res_id"] = std::move(resId);
         params["md5"] = std::move(md5);
         params["desc"] = std::move(desc);
 
-        const auto resp = co_await callApi("[Sticker]", "set_custom_face_desc", params, sessionId);
+        const bool snowLuma = getStr(connection, "oneBotImplementation") == "snowluma";
+        if (snowLuma)
+            params = {{"emoji_id", getStr(params, "emoji_id")}, {"desc", getStr(params, "desc")}};
+        const auto resp = co_await callApi(
+          "[Sticker]", snowLuma ? "modify_custom_face" : "set_custom_face_desc", params, sessionId, 30.0, connection);
         co_return resp.has_value();
     }
 
-    auto deleteCustomFace(std::string resId, const std::optional<SessionId> sessionId) -> drogon::Task<bool> {
+    auto deleteCustomFace(std::string resId, const std::optional<SessionId> sessionId, json connection)
+      -> drogon::Task<bool> {
+        if (connection.is_null())
+            connection = Config::instance().oneBotSnapshot();
         json params;
-        params["res_id"] = std::move(resId);
+        params[getStr(connection, "oneBotImplementation") == "snowluma" ? "emoji_id" : "res_id"] = std::move(resId);
 
-        const auto resp = co_await callApi("[Sticker]", "delete_custom_face", params, sessionId);
+        const auto resp = co_await callApi("[Sticker]", "delete_custom_face", params, sessionId, 30.0, connection);
         co_return resp.has_value();
     }
 
-    auto fetchCustomFaceDetail(const std::optional<SessionId> sessionId) -> drogon::Task<json> {
+    auto fetchCustomFaceDetail(const std::optional<SessionId> sessionId, json connection) -> drogon::Task<json> {
+        if (connection.is_null())
+            connection = Config::instance().oneBotSnapshot();
         json params;
         params["count"] = 200;
 
-        const auto resp = co_await callApi("[Sticker]", "fetch_custom_face_detail", params, sessionId);
+        const auto resp =
+          co_await callApi("[Sticker]", "fetch_custom_face_detail", params, sessionId, 30.0, connection);
         if (!resp) {
             co_return json::array();
         }
-        co_return atOrNull(*resp, "data");
+        auto data = atOrNull(*resp, "data");
+        if (getStr(connection, "oneBotImplementation") == "snowluma" && data.is_array()) {
+            for (auto &item: data) {
+                if (!item.is_object())
+                    continue;
+                item["eId"] = getStr(item, "emoji_id");
+                item["resId"] = getStr(item, "resId", getStr(item, "emoji_id"));
+            }
+        }
+        co_return data;
     }
 } // namespace insoulforge::OneBotClient

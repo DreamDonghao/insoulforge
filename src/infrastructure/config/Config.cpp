@@ -53,6 +53,10 @@ namespace insoulforge {
                           field < 1))
                         return std::unexpected(
                           ConfigError{.type = ConfigErrorType::InvalidArgument, .message = key + " 超出允许范围"});
+                } else if (key == "oneBotImplementation") {
+                    if (!field.is_string() || (field != "napcat" && field != "snowluma"))
+                        return std::unexpected(ConfigError{.type = ConfigErrorType::InvalidArgument,
+                          .message = "oneBotImplementation 必须为 napcat 或 snowluma"});
                 } else if (key == "apiType") {
                     if (!field.is_string() || (field != "openai" && field != "openrouter"))
                         return std::unexpected(ConfigError{
@@ -232,6 +236,7 @@ namespace insoulforge {
             accessToken = trim(getStr(qqCfg, "accessToken"));
             selfQQNumber = qqCfg.at("selfQQNumber").get<u64>();
             defaultPrivateEnabled.store(getBool(qqCfg, "defaultPrivateEnabled", false), std::memory_order_relaxed);
+            oneBotImplementation = getStr(qqCfg, "oneBotImplementation", "napcat");
             oneBotTransport = getStr(qqCfg, "oneBotTransport", "http");
             qqHttpHost = trim(getStr(qqCfg, "qqHttpHost"));
             qqWebSocketHost = trim(getStr(qqCfg, "qqWebSocketHost"));
@@ -289,7 +294,19 @@ namespace insoulforge {
         }
     }
 
+    auto Config::oneBotSnapshot() const -> json {
+        std::scoped_lock lock(m_updateMutex);
+        return {{"oneBotImplementation", oneBotImplementation}, {"oneBotTransport", oneBotTransport},
+          {"qqHttpHost", qqHttpHost}, {"qqWebSocketHost", qqWebSocketHost}, {"accessToken", accessToken},
+          {"selfQQNumber", selfQQNumber}, {"revision", m_oneBotRevision}};
+    }
+
     void Config::applyQQValues(Config &value) {
+        if (oneBotImplementation != value.oneBotImplementation || oneBotTransport != value.oneBotTransport ||
+            qqHttpHost != value.qqHttpHost || qqWebSocketHost != value.qqWebSocketHost ||
+            accessToken != value.accessToken || selfQQNumber != value.selfQQNumber)
+            ++m_oneBotRevision;
+        oneBotImplementation = std::move(value.oneBotImplementation);
         accessToken = std::move(value.accessToken);
         selfQQNumber = value.selfQQNumber;
         defaultPrivateEnabled.store(
@@ -354,7 +371,12 @@ namespace insoulforge {
     auto Config::getAllLLMConfigs() const -> json { return ConfigStore::getAllLLMConfigs(); }
     auto Config::getQQConfig() const -> json { return ConfigStore::getQQConfig(); }
     auto Config::getMemoryConfig() const -> json { return ConfigStore::getMemoryConfig(); }
-    auto Config::getExecutionConfig() const -> json { return ConfigStore::getExecutionConfig(); }
+    auto Config::getExecutionConfig() const -> json {
+        std::scoped_lock lock(m_updateMutex);
+        auto result = ConfigStore::getExecutionConfig();
+        result["defaultPrivateEnabled"] = defaultPrivateEnabled.load(std::memory_order_relaxed);
+        return result;
+    }
     auto Config::getMcpConfig() const -> json { return ConfigStore::getMcpConfig(); }
     auto Config::getActivitiesConfig() const -> json { return ConfigStore::getActivitiesConfig(); }
     auto Config::saveActivitiesConfig(const json &value) -> std::expected<void, ConfigError> {
@@ -391,6 +413,8 @@ namespace insoulforge {
     auto Config::saveQQConfig(const json &value) -> std::expected<void, ConfigError> {
         std::scoped_lock lock(m_updateMutex);
         auto normalized = value;
+        if (normalized.is_object() && !normalized.contains("oneBotImplementation"))
+            normalized["oneBotImplementation"] = oneBotImplementation;
         // 管理界面以十进制字符串提交 用户 ID，存储与运行时继续使用 u64。
         if (normalized.is_object() && normalized.contains("selfQQNumber") && normalized["selfQQNumber"].is_string()) {
             const auto number = tryParseUInt64(normalized["selfQQNumber"].get<std::string>());
@@ -505,6 +529,7 @@ namespace insoulforge {
         return ConfigStore::saveExecutionConfig(value, [&next](const json &stored) -> std::expected<void, ConfigError> {
             return next.loadValues(stored);
         }).transform([this, &next] -> void {
+            defaultPrivateEnabled.store(next.defaultPrivateEnabled.load(std::memory_order_relaxed), std::memory_order_relaxed);
             execution.maxToolRounds.store(
               next.execution.maxToolRounds.load(std::memory_order_relaxed), std::memory_order_relaxed);
             execution.routeWhileReplying.store(

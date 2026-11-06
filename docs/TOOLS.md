@@ -65,12 +65,33 @@ Executor（`ExecutorAgent`）在单个 Agent 循环中通过工具调用生成�
 
 ### 表情包
 
+后台「OneBot 配置 → 实现类型」选择 NapCat 或 SnowLuma；模型工具及后台收藏管理 API 不变。
+适配层将两种收藏列表统一后供读取、发送、删除和改名使用：
+
+| 操作 | NapCat | SnowLuma |
+| --- | --- | --- |
+| 查询 `fetch_custom_face_detail` | `eId` 为表情 ID，`resId` 为资源 ID | `emoji_id` 为表情 ID，`resId` 为资源 ID |
+| 删除 `delete_custom_face` | 传 `res_id` | 传 `emoji_id`（该版本列表的 `resId` 与 `emoji_id` 相同） |
+| 修改描述 | `set_custom_face_desc`，传 `emoji_id/res_id/md5/desc` | `modify_custom_face`，传 `emoji_id/desc` |
+| 添加收藏 | `add_custom_face.file` 接收协议主机路径 | 同名接口；POSIX 绝对路径转换为 `file://` 来源 |
+
+下载与上传沿用 `download_file.url/base64`，读取 `data.file` 后再收藏；共享的拍一拍与空间接口不按实现拆分。
+原生商城发送由实际字段决定：`is_mark_face`、表情 ID、表情包 ID 和 key 齐全时发送 `mface`；否则有 URL 就发图片表情，
+两者都不满足则返回错误。SnowLuma 的收藏详情没有完整商城字段，不代表它不支持原生商城发送。
+本次不收集聊天中的商城字段。保存已成功但新增条目未确认或命名失败时，工具明确返回部分成功，不能认为名称已设置。
+
+接口核对基准（2026-11-06）：[NapCat main 收藏接口](https://github.com/NapNeko/NapCatQQ/blob/main/packages/napcat-onebot/action/extends/CustomFace.ts)、
+[SnowLuma v2.4.0 扩展实现](https://github.com/SnowLuma/SnowLuma/blob/v2.4.0/packages/onebot/src/actions/extended.ts)，
+以及 [SnowLuma main 空间实现](https://github.com/SnowLuma/SnowLuma/blob/main/packages/onebot/src/actions/qzone.ts)。
+本次验证使用本地模拟 OneBot 服务；未进行真实 QQ／SnowLuma 联调，不将源码契约兼容视为线上验证通过。
+
+
 | 工具             | 参数                                | 说明                                                                                                                                                                                                                                             |
 |------------------|-------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `send_face`      | `id`                                | 生成 QQ 原生表情 CQ 码（返回的 CQ 码需拼进 `send_message_and_finish` 的 content）                                                                                                                                                                                  |
 | `send_image`     | `image_id`                               | 读取图片缓存后以 Base64 直接发送到当前会话，记录图片 ID 和已有有效描述，缺失时使用识图及描述缓存，失败记录“图片描述不可用”仍发送；ID 只能来自当前可见快照                                                                                                                                                                                                                       |
 | `send_sticker`   | `name`, `group_id?`, `user_id?`     | 把收藏表情作为**独立消息**发送到当前或指定已启用会话，无需拼进 send_message_and_finish；商城表情走 `[CQ:mface]`，个人收藏走 `[CQ:image,sub_type=1]`，消息记入目标会话并推送 WebSocket                                                                              |
-| `save_sticker`   | `message_id`, `image_index`, `name` | 把用户发的图片存为收藏表情并设置描述名：工具按消息 ID 和从 0 开始的图片索引在当前会话记录中解析图片来源，先 `get_image` 拿容器内路径，失败回退 `download_file`；`add_custom_face` 保存后 diff 保存前后的 `res_id` 集合定位新表情，再设置描述名。 |
+| `save_sticker`   | `message_id`, `image_index`, `name` | 把用户发的图片存为收藏表情并设置描述名：工具按消息 ID 和从 0 开始的图片索引在当前会话记录中解析图片来源，先 `get_image` 拿容器内路径，失败回退 `download_file`；`add_custom_face` 保存后 diff 保存前后的 `res_id` 集合定位新表情，再设置描述名；命名未确认时返回部分成功。 |
 | `rename_sticker` | `name`, `new_name`                  | 修改收藏表情的描述名                                                                                                                                                                                                                             |
 | `delete_sticker` | `name`                              | 从 QQ 收藏表情中删除                                                                                                                                                                                                                             |
 
@@ -119,7 +140,7 @@ MCP 远程工具仍由“MCP 服务”管理。
 不接受本地路径或 base64。`ugc_right` 支持 `1` 所有人可见（默认）、`4` 好友可见、`64` 仅自己可见。
 
 依赖 [NapCat 的 send_qzone_msg 扩展](https://github.com/NapNeko/NapCatQQ/pull/1965)，
-不是标准 OneBot 11 能力。复用后台配置的 HTTP/WebSocket 连接及 Access Token，无需另外配置空间 Cookie。
+不是标准 OneBot 11 能力；SnowLuma 的同名接口也支持当前参数和 tid 返回。复用后台配置的 HTTP/WebSocket 连接及 Access Token，无需另外配置空间 Cookie。
 成功返回说说 `tid`，失败保留接口错误详情；超时或响应缺少 `tid` 时不能确认是否已发布，
 应先检查空间，工具不会自动重试。调用结果通过现有工具历史进入上下文，不伪装成聊天消息。
 

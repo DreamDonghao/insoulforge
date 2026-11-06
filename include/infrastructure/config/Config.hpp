@@ -103,6 +103,7 @@ namespace insoulforge {
         std::string accessToken;
         u64 selfQQNumber = 0;
         std::atomic<bool> defaultPrivateEnabled{false}; // 仅用于首次收到消息的新私聊
+        std::string oneBotImplementation = "napcat"; ///< NapCat 或 SnowLuma 扩展接口。
         std::string oneBotTransport = "http"; // http 或 websocket；同一时刻只使用一种
         std::string qqHttpHost;
         std::string qqWebSocketHost;
@@ -137,6 +138,9 @@ namespace insoulforge {
         [[nodiscard]] auto saveMemoryConfig(const json &value) -> std::expected<void, ConfigError>;
         [[nodiscard]] auto saveExecutionConfig(const json &value) -> std::expected<void, ConfigError>;
 
+        /// @brief 原子读取 OneBot 操作所需的连接与实现配置；revision 防止切换后复用旧操作。
+        [[nodiscard]] auto oneBotSnapshot() const -> json;
+
     private:
         Config() = default;
         auto loadValues(const json &value) -> std::expected<void, ConfigError>;
@@ -144,6 +148,7 @@ namespace insoulforge {
         void applyLLMValues(std::string_view name, Config &value);
         void applyQQValues(Config &value);
         void applyMemoryValues(const Config &value);
-        std::mutex m_updateMutex; ///< 串行化读取、保存和运行时更新，防止并发保存使状态回退。
+        u64 m_oneBotRevision = 0;
+        mutable std::mutex m_updateMutex; ///< 串行化读取、保存和运行时更新，防止并发保存使状态回退。
     };
 } // namespace insoulforge

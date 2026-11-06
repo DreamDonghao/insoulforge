@@ -32,6 +32,7 @@ const loadConfig = async (): Promise<void> => {
     }
     config.maxToolRounds = data.maxToolRounds
     config.routeWhileReplying = data.routeWhileReplying ?? false
+    config.defaultPrivateEnabled = data.defaultPrivateEnabled ?? false
     for (const field of mcpFields) {
       if (!Number.isInteger(data[field.key]) || data[field.key] < 1 || data[field.key] > field.maximum) throw new Error('MCP 数量配置无效')
       config[field.key] = data[field.key]
@@ -113,6 +114,11 @@ onMounted(loadConfig)
       <div class="form-group">
         <label class="form-checkbox"><input v-model="config.routeWhileReplying" :disabled="saving" type="checkbox" aria-describedby="route-while-replying-hint">回复期间继续判断新消息（保存后生效）</label>
         <p id="route-while-replying-hint" class="form-hint">默认关闭。开启后，普通群消息在回复期间仍由 Jev 优先判断，无法确定时回退回复决策模型；需要回复的消息合并到下一轮，不打断当前回复，也不同时生成多条回复。会增加路由请求量。</p>
+      </div>
+      <h2 class="card-title mcp-heading">私聊</h2>
+      <div class="form-group">
+        <label class="form-checkbox"><input v-model="config.defaultPrivateEnabled" :disabled="saving" type="checkbox" aria-describedby="private-default-hint">新私聊默认启用（保存后生效）</label>
+        <p id="private-default-hint" class="form-hint">仅影响首次收到消息的新私聊，不改变已有会话的启用状态。</p>
       </div>
       <button :disabled="saving" class="btn btn-primary" type="submit">
         {{ saving ? '保存中...' : '保存配置' }}

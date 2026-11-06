@@ -227,11 +227,12 @@ namespace insoulforge::CommandProcessor {
             if (!(input >> name)) {
                 co_return "用法: /delemoji <名称或序号>";
             }
-            const json emoji = co_await ToolRuntime::findFavoriteEmoji(name);
+            const auto connection = Config::instance().oneBotSnapshot();
+            const json emoji = co_await ToolRuntime::findFavoriteEmoji(name, std::nullopt, connection);
             if (emoji.is_null()) {
                 co_return fmt::format("收藏表情中找不到'{}'", name);
             }
-            if (!co_await OneBotClient::deleteCustomFace(getStr(emoji, "res_id"))) {
+            if (!co_await ToolRuntime::deleteFavoriteEmoji(getStr(emoji, "res_id"), std::nullopt, connection)) {
                 co_return fmt::format("删除失败: {}（QQ 客户端操作失败）", name);
             }
             ToolRuntime::invalidateFavoriteEmojiCache();

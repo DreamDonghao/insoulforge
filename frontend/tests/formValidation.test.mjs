@@ -126,7 +126,7 @@ test('user ID validation rejects empty IDs and preserves arbitrary string identi
 })
 
 test('OneBot validates only the selected transport and saves the exact QQ string', async () => {
-  globalThis.fetch = async () => response({oneBotTransport: 'http', selfQQNumber: '42', qqHttpHost: 'http://localhost:3000', qqWebSocketHost: 'invalid hidden address'})
+  globalThis.fetch = async () => response({oneBotImplementation: 'napcat', oneBotTransport: 'http', selfQQNumber: '42', qqHttpHost: 'http://localhost:3000', qqWebSocketHost: 'invalid hidden address'})
   const state = mount('onebot/OneBotConfig')
   await flush()
   const focused = observeFocus(), submitted = []
@@ -134,6 +134,7 @@ test('OneBot validates only the selected transport and saves the exact QQ string
   state.qqConfig.selfQQNumber = '9007199254740993'
   await state.saveQQConfig()
   assert.equal(submitted[0].selfQQNumber, '9007199254740993')
+  state.qqConfig.oneBotImplementation = 'snowluma'
   state.qqConfig.oneBotTransport = 'websocket'
   await state.saveQQConfig()
   assert.equal(submitted.length, 1)
@@ -142,6 +143,8 @@ test('OneBot validates only the selected transport and saves the exact QQ string
   state.qqConfig.qqWebSocketHost = 'wss://example.com/ws'
   await state.saveQQConfig()
   assert.equal(submitted.length, 2)
+  assert.equal(submitted[1].oneBotImplementation, 'snowluma')
+  assert.equal(submitted[1].qqHttpHost, 'http://localhost:3000')
 })
 
 test('memory validation preserves invalid drafts and reports both numeric and dependent limits', async () => {
