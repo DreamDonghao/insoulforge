@@ -24,12 +24,16 @@ const person = () => ({user_id: '42', name: '测试人物', affinity: 7, profile
 
 function page(post, settings = {affinityEnabled: true}) {
   const requests = [], module = {exports: {}}
-  const require = name => name === 'vue' ? {...vue, onMounted() {}, onUnmounted() {}} :
+  const require = name => name.includes('usePeople') ? (() => {
+    const helper = {exports: {}}
+    const code = ts.transpileModule(readFileSync(new URL('../src/shared/features/conversation/usePeople.ts', import.meta.url), 'utf8'), {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020}}).outputText
+    new Function('require', 'module', 'exports', 'fetch', code)(require, helper, helper.exports, mockFetch)
+    return helper.exports
+  })() : name === 'vue' ? {...vue, onMounted() {}, onUnmounted() {}} :
     name.includes('useUnsavedChanges') ? {useUnsavedChanges() {}, confirmDiscard: () => true} :
     name.includes('session') ? sessionModule.exports :
       Object.fromEntries(['ArrowDownWideNarrow', 'ArrowUpNarrowWide', 'Pencil', 'Trash2'].map(key => [key, () => null]))
-  new Function('require', 'module', 'exports', 'fetch', outputText)(require, module, module.exports,
-    async (url, options = {}) => {
+  const mockFetch = async (url, options = {}) => {
       requests.push({url, ...options})
       const current = person()
       if (!settings.affinityEnabled) delete current.affinity
@@ -39,7 +43,8 @@ function page(post, settings = {affinityEnabled: true}) {
       return {ok: result.status === 200, status: result.status,
         headers: new Headers({'content-type': 'application/json'}),
         json: async () => result.body, text: async () => JSON.stringify(result.body)}
-    })
+    }
+  new Function('require', 'module', 'exports', 'fetch', outputText)(require, module, module.exports, mockFetch)
   const scope = vue.effectScope()
   const state = vue.proxyRefs(scope.run(() => module.exports.default.setup({}, {expose() {}})))
   state.people = [{...person(), pending_count: 0}]

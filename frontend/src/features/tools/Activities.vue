@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NavIcon from '../../components/NavIcon.vue'
 import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
 import EnabledSwitch from '../../components/EnabledSwitch.vue'
 import {useToast} from '../../composables/useToast'
@@ -139,14 +140,15 @@ onBeforeUnmount(() => {
     <form class="token-form" @submit.prevent="saveToken">
       <div class="form-group">
         <label class="form-label" for="activity-token">活动服务接入 Token</label>
-        <div class="activity-secret">
+        <div class="secret-input">
           <input id="activity-token" v-model="token" class="form-input" :type="showToken ? 'text' : 'password'"
                  autocomplete="new-password" autocapitalize="off" :spellcheck="false" minlength="16"
                  aria-describedby="activity-token-hint" :disabled="!loaded || saving" placeholder="设置所有活动服务连接时携带的 Token">
-          <button type="button" class="btn btn-secondary" :disabled="!loaded || saving"
+          <button type="button" class="secret-toggle" :disabled="!loaded || saving"
                   aria-controls="activity-token" :aria-pressed="showToken"
+                  :title="showToken ? '隐藏接入 Token' : '显示接入 Token'"
                   :aria-label="showToken ? '隐藏接入 Token' : '显示接入 Token'" @click="showToken = !showToken">
-            {{ showToken ? '隐藏' : '显示' }}
+            <NavIcon :name="showToken ? 'eye-off' : 'eye'"/>
           </button>
         </div>
         <p id="activity-token-hint" class="form-hint">至少 16 个字符。修改后已连接服务会断开，清空则关闭接入。服务连接 <code>/activities/ws</code>，携带此 Token 后自动上报名称和描述。</p>
@@ -181,18 +183,15 @@ onBeforeUnmount(() => {
 <style scoped>
 .activity-content {display: flex; flex-direction: column; gap: 24px}
 .page-header {grid-template-columns: minmax(0, 1fr) auto; gap: 16px}
-.token-form {display: flex; align-items: flex-start; gap: 16px; border-bottom: 1px solid var(--border-color); padding-bottom: 24px}
+.token-form {display: flex; align-items: flex-start; gap: 16px; border-bottom: 0; padding: 24px; background: var(--card-bg); border-radius: var(--radius-md); }
 .token-form .form-group {flex: 1; min-width: 0; margin: 0}
 .token-form > .btn {margin-top: 28px; flex-shrink: 0}
-.activity-secret {display: flex; gap: 8px}
-.activity-secret .form-input {flex: 1; min-width: 0}
-.activity-secret .btn {flex-shrink: 0; min-width: 64px}
 .activity-title {display: flex; align-items: center; gap: 12px; flex-wrap: wrap}
 .activity-actions {display: flex; gap: 16px; flex-wrap: wrap; align-items: center}
 .activity-title h2 {margin: 0; font-size: 18px; color: var(--text-primary)}
 .activity-title span, small {font-size: 13px; color: var(--text-secondary)}
 .activity-title .is-running {color: var(--primary)}
-.activity-row {display: grid; grid-template-columns: 120px minmax(0, 1fr) auto; gap: 24px; padding: 28px 0; border-bottom: 1px solid var(--border-color); align-items: start}
+.activity-row {display: grid; grid-template-columns: 120px minmax(0, 1fr) auto; gap: 24px; padding: 24px; border-bottom: 0; align-items: start; background: var(--card-bg); margin-bottom: 16px; border-radius: var(--radius-md); }
 .activity-info p {margin: 10px 0; overflow-wrap: anywhere; color: var(--text-secondary)}
 .activity-info .activity-status {color: var(--text-primary)}
 .activity-error {color: var(--danger) !important}

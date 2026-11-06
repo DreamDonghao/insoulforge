@@ -49,7 +49,7 @@ const activate = async (key: string): Promise<void> => {
     <p :id="`${idPrefix}-instructions`" class="sr-only">使用左右方向键、Home 或 End 移动焦点，按 Enter 或空格切换内容。</p>
     <div class="sliding-tabs-scroll">
       <div ref="tablist" class="tabs sliding-tabs" role="tablist" :aria-label="label" :aria-describedby="`${idPrefix}-instructions`" aria-orientation="horizontal"
-           :style="{'--tab-count': items.length, '--tab-index': Math.max(0, items.findIndex(item => item.key === modelValue)), minWidth: `${items.length * itemMinWidth}px`}">
+           :style="{'--tab-count': items.length, '--tab-index': Math.max(0, items.findIndex(item => item.key === modelValue)), '--tabs-min-width': `${items.length * itemMinWidth}px`}">
         <span class="sliding-tab-indicator" aria-hidden="true"></span>
         <button v-for="item in items" :id="tabId(item.key)" :key="item.key" type="button" class="tab" role="tab"
                 :class="{active: modelValue === item.key}" :aria-selected="modelValue === item.key"
@@ -76,6 +76,7 @@ const activate = async (key: string): Promise<void> => {
   isolation: isolate;
   display: flex;
   width: 100%;
+  min-width: var(--tabs-min-width);
   margin-bottom: 0;
   gap: 0;
 }
@@ -103,9 +104,14 @@ const activate = async (key: string): Promise<void> => {
   z-index: -1;
   pointer-events: none;
   background: var(--primary-soft);
-  border-bottom: 2px solid var(--primary);
   transform: translateX(calc(var(--tab-index) * 100%));
   transition: transform 220ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  border-radius: var(--radius-sm);
+}
+
+@media (min-width: 1100px) {
+  .sliding-tabs { min-width: 0; }
+  .tab { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 }
 
 @media (prefers-reduced-motion: reduce) {

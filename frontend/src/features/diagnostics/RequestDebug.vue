@@ -306,7 +306,8 @@ onUnmounted(() => { disposed = true; ++loadVersion; controller?.abort(); window.
   gap: 12px;
   flex-shrink: 0;
   border-top: 0;
-  padding: 0 0 20px;
+  padding: 16px;
+  margin-bottom: 16px;
 }
 
 .search {
@@ -326,11 +327,11 @@ onUnmounted(() => { disposed = true; ++loadVersion; controller?.abort(); window.
 .layout {
   display: grid;
   grid-template-columns: minmax(240px, 5fr) minmax(0, 7fr);
-  gap: 0;
+  gap: 16px;
   align-items: stretch;
   flex: 1;
   min-height: 0;
-  border-top: 1px solid var(--border);
+  border-top: 0;
 }
 
 .layout > .card {
@@ -353,8 +354,8 @@ onUnmounted(() => { disposed = true; ++loadVersion; controller?.abort(); window.
 
   .layout > .detail-card {
     border-left: 0;
-    border-top: 1px solid var(--border);
-    padding: 20px 0;
+    border-top: 0;
+    padding: 20px;
   }
 }
 
@@ -372,7 +373,7 @@ onUnmounted(() => { disposed = true; ++loadVersion; controller?.abort(); window.
   border: 0;
   flex-shrink: 0;
   padding: 14px 16px;
-  border-radius: 0;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   border-bottom: 1px solid var(--border);
 }
@@ -419,7 +420,7 @@ onUnmounted(() => { disposed = true; ++loadVersion; controller?.abort(); window.
 
 .chip {
   padding: 1px 8px;
-  border-radius: 0;
+  border-radius: var(--radius-pill);
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
@@ -444,7 +445,7 @@ onUnmounted(() => { disposed = true; ++loadVersion; controller?.abort(); window.
   background: var(--primary-soft);
   color: var(--primary);
   padding: 1px 8px;
-  border-radius: 0;
+  border-radius: var(--radius-pill);
   font-size: 12px;
   white-space: nowrap;
 }
@@ -474,8 +475,8 @@ onUnmounted(() => { disposed = true; ++loadVersion; controller?.abort(); window.
 
 .detail-card {
   min-width: 0;
-  padding: 20px 0 20px 28px;
-  border-left: 1px solid var(--border);
+  padding: 20px;
+  border-left: 0;
 }
 
 .detail-meta {
@@ -483,8 +484,10 @@ onUnmounted(() => { disposed = true; ++loadVersion; controller?.abort(); window.
   overflow-wrap: anywhere;
   font-size: 13px;
   color: var(--text-secondary);
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--border);
+  padding: 12px;
+  border-bottom: 0;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
 }
 
 .body-section {
@@ -507,7 +510,7 @@ onUnmounted(() => { disposed = true; ++loadVersion; controller?.abort(); window.
   overflow: auto;
   background: var(--code-bg);
   color: var(--code-text);
-  border-radius: 0;
+  border-radius: var(--radius-sm);
   font-size: 12px;
   line-height: 1.5;
   white-space: pre-wrap;

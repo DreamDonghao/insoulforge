@@ -73,7 +73,7 @@ for (const [name, theme] of [['light', light], ['dark', dark]]) {
 
 for (const [name, theme] of [['light', light], ['dark', dark]]) {
   test(`${name}: actual login button and request-tag CSS use readable foreground/background pairs`, () => {
-    const app = readFileSync(new URL('../src/App.vue', import.meta.url), 'utf8')
+    const app = readFileSync(new URL('../src/desktop/DesktopLogin.vue', import.meta.url), 'utf8')
     const button = app.match(/\.login-button\s*\{([^}]+)\}/)[1]
     const foreground = button.match(/color:\s*([^;]+);/)[1]
     const background = button.match(/background:\s*([^;]+);/)[1]

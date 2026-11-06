@@ -276,9 +276,9 @@ onMounted(() => loadEmojis())
 .emoji-row-actions { justify-content: center; margin-top: 8px; }
 .emoji-hint { color: var(--text-secondary); font-size: 13px; overflow-wrap: anywhere; }
 .emoji-overlay { display: flex; align-items: center; justify-content: center; padding: 16px; background: var(--overlay-bg, rgba(0,0,0,.5)); box-sizing: border-box; }
-.emoji-dialog { background: var(--bg-main); border: 1px solid var(--border); padding: 24px; width: min(480px, 100%); max-height: 100%; overflow-y: auto; overflow-wrap: anywhere; }
+.emoji-dialog { background: var(--bg-main); border: 1px solid var(--border); padding: 24px; width: min(480px, 100%); max-height: 100%; overflow-y: auto; overflow-wrap: anywhere; border-radius: var(--radius-lg); }
 .emoji-footer { justify-content: flex-end; margin-top: 24px; }
 .emoji-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(140px, 100%), 1fr)); gap: 24px 16px; }
 .emoji-item { min-width: 0; text-align: center; }
-.emoji-preview { display: flex; align-items: center; justify-content: center; height: 100px; background: var(--bg-secondary); border: 1px solid var(--border); }
+.emoji-preview { display: flex; align-items: center; justify-content: center; height: 100px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); }
 </style>

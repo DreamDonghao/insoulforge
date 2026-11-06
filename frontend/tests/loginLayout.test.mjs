@@ -6,25 +6,32 @@ import {renderToString} from 'vue/server-renderer'
 import * as vue from 'vue'
 
 const source = readFileSync(new URL('../src/App.vue', import.meta.url), 'utf8')
-const {descriptor} = parse(source)
+const desktopTemplate = parse(readFileSync(new URL('../src/desktop/DesktopApp.vue', import.meta.url), 'utf8')).descriptor.template.content
+const loginTemplate = parse(readFileSync(new URL('../src/desktop/DesktopLogin.vue', import.meta.url), 'utf8')).descriptor.template.content
+const expandedSource = source.replace(/<DesktopLogin[^>]+\/>/, loginTemplate.replace('<main', '<main v-else-if="!authenticationChecked || !authenticated"'))
+const {descriptor} = parse(expandedSource.replace('<DesktopApp :state="desktopState"/>', desktopTemplate))
 const compiled = compileTemplate({source: descriptor.template.content, filename: 'App.vue',
   id: 'login-test', compilerOptions: {mode: 'function'}})
 assert.deepEqual(compiled.errors, [])
 const render = new Function('Vue', compiled.code)(vue)
 const components = Object.fromEntries([...descriptor.template.content.matchAll(/<([A-Z]\w*)/g)]
   .map(([, name]) => [name, {render: () => null}]))
+components.ModalDialog = {render() { return vue.h('div', {role: 'dialog'}, this.$slots.default?.()) }}
 
 function page() {
   let tree, submits = 0
   const state = vue.reactive({
-    authenticationChecked: false, authenticated: false, theme: 'light',
+    authenticationChecked: false, authenticated: false, theme: 'light', accentColor: '#16746f', accentStorageError: '', setAccentColor() {},
     get themeToggleLabel() { return this.theme === 'dark' ? '切换为浅色模式' : '切换为深色模式' },
     accessToken: '', loginError: '', loginSubmitting: false, showAccessToken: false,
+    logoutConfirmationVisible: false, logoutSubmitting: false, logoutError: '', logoutHasUnsavedChanges: () => false,
     notifications: [], toastTarget: null, dismissToast() {}, currentView: 'dashboard', dailyNavItems: [], systemNavItems: [],
     sidebarNav: null, navIndicator: {height: 0, top: 0}, avatarUrl: '', avatarFailed: false,
-    qqConfig: {botName: 'Bot'}, resetPageScroll() {},
+    qqConfig: {botName: 'Bot'}, resetPageScroll() {}, isMobile: false, mobileNavigationOpen: false, ModalDialog: components.ModalDialog,
     changeView: view => { state.currentView = view },
-    login: () => { submits++ }, logout: () => { state.authenticated = false },
+    login: () => { submits++ }, logout: () => { state.logoutConfirmationVisible = true },
+    cancelLogout: () => { state.logoutConfirmationVisible = false },
+    confirmLogout: () => { state.logoutConfirmationVisible = false; state.authenticated = false },
     toggleTheme: () => { state.theme = state.theme === 'dark' ? 'light' : 'dark' }
   })
   return {
@@ -38,8 +45,10 @@ function page() {
     find(predicate) {
       function visit(node) {
         if (!node || typeof node !== 'object') return
+        if (Array.isArray(node)) return node.map(visit).find(Boolean)
         if (predicate(node)) return node
         if (Array.isArray(node.children)) return node.children.map(visit).find(Boolean)
+        if (typeof node.children?.default === 'function') return visit(node.children.default())
       }
       return visit(tree)
     }
@@ -96,7 +105,7 @@ test('login controls preserve theme, token visibility, validation state and subm
   assert.ok(html.includes('role="alert">访问令牌无效'))
 })
 
-test('authenticated content excludes the login shell and logout returns to the same form', async () => {
+test('logout presents confirmation and cancellation preserves the page before explicit confirmation', async () => {
   const view = page()
   view.state.authenticationChecked = true
   view.state.authenticated = true
@@ -104,6 +113,16 @@ test('authenticated content excludes the login shell and logout returns to the s
   assert.ok(html.includes('class="container"'))
   assert.equal(html.includes('class="login-page"'), false)
   view.state.logout()
+  view.state.logoutHasUnsavedChanges = () => true
+  const confirmation = await view.html()
+  assert.ok(confirmation.includes('有未保存的修改'))
+  const cancel = view.find(node => node.props?.['data-modal-initial-focus'] !== undefined)
+  assert.equal(cancel.props.type, 'button')
+  cancel.props.onClick()
+  assert.equal(view.state.authenticated, true)
+  assert.equal(view.state.logoutConfirmationVisible, false)
+  view.state.logout()
+  view.state.confirmLogout()
   const login = await view.html()
   assert.ok(login.includes('<form'))
   assert.equal(login.split('class="login-identity"').length - 1, 1)
@@ -131,4 +150,20 @@ test('compact navigation retains names, button behavior and an accurate item cou
   view.state.dailyNavItems.push({key: 'groups', label: '会话管理', icon: 'groups'})
   await view.html()
   assert.equal(sidebar().props.style['--nav-item-count'], 5)
+})
+
+test('theme settings use normal page navigation and show an active sidebar entry', async () => {
+  const view = page()
+  view.state.authenticationChecked = true
+  view.state.authenticated = true
+  view.state.currentView = 'llm'
+  await view.html()
+  const button = view.find(node => node.props?.['aria-label'] === '主题配色')
+  assert.equal(button.props.type, 'button')
+  button.props.onClick()
+  assert.equal(view.state.currentView, 'themeSettings')
+  await view.html()
+  const selected = view.find(node => node.props?.['aria-label'] === '主题配色')
+  assert.equal(selected.props['aria-current'], 'page')
+  assert.match(selected.props.class, /active/)
 })

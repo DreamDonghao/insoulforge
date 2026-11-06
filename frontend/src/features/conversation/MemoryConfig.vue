@@ -9,6 +9,7 @@ import RequestError from '../../components/RequestError.vue'
 import {requestJson, requestError} from '../../utils/api'
 import {confirmDiscard, useUnsavedChanges} from '../../composables/useUnsavedChanges'
 import FieldError from '../../components/FieldError.vue'
+import FieldHelp from '../../components/FieldHelp.vue'
 import {useFormValidation} from '../../composables/useFormValidation'
 import {I32_MAX, numberError} from '../../utils/validation'
 
@@ -39,7 +40,49 @@ const memoryConfig = reactive<MemoryConfig>({
   longTermRecallThreshold: 0.65,
   longTermInjectThreshold: 0.45
 })
-const textLimitFields: {key: keyof MemoryConfig, label: string}[] = [
+type NumericMemoryKey = Exclude<keyof MemoryConfig, 'affinityEnabled'>
+interface MemoryField {key: NumericMemoryKey, label: string, minimum: number, help: string, threshold?: boolean}
+const settingSections: {title: string, summary: string, fields: MemoryField[]}[] = [
+  {
+    title: '上下文窗口',
+    summary: '',
+    fields: [
+      {key: 'contextWindowLimit', label: '近期上下文上限', minimum: 1, help: 'Jev、Router 与 Agent 实际可见的最近消息数上限'},
+      {key: 'jevWindowSize', label: 'Jev 窗口条数', minimum: 1, help: '每次取最近 N 条消息判断是否回复，默认 10 条；受近期上下文上限限制'},
+      {key: 'routerWindowTriggerCount', label: 'Router 窗口触发条数', minimum: 1, help: 'Router 上下文超过 N 条时批量滑动（建议 40~60，前缀需超过缓存阈值）'},
+      {key: 'routerWindowKeepCount', label: 'Router 窗口保留条数', minimum: 1, help: '滑动后保留的条数，必须小于触发条数'},
+      {key: 'sharedConversationMessageCount', label: '每会话共享消息数', minimum: 1, help: ''},
+    ]
+  },
+  {
+    title: '记忆总结',
+    summary: '成功总结后会删除对应的最旧消息；每批总结条数不能超过触发条数。',
+    fields: [
+      {key: 'memorySummaryTriggerCount', label: '总结触发条数', minimum: 1, help: '完整消息达到该数量时创建一批记忆总结任务'},
+      {key: 'memorySummaryBatchSize', label: '每批总结条数', minimum: 1, help: '成功总结后删除的最旧消息数，不能超过触发条数'},
+      {key: 'memorySummaryContextCount', label: '总结补充上下文条数', minimum: 0, help: '仅帮助理解被总结消息的后续语境，不会被提取或删除'},
+      {key: 'conversationSummaryMaxCount', label: '会话聊天摘要保留条数', minimum: 1, help: '每次消息总结时生成摘要，按时间保留每个会话最近 N 条，放在回复上下文的历史消息之前。'},
+    ]
+  },
+  {
+    title: '长期记忆',
+    summary: '',
+    fields: [
+      {key: 'longTermRecallThreshold', label: '长期记忆召回阈值', minimum: 0, help: '新记忆召回长期记忆做合并去重的相似度阈值（大于 0 且小于 1，越高越严格）', threshold: true},
+      {key: 'longTermInjectThreshold', label: '长期记忆注入阈值', minimum: 0, help: '消息入库时召回长期记忆、注入提示词的相似度阈值（大于 0 且小于 1，越高越严格）', threshold: true},
+    ]
+  },
+  {
+    title: '人物记忆超限压缩',
+    summary: '触发值为 0 时关闭。目标为篇幅参考，实际结果可能超出。',
+    fields: [
+      {key: 'personCompressionTriggerTokens', label: '压缩触发 Token（0 关闭）', minimum: 0, help: '每日人物整理后执行，使用 Memory 模型；已有统计为 0 的人物不补算。'},
+      {key: 'personCompressionTargetTokens', label: '压缩目标 Token', minimum: 0, help: '启用压缩时，目标必须大于 0 且小于触发 Token。'},
+    ]
+  },
+]
+const hintsDismissed = ref(false)
+const textLimitFields: {key: NumericMemoryKey, label: string}[] = [
   {key: 'conversationSummaryMaxChars', label: '会话聊天摘要（每条）'},
   {key: 'personMemoryEntryMaxChars', label: '人物记忆提取（每条）'},
   {key: 'longTermMemoryEntryMaxChars', label: '长期记忆（每条）'},
@@ -121,124 +164,85 @@ const saveMemoryConfig = async (): Promise<void> => {
       <h1 class="page-title">记忆与上下文</h1>
       <p class="page-subtitle">配置记忆系统与回复上下文参数</p>
     </div>
-
     <RequestError :message="loadError" :busy="loading" @retry="loadConfig"/>
     <p v-if="loading" role="status">加载中…</p>
-    <form v-if="loaded" class="card" novalidate @submit.prevent="saveMemoryConfig">
-      <div class="card-header">
-        <h3 class="card-title">参数设置</h3>
+    <form v-if="loaded" class="memory-form" :class="{'hints-dismissed': hintsDismissed}" novalidate
+          @keydown.esc="hintsDismissed = true" @submit.prevent="saveMemoryConfig">
+      <section class="memory-section">
+        <h2 class="card-title section-heading">好感度</h2>
+        <div class="setting-row">
+          <div class="setting-description">
+            <div class="setting-name">
+              <label for="memory-affinityEnabled">启用好感度</label>
+              <FieldHelp id="memory-affinityEnabled-details" label="好感度">关闭后停止评分，模型和人物页面不再使用好感度；历史分数保留，重新开启后恢复。</FieldHelp>
+            </div>
+            <p id="memory-affinityEnabled-hint" class="setting-summary">关闭后停止使用好感度，历史分数保留。</p>
+          </div>
+          <input id="memory-affinityEnabled" v-model="memoryConfig.affinityEnabled" type="checkbox" :disabled="saving" aria-describedby="memory-affinityEnabled-hint">
+        </div>
+      </section>
+      <section v-for="section in settingSections" :key="section.title" class="memory-section">
+        <h2 class="card-title section-heading">{{ section.title }}</h2>
+        <p v-if="section.summary" class="section-summary">{{ section.summary }}</p>
+        <div class="settings-list">
+          <div v-for="field in section.fields" :key="field.key" class="number-row" @focusin="hintsDismissed = false">
+            <div class="setting-name">
+              <label class="form-label" :for="`memory-${field.key}`">{{ field.label }}</label>
+              <FieldHelp v-if="field.help" :id="`memory-${field.key}-details`" :label="field.label">{{ field.help }}</FieldHelp>
+            </div>
+            <input v-bind="fieldAttrs(`memory-${field.key}`, `memory-${field.key}-hint`)" v-model.number="memoryConfig[field.key]"
+                   :disabled="saving" class="form-input" type="number" :min="field.minimum" :max="field.threshold ? 1 : I32_MAX" :step="field.threshold ? 'any' : 1">
+            <p :id="`memory-${field.key}-hint`" class="range-hint" role="tooltip">{{ field.threshold ? '大于 0 且小于 1，越高越严格' : `${field.minimum}～${I32_MAX}，整数` }}</p>
+            <FieldError :field="`memory-${field.key}`" :message="errors[`memory-${field.key}`]"/>
+          </div>
+        </div>
+      </section>
+      <section class="memory-section">
+        <h2 class="card-title section-heading">总结篇幅（字）</h2>
+        <p class="section-summary">字数为模型生成的目标上限，实际可能超出，程序不会强行截断。</p>
+        <div class="settings-list">
+          <div v-for="field in textLimitFields" :key="field.key" class="number-row" @focusin="hintsDismissed = false">
+            <label class="form-label" :for="`memory-${field.key}`">{{ field.label }}</label>
+            <input v-model.number="memoryConfig[field.key]" v-bind="fieldAttrs(`memory-${field.key}`, `memory-${field.key}-hint`)" :disabled="saving" class="form-input" min="1" :max="I32_MAX" step="1" type="number">
+            <p :id="`memory-${field.key}-hint`" class="range-hint" role="tooltip">1～{{ I32_MAX }} 字，整数</p>
+            <FieldError :field="`memory-${field.key}`" :message="errors[`memory-${field.key}`]"/>
+          </div>
+        </div>
+      </section>
+      <div class="save-actions">
+        <button :disabled="saving" class="btn btn-primary" type="submit">{{ saving ? '保存中...' : '保存配置' }}</button>
+        <p class="save-hint" :class="{'has-changes': isDirty()}" role="status">{{ isDirty() ? '有未保存的修改' : '修改后需保存' }}</p>
       </div>
-      <div class="form-group">
-        <label class="form-checkbox"><input v-model="memoryConfig.affinityEnabled" type="checkbox" :disabled="saving" aria-describedby="memory-affinityEnabled-hint">启用好感度（保存后生效）</label>
-        <p id="memory-affinityEnabled-hint" class="form-hint">关闭后停止评分，模型和人物页面不再使用好感度；历史分数保留，重新开启后恢复。</p>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label for="memory-contextWindowLimit" class="form-label">近期上下文上限</label>
-          <input v-bind="fieldAttrs('memory-contextWindowLimit', 'memory-contextWindowLimit-hint')" :disabled="saving" v-model.number="memoryConfig.contextWindowLimit" class="form-input" type="number" min="1" :max="I32_MAX" step="1">
-          <FieldError field="memory-contextWindowLimit" :message="errors['memory-contextWindowLimit']"/>
-          <p id="memory-contextWindowLimit-hint" class="form-hint">1～2147483647，整数。Jev、Router 与 Agent 实际可见的最近消息数上限</p>
-        </div>
-        <div class="form-group">
-          <label for="memory-memorySummaryTriggerCount" class="form-label">总结触发条数</label>
-          <input v-bind="fieldAttrs('memory-memorySummaryTriggerCount', 'memory-memorySummaryTriggerCount-hint')" :disabled="saving" v-model.number="memoryConfig.memorySummaryTriggerCount" class="form-input" type="number" min="1" :max="I32_MAX" step="1">
-          <FieldError field="memory-memorySummaryTriggerCount" :message="errors['memory-memorySummaryTriggerCount']"/>
-          <p id="memory-memorySummaryTriggerCount-hint" class="form-hint">1～2147483647，整数。完整消息达到该数量时创建一批记忆总结任务</p>
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label for="memory-memorySummaryBatchSize" class="form-label">每批总结条数</label>
-          <input v-bind="fieldAttrs('memory-memorySummaryBatchSize', 'memory-memorySummaryBatchSize-hint')" :disabled="saving" v-model.number="memoryConfig.memorySummaryBatchSize" class="form-input" type="number" min="1" :max="I32_MAX" step="1">
-          <FieldError field="memory-memorySummaryBatchSize" :message="errors['memory-memorySummaryBatchSize']"/>
-          <p id="memory-memorySummaryBatchSize-hint" class="form-hint">1～2147483647，整数。成功总结后删除的最旧消息数，不能超过触发条数</p>
-        </div>
-        <div class="form-group">
-          <label for="memory-memorySummaryContextCount" class="form-label">总结补充上下文条数</label>
-          <input v-bind="fieldAttrs('memory-memorySummaryContextCount', 'memory-memorySummaryContextCount-hint')" :disabled="saving" v-model.number="memoryConfig.memorySummaryContextCount" class="form-input" type="number" min="0" :max="I32_MAX" step="1">
-          <FieldError field="memory-memorySummaryContextCount" :message="errors['memory-memorySummaryContextCount']"/>
-          <p id="memory-memorySummaryContextCount-hint" class="form-hint">0～2147483647，整数。仅帮助理解被总结消息的后续语境，不会被提取或删除</p>
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label for="memory-routerWindowTriggerCount" class="form-label">Router 窗口触发条数</label>
-          <input v-bind="fieldAttrs('memory-routerWindowTriggerCount', 'memory-routerWindowTriggerCount-hint')" :disabled="saving" v-model.number="memoryConfig.routerWindowTriggerCount" class="form-input" type="number" min="1" :max="I32_MAX" step="1">
-          <FieldError field="memory-routerWindowTriggerCount" :message="errors['memory-routerWindowTriggerCount']"/>
-          <p id="memory-routerWindowTriggerCount-hint" class="form-hint">1～2147483647，整数。Router 上下文超过 N 条时批量滑动（建议 40~60，前缀需超过缓存阈值）</p>
-        </div>
-        <div class="form-group">
-          <label for="memory-routerWindowKeepCount" class="form-label">Router 窗口保留条数</label>
-          <input v-bind="fieldAttrs('memory-routerWindowKeepCount', 'memory-routerWindowKeepCount-hint')" :disabled="saving" v-model.number="memoryConfig.routerWindowKeepCount" class="form-input" type="number" min="1" :max="I32_MAX" step="1">
-          <FieldError field="memory-routerWindowKeepCount" :message="errors['memory-routerWindowKeepCount']"/>
-          <p id="memory-routerWindowKeepCount-hint" class="form-hint">1～2147483647，整数。滑动后保留的条数，必须小于触发条数</p>
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label for="memory-jevWindowSize" class="form-label">Jev 窗口条数</label>
-          <input v-bind="fieldAttrs('memory-jevWindowSize', 'memory-jevWindowSize-hint')" :disabled="saving" v-model.number="memoryConfig.jevWindowSize" class="form-input" type="number" min="1" :max="I32_MAX" step="1">
-          <FieldError field="memory-jevWindowSize" :message="errors['memory-jevWindowSize']"/>
-          <p id="memory-jevWindowSize-hint" class="form-hint">1～2147483647，整数。每次取最近 N 条消息判断是否回复，默认 10 条；受近期上下文上限限制</p>
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label for="memory-longTermRecallThreshold" class="form-label">长期记忆召回阈值</label>
-          <input v-bind="fieldAttrs('memory-longTermRecallThreshold', 'memory-longTermRecallThreshold-hint')" :disabled="saving" v-model.number="memoryConfig.longTermRecallThreshold" class="form-input"
-                 type="number" min="0" :max="1" step="any">
-          <FieldError field="memory-longTermRecallThreshold" :message="errors['memory-longTermRecallThreshold']"/>
-          <p id="memory-longTermRecallThreshold-hint" class="form-hint">新记忆召回长期记忆做合并去重的相似度阈值（大于 0 且小于 1，越高越严格）</p>
-        </div>
-        <div class="form-group">
-          <label for="memory-longTermInjectThreshold" class="form-label">长期记忆注入阈值</label>
-          <input v-bind="fieldAttrs('memory-longTermInjectThreshold', 'memory-longTermInjectThreshold-hint')" :disabled="saving" v-model.number="memoryConfig.longTermInjectThreshold" class="form-input"
-                 type="number" min="0" :max="1" step="any">
-          <FieldError field="memory-longTermInjectThreshold" :message="errors['memory-longTermInjectThreshold']"/>
-          <p id="memory-longTermInjectThreshold-hint" class="form-hint">消息入库时召回长期记忆、注入提示词的相似度阈值（大于 0 且小于 1，越高越严格）</p>
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label for="memory-sharedConversationMessageCount" class="form-label">每会话共享消息数</label>
-          <input v-bind="fieldAttrs('memory-sharedConversationMessageCount', 'memory-sharedConversationMessageCount-hint')" :disabled="saving" v-model.number="memoryConfig.sharedConversationMessageCount" class="form-input"
-                 type="number" min="1" :max="I32_MAX" step="1">
-          <FieldError field="memory-sharedConversationMessageCount" :message="errors['memory-sharedConversationMessageCount']"/><p id="memory-sharedConversationMessageCount-hint" class="form-hint">1～2147483647 的整数</p>
-        </div>
-      </div>
-      <div class="form-group">
-        <label for="memory-conversationSummaryMaxCount" class="form-label">会话聊天摘要保留条数</label>
-        <input v-bind="fieldAttrs('memory-conversationSummaryMaxCount', 'memory-conversationSummaryMaxCount-hint')" :disabled="saving" v-model.number="memoryConfig.conversationSummaryMaxCount" class="form-input" type="number" min="1" :max="I32_MAX" step="1">
-          <FieldError field="memory-conversationSummaryMaxCount" :message="errors['memory-conversationSummaryMaxCount']"/>
-        <p id="memory-conversationSummaryMaxCount-hint" class="form-hint">1～2147483647，整数。每次消息总结时生成摘要，按时间保留每个会话最近 N 条，放在回复上下文的历史消息之前。</p>
-      </div>
-      <h3 class="card-title">人物记忆超限压缩</h3>
-      <p class="form-hint">每日人物整理后执行，使用 Memory 模型。触发值为 0 时关闭；已有统计为 0 的人物不补算。目标是篇幅参考，实际结果可能超出。</p>
-      <div class="form-row">
-        <div class="form-group">
-          <label for="memory-personCompressionTriggerTokens" class="form-label">压缩触发 Token（0 关闭）</label>
-          <input v-model.number="memoryConfig.personCompressionTriggerTokens" v-bind="fieldAttrs('memory-personCompressionTriggerTokens')" :disabled="saving" class="form-input" type="number" min="0" :max="I32_MAX" step="1">
-          <FieldError field="memory-personCompressionTriggerTokens" :message="errors['memory-personCompressionTriggerTokens']"/>
-        </div>
-        <div class="form-group">
-          <label for="memory-personCompressionTargetTokens" class="form-label">压缩目标 Token</label>
-          <input v-model.number="memoryConfig.personCompressionTargetTokens" v-bind="fieldAttrs('memory-personCompressionTargetTokens')" :disabled="saving" class="form-input" type="number" min="0" :max="I32_MAX" step="1">
-          <FieldError field="memory-personCompressionTargetTokens" :message="errors['memory-personCompressionTargetTokens']"/>
-        </div>
-      </div>
-      <h3 class="card-title">总结篇幅（字）</h3>
-      <p class="form-hint">字数为模型生成的目标上限，实际长度受模型遵守指令的程度影响，可能超出。程序不会强行截断。</p>
-      <div class="form-row">
-        <div v-for="field in textLimitFields" :key="field.key" class="form-group">
-          <label class="form-label" :for="`memory-${field.key}`">{{ field.label }}</label>
-          <input v-model.number="memoryConfig[field.key]" v-bind="fieldAttrs(`memory-${field.key}`, `memory-${field.key}-hint`)" :disabled="saving" class="form-input" min="1" :max="I32_MAX" step="1" type="number">
-          <FieldError :field="`memory-${field.key}`" :message="errors[`memory-${field.key}`]"/>
-          <p :id="`memory-${field.key}-hint`" class="form-hint">1～2147483647 字，整数。</p>
-        </div>
-      </div>
-      <button :disabled="saving" class="btn btn-primary" type="submit">
-        {{ saving ? '保存中...' : '保存配置' }}
-      </button>
     </form>
   </div>
 </template>
+
+<style scoped>
+.memory-form { display: grid; gap: 16px; }
+.memory-section { min-width: 0; padding: 20px 24px; background: var(--card-bg); border-radius: var(--radius-md); }
+.section-heading { margin-bottom: 12px; color: var(--text-secondary); }
+.section-summary, .setting-summary, .save-hint { margin: 0; font-size: 12px; color: var(--text-secondary); }
+.section-summary { margin-bottom: 16px; }
+.settings-list { display: grid; gap: 12px; }
+.number-row { position: relative; display: grid; grid-template-columns: minmax(0, 220px) minmax(0, 160px) minmax(0, 1fr); align-items: center; gap: 8px 16px; }
+.number-row + .number-row::before { content: ''; position: absolute; top: -6px; inset-inline-start: 0; width: min(396px, 100%); border-top: 1px solid color-mix(in srgb, var(--border) 35%, transparent); pointer-events: none; }
+.form-label { margin: 0; }
+.number-row .form-input { min-width: 0; height: 36px; padding: 6px 10px; line-height: 22px; background: color-mix(in srgb, var(--input-bg) 75%, var(--card-bg)); }
+.range-hint { margin: 0; font-size: 12px; color: var(--text-secondary); visibility: hidden; }
+.memory-form:not(.hints-dismissed) .number-row:focus-within > .range-hint { visibility: visible; }
+.number-row :deep(.form-error) { grid-column: 2 / -1; margin: 0; }
+.setting-row { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.setting-description { min-width: 0; }
+.setting-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.setting-name label { min-width: 0; }
+.setting-row > input { flex-shrink: 0; }
+.setting-summary { margin-top: 4px; }
+.save-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.save-hint.has-changes { color: var(--warning); font-weight: 500; }
+@media (max-width: 600px) {
+  .number-row { grid-template-columns: minmax(0, 1fr) minmax(0, 120px); }
+  .range-hint { display: none; }
+  .memory-form:not(.hints-dismissed) .number-row:focus-within > .range-hint { display: block; grid-column: 1 / -1; }
+  .number-row :deep(.form-error) { grid-column: 1 / -1; }
+}
+</style>

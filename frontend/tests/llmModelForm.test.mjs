@@ -89,6 +89,22 @@ test('chat model forms do not expose image API controls or rewrite paths', async
   } finally { view.dispose() }
 })
 
+test('API key visibility stays masked by default and toggles without changing the credential', async () => {
+  const view = form('executor')
+  try {
+    let html = await view.html()
+    assert.ok(html.includes('type="password"'))
+    assert.ok(html.includes('aria-label="显示 API 密钥"'))
+    assert.ok(html.includes('aria-controls="model-executor-apiKey"'))
+    view.state.showApiKey = true
+    html = await view.html()
+    assert.equal(html.includes('type="password"'), false)
+    assert.ok(html.includes('aria-label="隐藏 API 密钥"'))
+    assert.ok(html.includes('aria-pressed="true"'))
+    assert.equal(view.state.llmConfig.apiKey, 'fixture')
+  } finally { view.dispose() }
+})
+
 test('all model forms show and save independent request timeout and retry settings', async () => {
   for (const name of ['router', 'executor', 'executorFallback', 'executorThinking', 'image',
     'memory', 'imageGeneration', 'embedding', 'jev']) {
@@ -98,9 +114,14 @@ test('all model forms show and save independent request timeout and retry settin
       assert.ok(html.includes('请求超时（秒）') && html.includes('失败重试次数'))
       assert.ok(html.includes('min="1"') && html.includes('max="3600"') && html.includes('max="10"'))
       assert.equal(html.includes('可能重复生成并计费'), name === 'imageGeneration')
+      assert.equal(view.state.dirty, false)
       view.state.llmConfig.timeoutSeconds = 600
       view.state.llmConfig.maxRetries = 2
+      assert.equal(view.state.dirty, true)
+      assert.ok((await view.html()).includes('有未保存的修改'))
       await view.state.saveLLMConfig()
+      assert.equal(view.state.dirty, false)
+      assert.equal((await view.html()).includes('有未保存的修改'), false)
       assert.equal(view.requests[0].body.timeoutSeconds, 600)
       assert.equal(view.requests[0].body.maxRetries, 2)
       assert.equal(view.requests[0].body.name, name)

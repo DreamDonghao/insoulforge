@@ -266,21 +266,22 @@ onMounted(() => void Promise.all([loadAdmins(), loadBlacklist()]))
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-template-rows: auto auto;
-  gap: 0;
+  gap: 24px;
 }
 
 .access-grid section {
   display: grid;
   grid-template-rows: subgrid;
   grid-row: 1 / span 2;
-  gap: 0;
+  gap: 16px;
   min-width: 0;
-  padding-right: 28px;
+  padding-right: 0;
 }
 
 .access-grid section + section {
-  padding: 0 0 0 28px;
-  border-left: 1px solid var(--border);
+  padding: 0;
+  border-left: 0;
+  border-top: 0;
 }
 
 .access-grid .card {
@@ -289,7 +290,7 @@ onMounted(() => void Promise.all([loadAdmins(), loadBlacklist()]))
 }
 
 .access-form-card {
-  padding: 24px 0;
+  padding: 24px;
   border-top: 0;
 }
 
@@ -353,7 +354,7 @@ onMounted(() => void Promise.all([loadAdmins(), loadBlacklist()]))
   .access-grid section + section {
     padding: 0;
     border-left: 0;
-    border-top: 1px solid var(--border);
+    border-top: 0;
   }
 }
 

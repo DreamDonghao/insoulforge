@@ -22,6 +22,7 @@ defineEmits<{retry: []}>()
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
+  border-radius: var(--radius-sm);
 }
 p { margin: 0; color: var(--text-primary); overflow-wrap: anywhere; }
 </style>

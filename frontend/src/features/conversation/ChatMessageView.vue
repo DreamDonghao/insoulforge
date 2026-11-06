@@ -122,6 +122,7 @@ const toggleJson = (event: Event): void => {
   background: var(--primary-soft);
   color: var(--primary);
   font-size: 11px;
+  border-radius: var(--radius-xs);
 }
 
 .msg-header {
@@ -196,7 +197,7 @@ const toggleJson = (event: Event): void => {
   background: var(--code-bg);
   color: var(--code-text);
   border: 1px solid var(--border);
-  border-radius: 0;
+  border-radius: var(--radius-sm);
   font-size: 12px;
   line-height: 1.6;
   white-space: pre-wrap;

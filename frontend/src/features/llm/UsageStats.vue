@@ -255,7 +255,7 @@ onMounted(loadUsage)
       </div>
 
       <div v-if="mergedRoles.length" class="table-container">
-        <table>
+        <table class="role-usage-table">
           <thead>
           <tr>
             <th>角色</th>
@@ -331,7 +331,7 @@ onMounted(loadUsage)
       </div>
 
       <div v-if="recent.length" class="table-container">
-        <table>
+        <table class="recent-usage-table">
           <thead>
           <tr>
             <th>时间</th>
@@ -374,18 +374,21 @@ onMounted(loadUsage)
 .overview-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 24px 0;
-  padding: 24px 0;
-  border-top: 1px solid var(--border);
+  gap: 16px;
+  padding: 0;
+  border-top: 0;
+  margin-bottom: 24px;
 }
 
 .overview-card {
   min-width: 0;
-  padding: 0 24px;
-  border-left: 1px solid var(--border);
+  padding: 20px;
+  border-left: 0;
+  background: var(--card-bg);
+  border-radius: var(--radius-md);
 }
 
-.overview-card:first-child { border-left: 0; padding-left: 0; }
+.overview-card:first-child { border-left: 0; padding-left: 20px; }
 
 .ov-label {
   font-size: 12px;
@@ -488,7 +491,7 @@ onMounted(loadUsage)
 .share-bar {
   height: 5px;
   background: var(--primary);
-  border-radius: 0;
+  border-radius: var(--radius-pill);
   min-width: 2px;
   flex-shrink: 0;
 }
@@ -506,7 +509,7 @@ onMounted(loadUsage)
   align-items: center;
   gap: 10px;
   padding: 3px 0;
-  border-radius: 0;
+  border-radius: var(--radius-sm);
 }
 
 .trend-row-today {
@@ -525,14 +528,14 @@ onMounted(loadUsage)
   flex: 1;
   height: 18px;
   background: var(--border-soft);
-  border-radius: 0;
+  border-radius: var(--radius-xs);
   overflow: hidden;
 }
 
 .trend-bar {
   height: 100%;
   background: var(--primary);
-  border-radius: 0;
+  border-radius: var(--radius-xs);
   min-width: 2px;
   transition: width 0.3s ease;
 }
@@ -570,20 +573,31 @@ onMounted(loadUsage)
 }
 
 /* ====== 响应式 ====== */
+@media (min-width: 1100px) {
+  .col-num, .role-name, .model-code, .cell-time { white-space: normal; overflow-wrap: anywhere; }
+  .share-bar-cell { min-width: 0; flex-wrap: wrap; }
+  th, td { padding: 12px 8px; }
+  .role-usage-table th:first-child { width: 10%; }
+  .role-usage-table th:nth-child(2) { width: 20%; }
+  .recent-usage-table th:first-child { width: 16%; }
+  .recent-usage-table th:nth-child(2) { width: 12%; }
+  .recent-usage-table th:nth-child(3) { width: 24%; }
+}
+
 @media (max-width: 900px) {
   .overview-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .overview-card:nth-child(odd) { border-left: 0; padding-left: 0; }
+  .overview-card:nth-child(odd) { border-left: 0; padding-left: 20px; }
 }
 
 @media (max-width: 560px) {
   .overview-grid {
     grid-template-columns: minmax(0, 1fr);
-    gap: 0;
+    gap: 16px;
   }
-  .overview-card { border: 0; padding: 16px 0; }
-  .overview-card + .overview-card { border-top: 1px solid var(--border); }
+  .overview-card { border: 0; padding: 20px; }
+  .overview-card + .overview-card { border-top: 0; }
 }
 @media (prefers-reduced-motion: reduce) { .trend-bar { transition: none; } }
 </style>

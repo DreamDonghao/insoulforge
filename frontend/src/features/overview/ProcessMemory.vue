@@ -126,7 +126,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section class="process-memory" aria-label="运行概况">
+  <section class="card process-memory" aria-label="运行概况">
     <header>
       <h2>运行概况</h2>
       <div class="update-notes">
@@ -175,7 +175,6 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.process-memory { padding: 24px 0; min-width: 0; }
 header, .chart-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
 h2, h3 { margin: 0; color: var(--text-primary); font-size: 16px; font-weight: 600; }
 .updated, .chart-heading span, .scale, .time-axis { font-size: 12px; color: var(--text-secondary); }

@@ -3,7 +3,7 @@
  * @file PromptEditor.vue
  * @brief 提示词编辑组件
  */
-import {computed, inject, onMounted, onUnmounted, reactive, ref, type Ref, watch} from 'vue'
+import {computed, inject, onMounted, onUnmounted, reactive, ref, type Ref} from 'vue'
 import {confirmDiscard, useUnsavedChanges} from '../../composables/useUnsavedChanges'
 import {Marked} from 'marked'
 import RequestError from '../../components/RequestError.vue'
@@ -260,6 +260,7 @@ const savePrompt = async (): Promise<void> => {
 .editor-modes {
   display: inline-flex;
   border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
 }
 
 .editor-modes button {
@@ -273,6 +274,8 @@ const savePrompt = async (): Promise<void> => {
 }
 
 .editor-modes button:last-child { border-right: 0; }
+.editor-modes button:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+.editor-modes button:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
 .editor-modes button.active { background: var(--primary-soft); color: var(--primary); }
 
 .editor-panes {
@@ -303,6 +306,7 @@ const savePrompt = async (): Promise<void> => {
   color: var(--text-primary);
   line-height: 1.7;
   overflow-wrap: anywhere;
+  border-radius: var(--radius-sm);
 }
 
 .markdown-preview :deep(h1),
@@ -317,7 +321,7 @@ const savePrompt = async (): Promise<void> => {
 .markdown-preview :deep(ol) { margin-bottom: 12px; }
 .markdown-preview :deep(ul),
 .markdown-preview :deep(ol) { padding-left: 24px; }
-.markdown-preview :deep(pre) { padding: 12px; background: var(--code-bg); overflow: auto; margin-block: 12px; }
+.markdown-preview :deep(pre) { padding: 12px; background: var(--code-bg); overflow: auto; margin-block: 12px; border-radius: var(--radius-sm); }
 .markdown-preview :deep(pre code) { padding: 0; }
 .markdown-preview :deep(blockquote) { border-left: 3px solid var(--border-strong); padding-left: 12px; margin-block: 12px; color: var(--text-secondary); }
 
@@ -332,8 +336,11 @@ const savePrompt = async (): Promise<void> => {
 }
 
 .character-section {
-  border-top: 1px solid var(--border);
+  border-top: 0;
   padding-top: 24px;
+  padding: 24px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
 }
 
 .character-heading {
@@ -366,7 +373,7 @@ const savePrompt = async (): Promise<void> => {
   object-fit: contain;
   margin-top: 24px;
   border: 1px solid var(--border);
-  border-radius: 0;
+  border-radius: var(--radius-sm);
   background: var(--bg-secondary);
 }
 
@@ -377,7 +384,7 @@ const savePrompt = async (): Promise<void> => {
   min-height: 240px;
   margin-top: 24px;
   border: 1px dashed var(--border);
-  border-radius: 0;
+  border-radius: var(--radius-sm);
   color: var(--text-secondary);
 }
 </style>

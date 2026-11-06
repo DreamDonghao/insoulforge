@@ -1,0 +1,35 @@
+<script setup lang="ts">
+import {inject} from 'vue'
+import NavIcon from '../components/NavIcon.vue'
+import ProcessMemory from '../features/overview/ProcessMemory.vue'
+interface State {
+ dataState:Record<string,{loaded:boolean;loading:boolean;error:string}>;
+ dataSections:{key:string;label:string;retry:()=>unknown}[];
+ botRunning:boolean;botStatusSaving:boolean;toggleBotStatus:()=>unknown;oneBotConnectionReady:boolean;oneBotConnectionText:string;
+ uptimeText:string;enabledCount:number;groupCount:number;totalMessages:number;adminCount:number;emojiCount:number;toolCount:number;
+ todayStats:{calls:number;total:number};todayHitRate:number;byDay:{day:string;total:number}[];maxDayTotal:number;
+ storage:{databaseBytes:number|null;logBytes:number|null;timestamp:number}|null;formatStorage:(value:number|null|undefined)=>string;
+ startTimeEpoch:number;fmtDateTime:(value:number)=>string;transportLabel:string;oneBotStatus:{address:string};llmOrder:readonly string[];llmLabels:Record<string,string>;llmModels:Record<string,string>
+}
+const {state:s,botName}=defineProps<{state:State;botName:string}>()
+const navigate=inject<(view:string)=>void>('mobileNavigate',()=>{})
+const tools=[{key:'logs',label:'运行日志',icon:'logs'},{key:'requestDebug',label:'请求调试',icon:'requestDebug'},{key:'system-tokens',label:'上下文占用',icon:'prompts'},{key:'usage',label:'用量统计',icon:'memory'},{key:'emojis',label:'表情库',icon:'emojis'},{key:'activities',label:'实时活动',icon:'execution'}]
+const value=(key:string,n:number)=>s.dataState[key].loaded?n.toLocaleString():'—'
+</script>
+<template>
+ <div class="mobile-overview">
+  <section class="runtime">
+   <div class="bot-state"><div><strong>{{ botName }}</strong><span><i :class="{'is-ready':s.dataState.botStatus.loaded&&s.botRunning}"/>{{ !s.dataState.botStatus.loaded?'读取状态中':s.botRunning?'运行中':'已暂停' }}</span></div><button :disabled="s.botStatusSaving||!s.dataState.botStatus.loaded" @click="s.toggleBotStatus()">{{ s.botStatusSaving?'处理中…':s.botRunning?'暂停':'启动' }}</button></div>
+   <p class="connection"><i :class="{'is-ready':s.oneBotConnectionReady}"/>{{ s.dataState.oneBotStatus.loaded?s.oneBotConnectionText:'连接状态读取中' }}</p>
+  </section>
+  <div class="metrics"><div><span>已运行</span><strong>{{ s.dataState.system.loaded?s.uptimeText:'—' }}</strong></div><div><span>启用会话</span><strong>{{ value('groups',s.enabledCount) }}<small> / {{ value('groups',s.groupCount) }}</small></strong></div><div><span>今日调用</span><strong>{{ value('usage',s.todayStats.calls) }}<small> 次</small></strong></div><div><span>今日 Token</span><strong>{{ value('usage',s.todayStats.total) }}</strong></div></div>
+  <div v-for="section in s.dataSections.filter(item=>s.dataState[item.key].error)" :key="section.key" class="load-error" role="alert"><span>{{ section.label }}：{{ s.dataState[section.key].error }}</span><button :disabled="s.dataState[section.key].loading" @click="section.retry()">重试</button></div>
+  <section class="tools"><h2>常用功能</h2><div><button v-for="tool in tools" :key="tool.key" @click="navigate(tool.key)"><NavIcon :name="tool.icon"/><span>{{ tool.label }}</span><span class="chevron">›</span></button></div></section>
+  <details class="section"><summary>运行监控<span>内存、存储与启动时间</span></summary><div class="details-content"><p>启动于 {{ s.fmtDateTime(s.startTimeEpoch) }}</p><ProcessMemory><template #after-metrics><div><dt>数据库占用</dt><dd>{{ s.storage?s.formatStorage(s.storage.databaseBytes):'—' }}</dd></div><div><dt>日志占用</dt><dd>{{ s.storage?s.formatStorage(s.storage.logBytes):'—' }}</dd></div></template></ProcessMemory></div></details>
+  <details class="section"><summary>连接与模型<span>{{ s.transportLabel }}</span></summary><div class="details-content"><p>{{ s.oneBotStatus.address||'未配置地址' }}</p><div v-for="name in s.llmOrder" :key="name" class="model"><span>{{ s.llmLabels[name] }}</span><code>{{ s.llmModels[name]||'未配置' }}</code></div></div></details>
+  <details class="section"><summary>资源与用量<span>查看详情</span></summary><div class="details-content"><p>消息 {{ value('groups',s.totalMessages) }} · 管理员 {{ value('admins',s.adminCount) }} · 表情 {{ value('emojis',s.emojiCount) }} · 工具 {{ value('tools',s.toolCount) }}</p><p>今日缓存命中率 {{ s.dataState.usage.loaded?s.todayHitRate.toFixed(1)+'%':'—' }}</p><div v-for="day in s.byDay" :key="day.day" class="daily"><span>{{ day.day }}</span><span>{{ day.total.toLocaleString() }} Token</span></div></div></details>
+ </div>
+</template>
+<style scoped>
+.mobile-overview{font-size:14px}.runtime,.metrics,.tools,.section{background:var(--card-bg);border-radius:10px;margin-bottom:12px}.runtime{padding:12px}.bot-state{display:flex;align-items:center;justify-content:space-between;gap:12px}.bot-state>div{display:grid;gap:6px}.bot-state strong{font-size:16px;font-weight:600}.bot-state span,.connection{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary)}i{width:6px;height:6px;border-radius:50%;background:var(--warning);flex-shrink:0}i.is-ready{background:var(--success)}.connection{margin:10px 0 0;padding-top:10px;border-top:1px solid var(--border);overflow-wrap:anywhere}button{min-height:44px;font:inherit;border:0;border-radius:8px;padding:8px 12px;background:var(--bg-secondary);color:var(--text-primary);cursor:pointer}button:disabled{opacity:.5}.metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));padding:4px 12px}.metrics>div{padding:10px 0;min-width:0}.metrics span{display:block;font-size:12px;color:var(--text-secondary);margin-bottom:4px}.metrics strong{font-size:18px;font-weight:600;overflow-wrap:anywhere}.metrics small{font-size:12px;color:var(--text-secondary);font-weight:400}h2{font-size:14px;font-weight:500;margin:0;padding:12px 12px 4px}.tools>div{display:grid;grid-template-columns:1fr 1fr;padding:0 4px 4px}.tools button{display:flex;align-items:center;gap:8px;background:none;text-align:left;font-size:13px;min-width:0}.tools :deep(svg){width:18px;height:18px;color:var(--text-secondary);flex-shrink:0}.chevron{margin-left:auto;color:var(--text-secondary)}summary{display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:48px;padding:10px 12px;cursor:pointer;font-size:13px}summary::after{content:'⌄';color:var(--text-secondary)}details[open]>summary::after{transform:rotate(180deg)}summary>span{font-size:12px;color:var(--text-secondary);text-align:right;margin-left:auto}.details-content{padding:0 12px 12px;font-size:12px;overflow-wrap:anywhere}.model,.daily{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid var(--border)}.model code{text-align:right;overflow-wrap:anywhere;min-width:0}.model>span{flex-shrink:0;color:var(--text-secondary)}.load-error{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px;font-size:12px;color:var(--danger)}.details-content :deep(.process-memory){padding:8px 0;margin:0;background:none}.details-content :deep(dl){grid-template-columns:repeat(2,minmax(0,1fr))}.details-content :deep(dd){font-size:16px}button:focus-visible,summary:focus-visible{outline:2px solid var(--focus-ring);outline-offset:-2px}
+</style>

@@ -7,8 +7,15 @@ defineProps<{ name: string }>()
 </script>
 
 <template>
+  <svg v-if="name === 'eye'" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/>
+    <circle cx="12" cy="12" r="3"/>
+  </svg>
+  <svg v-else-if="name === 'eye-off'" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+    <path d="m3 3 18 18M10.58 10.58a2 2 0 0 0 2.83 2.83M9.88 4.24A10.94 10.94 0 0 1 12 4c5 0 9.27 3.11 11 7.5a11.82 11.82 0 0 1-2.08 3.19M6.61 6.61A11.87 11.87 0 0 0 1 11.5C2.73 15.89 7 19 12 19c1.61 0 3.14-.32 4.53-.9"/>
+  </svg>
   <!-- 首页 -->
-  <svg v-if="name === 'home'" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+  <svg v-else-if="name === 'home'" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
     <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
     <polyline points="9 22 9 12 15 12 15 22"/>
   </svg>

@@ -744,9 +744,9 @@ onMounted(() => {
 .tool-editor-form { min-width: 0; }
 .tool-editor-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
 .tool-editor-heading .page-subtitle { overflow-wrap: anywhere; }
-.editor-section-title { font-size: 16px; margin: 24px 0 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+.editor-section-title { font-size: 16px; margin: 24px 0 16px; padding: 16px; border-top: 0; background: var(--bg-secondary); border-radius: var(--radius-sm); }
 .editor-section-title:first-child { margin-top: 0; }
-.tool-editor-footer { display: flex; justify-content: flex-end; gap: 12px; flex-wrap: wrap; padding: 20px 0; border-top: 1px solid var(--border); }
+.tool-editor-footer { display: flex; justify-content: flex-end; gap: 12px; flex-wrap: wrap; padding: 20px; border-top: 0; background: var(--bg-secondary); border-radius: var(--radius-sm); }
 .tool-editor-page .auto-height { min-height: 120px; }
 .tool-editor-page .test-input, .tool-editor-page .test-output { min-width: 0; }
 .tool-editor-page .test-content { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -781,12 +781,15 @@ onMounted(() => {
 }
 .builtin-group {
   margin-top: 20px;
+  padding: 16px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
 }
 .builtin-group h3 {
   font-size: 16px;
   margin: 0;
   padding: 12px 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 0;
 }
 .builtin-group h3 span {
   margin-left: 8px;
@@ -941,7 +944,7 @@ onMounted(() => {
 
 .dialog {
   background: var(--card-bg);
-  border-radius: 0;
+  border-radius: var(--radius-lg);
   max-width: 95vw;
   max-height: 90vh;
   overflow-y: auto;
@@ -1021,7 +1024,7 @@ onMounted(() => {
   background: var(--code-bg);
   color: var(--code-text);
   padding: 2px 6px;
-  border-radius: 0;
+  border-radius: var(--radius-xs);
   font-family: 'Consolas', 'Monaco', monospace;
   font-size: 13px;
 }
@@ -1030,7 +1033,7 @@ onMounted(() => {
   background: var(--code-bg);
   color: var(--code-text);
   padding: 12px 16px;
-  border-radius: 0;
+  border-radius: var(--radius-sm);
   overflow-x: auto;
   margin: 0 0 12px 0;
 }
@@ -1097,7 +1100,7 @@ onMounted(() => {
   margin-top: 12px;
   padding: 12px;
   background: var(--bg-secondary);
-  border-radius: 0;
+  border-radius: var(--radius-sm);
   font-size: 12px;
 }
 
@@ -1105,7 +1108,7 @@ onMounted(() => {
   background: var(--code-bg);
   color: var(--code-text);
   padding: 8px 12px;
-  border-radius: 0;
+  border-radius: var(--radius-sm);
   font-size: 11px;
   margin: 8px 0;
   overflow-x: auto;
@@ -1114,7 +1117,7 @@ onMounted(() => {
 .test-section {
   margin-top: 16px;
   border: 1px solid var(--border);
-  border-radius: 0;
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
 
@@ -1153,7 +1156,7 @@ onMounted(() => {
   padding: 8px 10px;
   background: var(--code-bg);
   color: var(--code-text);
-  border-radius: 0;
+  border-radius: var(--radius-sm);
   font-family: 'Consolas', 'Monaco', monospace;
   font-size: 12px;
   min-height: 80px;

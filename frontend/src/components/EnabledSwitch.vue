@@ -58,6 +58,7 @@ input {
   background: var(--border-strong);
   pointer-events: none;
   transition: background-color 150ms ease;
+  border-radius: var(--radius-pill);
 }
 .switch-track::before {
   content: '';
@@ -65,8 +66,9 @@ input {
   width: 18px;
   height: 18px;
   margin: 3px;
-  background: #fff;
+  background: var(--on-primary);
   transition: transform 150ms ease;
+  border-radius: var(--radius-pill);
 }
 input:checked + .switch-track { background: var(--primary-strong); }
 input:checked + .switch-track::before { transform: translateX(20px); }

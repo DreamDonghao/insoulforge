@@ -349,9 +349,13 @@ onUnmounted(() => {
 .mcp-header {justify-content: space-between; flex-wrap: wrap}
 .mcp-actions {flex-wrap: wrap}
 .mcp-actions svg {width: 16px; height: 16px}
-.mcp-list {border-top: 1px solid var(--border)}
+.mcp-list {border-top: 0;}
 .mcp-row {display: grid; grid-template-columns: 120px minmax(0, 1fr) auto; align-items: start;
-  gap: 12px 20px; padding: 20px 0; border-bottom: 1px solid var(--border)}
+  gap: 12px 20px; padding: 24px; border-bottom: 0;
+  background: var(--card-bg);
+  margin-bottom: 16px;
+  border-radius: var(--radius-md);
+}
 .mcp-row > .tool-switch {align-self: start}
 .mcp-row > .mcp-actions {justify-content: flex-end}
 .mcp-details {min-width: 0}
@@ -367,7 +371,7 @@ onUnmounted(() => {
 .mcp-tools code {font-size: 13px; padding: 0; background: transparent}
 .mcp-tools li p {margin: 0; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65}
 .mcp-overlay {position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.5); display: grid; place-items: center; padding: 20px}
-.mcp-dialog {background: var(--card-bg); border: 1px solid var(--border); border-radius: 0; padding: 24px; width: min(520px, 100%); max-height: calc(100dvh - 40px); overflow-y: auto; box-sizing: border-box}
+.mcp-dialog {background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 24px; width: min(520px, 100%); max-height: calc(100dvh - 40px); overflow-y: auto; box-sizing: border-box}
 .mcp-dialog textarea.form-input {min-height: 96px; height: 112px}
 .mcp-enabled {display: flex; align-items: center; gap: 8px}
 .mcp-footer {justify-content: flex-end; margin-top: 24px}

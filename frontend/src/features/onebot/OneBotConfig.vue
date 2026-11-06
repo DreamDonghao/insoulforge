@@ -3,12 +3,14 @@
  * @file OneBotConfig.vue
  * @brief OneBot 配置组件
  */
+import NavIcon from '../../components/NavIcon.vue'
 import {inject, onMounted, ref, type Ref, watch} from 'vue'
 import type {ApiResponse, QQConfig} from '../../vite-env.d'
 import RequestError from '../../components/RequestError.vue'
 import {requestJson, requestError} from '../../utils/api'
 import {confirmDiscard, useUnsavedChanges} from '../../composables/useUnsavedChanges'
 import FieldError from '../../components/FieldError.vue'
+import FieldHelp from '../../components/FieldHelp.vue'
 import {useFormValidation} from '../../composables/useFormValidation'
 import {identifierError} from '../../utils/validation'
 
@@ -98,28 +100,34 @@ onMounted(() => {
 
     <RequestError :message="loadError" :busy="loading" @retry="refreshActiveTransport"/>
     <p v-if="loading" role="status">加载中…</p>
-    <form v-if="loaded" class="card" novalidate @submit.prevent="saveQQConfig">
+    <form v-if="loaded" class="onebot-form" novalidate @submit.prevent="saveQQConfig">
       <section class="config-section">
         <h3 class="section-title">机器人身份</h3>
-        <div class="form-row">
-          <div class="form-group">
+        <div class="form-group">
+          <div class="field-label">
             <label for="bot-qq" class="form-label">Bot 用户 ID</label>
-            <input v-model="qqConfig!.selfQQNumber" v-bind="fieldAttrs('bot-qq', 'bot-qq-hint')" class="form-input" type="text" inputmode="numeric" autocomplete="off" :disabled="saving">
-            <FieldError field="bot-qq" :message="errors['bot-qq']"/>
-            <p id="bot-qq-hint" class="form-hint">机器人自身的用户 ID，0 表示尚未配置。</p>
+            <FieldHelp id="bot-qq-hint" label="Bot 用户 ID">机器人自身的用户 ID，0 表示尚未配置。</FieldHelp>
           </div>
-          <div class="form-group">
+          <input v-model="qqConfig!.selfQQNumber" v-bind="fieldAttrs('bot-qq', 'bot-qq-hint')" class="form-input" type="text" inputmode="numeric" autocomplete="off" :disabled="saving">
+          <FieldError field="bot-qq" :message="errors['bot-qq']"/>
+        </div>
+        <div class="form-group">
+          <div class="field-label">
             <label for="bot-name" class="form-label">Bot 名称</label>
-            <input id="bot-name" :disabled="saving" v-model="qqConfig!.botName" class="form-input" type="text">
-            <p class="form-hint">机器人在群聊中的显示名称</p>
+            <FieldHelp id="bot-name-hint" label="Bot 名称">机器人在群聊中的显示名称。</FieldHelp>
           </div>
+          <input id="bot-name" :disabled="saving" v-model="qqConfig!.botName" class="form-input" type="text" aria-describedby="bot-name-hint">
         </div>
       </section>
 
       <section class="config-section">
         <h3 class="section-title">OneBot 实现</h3>
         <div class="form-group">
-          <fieldset class="transport-switch" :disabled="saving">
+          <div class="field-label">
+            <span id="onebot-implementation-label" class="form-label">实现类型</span>
+            <FieldHelp id="onebot-implementation-hint" label="OneBot 实现类型">保存后切换扩展接口。连接地址和 Token 不会自动更改。</FieldHelp>
+          </div>
+          <fieldset class="transport-switch" :disabled="saving" aria-labelledby="onebot-implementation-label" aria-describedby="onebot-implementation-note">
             <legend class="sr-only">OneBot 实现类型（保存后生效）</legend>
             <label v-for="implementation in ['napcat', 'snowluma'] as const" :key="implementation" :class="{active: qqConfig!.oneBotImplementation === implementation}">
               <input class="sr-only" v-model="qqConfig!.oneBotImplementation" type="radio" name="onebot-implementation" :value="implementation">
@@ -127,154 +135,103 @@ onMounted(() => {
               {{ implementation === 'napcat' ? 'NapCat' : 'SnowLuma' }}
             </label>
           </fieldset>
-          <p class="form-hint">保存后切换扩展接口。连接地址和 Token 请按所选服务填写，不会自动更改。</p>
         </div>
+        <p id="onebot-implementation-note" class="setting-summary">连接地址和 Token 需与所选服务匹配。</p>
       </section>
 
-      <section class="config-section connection-section">
+      <section class="config-section">
         <div class="connection-header">
-          <div>
-            <h3 class="section-title">连接方式</h3>
-            <p class="runtime-transport">
-              当前运行：{{ activeTransport === null ? '读取中...' : activeTransport === 'http' ? 'HTTP' : 'WebSocket' }}
-            </p>
-          </div>
-          <div class="transport-choice">
-            <fieldset class="transport-switch" :disabled="saving">
-              <legend class="sr-only">OneBot 传输方式（保存后生效）</legend>
-              <label v-for="transport in ['http', 'websocket'] as const" :key="transport" :class="{active: qqConfig!.oneBotTransport === transport}">
-                <input class="sr-only" v-model="qqConfig!.oneBotTransport" type="radio" name="onebot-transport" :value="transport">
-                <span class="choice-mark" aria-hidden="true">{{ qqConfig!.oneBotTransport === transport ? '✓' : '' }}</span>
-                {{ transport === 'http' ? 'HTTP' : 'WebSocket' }}
-              </label>
-            </fieldset>
-          </div>
+          <h3 class="section-title">连接方式</h3>
+          <p class="runtime-transport" role="status">当前运行：{{ activeTransport === null ? '读取中...' : activeTransport === 'http' ? 'HTTP' : 'WebSocket' }}</p>
         </div>
-        <p class="form-hint transport-hint">选择新的方式并保存后，才会切换当前运行方式。</p>
-
-        <div v-if="qqConfig!.oneBotTransport === 'http'" class="connection-fields">
-          <div class="form-row">
-            <div class="form-group">
-              <label for="onebot-http-host" class="form-label">HTTP 服务地址</label>
-              <input v-bind="fieldAttrs('onebot-http-host')" :disabled="saving" v-model="qqConfig!.qqHttpHost" class="form-input" placeholder="http://127.0.0.1:3000"
-                     type="text">
-              <FieldError field="onebot-http-host" :message="errors['onebot-http-host']"/>
-              <p class="form-hint">OneBot HTTP 服务地址</p>
-            </div>
-            <div class="form-group">
-              <label for="onebot-access-token" class="form-label">Access Token</label>
-              <div class="access-token-row">
-                <input id="onebot-access-token" :disabled="saving" v-model="qqConfig!.accessToken" class="form-input"
-                       :type="showAccessToken ? 'text' : 'password'" autocomplete="off" spellcheck="false"
-                       aria-describedby="onebot-access-token-hint">
-                <button class="btn btn-secondary btn-sm access-token-toggle" type="button"
-                        :aria-label="showAccessToken ? '隐藏访问令牌' : '显示访问令牌'"
-                        :aria-pressed="showAccessToken" @click="showAccessToken = !showAccessToken">
-                  {{ showAccessToken ? '隐藏' : '显示' }}
-                </button>
-              </div>
-              <p id="onebot-access-token-hint" class="form-hint">OneBot API 访问令牌</p>
-            </div>
+        <div class="form-group">
+          <div class="field-label">
+            <span id="onebot-transport-label" class="form-label">传输方式</span>
+            <FieldHelp id="onebot-transport-hint" label="传输方式">选择新的方式并保存后，才会切换当前运行方式。</FieldHelp>
           </div>
+          <fieldset class="transport-switch" :disabled="saving" aria-labelledby="onebot-transport-label" aria-describedby="onebot-transport-hint">
+            <legend class="sr-only">OneBot 传输方式（保存后生效）</legend>
+            <label v-for="transport in ['http', 'websocket'] as const" :key="transport" :class="{active: qqConfig!.oneBotTransport === transport}">
+              <input class="sr-only" v-model="qqConfig!.oneBotTransport" type="radio" name="onebot-transport" :value="transport">
+              <span class="choice-mark" aria-hidden="true">{{ qqConfig!.oneBotTransport === transport ? '✓' : '' }}</span>
+              {{ transport === 'http' ? 'HTTP' : 'WebSocket' }}
+            </label>
+          </fieldset>
         </div>
-
-        <div v-else class="connection-fields">
-          <div class="form-row">
-            <div class="form-group">
-              <label for="onebot-ws-host" class="form-label">WebSocket 服务地址</label>
-              <input v-bind="fieldAttrs('onebot-ws-host')" :disabled="saving" v-model="qqConfig!.qqWebSocketHost" class="form-input" placeholder="ws://127.0.0.1:3001"
-                     type="text">
-              <FieldError field="onebot-ws-host" :message="errors['onebot-ws-host']"/>
-              <p class="form-hint">OneBot 正向 WebSocket 地址</p>
-            </div>
-            <div class="form-group">
-              <label for="onebot-access-token" class="form-label">Access Token</label>
-              <div class="access-token-row">
-                <input id="onebot-access-token" :disabled="saving" v-model="qqConfig!.accessToken" class="form-input"
-                       :type="showAccessToken ? 'text' : 'password'" autocomplete="off" spellcheck="false"
-                       aria-describedby="onebot-access-token-hint">
-                <button class="btn btn-secondary btn-sm access-token-toggle" type="button"
-                        :aria-label="showAccessToken ? '隐藏访问令牌' : '显示访问令牌'"
-                        :aria-pressed="showAccessToken" @click="showAccessToken = !showAccessToken">
-                  {{ showAccessToken ? '隐藏' : '显示' }}
-                </button>
-              </div>
-              <p id="onebot-access-token-hint" class="form-hint">OneBot API 访问令牌</p>
-            </div>
+        <p v-if="activeTransport !== null && qqConfig!.oneBotTransport !== activeTransport" class="transport-pending" role="status">保存后切换至 {{ qqConfig!.oneBotTransport === 'http' ? 'HTTP' : 'WebSocket' }}。</p>
+        <div v-if="qqConfig!.oneBotTransport === 'http'" class="form-group">
+          <label for="onebot-http-host" class="form-label">HTTP 服务地址</label>
+          <input v-bind="fieldAttrs('onebot-http-host')" :disabled="saving" v-model="qqConfig!.qqHttpHost" class="form-input" placeholder="http://127.0.0.1:3000" type="text">
+          <FieldError field="onebot-http-host" :message="errors['onebot-http-host']"/>
+        </div>
+        <div v-else class="form-group">
+          <div class="field-label">
+            <label for="onebot-ws-host" class="form-label">WebSocket 服务地址</label>
+            <FieldHelp id="onebot-ws-host-hint" label="WebSocket 服务地址">OneBot 正向 WebSocket 地址。</FieldHelp>
+          </div>
+          <input v-bind="fieldAttrs('onebot-ws-host', 'onebot-ws-host-hint')" :disabled="saving" v-model="qqConfig!.qqWebSocketHost" class="form-input" placeholder="ws://127.0.0.1:3001" type="text">
+          <FieldError field="onebot-ws-host" :message="errors['onebot-ws-host']"/>
+        </div>
+        <div class="form-group">
+          <div class="field-label">
+            <label for="onebot-access-token" class="form-label">Access Token</label>
+            <FieldHelp id="onebot-access-token-hint" label="Access Token">OneBot API 访问令牌。</FieldHelp>
+          </div>
+          <div class="secret-input">
+            <input id="onebot-access-token" :disabled="saving" v-model="qqConfig!.accessToken" class="form-input"
+                   :type="showAccessToken ? 'text' : 'password'" autocomplete="off" spellcheck="false" aria-describedby="onebot-access-token-hint">
+            <button class="secret-toggle" type="button"
+                    aria-controls="onebot-access-token" :title="showAccessToken ? '隐藏访问令牌' : '显示访问令牌'"
+                    :aria-label="showAccessToken ? '隐藏访问令牌' : '显示访问令牌'" :aria-pressed="showAccessToken" @click="showAccessToken = !showAccessToken">
+              <NavIcon :name="showAccessToken ? 'eye-off' : 'eye'"/>
+            </button>
           </div>
         </div>
       </section>
 
-      <button :disabled="saving" class="btn btn-primary" type="submit">
-        {{ saving ? '保存中...' : '保存配置' }}
-      </button>
+      <div class="save-actions">
+        <button :disabled="saving" class="btn btn-primary" type="submit">{{ saving ? '保存中...' : '保存配置' }}</button>
+        <p class="save-hint" :class="{'has-changes': isDirty()}" role="status">{{ isDirty() ? '有未保存的修改' : '修改后需保存' }}</p>
+      </div>
     </form>
   </div>
 </template>
 
 <style scoped>
-.access-token-row {
-  display: flex;
+.onebot-form { display: grid; gap: 16px; }
+.config-section { min-width: 0; padding: 20px 24px; background: var(--card-bg); border-radius: var(--radius-md); }
+.section-title { margin: 0 0 12px; color: var(--text-secondary); font-size: 16px; font-weight: 600; }
+.form-group {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 220px) minmax(0, 440px) minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
-}
-
-.access-token-row .form-input {
-  flex: 1;
+  gap: 8px 16px;
   min-width: 0;
-}
-
-.access-token-toggle {
-  align-self: stretch;
-  flex-shrink: 0;
-  min-width: 64px;
-}
-
-.config-section {
-  padding: 22px 0 6px;
-  border-top: 1px solid var(--border-color);
-}
-
-.config-section:first-of-type {
-  padding-top: 0;
-  border-top: 0;
-}
-
-.section-title {
-  margin: 0 0 14px;
-  color: var(--text-primary);
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.connection-section {
-  padding-bottom: 0;
-}
-
-.connection-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-}
-
-.connection-header .section-title {
-  margin-bottom: 4px;
-}
-
-.runtime-transport {
   margin: 0;
-  color: var(--text-secondary);
-  font-size: 13px;
+  padding: 12px 0;
 }
-
-.transport-choice {
-  display: flex;
-  align-items: center;
-  gap: 14px;
+.form-group:first-of-type { padding-top: 0; }
+.connection-header + .form-group { padding-top: 0; }
+.form-group:last-child { padding-bottom: 0; }
+.form-group + .form-group::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  inset-inline-start: 0;
+  width: min(676px, 100%);
+  border-top: 1px solid color-mix(in srgb, var(--border) 35%, transparent);
+  pointer-events: none;
 }
-
+.field-label { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.form-label { margin: 0; }
+.form-input { height: 36px; min-height: 36px; padding: 6px 10px; line-height: 22px; background-color: color-mix(in srgb, var(--input-bg) 75%, var(--card-bg)); }
+.form-group :deep(.form-error) { grid-column: 2 / -1; margin: 0; }
+.connection-header { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; margin-bottom: 12px; }
+.connection-header .section-title { margin: 0; }
+.runtime-transport { margin: 0; color: var(--text-secondary); font-size: 13px; }
 .transport-switch {
+  justify-self: start;
   margin: 0;
   padding: 0;
   min-inline-size: 0;
@@ -282,66 +239,35 @@ onMounted(() => {
   grid-template-columns: repeat(2, 128px);
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 0;
+  border-radius: var(--radius-sm);
 }
-
 .transport-switch label {
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: 40px;
-  padding: 8px 12px;
+  min-height: 34px;
+  padding: 6px 12px;
   color: var(--text-secondary);
   background: var(--input-bg);
-  border: 0;
   cursor: pointer;
   font-family: inherit;
   font-size: 13px;
   font-weight: 500;
   transition: background-color 0.15s ease, color 0.15s ease;
 }
-
 .transport-switch label:focus-within { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
-
-.transport-switch label + label {
-  border-left: 1px solid var(--border);
-}
-
-.transport-switch label:hover {
-  color: var(--text-primary);
-  background: var(--bg-secondary);
-}
-
-.transport-switch label.active {
-  color: var(--primary);
-  background: var(--primary-soft);
-  font-weight: 600;
-}
-
-.transport-hint {
-  margin: 10px 0 0;
-}
-
-.connection-fields {
-  margin-top: 20px;
-}
-
-@media (max-width: 640px) {
-  .connection-header {
-    align-items: stretch;
-    flex-direction: column;
-    gap: 14px;
-  }
-
-  .transport-choice {
-    width: 100%;
-  }
-
-  .transport-switch {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    width: 100%;
-  }
+.transport-switch label + label { border-left: 1px solid var(--border); }
+.transport-switch label:hover { color: var(--text-primary); background: var(--bg-secondary); }
+.transport-switch label.active { color: var(--primary); background: var(--primary-soft); font-weight: 600; }
+.setting-summary, .transport-pending, .save-hint { margin: 0; color: var(--text-secondary); font-size: 12px; }
+.transport-pending { margin-bottom: 12px; color: var(--warning); }
+.save-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.save-hint.has-changes { color: var(--warning); font-weight: 500; }
+@media (max-width: 600px) {
+  .form-group { grid-template-columns: minmax(0, 1fr); }
+  .form-group :deep(.form-error) { grid-column: 1 / -1; }
+  .transport-switch { grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
 }
 </style>

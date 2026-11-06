@@ -130,7 +130,7 @@ test('memory settings save the affinity switch as a boolean with the other param
   } finally { view.dispose() }
 })
 
-test('execution settings load and save busy routing with the existing tool limits', async () => {
+test('execution settings default missing private enablement to false and save both switches with tool limits', async () => {
   let saved
   const loaded = {maxToolRounds: 8, routeWhileReplying: true, mcpToolPageSize: 10, mcpMaxToolsPerEnable: 4, mcpMaxToolsPerReply: 12}
   const view = setup('agent/ExecutionConfig', async (url, options) => {
@@ -143,9 +143,13 @@ test('execution settings load and save busy routing with the existing tool limit
     assert.equal(view.state.config.routeWhileReplying, false)
     await view.state.loadConfig()
     assert.equal(view.state.config.routeWhileReplying, true)
+    assert.equal(view.state.config.defaultPrivateEnabled, false)
     view.state.config.routeWhileReplying = false
     await view.state.saveConfig()
-    assert.deepEqual(saved, {...loaded, routeWhileReplying: false})
+    assert.deepEqual(saved, {...loaded, routeWhileReplying: false, defaultPrivateEnabled: false})
+    view.state.config.defaultPrivateEnabled = true
+    await view.state.saveConfig()
+    assert.deepEqual(saved, {...loaded, routeWhileReplying: false, defaultPrivateEnabled: true})
     assert.equal(view.state.saving, false)
   } finally { view.dispose() }
 })
@@ -156,28 +160,28 @@ test('tool grouping preserves category and tool order, global counts, and existi
     const builtin = (name, category, enabled = true) => ({
       name, category, enabled, description: 'Original description', defaultDescription: '', customDescription: false
     })
-    view.state.builtinTools = [builtin('replyB', '回复'), builtin('action', '动作', false),
-      builtin('replyA', '回复'), builtin('unknown', '其他')]
+    view.state.builtinTools = [builtin('send_message_and_finish', '回复'), builtin('action', '动作', false),
+      builtin('send_message', '回复'), builtin('unknown', '其他')]
     view.state.tools = [{id: 1, name: 'LuaOne', description: ' Useful tool ', enabled: true},
       {id: 2, name: 'LuaTwo', description: 'Other', enabled: false}]
     assert.deepEqual(view.state.builtinGroups.map(group => [group.category, group.tools.map(tool => tool.name)]),
-      [['回复', ['replyB', 'replyA']], ['信息', []], ['动作', ['action']]])
+      [['消息发送与结束', ['send_message_and_finish', 'send_message']], ['信息', []], ['动作', ['action']], ['其他', ['unknown']]])
     assert.equal(view.state.builtinGroups[0].tools[0], view.state.builtinTools[0])
     assert.equal(view.state.enabledBuiltinCount, 3)
     assert.equal(view.state.enabledCustomCount, 1)
     const groups = view.state.builtinGroups
     view.state.editingBuiltin = {...view.state.builtinTools[0]}
-    view.state.pendingTools.add('builtin:replyB')
+    view.state.pendingTools.add('builtin:send_message_and_finish')
     view.state.builtinTools[0].enabled = false
     assert.equal(view.state.enabledBuiltinCount, 2)
     assert.equal(view.state.builtinGroups, groups)
     assert.equal(view.runs('builtinGroups'), 1)
 
-    view.state.builtinFilter = 'REPLY'
+    view.state.builtinFilter = 'SEND'
     assert.equal(view.state.builtinGroups[0].tools.length, 2)
     assert.equal(view.state.enabledBuiltinCount, 2)
     assert.equal(view.runs('enabledBuiltinCount'), 2)
-    view.state.builtinFilter = ' reply '
+    view.state.builtinFilter = ' send '
     assert.equal(view.state.visibleBuiltins.length, 0)
     view.state.builtinFilter = 'new description'
     view.state.builtinTools[1].description = 'New description'

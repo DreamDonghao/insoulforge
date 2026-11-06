@@ -143,7 +143,7 @@ const copyJoinUrl = async (): Promise<void> => {
   background: var(--primary-soft);
   border: 1px solid var(--focus-ring);
   padding: 2px 10px;
-  border-radius: 0;
+  border-radius: var(--radius-pill);
 }
 
 .hero-desc {
@@ -188,7 +188,7 @@ const copyJoinUrl = async (): Promise<void> => {
 .qr-img {
   width: 168px;
   height: 168px;
-  border-radius: 0;
+  border-radius: var(--radius-md);
   background: #ffffff;
   padding: 8px;
   border: 1px solid var(--border);

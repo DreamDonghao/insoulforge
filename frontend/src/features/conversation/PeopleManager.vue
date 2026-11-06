@@ -1,261 +1,10 @@
 <script setup lang="ts">
-import {computed, nextTick, onMounted, onUnmounted, ref} from 'vue'
-import {confirmDiscard, useUnsavedChanges} from '../../composables/useUnsavedChanges'
+
+import {usePeople} from './usePeople'
 import {ArrowDownWideNarrow, ArrowUpNarrowWide, Pencil, Trash2} from '@lucide/vue'
-import {sessionIdLabel} from '../../utils/session'
 
-interface PersonIdentity {
-  user_id: string
-  name: string
-  estimated_tokens: number
-  name_pending: boolean
-  affinity?: number
-}
-interface PersonSummary extends PersonIdentity {
-  pending_count: number
-  updated_at: string
-}
-interface PersonDetail extends PersonIdentity {
-  profile: string[]
-  relationship: string[]
-  recent_interactions: string[]
-  pending_entries: {id: string; content: string; source_session: string; time: string}[]
-}
-
-const people = ref<PersonSummary[]>([])
-const selected = ref('')
-const detail = ref<PersonDetail | null>(null)
-const search = ref('')
-const loading = ref(false)
-const detailLoading = ref(false)
-const error = ref('')
-const detailError = ref('')
-const ascending = ref(false)
-const sortBy = ref<'affinity' | 'tokens'>('affinity')
-const sortLabel = computed(() => sortBy.value === 'tokens' || !affinityEnabled.value ? '预估 Token' : '好感度')
-const affinityEnabled = ref(true)
-const editing = ref(false)
-const draftText = ref('')
-const saving = ref(false)
-const savedDraft = ref('')
-const isDirty = (): boolean => editing.value && draftText.value !== savedDraft.value
-const consolidating = ref(false)
-const compressing = ref(false)
-const consolidationMessage = ref('')
-useUnsavedChanges(isDirty, () => saving.value || consolidating.value)
-const editError = ref('')
-const jsonInvalid = ref(false)
-const jsonEditor = ref<HTMLTextAreaElement | null>(null)
-const focusJsonEditor = (): void => { void nextTick(() => jsonEditor.value?.focus()) }
-let nameTimer: ReturnType<typeof setTimeout> | undefined
-let disposed = false
-let summaryController: AbortController | undefined
-let detailController: AbortController | undefined
-const sortedPeople = computed(() => {
-  const direction = ascending.value ? 1 : -1
-  return [...people.value]
-    .sort((a, b) => direction * (sortBy.value === 'tokens' || !affinityEnabled.value
-      ? (a.estimated_tokens ?? 0) - (b.estimated_tokens ?? 0)
-      : (a.affinity ?? 0) - (b.affinity ?? 0)) ||
-      (a.user_id < b.user_id ? -1 : a.user_id > b.user_id ? 1 : 0))
-})
-const filtered = computed(() => {
-  const query = search.value.trim().toLowerCase()
-  return sortedPeople.value.filter(person => `${person.user_id} ${person.name}`.toLowerCase().includes(query))
-})
-const detailName = computed(() => {
-  const person = people.value.find(person => person.user_id === selected.value)
-  return person?.name && person.name !== '未知' ? person.name : detail.value?.name || '未知'
-})
-const memorySections = computed(() => detail.value ? [
-  {key: 'profile', title: '人物档案', items: detail.value.profile},
-  {key: 'relationship', title: '与机器人的关系', items: detail.value.relationship},
-  {key: 'recent', title: '近期互动', items: detail.value.recent_interactions}
-] : [])
-const scoreClass = (value = 0) => value > 0 ? 'positive' : value < 0 ? 'negative' : ''
-const sourceLabel = (session: string) => {
-  return sessionIdLabel(session)
-}
-const formatTime = (value: string) => value ? new Date(value.replace(' ', 'T') + 'Z').toLocaleString() : '暂无'
-
-async function fetchPeopleJson(path: string, signal: AbortSignal, options: RequestInit = {}) {
-  const response = await fetch(path, {...options, signal})
-  if (!response.ok) {
-    const body = await response.json().catch(() => null)
-    if (typeof body?.error === 'string') throw new Error(body.error)
-    if (response.status === 409) throw new Error('人物信息已变化，请重新读取后编辑；当前草稿已保留')
-    if (response.status === 400) throw new Error(affinityEnabled.value ? '输入无效，请检查好感度及记忆内容' : '输入无效，请检查记忆内容')
-    if (response.status === 404) throw new Error('人物查询接口不存在，请更新并重启后端服务')
-    if (response.status === 401 || response.status === 403) throw new Error('登录已失效，请重新登录')
-    throw new Error(`人物查询失败：HTTP ${response.status}`)
-  }
-  if (!response.headers.get('content-type')?.includes('application/json')) {
-    throw new Error('人物查询接口未返回 JSON，请检查后端版本及反向代理配置')
-  }
-  const text = await response.text()
-  let data
-  try {
-    data = JSON.parse(text)
-  } catch {
-    throw new Error('人物查询接口返回了无效的 JSON')
-  }
-  if (data?.error) throw new Error(data.error)
-  return data
-}
-
-async function selectPerson(user_id: string) {
-  if (saving.value || consolidating.value || !confirmDiscard(isDirty())) return
-  editing.value = false
-  editError.value = ''
-  consolidationMessage.value = ''
-  detailController?.abort()
-  const controller = detailController = new AbortController()
-  selected.value = user_id
-  detail.value = null
-  detailLoading.value = true
-  detailError.value = ''
-  try {
-    const data = await fetchPeopleJson(`/admin/api/people/${encodeURIComponent(user_id)}`, controller.signal)
-    if (!disposed && !controller.signal.aborted) {
-      affinityEnabled.value = typeof data.affinity === 'number'
-      detail.value = data
-    }
-  } catch (cause) {
-    if (!disposed && !controller.signal.aborted)
-      detailError.value = cause instanceof Error ? cause.message : '读取人物失败'
-  } finally {
-    if (detailController === controller) detailLoading.value = false
-  }
-}
-
-async function loadPeople(refreshDetail = true) {
-  if (disposed || loading.value || editing.value || saving.value || consolidating.value) return
-  clearTimeout(nameTimer)
-  const controller = summaryController = new AbortController()
-  loading.value = true
-  error.value = ''
-  try {
-    const [data, config] = await Promise.all([
-      fetchPeopleJson('/admin/api/people', controller.signal),
-      fetchPeopleJson('/admin/api/memory-config', controller.signal)
-    ])
-    if (disposed) return
-    if (!Array.isArray(data)) throw new Error('人物列表响应格式不正确')
-    const changed = affinityEnabled.value !== (config.affinityEnabled ?? true)
-    affinityEnabled.value = config.affinityEnabled ?? true
-    people.value = data
-    const user_id = data.some((person: PersonSummary) => person.user_id === selected.value) ? selected.value : filtered.value[0]?.user_id
-    if (!user_id) {
-      selected.value = ''
-      detail.value = null
-    } else if (refreshDetail || changed) {
-      await selectPerson(user_id)
-    }
-  } catch (cause) {
-    if (!disposed && !controller.signal.aborted)
-      error.value = cause instanceof Error ? cause.message : '读取人物列表失败'
-  } finally {
-    loading.value = false
-    if (!disposed && !editing.value && people.value.some(person => person.name_pending))
-      nameTimer = setTimeout(() => void loadPeople(false), 2000)
-  }
-}
-function beginEdit() {
-  jsonInvalid.value = false
-  if (!detail.value || consolidating.value) return
-  clearTimeout(nameTimer)
-  editing.value = true
-  const {affinity, profile, relationship, recent_interactions, pending_entries} = detail.value
-  draftText.value = JSON.stringify({...(affinityEnabled.value ? {affinity} : {}), profile, relationship, recent_interactions,
-    pending_entries: pending_entries.map(({id, content}) => ({id, content}))}, null, 2)
-  savedDraft.value = draftText.value
-  editError.value = ''
-  focusJsonEditor()
-}
-function cancelEdit() {
-  if (saving.value || !confirmDiscard(isDirty())) return
-  editing.value = false
-  editError.value = ''
-  void loadPeople(false)
-}
-async function savePerson() {
-  if (!editing.value || !detail.value || saving.value) return
-  let value
-  jsonInvalid.value = false
-  try {
-    value = JSON.parse(draftText.value)
-  } catch {
-    editError.value = 'JSON 格式不正确，请检查后保存'
-    jsonInvalid.value = true
-    focusJsonEditor()
-    return
-  }
-  saving.value = true
-  editError.value = ''
-  let configurationChanged = false
-  try {
-    const signal = new AbortController().signal
-    const config = await fetchPeopleJson('/admin/api/memory-config', signal)
-    if ((config.affinityEnabled ?? true) === affinityEnabled.value) {
-      if (!affinityEnabled.value) delete value.affinity
-      await fetchPeopleJson(`/admin/api/people/${encodeURIComponent(selected.value)}`, signal, {
-        method: 'PUT', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({expected: detail.value, replacement: value})
-      })
-    } else configurationChanged = true
-    editing.value = false
-    draftText.value = ''
-  } catch (cause) {
-    editError.value = cause instanceof Error ? cause.message : '保存失败'
-  } finally { saving.value = false }
-  if (editing.value && editError.value && !disposed) focusJsonEditor()
-  if (!editing.value && !disposed) await loadPeople()
-  if (configurationChanged && !disposed) editError.value = '好感度设置已变化，已重新读取人物信息，请重新编辑'
-}
-async function deletePerson() {
-  if (!detail.value || saving.value || consolidating.value || !window.confirm(`删除 ${detailName.value}（${selected.value}）的全部人物记忆和好感度？聊天记录不受影响，后续聊天可重新建立档案。`)) return
-  const index = filtered.value.findIndex(person => person.user_id === selected.value)
-  const next = filtered.value[index + 1]?.user_id || filtered.value[index - 1]?.user_id || ''
-  saving.value = true
-  editError.value = ''
-  try {
-    await fetchPeopleJson(`/admin/api/people/${encodeURIComponent(selected.value)}`, new AbortController().signal, {
-      method: 'DELETE', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({expected: detail.value})
-    })
-    selected.value = next
-    detail.value = null
-  } catch (cause) {
-    editError.value = cause instanceof Error ? cause.message : '删除失败'
-    return
-  } finally { saving.value = false }
-  if (!disposed) await loadPeople()
-}
-async function consolidatePerson(compress = false) {
-  if (!detail.value || editing.value || saving.value || consolidating.value) return
-  clearTimeout(nameTimer)
-  consolidating.value = true
-  compressing.value = compress
-  consolidationMessage.value = ''
-  editError.value = ''
-  try {
-    const data = await fetchPeopleJson(`/admin/api/people/${encodeURIComponent(selected.value)}/${compress ? 'compress' : 'consolidate'}`,
-      new AbortController().signal, {method: 'POST'})
-    consolidating.value = false
-    if (!disposed) {
-      await loadPeople()
-      consolidationMessage.value = data.message || (compress ? '人物记忆已压缩' : '人物记忆已整理')
-    }
-  } catch (cause) {
-    if (!disposed) editError.value = cause instanceof Error ? cause.message : '处理失败，原记忆已保留'
-  } finally { consolidating.value = false }
-}
-onMounted(loadPeople)
-onUnmounted(() => {
-  disposed = true
-  clearTimeout(nameTimer)
-  summaryController?.abort()
-  detailController?.abort()
-})
+const state = usePeople()
+const {people, selected, detail, search, loading, detailLoading, error, detailError, ascending, sortBy, sortLabel, affinityEnabled, editing, draftText, saving, savedDraft, isDirty, consolidating, compressing, consolidationMessage, editError, jsonInvalid, jsonEditor, focusJsonEditor, nameTimer, disposed, summaryController, detailController, sortedPeople, filtered, detailName, memorySections, scoreClass, sourceLabel, formatTime, fetchPeopleJson, selectPerson, loadPeople, beginEdit, cancelEdit, savePerson, deletePerson, consolidatePerson} = state
 </script>
 
 <template>
@@ -344,17 +93,20 @@ onUnmounted(() => {
 .editor-footer { padding-top: 16px; margin: 0; }
 .sort-options, .person-stats { display: flex; gap: 12px; }
 .sort-options .btn[aria-pressed="true"] { border-color: var(--primary); background: var(--bg-secondary); box-shadow: inset 0 -2px var(--primary); }
-.people-toolbar { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+.people-toolbar { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; background: var(--card-bg); padding: 16px; border-radius: var(--radius-md); }
 .people-toolbar input { max-width: 420px; min-width: 0; flex: 1; }
 .people-toolbar span, .muted, small, .person-heading span { color: var(--text-secondary); }
-.people-layout { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); flex: 1; min-height: 0; overflow: hidden; border-top: 1px solid var(--border-color); }
+.people-layout { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); flex: 1; min-height: 0; overflow: hidden; border-top: 0; gap: 16px; }
 .people-list, .person-detail { min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-gutter: stable; }
-.people-list { border-right: 1px solid var(--border-color); }
-.person-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; width: 100%; min-height: 76px; padding: 16px; border: 0; border-bottom: 1px solid var(--border-color); background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; }
-.person-row:hover, .person-row.selected { background: var(--bg-secondary); }
-.person-row.selected { box-shadow: inset 3px 0 var(--primary); }
+.people-list { border-right: 0; border-bottom: 0; background: var(--card-bg); border-radius: var(--radius-md); }
+.person-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; width: 100%; min-height: 76px; padding: 16px; border: 0; border-bottom: 1px solid var(--border-color); background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; border-radius: var(--radius-sm); }
+.person-row:hover { background: var(--primary-softer); }
+.person-row.selected { background: var(--primary-soft); }
+.person-row:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -3px; }
+.person-identity strong { font-weight: 500; }
+.person-row.selected .person-identity strong { color: var(--primary); font-weight: 700; }
 .person-identity { display: grid; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
-.person-detail { min-width: 0; padding: 24px 32px; }
+.person-detail { min-width: 0; padding: 24px; background: var(--card-bg); border-radius: var(--radius-md); }
 .person-heading { flex-wrap: wrap; display: flex; justify-content: space-between; gap: 24px; align-items: center; padding-bottom: 24px; overflow-wrap: anywhere; }
 h2, h3, p { margin-top: 0; }
 h2 { font-size: 22px; margin-bottom: 8px; }
@@ -363,16 +115,25 @@ h3 small { margin-left: 8px; font-weight: normal; }
 .score { display: grid; gap: 8px; text-align: right; flex-shrink: 0; }
 .score strong { font-size: 26px; }
 .positive { color: var(--success); } .negative { color: var(--danger); }
-.memory-section { border-top: 1px solid var(--border-color); padding: 24px 0 8px; }
+.memory-section { border-top: 0; padding: 16px; background: var(--bg-secondary); margin-bottom: 16px; border-radius: var(--radius-sm); }
 .memory-entry { padding: 12px 0; border-bottom: 1px solid var(--border-color); }
 .memory-entry:last-child { border-bottom: 0; }
 .memory-entry p, li { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; margin-bottom: 8px; }
 .empty { padding: 32px 16px; color: var(--text-secondary); text-align: center; }
 @media (max-width: 760px) {
-  .people-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(76px, 28%) minmax(0, 1fr); }
-  .people-list { border-right: 0; border-bottom: 1px solid var(--border-color); }
-  .person-detail { padding: 24px 0; }
+  .people-page { height: auto; min-height: 0; }
+  .people-layout { display: flex; flex-direction: column; flex: initial; overflow: visible; }
+  .people-list { flex-shrink: 0; max-height: 304px; scrollbar-gutter: auto; }
+  .person-detail { padding: 16px; overflow: visible; scrollbar-gutter: auto; }
+  .person-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .person-actions .btn { width: 100%; min-width: 0; justify-content: center; }
+  .person-actions .icon-button { height: 44px; }
+  .person-heading { gap: 16px; padding-bottom: 16px; }
   .editor-heading { flex-wrap: wrap; }
-  .people-toolbar { flex-wrap: wrap; gap: 12px; }
+  .people-toolbar { flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+  .people-toolbar input { flex-basis: 100%; max-width: none; order: 1; }
+  .people-toolbar .sort-options, .people-toolbar > button { order: 2; }
+  .people-toolbar > .form-label { margin: 0; }
+  .people-toolbar > span { margin-left: auto; }
 }
 </style>

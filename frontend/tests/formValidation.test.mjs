@@ -129,13 +129,19 @@ test('OneBot validates only the selected transport and saves the exact QQ string
   globalThis.fetch = async () => response({oneBotImplementation: 'napcat', oneBotTransport: 'http', selfQQNumber: '42', qqHttpHost: 'http://localhost:3000', qqWebSocketHost: 'invalid hidden address'})
   const state = mount('onebot/OneBotConfig')
   await flush()
+  assert.equal(state.isDirty(), false)
+  assert.equal(state.activeTransport, 'http')
   const focused = observeFocus(), submitted = []
   globalThis.fetch = async (_url, options) => { submitted.push(JSON.parse(options.body)); return response({success: true}) }
   state.qqConfig.selfQQNumber = '9007199254740993'
+  assert.equal(state.isDirty(), true)
   await state.saveQQConfig()
+  assert.equal(state.isDirty(), false)
   assert.equal(submitted[0].selfQQNumber, '9007199254740993')
   state.qqConfig.oneBotImplementation = 'snowluma'
   state.qqConfig.oneBotTransport = 'websocket'
+  assert.equal(state.isDirty(), true)
+  assert.equal(state.activeTransport, 'http')
   await state.saveQQConfig()
   assert.equal(submitted.length, 1)
   assert.ok(state.errors['onebot-ws-host'])
@@ -145,16 +151,23 @@ test('OneBot validates only the selected transport and saves the exact QQ string
   assert.equal(submitted.length, 2)
   assert.equal(submitted[1].oneBotImplementation, 'snowluma')
   assert.equal(submitted[1].qqHttpHost, 'http://localhost:3000')
+  assert.equal(state.activeTransport, 'websocket')
+  assert.equal(state.isDirty(), false)
 })
 
 test('memory validation preserves invalid drafts and reports both numeric and dependent limits', async () => {
+  globalThis.fetch = async () => response({contextWindowLimit: 100})
   const state = mount('conversation/MemoryConfig')
   await flush()
-  state.loaded = true
+  assert.equal(state.isDirty(), false)
   const focused = observeFocus()
   let posts = 0
   globalThis.fetch = async () => { posts++; return response({success: true}) }
   assert.deepEqual(state.errors, {})
+  state.memoryConfig.contextWindowLimit = 101
+  assert.equal(state.isDirty(), true)
+  state.memoryConfig.contextWindowLimit = 100
+  assert.equal(state.isDirty(), false)
   state.memoryConfig.contextWindowLimit = ''
   state.memoryConfig.memorySummaryBatchSize = 101
   state.memoryConfig.routerWindowKeepCount = 20
@@ -167,6 +180,7 @@ test('memory validation preserves invalid drafts and reports both numeric and de
   Object.assign(state.memoryConfig, {contextWindowLimit: 100, memorySummaryBatchSize: 50, routerWindowKeepCount: 10, longTermRecallThreshold: 0.65})
   await state.saveMemoryConfig()
   assert.equal(posts, 1)
+  assert.equal(state.isDirty(), false)
 })
 
 test('model numeric validation runs before requests, allows fractional sampling, and uses unique IDs', async () => {
@@ -227,4 +241,38 @@ test('execution dependent limits identify the exact invalid field on submit', as
   await state.saveConfig()
   assert.ok(state.errors.mcpMaxToolsPerEnable)
   assert.equal(focused.at(-1), 'mcpMaxToolsPerEnable')
+})
+
+test('execution unsaved status follows edits, reversions, failures and the submitted snapshot', async () => {
+  globalThis.fetch = async () => response({maxToolRounds: 8, routeWhileReplying: false, defaultPrivateEnabled: false,
+    mcpToolPageSize: 10, mcpMaxToolsPerEnable: 4, mcpMaxToolsPerReply: 12})
+  const state = mount('agent/ExecutionConfig')
+  await flush()
+  assert.equal(state.hasUnsavedChanges, false)
+  state.config.maxToolRounds = 9
+  assert.equal(state.hasUnsavedChanges, true)
+  state.config.maxToolRounds = 8
+  assert.equal(state.hasUnsavedChanges, false)
+  state.config.defaultPrivateEnabled = true
+  assert.equal(state.hasUnsavedChanges, true)
+
+  globalThis.fetch = async () => response({success: false, error: '保存失败'})
+  await state.saveConfig()
+  assert.equal(state.hasUnsavedChanges, true)
+
+  let completeSave
+  globalThis.fetch = () => new Promise(resolve => { completeSave = resolve })
+  const pendingSave = state.saveConfig()
+  assert.equal(state.saving, true)
+  state.config.maxToolRounds = 10
+  completeSave(response({success: true}))
+  await pendingSave
+  assert.equal(state.hasUnsavedChanges, true)
+  state.config.maxToolRounds = 8
+  assert.equal(state.hasUnsavedChanges, false)
+
+  state.config.routeWhileReplying = true
+  globalThis.fetch = async () => response({success: true})
+  await state.saveConfig()
+  assert.equal(state.hasUnsavedChanges, false)
 })
