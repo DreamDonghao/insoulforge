@@ -194,12 +194,15 @@ insoulforge/
 恢复查询及消息列表使用传入的数据库与配置；同一组依赖重复初始化不会重复恢复消息或调度任务。
 初始化仅限启动阶段调用，不与消息处理并发执行。
 
-```
+WebSocket 模式：OneBotWebSocketTransport 共用正向和反向连接的事件分发、echo 请求匹配与超时清理。`oneBotTransport` 可选 `http`、`websocket`、`reverse_websocket`；反向入口 `/onebot/ws` 仅接纳通过 Access Token、机器人账号和 Universal 角色校验的连接。三种模式互斥，保存连接配置后生效。
+
+```text
 HTTP 模式：OneBot HTTP POST /
-WebSocket 模式：OneBotWebSocketClient 接收事件，并按 echo 匹配动作响应
+正向 WebSocket：主程序主动连接 OneBot
+反向 WebSocket：OneBot 主动连接 /onebot/ws
     │
     ▼
-两种入口均投递已解析的 OneBot JSON（HTTP 入口会立即确认请求）
+各入口均投递已解析的 OneBot JSON（HTTP 入口会立即确认请求）
     │
     ▼
 OneBotEventWorkflow::enqueueOneBotEvent

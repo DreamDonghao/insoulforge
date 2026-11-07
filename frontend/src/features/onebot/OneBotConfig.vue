@@ -32,7 +32,7 @@ const refreshActiveTransport = async (): Promise<void> => {
   loading.value = true
   try {
     const config = await requestJson<QQConfig>('/admin/api/qq-config')
-    if (config.oneBotTransport !== 'http' && config.oneBotTransport !== 'websocket') throw new Error('OneBot 配置数据无效')
+    if (config.oneBotTransport !== 'http' && config.oneBotTransport !== 'websocket' && config.oneBotTransport !== 'reverse_websocket') throw new Error('OneBot 配置数据无效')
     if (config.oneBotImplementation !== 'napcat' && config.oneBotImplementation !== 'snowluma') throw new Error('OneBot 实现类型无效')
     Object.assign(qqConfig!, config, {selfQQNumber: String(config.selfQQNumber ?? '0')})
     activeTransport.value = config.oneBotTransport
@@ -48,6 +48,10 @@ const refreshActiveTransport = async (): Promise<void> => {
 
 const {errors, fieldAttrs, validateForm} = useFormValidation(() => {
   const result: Record<string, string> = {'bot-qq': identifierError(qqConfig!.selfQQNumber, 'Bot 用户 ID', true)}
+  if (qqConfig!.oneBotTransport === 'reverse_websocket') {
+    if (!qqConfig!.accessToken.trim()) result['onebot-access-token'] = '反向 WebSocket 必须配置 Access Token'
+    return result
+  }
   const http = qqConfig!.oneBotTransport === 'http'
   const value = http ? qqConfig!.qqHttpHost : qqConfig!.qqWebSocketHost
   try {
@@ -58,6 +62,12 @@ const {errors, fieldAttrs, validateForm} = useFormValidation(() => {
   }
   return result
 })
+
+const reverseAddress = 'ws://<主程序地址>:<端口>/onebot/ws'
+const copyReverseAddress = async (): Promise<void> => {
+  try { await navigator.clipboard.writeText(reverseAddress); showToast!('接入地址已复制') }
+  catch { showToast!('复制失败，请手动复制接入地址', true) }
+}
 
 const saveQQConfig = async (): Promise<void> => {
   if (saving.value || loading.value || !loaded.value || !validateForm()) return
@@ -142,43 +152,44 @@ onMounted(() => {
       <section class="config-section">
         <div class="connection-header">
           <h3 class="section-title">连接方式</h3>
-          <p class="runtime-transport" role="status">当前运行：{{ activeTransport === null ? '读取中...' : activeTransport === 'http' ? 'HTTP' : 'WebSocket' }}</p>
+          <p class="runtime-transport" role="status">当前运行：{{ activeTransport === null ? '读取中...' : activeTransport === 'http' ? 'HTTP' : activeTransport === 'reverse_websocket' ? '反向 WebSocket' : '正向 WebSocket' }}</p>
         </div>
         <div class="form-group">
           <div class="field-label">
             <span id="onebot-transport-label" class="form-label">传输方式</span>
             <FieldHelp id="onebot-transport-hint" label="传输方式">选择新的方式并保存后，才会切换当前运行方式。</FieldHelp>
           </div>
-          <fieldset class="transport-switch" :disabled="saving" aria-labelledby="onebot-transport-label" aria-describedby="onebot-transport-hint">
+          <fieldset class="transport-switch transport-modes" :disabled="saving" aria-labelledby="onebot-transport-label" aria-describedby="onebot-transport-hint">
             <legend class="sr-only">OneBot 传输方式（保存后生效）</legend>
-            <label v-for="transport in ['http', 'websocket'] as const" :key="transport" :class="{active: qqConfig!.oneBotTransport === transport}">
+            <label v-for="transport in ['http', 'websocket', 'reverse_websocket'] as const" :key="transport" :class="{active: qqConfig!.oneBotTransport === transport}">
               <input class="sr-only" v-model="qqConfig!.oneBotTransport" type="radio" name="onebot-transport" :value="transport">
               <span class="choice-mark" aria-hidden="true">{{ qqConfig!.oneBotTransport === transport ? '✓' : '' }}</span>
-              {{ transport === 'http' ? 'HTTP' : 'WebSocket' }}
+              {{ transport === 'http' ? 'HTTP' : transport === 'reverse_websocket' ? '反向 WebSocket' : '正向 WebSocket' }}
             </label>
           </fieldset>
         </div>
-        <p v-if="activeTransport !== null && qqConfig!.oneBotTransport !== activeTransport" class="transport-pending" role="status">保存后切换至 {{ qqConfig!.oneBotTransport === 'http' ? 'HTTP' : 'WebSocket' }}。</p>
+        <p v-if="activeTransport !== null && qqConfig!.oneBotTransport !== activeTransport" class="transport-pending" role="status">保存后切换至 {{ qqConfig!.oneBotTransport === 'http' ? 'HTTP' : qqConfig!.oneBotTransport === 'reverse_websocket' ? '反向 WebSocket' : '正向 WebSocket' }}。</p>
         <div v-if="qqConfig!.oneBotTransport === 'http'" class="form-group">
           <label for="onebot-http-host" class="form-label">HTTP 服务地址</label>
-          <input v-bind="fieldAttrs('onebot-http-host')" :disabled="saving" v-model="qqConfig!.qqHttpHost" class="form-input" placeholder="http://127.0.0.1:3000" type="text">
+          <input v-bind="fieldAttrs('onebot-http-host')" :disabled="saving" v-model="qqConfig!.qqHttpHost" class="form-input" placeholder="http://<OneBot 服务地址>:<端口>" type="text">
           <FieldError field="onebot-http-host" :message="errors['onebot-http-host']"/>
         </div>
-        <div v-else class="form-group">
+        <div v-else-if="qqConfig!.oneBotTransport === 'websocket'" class="form-group">
           <div class="field-label">
             <label for="onebot-ws-host" class="form-label">WebSocket 服务地址</label>
             <FieldHelp id="onebot-ws-host-hint" label="WebSocket 服务地址">OneBot 正向 WebSocket 地址。</FieldHelp>
           </div>
-          <input v-bind="fieldAttrs('onebot-ws-host', 'onebot-ws-host-hint')" :disabled="saving" v-model="qqConfig!.qqWebSocketHost" class="form-input" placeholder="ws://127.0.0.1:3001" type="text">
+          <input v-bind="fieldAttrs('onebot-ws-host', 'onebot-ws-host-hint')" :disabled="saving" v-model="qqConfig!.qqWebSocketHost" class="form-input" placeholder="ws://<OneBot 服务地址>:<端口>" type="text">
           <FieldError field="onebot-ws-host" :message="errors['onebot-ws-host']"/>
         </div>
+        <p v-if="qqConfig!.oneBotTransport === 'reverse_websocket'"><code>{{ reverseAddress }}</code><button type="button" class="btn btn-secondary" @click="copyReverseAddress">复制地址</button></p>
         <div class="form-group">
           <div class="field-label">
             <label for="onebot-access-token" class="form-label">Access Token</label>
             <FieldHelp id="onebot-access-token-hint" label="Access Token">OneBot API 访问令牌。</FieldHelp>
           </div>
           <div class="secret-input">
-            <input id="onebot-access-token" :disabled="saving" v-model="qqConfig!.accessToken" class="form-input"
+            <input v-bind="fieldAttrs('onebot-access-token', 'onebot-access-token-hint')" :disabled="saving" v-model="qqConfig!.accessToken" class="form-input"
                    :type="showAccessToken ? 'text' : 'password'" autocomplete="off" spellcheck="false" aria-describedby="onebot-access-token-hint">
             <button class="secret-toggle" type="button"
                     aria-controls="onebot-access-token" :title="showAccessToken ? '隐藏访问令牌' : '显示访问令牌'"
@@ -186,6 +197,7 @@ onMounted(() => {
               <NavIcon :name="showAccessToken ? 'eye-off' : 'eye'"/>
             </button>
           </div>
+          <FieldError field="onebot-access-token" :message="errors['onebot-access-token']"/>
         </div>
       </section>
 
@@ -241,6 +253,7 @@ onMounted(() => {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }
+.transport-modes { grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
 .transport-switch label {
   position: relative;
   display: flex;
@@ -257,6 +270,7 @@ onMounted(() => {
   font-weight: 500;
   transition: background-color 0.15s ease, color 0.15s ease;
 }
+.transport-modes label { gap: 6px; padding-inline: 8px; white-space: nowrap; }
 .transport-switch label:focus-within { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 .transport-switch label + label { border-left: 1px solid var(--border); }
 .transport-switch label:hover { color: var(--text-primary); background: var(--bg-secondary); }
@@ -269,5 +283,7 @@ onMounted(() => {
   .form-group { grid-template-columns: minmax(0, 1fr); }
   .form-group :deep(.form-error) { grid-column: 1 / -1; }
   .transport-switch { grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+  .transport-modes { grid-template-columns: minmax(0, 1fr); }
+  .transport-modes label + label { border-left: 0; border-top: 1px solid var(--border); }
 }
 </style>

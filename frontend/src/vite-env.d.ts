@@ -4,7 +4,7 @@ export interface QQConfig {
     accessToken: string
     selfQQNumber: string
     oneBotImplementation: 'napcat' | 'snowluma'
-    oneBotTransport: 'http' | 'websocket'
+    oneBotTransport: 'http' | 'websocket' | 'reverse_websocket'
     qqHttpHost: string
     qqWebSocketHost: string
     botName: string

@@ -18,7 +18,7 @@
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/ConnectionRefusedLogFilter.hpp>
 #include <infrastructure/logging/LogBuffer.hpp>
-#include <onebot/transport/OneBotWebSocketClient.hpp>
+#include <onebot/transport/OneBotWebSocketTransport.hpp>
 #include <onebot/transport/ReconnectLogState.hpp>
 #include <workflow/session/QQNameDirectory.hpp>
 
@@ -28,7 +28,8 @@ namespace {
     using namespace std::chrono_literals;
 
     void require(const bool condition, const char *message) {
-        if (!condition) throw std::runtime_error(message);
+        if (!condition)
+            throw std::runtime_error(message);
     }
 
     std::atomic<bool> ready{false};
@@ -41,13 +42,16 @@ namespace {
         ReconnectLogState state;
         const Clock::time_point start{};
         const auto first = state.record(2, start);
-        require(first && first->first && first->failedAttempts == 1 && first->offlineSeconds == 0 && first->lastError == 2,
+        require(
+          first && first->first && first->failedAttempts == 1 && first->offlineSeconds == 0 && first->lastError == 2,
           "first failure is reported immediately");
         for (int second = 3; second < 300; second += 3)
-            require(!state.record(2, start + std::chrono::seconds(second)), "retries must not produce repeated warnings");
+            require(
+              !state.record(2, start + std::chrono::seconds(second)), "retries must not produce repeated warnings");
         const auto summary = state.record(4, start + 300s);
         require(summary && !summary->first && summary->failedAttempts == 101 && summary->lastError == 4 &&
-                  summary->offlineSeconds == 300, "five minute summary includes cumulative attempts and latest error");
+                  summary->offlineSeconds == 300,
+          "five minute summary includes cumulative attempts and latest error");
         require(!state.record(2, start + 303s), "summary restarts the reporting window");
         const auto recovered = state.recover(start + 305s);
         require(recovered && recovered->failedAttempts == 102 && recovered->offlineSeconds == 305,
@@ -65,13 +69,15 @@ namespace {
     void testTrantorFilter() {
         ConnectionRefusedLogFilter filter;
         const Clock::time_point start{};
-        const auto warning = "20261028 UTC 1 WARN  Connector::handleWrite - SO_ERROR = " +
-          std::to_string(ECONNREFUSED) + " Connection refused - Connector.cc:181\n";
+        const auto warning =
+          "20261028 UTC 1 WARN  Connector::handleWrite - SO_ERROR = " + std::to_string(ECONNREFUSED) +
+          " Connection refused - Connector.cc:181\n";
         require(filter.shouldWrite(warning, start), "first Connector warning is visible");
         require(!filter.shouldWrite(warning, start + 3s) && !filter.shouldWrite(warning, start + 299s),
           "duplicate Connector warnings are suppressed");
         require(filter.shouldWrite(warning, start + 300s), "Connector warning remains visible every five minutes");
-        require(filter.shouldWrite("ERROR Connector::handleWrite - SO_ERROR = 61 Connection refused - Connector.cc:181", start),
+        require(filter.shouldWrite(
+                  "ERROR Connector::handleWrite - SO_ERROR = 61 Connection refused - Connector.cc:181", start),
           "error severity must not be filtered");
         require(filter.shouldWrite("WARN another connection refused", start), "other warnings remain visible");
         require(filter.shouldWrite("WARN Connector::handleWrite - SO_ERROR = 110 Timeout - Connector.cc:181", start),
@@ -106,10 +112,10 @@ namespace {
         require(response && response->getStatusCode() == drogon::k200OK, "QQ configuration save failed");
     }
 
-    auto testConfigReload(OneBotWebSocketClient &client, const std::string &hostname) -> drogon::Task<> {
+    auto testConfigReload(OneBotWebSocketTransport &client, const std::string &hostname) -> drogon::Task<> {
         auto qq = Config::instance().getQQConfig();
         qq["qqWebSocketHost"] = "ws://" + hostname + ":" +
-          std::to_string(drogon::app().getListeners().front().toPort()) + "/reconnect-fixture";
+                                std::to_string(drogon::app().getListeners().front().toPort()) + "/reconnect-fixture";
         int previousAttempts = attempts.load();
         co_await saveQQConfig(qq);
         co_await waitFor([&] { return attempts.load() > previousAttempts && client.isConnected(); },
@@ -117,7 +123,10 @@ namespace {
         // DNS 定时器可能暂时持有解析器，立即重连会掩盖错误线程析构的问题。
         co_await drogon::sleepCoro(trantor::EventLoop::getEventLoopOfCurrentThread(), 4.0);
 
-        struct PendingAction { bool finished = false; std::optional<json> response; };
+        struct PendingAction {
+            bool finished = false;
+            std::optional<json> response;
+        };
         const auto action = std::make_shared<PendingAction>();
         drogon::async_run([&client, action]() -> drogon::Task<> {
             action->response = co_await client.callApi("delayed_reply", json::object(), 2.0);
@@ -138,7 +147,8 @@ namespace {
         qq["qqHttpHost"] = "http://unused-fixture:3000";
         co_await saveQQConfig(qq);
         require(client.isConnected() && attempts.load() == previousAttempts &&
-          (co_await client.callApi("get_version", json::object(), 1.0, Config::instance().oneBotSnapshot())).has_value(),
+                  (co_await client.callApi("get_version", json::object(), 1.0, Config::instance().oneBotSnapshot()))
+                    .has_value(),
           "inactive HTTP address change must not invalidate the active WebSocket");
 
         qq["accessToken"] = "fixture-token";
@@ -170,12 +180,70 @@ namespace {
           "switching back to WebSocket must reconnect");
     }
 
+    auto testReverse() -> drogon::Task<> {
+        auto &transport = OneBotWebSocketTransport::instance();
+        auto qq = Config::instance().getQQConfig();
+        qq["oneBotTransport"] = "reverse_websocket";
+        qq["accessToken"] = "reverse-test-token";
+        co_await saveQQConfig(qq);
+        const auto origin = "ws://127.0.0.1:" + std::to_string(drogon::app().getListeners().front().toPort());
+        auto connect = [&](const std::string &token, const std::string &role,
+                         const std::string &self) -> drogon::Task<drogon::WebSocketClientPtr> {
+            auto peer = drogon::WebSocketClient::newWebSocketClient(origin, drogon::app().getLoop());
+            auto request = drogon::HttpRequest::newHttpRequest();
+            request->setPath("/onebot/ws");
+            request->addHeader("Authorization", "Bearer " + token);
+            request->addHeader("X-Client-Role", role);
+            request->addHeader("X-Self-ID", self);
+            auto done = std::make_shared<std::atomic<bool>>(false);
+            auto ok = std::make_shared<std::atomic<bool>>(false);
+            peer->setMessageHandler([](std::string &&message, const drogon::WebSocketClientPtr &source,
+                                      const drogon::WebSocketMessageType &type) {
+                if (type != drogon::WebSocketMessageType::Text)
+                    return;
+                json body;
+                if (tryParseJson(message, body) && body.contains("echo") && getStr(body, "action") != "never_reply")
+                    source->getConnection()->send(dumpJson(json{{"status", "ok"}, {"echo", body["echo"]}}));
+            });
+            peer->connectToServer(request, [done, ok](drogon::ReqResult result, const drogon::HttpResponsePtr &,
+                                             const drogon::WebSocketClientPtr &) {
+                *ok = result == drogon::ReqResult::Ok;
+                *done = true;
+            });
+            co_await waitFor([done] { return done->load(); }, "reverse handshake timed out");
+            if (!*ok) {
+                peer->stop();
+                co_return nullptr;
+            }
+            co_return peer;
+        };
+        require(!(co_await connect("wrong", "Universal", "123")), "invalid token rejected");
+        require(!(co_await connect("reverse-test-token", "Event", "123")), "split event connection rejected");
+        require(!(co_await connect("reverse-test-token", "Universal", "456")), "wrong account rejected");
+        auto peer = co_await connect("reverse-test-token", "Universal", "123");
+        require(peer != nullptr, "reverse handshake accepted");
+        co_await waitFor([&transport] { return transport.isConnected(); }, "reverse connection accepted");
+        require((co_await transport.callApi("get_version", json::object(), 1)).has_value(), "reverse API roundtrip");
+        require(!(co_await transport.callApi("never_reply", json::object(), 0.05)), "reverse request timeout");
+        auto replacement = co_await connect("reverse-test-token", "Universal", "123");
+        require(replacement && transport.isConnected(), "replacement accepted");
+        require(
+          (co_await transport.callApi("get_version", json::object(), 1)).has_value(), "replacement API roundtrip");
+        qq["oneBotTransport"] = "http";
+        co_await saveQQConfig(qq);
+        require(!transport.isConnected(), "mode switch closes reverse connection");
+        require(!(co_await connect("reverse-test-token", "Universal", "123")), "inactive mode rejected");
+        peer->stop();
+        replacement->stop();
+    }
+
     auto testConnection(int &exitCode, const std::string &hostname) -> drogon::Task<> {
-        auto &client = OneBotWebSocketClient::instance();
+        auto &client = OneBotWebSocketTransport::instance();
         try {
             client.start();
             co_await waitFor([] { return attempts.load() >= 2; }, "timed out waiting for two failed attempts");
-            require(!client.isConnected() && warnings().size() == 1, "offline retries log only one application warning");
+            require(
+              !client.isConnected() && warnings().size() == 1, "offline retries log only one application warning");
             {
                 std::scoped_lock lock(fixtureMutex);
                 require(attemptTimes.size() == 2 && attemptTimes[1] - attemptTimes[0] >= 2500ms,
@@ -202,10 +270,12 @@ namespace {
               "stop cancels stale retry timers without additional warnings");
             ready = true;
             client.reconfigure();
-            co_await waitFor([&client] { return client.isConnected(); }, "timed out waiting for reconfigured connection");
+            co_await waitFor(
+              [&client] { return client.isConnected(); }, "timed out waiting for reconfigured connection");
             require(LogBuffer::instance().query({.keyword = "已恢复连接", .limit = 100}).entries.size() == 1,
               "reconfigure clears the previous offline state");
             co_await testConfigReload(client, hostname);
+            co_await testReverse();
             exitCode = 0;
             std::cout << "OneBot reconnect tests passed\n";
         } catch (const std::exception &error) {
@@ -218,8 +288,8 @@ namespace {
 
 class ReconnectFixtureFilter : public drogon::HttpFilter<ReconnectFixtureFilter, false> {
 public:
-    void doFilter(const drogon::HttpRequestPtr &, drogon::FilterCallback &&reject,
-      drogon::FilterChainCallback &&next) override {
+    void doFilter(
+      const drogon::HttpRequestPtr &, drogon::FilterCallback &&reject, drogon::FilterChainCallback &&next) override {
         const bool accept = ready.load();
         {
             std::scoped_lock lock(fixtureMutex);
@@ -246,7 +316,8 @@ public:
     void handleConnectionClosed(const drogon::WebSocketConnectionPtr &) override {}
     void handleNewMessage(const drogon::WebSocketConnectionPtr &connection, std::string &&message,
       const drogon::WebSocketMessageType &type) override {
-        if (type != drogon::WebSocketMessageType::Text) return;
+        if (type != drogon::WebSocketMessageType::Text)
+            return;
         const auto request = insoulforge::json::parse(message);
         if (request["action"] == "close_fixture") {
             connection->forceClose();
@@ -266,7 +337,8 @@ public:
 auto main(const int argc, char **argv) -> int {
     // 默认仅使用本机域名；可传入指向 127.0.0.1 的 DNS 域名，验证实际 c-ares 套接字析构。
     const std::string hostname = argc > 1 ? argv[1] : "localhost";
-    const auto configPath = std::filesystem::temp_directory_path() /
+    const auto configPath =
+      std::filesystem::temp_directory_path() /
       ("insoulforge-onebot-reconnect-" + std::to_string(Clock::now().time_since_epoch().count()) + ".json");
     try {
         require(Config::instance().initialize(configPath.string()).has_value(), "fixture configuration failed");
@@ -287,8 +359,8 @@ auto main(const int argc, char **argv) -> int {
         auto qq = config.getQQConfig();
         qq["selfQQNumber"] = 123;
         qq["oneBotTransport"] = "websocket";
-        qq["qqWebSocketHost"] = "ws://127.0.0.1:" +
-          std::to_string(drogon::app().getListeners().front().toPort()) + "/reconnect-fixture";
+        qq["qqWebSocketHost"] =
+          "ws://127.0.0.1:" + std::to_string(drogon::app().getListeners().front().toPort()) + "/reconnect-fixture";
         require(config.saveQQConfig(qq).has_value(), "fixture connection configuration failed");
         worker.getLoop()->queueInLoop([&] {
             drogon::async_run([&]() -> drogon::Task<> {

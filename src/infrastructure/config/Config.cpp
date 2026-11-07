@@ -243,7 +243,7 @@ namespace insoulforge {
             if (qqCfg.contains("botName")) {
                 botName = getStr(qqCfg, "botName");
             }
-            if (oneBotTransport != "http" && oneBotTransport != "websocket") {
+            if (oneBotTransport != "http" && oneBotTransport != "websocket" && oneBotTransport != "reverse_websocket") {
                 oneBotTransport = "http";
             }
         }
@@ -428,7 +428,11 @@ namespace insoulforge {
             return result;
         }
         const auto transport = getStr(value, "oneBotTransport", "http");
-        normalized["oneBotTransport"] = transport == "websocket" ? "websocket" : "http";
+        normalized["oneBotTransport"] =
+          (transport == "websocket" || transport == "reverse_websocket") ? transport : "http";
+        if (transport == "reverse_websocket" && trim(getStr(normalized, "accessToken")).empty())
+            return std::unexpected(
+              ConfigError{.type = ConfigErrorType::InvalidArgument, .message = "反向 WebSocket 必须配置 Access Token"});
         Config next;
         return ConfigStore::saveQQConfig(normalized, [&next](const json &stored) -> std::expected<void, ConfigError> {
             return next.loadValues(stored);
@@ -529,7 +533,8 @@ namespace insoulforge {
         return ConfigStore::saveExecutionConfig(value, [&next](const json &stored) -> std::expected<void, ConfigError> {
             return next.loadValues(stored);
         }).transform([this, &next] -> void {
-            defaultPrivateEnabled.store(next.defaultPrivateEnabled.load(std::memory_order_relaxed), std::memory_order_relaxed);
+            defaultPrivateEnabled.store(
+              next.defaultPrivateEnabled.load(std::memory_order_relaxed), std::memory_order_relaxed);
             execution.maxToolRounds.store(
               next.execution.maxToolRounds.load(std::memory_order_relaxed), std::memory_order_relaxed);
             execution.routeWhileReplying.store(

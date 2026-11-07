@@ -104,7 +104,7 @@ namespace insoulforge {
         u64 selfQQNumber = 0;
         std::atomic<bool> defaultPrivateEnabled{false}; // 仅用于首次收到消息的新私聊
         std::string oneBotImplementation = "napcat"; ///< NapCat 或 SnowLuma 扩展接口。
-        std::string oneBotTransport = "http"; // http 或 websocket；同一时刻只使用一种
+        std::string oneBotTransport = "http"; // http、websocket 或 reverse_websocket；同一时刻只使用一种
         std::string qqHttpHost;
         std::string qqWebSocketHost;
         std::string botName{"机器人"};

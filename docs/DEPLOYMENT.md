@@ -303,6 +303,34 @@ http://服务器IP:7778/index.html#token=<日志中的令牌>
 
 WebSocket 连接失败后 InSoulForge 每 3 秒重试，首次离线立即警告，持续失败每 5 分钟汇总一次，恢复后重置统计。NapCat 未启动时也保持此重连频率。
 
+### 公网主程序与本地 NapCat：反向 WebSocket
+
+当 InSoulForge 在公网服务器、NapCat 在本地或另一台机器时，在后台 OneBot 配置选择「反向 WebSocket」，填写机器人用户 ID 和非空 Access Token 后保存。该模式不需要填写 NapCat 服务地址，也不需要向公网开放 NapCat 端口。
+
+在 NapCat 添加 WebSocket 客户端，使用 Universal（事件和 API 共用连接）模式：
+
+- 地址：`wss://你的域名/onebot/ws`；本地测试可用 `ws://主程序IP:7778/onebot/ws`。
+- Token：与主程序 Access Token 一致，通过 `Authorization: Bearer ...` 请求头发送。
+- 机器人账号必须与主程序配置一致；接入会校验 `X-Self-ID` 和 `X-Client-Role: Universal`。
+
+反向模式由 NapCat 负责断线重连。主程序每 30 秒发送 Ping，连续 90 秒未收到帧则关闭失活连接。新连接替换旧连接，断线和切换配置会使等待中的 API 请求失败，不自动重发，避免重复发送消息。
+
+公网建议使用 HTTPS/WSS。Nginx 的 HTTPS 虚拟主机中可加入以下路径配置（证书使用现有站点配置）：
+
+```nginx
+location /onebot/ws {
+    proxy_pass http://127.0.0.1:7778;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header Authorization $http_authorization;
+    proxy_read_timeout 120s;
+}
+```
+
+容器端口需绑定到代理可访问的地址。通过反向代理访问后台时，页面提供可复制的接入地址；若代理有路径前缀或访问主机与 NapCat 所用主机不同，请按公网实际入口调整。
+
 ### 单服务部署：连接已有 OneBot
 
 上面的单服务 Compose 不包含名为 `napcat` 的服务，不能直接照填 `ws://napcat:3001`。优先使用正向 WebSocket，并在后台填写现有 OneBot 的可达地址、Access Token 和机器人 QQ 号：

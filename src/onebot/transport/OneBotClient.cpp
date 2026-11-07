@@ -13,7 +13,7 @@
 #include <infrastructure/image/Image.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <onebot/transport/OneBotClient.hpp>
-#include <onebot/transport/OneBotWebSocketClient.hpp>
+#include <onebot/transport/OneBotWebSocketTransport.hpp>
 
 namespace insoulforge::OneBotClient {
     namespace {
@@ -44,9 +44,9 @@ namespace insoulforge::OneBotClient {
             if (connection != Config::instance().oneBotSnapshot())
                 co_return std::unexpected("OneBot 配置已切换，请刷新收藏列表后重试");
             json body;
-            if (getStr(connection, "oneBotTransport") == "websocket") {
+            if (getStr(connection, "oneBotTransport") != "http") {
                 const auto response =
-                  co_await OneBotWebSocketClient::instance().callApi(api, std::move(params), timeout, connection);
+                  co_await OneBotWebSocketTransport::instance().callApi(api, std::move(params), timeout, connection);
                 if (!response) {
                     co_return std::unexpected("OneBot 请求失败或超时，无法确认发送结果");
                 }

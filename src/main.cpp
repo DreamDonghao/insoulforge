@@ -27,7 +27,7 @@
 #include <infrastructure/monitoring/ProcessMetrics.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/tokenizer/TokenCounter.hpp>
-#include <onebot/transport/OneBotWebSocketClient.hpp>
+#include <onebot/transport/OneBotWebSocketTransport.hpp>
 #include <workflow/OneBotEventWorkflow.hpp>
 #include <workflow/activity/ActivityManager.hpp>
 #include <workflow/agent/ability/AsyncTaskManager.hpp>
@@ -152,7 +152,7 @@ auto main() -> int {
         QQNameDirectory::setCustomName(UserId{config.selfQQNumber}, config.botName + "(我)");
 
         // 配置为 WebSocket 时建立正向连接；使用 HTTP 时不建立连接。
-        OneBotWebSocketClient::instance().start();
+        OneBotWebSocketTransport::instance().start();
 
         // 启动定时任务调度器
         TaskScheduler::instance().start();
@@ -199,7 +199,7 @@ auto main() -> int {
 
         // 先停止任务来源并记录未完成的后台任务，再持久化消息列表、关闭数据库。
         TaskScheduler::instance().stop();
-        OneBotWebSocketClient::instance().stop();
+        OneBotWebSocketTransport::instance().stop();
         AsyncTaskManager::instance().stop();
         workflow.flushMessageListsToStorage();
         database.close();

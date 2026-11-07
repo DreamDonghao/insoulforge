@@ -1,10 +1,10 @@
-/// @file OneBotWebSocketClient.cpp
+/// @file OneBotWebSocketTransport.cpp
 /// @brief OneBot 正向 WebSocket 连接管理器实现
 
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
-#include <onebot/transport/OneBotWebSocketClient.hpp>
+#include <onebot/transport/OneBotWebSocketTransport.hpp>
 #include <workflow/OneBotEventWorkflow.hpp>
 
 namespace insoulforge {
@@ -12,18 +12,20 @@ namespace insoulforge {
         constexpr f64 kReconnectDelaySeconds = 3.0;
     } // namespace
 
-    auto OneBotWebSocketClient::instance() -> OneBotWebSocketClient & {
-        static OneBotWebSocketClient client;
+    auto OneBotWebSocketTransport::instance() -> OneBotWebSocketTransport & {
+        static OneBotWebSocketTransport client;
         return client;
     }
 
-    OneBotWebSocketClient::ApiResponseAwaiter::ApiResponseAwaiter(
-      OneBotWebSocketClient &client, std::string action, json params, const f64 timeout, json expectedConnection) :
+    OneBotWebSocketTransport::ApiResponseAwaiter::ApiResponseAwaiter(
+      OneBotWebSocketTransport &client, std::string action, json params, const f64 timeout, json expectedConnection) :
         m_client(client), m_action(std::move(action)), m_params(std::move(params)), m_timeout(timeout),
         m_expectedConnection(std::move(expectedConnection)) {}
 
-    auto OneBotWebSocketClient::ApiResponseAwaiter::await_suspend(const std::coroutine_handle<> continuation) -> bool {
-        if (m_client.sendApiRequest(std::move(m_action), std::move(m_params), m_timeout,
+    auto OneBotWebSocketTransport::ApiResponseAwaiter::await_suspend(const std::coroutine_handle<> continuation)
+      -> bool {
+        if (m_client.sendApiRequest(
+              std::move(m_action), std::move(m_params), m_timeout,
               [this, continuation](std::optional<json> response) mutable -> void {
                   setValue(std::move(response));
                   continuation.resume();
@@ -35,7 +37,75 @@ namespace insoulforge {
         return false;
     }
 
-    void OneBotWebSocketClient::start() {
+    void OneBotWebSocketTransport::acceptReverse(drogon::WebSocketConnectionPtr connection, json config) {
+        drogon::app().getLoop()->queueInLoop([this, connection = std::move(connection), config = std::move(config)] {
+            if (config != Config::instance().oneBotSnapshot() || !connection->connected()) {
+                connection->shutdown();
+                return;
+            }
+            stop();
+            {
+                std::scoped_lock lock(m_mutex);
+                if (getStr(config, "oneBotTransport") != "reverse_websocket" ||
+                    config != Config::instance().oneBotSnapshot()) {
+                    connection->shutdown();
+                    return;
+                }
+                m_running = true;
+                m_connectionConfig = config;
+                m_connection = connection;
+                m_lastReceive = std::chrono::steady_clock::now();
+                const auto generation = m_generation;
+                drogon::app().getLoop()->runAfter(30, [this, generation] { checkReverseTimeout(generation); });
+            }
+            connection->setPingMessage("onebot", std::chrono::seconds(30));
+            Logger::info(std::nullopt, "OneBot", "OneBot 反向 WebSocket 已连接");
+        });
+    }
+
+    void OneBotWebSocketTransport::receiveReverse(const drogon::WebSocketConnectionPtr &connection,
+      const std::string &message, const drogon::WebSocketMessageType type) {
+        {
+            std::scoped_lock lock(m_mutex);
+            if (m_connection != connection)
+                return;
+            m_lastReceive = std::chrono::steady_clock::now();
+        }
+        handleMessage(message, type);
+    }
+
+    void OneBotWebSocketTransport::closeReverse(const drogon::WebSocketConnectionPtr &connection) {
+        std::vector<ResponseCallback> callbacks;
+        {
+            std::scoped_lock lock(m_mutex);
+            if (m_connection != connection)
+                return;
+            m_connection.reset();
+            m_running = false;
+            callbacks = takePendingCallbacksLocked();
+        }
+        failRequests(callbacks);
+        Logger::info(std::nullopt, "OneBot", "OneBot 反向 WebSocket 已断开，等待重新接入");
+    }
+
+    void OneBotWebSocketTransport::checkReverseTimeout(const u64 generation) {
+        drogon::WebSocketConnectionPtr expired;
+        {
+            std::scoped_lock lock(m_mutex);
+            if (generation != m_generation || !m_connection || m_client)
+                return;
+            if (std::chrono::steady_clock::now() - m_lastReceive >= std::chrono::seconds(90))
+                expired = m_connection;
+            else
+                drogon::app().getLoop()->runAfter(30, [this, generation] { checkReverseTimeout(generation); });
+        }
+        if (expired) {
+            closeReverse(expired);
+            expired->forceClose();
+        }
+    }
+
+    void OneBotWebSocketTransport::start() {
         u64 generation = 0;
         {
             std::scoped_lock lock(m_mutex);
@@ -48,8 +118,9 @@ namespace insoulforge {
         drogon::app().getLoop()->queueInLoop([this, generation] -> void { connect(generation); });
     }
 
-    void OneBotWebSocketClient::stop() {
+    void OneBotWebSocketTransport::stop() {
         drogon::WebSocketClientPtr client;
+        drogon::WebSocketConnectionPtr connection;
         std::vector<ResponseCallback> callbacks;
         {
             std::scoped_lock lock(m_mutex);
@@ -57,9 +128,11 @@ namespace insoulforge {
             m_running = false;
             m_reconnectLog.reset();
             client = std::move(m_client);
-            m_connection.reset();
+            connection = std::move(m_connection);
             callbacks = takePendingCallbacksLocked();
         }
+        if (connection)
+            connection->shutdown();
         if (client) {
             // 域名连接持有 DNS 解析器，停止和最终析构都必须回到所属事件循环。
             // 转移所有权，避免循环执行完回调后，最后一份引用仍在调用线程释放。
@@ -70,23 +143,23 @@ namespace insoulforge {
         Logger::resetConnectionRefusedWarnings();
     }
 
-    void OneBotWebSocketClient::reconfigure() {
+    void OneBotWebSocketTransport::reconfigure() {
         stop();
         start();
     }
 
-    auto OneBotWebSocketClient::isConnected() const -> bool {
+    auto OneBotWebSocketTransport::isConnected() const -> bool {
         std::scoped_lock lock(m_mutex);
         return m_connection && m_connection->connected();
     }
 
-    auto OneBotWebSocketClient::callApi(std::string action, json params, const f64 timeout, json expectedConnection)
+    auto OneBotWebSocketTransport::callApi(std::string action, json params, const f64 timeout, json expectedConnection)
       -> drogon::Task<std::optional<json>> {
         co_return co_await ApiResponseAwaiter(
           *this, std::move(action), std::move(params), timeout, std::move(expectedConnection));
     }
 
-    void OneBotWebSocketClient::connect(const u64 generation) {
+    void OneBotWebSocketTransport::connect(const u64 generation) {
         const auto connectionConfig = Config::instance().oneBotSnapshot();
         std::string origin;
         std::string path;
@@ -115,15 +188,15 @@ namespace insoulforge {
         }
         request->setPath(path);
 
-        client->setMessageHandler(
-          [this, generation](std::string &&message, const drogon::WebSocketClientPtr &source,
-            const drogon::WebSocketMessageType &type) -> void {
-              {
-                  std::scoped_lock lock(m_mutex);
-                  if (!m_running || generation != m_generation || m_client != source) return;
-              }
-              handleMessage(message, type);
-          });
+        client->setMessageHandler([this, generation](std::string &&message, const drogon::WebSocketClientPtr &source,
+                                    const drogon::WebSocketMessageType &type) -> void {
+            {
+                std::scoped_lock lock(m_mutex);
+                if (!m_running || generation != m_generation || m_client != source)
+                    return;
+            }
+            handleMessage(message, type);
+        });
         client->setConnectionClosedHandler(
           [this](const drogon::WebSocketClientPtr &closedClient) -> void { handleConnectionClosed(closedClient); });
 
@@ -174,11 +247,11 @@ namespace insoulforge {
           });
     }
 
-    void OneBotWebSocketClient::scheduleReconnect(const u64 generation) {
+    void OneBotWebSocketTransport::scheduleReconnect(const u64 generation) {
         drogon::app().getLoop()->runAfter(kReconnectDelaySeconds, [this, generation] -> void { connect(generation); });
     }
 
-    auto OneBotWebSocketClient::sendApiRequest(std::string action, json params, const f64 timeout,
+    auto OneBotWebSocketTransport::sendApiRequest(std::string action, json params, const f64 timeout,
       ResponseCallback callback, const json &expectedConnection) -> bool {
         const bool currentConfig =
           expectedConnection.is_null() || expectedConnection == Config::instance().oneBotSnapshot();
@@ -218,7 +291,7 @@ namespace insoulforge {
         return true;
     }
 
-    void OneBotWebSocketClient::handleMessage(const std::string &message, const drogon::WebSocketMessageType type) {
+    void OneBotWebSocketTransport::handleMessage(const std::string &message, const drogon::WebSocketMessageType type) {
         if (type == drogon::WebSocketMessageType::Close) {
             const auto *data = reinterpret_cast<const unsigned char *>(message.data());
             const u16 closeCode = message.size() >= 2 ? static_cast<u16>((data[0] << 8U) | data[1]) : 0;
@@ -248,8 +321,8 @@ namespace insoulforge {
         }
     }
 
-    void OneBotWebSocketClient::handleConnectionClosed(const drogon::WebSocketClientPtr &client,
-      const std::optional<drogon::ReqResult> failure) {
+    void OneBotWebSocketTransport::handleConnectionClosed(
+      const drogon::WebSocketClientPtr &client, const std::optional<drogon::ReqResult> failure) {
         u64 generation = 0;
         bool shouldReconnect = false;
         std::optional<ReconnectLogState::Report> report;
@@ -289,7 +362,7 @@ namespace insoulforge {
         }
     }
 
-    void OneBotWebSocketClient::resolveRequest(const std::string &echo, std::optional<json> response) {
+    void OneBotWebSocketTransport::resolveRequest(const std::string &echo, std::optional<json> response) {
         ResponseCallback callback;
         {
             std::scoped_lock lock(m_mutex);
@@ -303,7 +376,7 @@ namespace insoulforge {
         callback(std::move(response));
     }
 
-    auto OneBotWebSocketClient::splitWebSocketUrl(const std::string &url, std::string &origin, std::string &path)
+    auto OneBotWebSocketTransport::splitWebSocketUrl(const std::string &url, std::string &origin, std::string &path)
       -> bool {
         const size_t schemeEnd = url.find("://");
         if (schemeEnd == std::string::npos) {
@@ -322,7 +395,7 @@ namespace insoulforge {
         return !origin.empty() && path.find('#') == std::string::npos;
     }
 
-    auto OneBotWebSocketClient::takePendingCallbacksLocked() -> std::vector<ResponseCallback> {
+    auto OneBotWebSocketTransport::takePendingCallbacksLocked() -> std::vector<ResponseCallback> {
         std::vector<ResponseCallback> callbacks;
         callbacks.reserve(m_pendingRequests.size());
         for (auto &callback: m_pendingRequests | std::views::values) {
@@ -332,7 +405,7 @@ namespace insoulforge {
         return callbacks;
     }
 
-    void OneBotWebSocketClient::failRequests(const std::vector<ResponseCallback> &callbacks) {
+    void OneBotWebSocketTransport::failRequests(const std::vector<ResponseCallback> &callbacks) {
         for (auto &callback: callbacks) {
             callback(std::nullopt);
         }

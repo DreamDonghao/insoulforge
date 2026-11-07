@@ -53,7 +53,7 @@ const botStatusSaving = ref(false)
 
 
 interface OneBotStatus {
-  transport: 'http' | 'websocket'
+  transport: 'http' | 'websocket' | 'reverse_websocket'
   address: string
   configured: boolean
   websocketConnected: boolean
@@ -76,7 +76,7 @@ const loadBotStatus = (): Promise<void> => loadData('botStatus', async signal =>
 
 const loadOneBotStatus = (): Promise<void> => loadData('oneBotStatus', async signal => {
   const data = await readData<OneBotStatus>('/admin/api/onebot-status', signal)
-  if ((data.transport !== 'http' && data.transport !== 'websocket') || typeof data.address !== 'string') throw new Error('OneBot 状态数据无效')
+  if ((data.transport !== 'http' && data.transport !== 'websocket' && data.transport !== 'reverse_websocket') || typeof data.address !== 'string') throw new Error('OneBot 状态数据无效')
   oneBotStatus.value = data
 })
 
@@ -189,9 +189,9 @@ const emojiCount: Ref<number> = ref(0)
 const toolCount: Ref<number> = ref(0)
 
 
-const transportLabel = computed(() => oneBotStatus.value.transport === 'websocket' ? 'WebSocket' : 'HTTP')
+const transportLabel = computed(() => oneBotStatus.value.transport === 'reverse_websocket' ? '反向 WebSocket' : oneBotStatus.value.transport === 'websocket' ? '正向 WebSocket' : 'HTTP')
 
-const oneBotAddressLabel = computed(() => oneBotStatus.value.transport === 'websocket' ? 'WebSocket 地址' : 'HTTP 地址')
+const oneBotAddressLabel = computed(() => oneBotStatus.value.transport !== 'http' ? 'WebSocket 地址' : 'HTTP 地址')
 
 const oneBotConnectionReady = computed(() => oneBotStatus.value.transport === 'http'
     ? oneBotStatus.value.configured
