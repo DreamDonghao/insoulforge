@@ -279,7 +279,9 @@ MessageService → OneBot API
   Jev 独立取最近 `memory.jevWindowSize` 条消息（默认 10，正整数，保存后热更新），逐条滑动；不足时全部读取，
   实际范围受 `contextWindowLimit` 限制。Router LLM 仍使用原有分段窗口；各自在窗口内计算机器人静默状态，不修改冻结快照。
   Jev 使用压平的消息段，并保留
-  `message_id` / `reply_to` 供引用关系判断。
+  `message_id` / `reply_to` 供引用关系判断。两种投影均保留系统 Activity 的 `activity.mode`，使混合批次中的 silent 通知仅作为背景。
+  Router LLM 与 Jev 共用分组和阅读状态说明，按已发送内容是否覆盖当前问题或话题判断是否还值得回复，
+  不以单条消息类型、机器人刚发言或是否出现提问单独决定。skip 不会安排延时自动回复。
 - Jev 一次请求给出 `action`、`tone` 和 `maxLength`。仅当 `answers.action.choice` 为 `send_message_and_finish` / `skip` 且
   `answers.action.confidence` 有效并达到 `jevMinConfidence` 时采纳；`unclear`、低置信度、响应异常或请求失败均交给原有
   Router LLM。`probabilities.reply` 不是当前阈值的比较对象。Jev 默认超时 10 秒、不重试，可在模型配置中调整；Router LLM 兜底仍保留原有

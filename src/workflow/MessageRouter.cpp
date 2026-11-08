@@ -27,6 +27,13 @@ namespace insoulforge::MessageRouter {
     }
 
     namespace {
+        constexpr std::string_view kContextInstructions =
+          "输入为 JSON：chat_records 是历史，new_messages 是尚未交给 Executor 的入站消息，"
+          "sent_messages 是窗口末尾连续成功发送的消息。new_messages 不代表尚未回答；"
+          "结合历史与已发送内容，判断当前是否还有未覆盖且值得回应的内容，不指定回复某条消息。"
+          "仅有表情或提问等表面特征不足以决定整批消息是否需要回复；刚发言也不代表已覆盖新内容。"
+          "各组时间可能交错，不按字段顺序推断先后；activity.mode=silent 仅作背景，不构成回复理由。";
+
         constexpr std::string_view kJevActionSkip = "skip";
         constexpr std::string_view kJevActionReply = "reply";
         constexpr std::string_view kJevActionUnclear = "unclear";
@@ -59,6 +66,9 @@ namespace insoulforge::MessageRouter {
             }
             if (projected.contains("reply_to")) {
                 compact["reply_to"] = projected["reply_to"];
+            }
+            if (projected.contains("activity")) {
+                compact["activity"] = {{"mode", getStr(projected["activity"], "mode")}};
             }
             compact["message_id"] = getStr(message, "message_id");
             if (const std::string name = getStr(atOrNull(projected, "sender"), "name"); !name.empty()) {
@@ -160,6 +170,9 @@ namespace insoulforge::MessageRouter {
             if (projected.contains("time")) {
                 record["time"] = projected["time"];
             }
+            if (projected.contains("activity")) {
+                record["activity"] = {{"mode", getStr(projected["activity"], "mode")}};
+            }
             record["text"] = std::move(text);
             if (const json &replyTo = atOrNull(projected, "reply_to"); !replyTo.is_null() && !replyTo.empty()) {
                 record["reply_to"] = replyTo;
@@ -201,20 +214,15 @@ namespace insoulforge::MessageRouter {
         [[nodiscard]] auto buildJevQuestions() -> json {
             json action;
             action["type"] = "choice";
-            action["instructions"] =
-              "以下是群聊上下文。chat_records 是历史，new_messages 是尚未交给回复生成器的入站消息，sent_messages "
-              "是末尾连续已发送的回复。"
-              "reply_to 是被引用消息的 message_id，[bot] 标记机器人发言。"
-              "结合已经发送的内容，判断当前是否仍有必要回复；各组时间可能交错，不按字段顺序推断消息先后。";
+            action["instructions"] = std::string(kContextInstructions) +
+                                     "记录用 text 表示消息内容，reply_to 是被引用消息的 message_id，[bot] 标记机器人。";
             const std::string &botName = Config::instance().botName;
             action["criteria"] = {
-              {"skip", fmt::format("纯表情/贴纸、单字或复读、广告、群友互聊且未涉及{0}、"
-                                   "{0}刚发言且新消息非针对它、无意义闲聊",
-                         botName)},
-              {"reply", fmt::format("被@或叫到名字、有提问、分享{0}可能感兴趣的内容、对{0}上次发言的反馈、"
-                                    "有梗可发挥、{0}久未发言或冷场需活跃",
-                          botName)},
-              {"unclear", "以上都不明显适用，或聊天记录不足以判断"},
+              {"skip", "值得回应的内容已全部被回复覆盖，或仅剩广告、刷屏、无实质内容的表情复读及不宜插入的群友互聊"},
+              {"reply",
+                fmt::format("仍有未覆盖且值得{0}回应的问题、补充或反馈，或有感兴趣的分享、有梗可发挥的话题值得自然接续",
+                  botName)},
+              {"unclear", "无法确定已发送内容是否覆盖问题，或是否仍有值得回应的内容"},
             };
 
             json tone;
@@ -264,11 +272,10 @@ namespace insoulforge::MessageRouter {
             prompt.push_back(
               {{"role", "system"}, {"content", sessionId.isPrivate() ? PromptService::getRouterPrivateSystemPrompt()
                                                                      : PromptService::getRouterSystemPrompt()}});
-            prompt.push_back({{"role", "system"},
-              {"content", "chat_records 是历史；new_messages 是尚未交给回复生成器的入站消息；sent_messages "
-                          "是末尾连续成功发送的回复。"
-                          "结合全部上下文和已发送内容判断当前是否还需回复，不指定回复某条消息。各组时间可能交错，不按字"
-                          "段顺序推断先后。"}});
+            prompt.push_back(
+              {{"role", "system"}, {"content", std::string(kContextInstructions) +
+                                                 "记录以 sender 表示显示名，content.segments 表示有序消息段，reply_to "
+                                                 "通过 message_id 表示引用关系。"}});
             prompt.push_back({{"role", "user"}, {"content", dumpJson(context)}});
             return prompt;
         }

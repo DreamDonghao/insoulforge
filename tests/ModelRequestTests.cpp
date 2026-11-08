@@ -251,6 +251,19 @@ namespace {
         require(!(co_await MessageRouter::route(SessionId::group("100"), mixed)).shouldReply &&
                   fixture.count("jev-window-silent") == 1,
           "silent notification prevented normal input from reaching Jev");
+        {
+            std::lock_guard lock(fixture.mutex);
+            const auto &body = fixture.bodies.at("jev-window-silent");
+            require(body["state"]["new_messages"][0]["activity"]["mode"] == "silent",
+              "Jev projection lost silent mode in mixed input");
+            const auto &action = body["questions"]["action"];
+            const auto instructions = getStr(action, "instructions");
+            require(instructions.find("不代表尚未回答") != std::string::npos &&
+                      instructions.find("silent") != std::string::npos &&
+                      getStr(action["criteria"], "skip").find("覆盖") != std::string::npos &&
+                      getStr(action["criteria"], "reply").find("未覆盖") != std::string::npos,
+              "Jev instructions and criteria do not judge coverage of the whole context");
+        }
         // 自定义窗口独立于 Router；低置信度时 Router 仍采用原有分段窗口。
         config.jevWindowSize.store(4);
         config.jev = apiFor(endpoint, "jev-window-fallback", 0);
@@ -263,6 +276,8 @@ namespace {
               {"segments", json::array({{{"type", "text"}, {"text", "test"}}})}});
         }
         records.back()["executor_processed"] = false;
+        records[23] = silent;
+        records[23]["executor_processed"] = true;
         (void) co_await MessageRouter::route(insoulforge::SessionId::group("100"), records);
         {
             std::lock_guard lock(fixture.mutex);
@@ -274,6 +289,12 @@ namespace {
             require(context["chat_records"].size() == 14 && context["new_messages"].size() == 1 &&
                       context["chat_records"][0]["message_id"] == "10",
               "Router fallback stopped using its batched window");
+            require(
+              context["chat_records"].back()["activity"]["mode"] == "silent", "Router projection lost Activity mode");
+            const auto contract = getStr(messages[1], "content");
+            require(contract.find("不代表尚未回答") != std::string::npos &&
+                      contract.find("silent") != std::string::npos && contract.find("未覆盖") != std::string::npos,
+              "Router runtime contract does not explain coverage and silent background");
         }
     }
 

@@ -3442,17 +3442,24 @@ namespace {
         constexpr std::string_view kTestName = "context prompt migration";
         auto &db = Database::instance();
         check(db.initialize(":memory:").has_value(), "initializes database", kTestName);
-        PromptStore::setPrompt(
-          db, "router_system", "custom prefix\n是否应该回复最新一条消息\n1. 看最新一条消息的性质\ncustom suffix");
+        PromptStore::setPrompt(db, "router_system",
+          "custom prefix\n是否应该回复最新一条消息\n1. 看最新一条消息的性质\n- [{botName}]: 机器人发送的消息\n   - "
+          "如果{botName}在最近1-2条内刚发过言，除非新消息明确针对它（追问、反驳、接它的话），否则 skip\ncustom suffix");
         PromptStore::setPrompt(db, "executor_system", "custom\n只回复最新的一条消息或话题，不要同时回复多条消息");
         PromptService::initialize(db);
         const auto router = PromptStore::getPrompt(db, "router_system", "");
         const auto executor = PromptStore::getPrompt(db, "executor_system", "");
         check(router.starts_with("custom prefix") && router.ends_with("custom suffix") &&
-                router.find("最新一条消息") == std::string::npos,
+                router.find("最新一条消息") == std::string::npos && router.find("最近1-2条") == std::string::npos &&
+                router.find("[{botName}]") == std::string::npos,
           "known legacy rules upgrade without overwriting custom content", kTestName);
         check(executor.starts_with("custom") && executor.find("只回复最新") == std::string::npos,
           "executor legacy focus rule also upgrades", kTestName);
+        const auto privatePrompt = PromptStore::getPrompt(db, "router_private_system", "");
+        check(privatePrompt.find("未交给 Executor 不等于尚未回答") != std::string::npos &&
+                privatePrompt.find("可以稍等") == std::string::npos &&
+                privatePrompt.find("其余情况一律 reply") == std::string::npos,
+          "default private Router reasons about coverage without fictitious delayed replies", kTestName);
         PromptService::initialize(db);
         check(PromptStore::getPrompt(db, "router_system", "") == router, "prompt upgrade is idempotent", kTestName);
         db.close();
