@@ -21,7 +21,7 @@
 #include <infrastructure/http/HttpTrace.hpp>
 #include <infrastructure/image/Image.hpp>
 #include <infrastructure/storage/Database.hpp>
-#include <workflow/OneBotEventWorkflow.hpp>
+#include <workflow/EventWorkflow.hpp>
 #include <workflow/activity/ActivityManager.hpp>
 #include <workflow/agent/runtime/AgentSystem.hpp>
 #include <workflow/agent/tools/ToolRegistry.hpp>
@@ -150,7 +150,7 @@ namespace {
         require(config.saveQQConfig(qq).has_value(), "OneBot fixture configuration failed");
         auto &agent = AgentSystem::instance();
         require(agent.initialize(database, "fixture").has_value(), "workflow fixture agent failed");
-        auto &workflow = OneBotEventWorkflow::instance();
+        auto &workflow = EventWorkflow::instance();
         require(workflow.initialize(database, config, agent).has_value(), "workflow initialization failed");
         const auto session = SessionId::group("12345");
         SessionStore::enableSession(session);

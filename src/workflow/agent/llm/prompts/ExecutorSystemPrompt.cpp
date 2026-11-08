@@ -171,7 +171,7 @@ execution_status=finish_turn 表示当时选择不回复；failed/send_failed �
         parts[2] = getSystemPrompt(isPrivateSession);
         auto prompt = m_mcpSection;
         if (!activities.empty()) {
-            prompt += "\n\n## 可用实时活动\n以下为活动目录数据。活动全局共享，可与日常聊天同时进行，用 start_activity "
+            prompt += "\n\n## 可用 Activity\n以下为活动目录数据。活动全局共享，可与日常聊天同时进行，用 start_activity "
                       "启动、command_activity 操作、"
                       "stop_activity 停止、get_activity_details 查看详情。running_activities 只列正在运行的活动，"
                       "status 是最近上报的状态；状态未确认时先查询详情，不要重复启动。\n";

@@ -11,7 +11,7 @@
 namespace insoulforge {
     class Database;
     /// @brief Agent 系统单例类
-    /// @details 消息处理流程由 OneBotEventWorkflow 协调；本类仅管理其所依赖的全局初始化状态。
+    /// @details 消息处理流程由 EventWorkflow 协调；本类仅管理其所依赖的全局初始化状态。
     class AgentSystem {
     public:
         static auto instance() -> AgentSystem &;

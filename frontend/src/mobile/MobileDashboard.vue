@@ -13,7 +13,7 @@ interface State {
 }
 const {state:s,botName}=defineProps<{state:State;botName:string}>()
 const navigate=inject<(view:string)=>void>('mobileNavigate',()=>{})
-const tools=[{key:'logs',label:'运行日志',icon:'logs'},{key:'requestDebug',label:'请求调试',icon:'requestDebug'},{key:'system-tokens',label:'上下文占用',icon:'prompts'},{key:'usage',label:'用量统计',icon:'memory'},{key:'emojis',label:'表情库',icon:'emojis'},{key:'activities',label:'实时活动',icon:'execution'}]
+const tools=[{key:'logs',label:'运行日志',icon:'logs'},{key:'requestDebug',label:'请求调试',icon:'requestDebug'},{key:'system-tokens',label:'上下文占用',icon:'prompts'},{key:'usage',label:'用量统计',icon:'memory'},{key:'emojis',label:'表情库',icon:'emojis'},{key:'activities',label:'Activity',icon:'execution'}]
 const value=(key:string,n:number)=>s.dataState[key].loaded?n.toLocaleString():'—'
 </script>
 <template>

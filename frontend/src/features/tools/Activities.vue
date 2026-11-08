@@ -132,7 +132,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="page-header">
-    <div><h1 class="page-title">实时活动</h1><p class="page-subtitle">服务自动注册，所有会话共享 · {{ runningCount }} 个运行记录</p></div>
+    <div><h1 class="page-title">Activity</h1><p class="page-subtitle">服务自动注册，所有会话共享 · {{ runningCount }} 个运行记录</p></div>
     <button class="btn btn-secondary" :disabled="loading || reading || saving" @click="load()">刷新</button>
   </div>
   <div class="content activity-content">

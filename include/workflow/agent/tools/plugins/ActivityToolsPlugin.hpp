@@ -1,5 +1,5 @@
 /// @file ActivityToolsPlugin.hpp
-/// @brief 独立实时活动服务的通用模型工具。
+/// @brief 独立 Activity 服务的通用模型工具。
 #pragma once
 #include <workflow/agent/tools/ToolPlugin.hpp>
 

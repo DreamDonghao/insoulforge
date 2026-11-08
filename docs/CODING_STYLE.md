@@ -40,7 +40,7 @@
 
 | 对象                       | 规则                               | 示例                                            |
 |----------------------------|------------------------------------|-------------------------------------------------|
-| 头文件、源文件             | `PascalCase.hpp`、`PascalCase.cpp` | `OneBotEventWorkflow.hpp`                       |
+| 头文件、源文件             | `PascalCase.hpp`、`PascalCase.cpp` | `EventWorkflow.hpp`                       |
 | 类型、枚举、别名           | `PascalCase`                       | `MessageList`、`ToolCategory`                   |
 | 枚举值                     | 枚举内保持一致                     | `Level::Warning` 或 `ToolCategory::INFORMATION` |
 | 函数、方法、局部变量、参数 | `camelCase`                        | `processMessage`、`groupId`                     |

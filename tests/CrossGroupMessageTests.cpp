@@ -5,6 +5,7 @@
 #include <iostream>
 #include <mutex>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 #include <drogon/drogon.h>
@@ -16,7 +17,7 @@
 #include <infrastructure/http/HttpUtil.hpp>
 #include <infrastructure/image/Image.hpp>
 #include <infrastructure/storage/Database.hpp>
-#include <workflow/OneBotEventWorkflow.hpp>
+#include <workflow/EventWorkflow.hpp>
 #include <workflow/access/BlacklistStore.hpp>
 #include <workflow/agent/runtime/AgentSystem.hpp>
 #include <workflow/agent/tools/ToolRegistry.hpp>
@@ -60,7 +61,7 @@ namespace {
         }
     } fixture;
 
-    void require(const bool value, const char *message) {
+    void require(const bool value, const std::string &message) {
         if (!value)
             throw std::runtime_error(message);
     }
@@ -211,7 +212,7 @@ namespace {
                     "[CQ:image,file=base64://" + Image::encode(imageBytes()) + "]",
           "ID send did not directly send Base64");
         const auto checkSentDescription = [&](const std::string &expected) {
-            const auto records = OneBotEventWorkflow::instance().getSessionMessages(SessionId::group("600"));
+            const auto records = EventWorkflow::instance().getSessionMessages(SessionId::group("600"));
             require(records && !records->empty(), "sent image record missing");
             const auto &sent = records->back();
             require(sent["segments"][0]["description"] == expected && sent["segments"][0]["image_id"] == cachedId &&
@@ -425,7 +426,7 @@ namespace {
         require(fixture.messages().size() == beforeIdGeneration + 1 &&
                   fixture.images().back()["input_references"][0]["image_url"]["url"] == *cached->dataUrl(),
           "ID generation lost reference pixels");
-        const auto generatedRecords = OneBotEventWorkflow::instance().getSessionMessages(SessionId::group("503"));
+        const auto generatedRecords = EventWorkflow::instance().getSessionMessages(SessionId::group("503"));
         require(generatedRecords && generatedRecords->dump().contains(cached->id()) &&
                   !generatedRecords->dump().contains("base64://"),
           "generated delivery records lost image IDs or persisted transport data");
@@ -434,7 +435,7 @@ namespace {
 
     auto testPrivateTargets() -> drogon::Task<> {
         auto &registry = ToolRegistry::instance();
-        auto &workflow = OneBotEventWorkflow::instance();
+        auto &workflow = EventWorkflow::instance();
         auto &config = Config::instance();
         const auto target = SessionId::privateChat(insoulforge::UserId{702});
         const auto source = SessionId::privateChat(insoulforge::UserId{703});
@@ -445,12 +446,14 @@ namespace {
         const auto stickerQueriesBefore = fixture.stickerQueries.load();
         const auto invalidIds = json::array({nullptr, false, 702, "", " ", "0", "-1", "+702", "702x", "702.0",
           "18446744073709551616", target.toString(), "system", "700", "701", "200"});
-        for (const auto *tool: {"reply_and_continue", "send_sticker"}) {
+        for (const auto *tool: {"send_message", "send_sticker"}) {
             for (const auto &id: invalidIds) {
                 const json args = {{"content", "test"}, {"name", "fixture"}, {"user_id", id}};
                 const auto error =
                   co_await registry.executeTool(tool, args, {.sessionId = insoulforge::SessionId::group("100")});
-                require(error.contains("user_id") || error.contains("未在后台启用"), "invalid private target accepted");
+                require(error.contains("user_id") || error.contains("未在后台启用"),
+                  "private target rejection mismatch: tool=" + std::string(tool) + " user_id=" + id.dump() +
+                    " result=" + error);
             }
             const auto conflict = co_await registry.executeTool(tool,
               {{"content", "test"}, {"name", "fixture"}, {"group_id", "200"}, {"user_id", "702"}},
@@ -469,7 +472,7 @@ namespace {
           "rejected target performed network requests or enabled a private session");
         const auto callerRecords = workflow.getSessionMessages(insoulforge::SessionId::group("100"))->size();
         for (const auto caller: {insoulforge::SessionId::group("100"), source}) {
-            for (const auto *tool: {"reply_and_continue", "send_sticker"}) {
+            for (const auto *tool: {"send_message", "send_sticker"}) {
                 const auto result = co_await registry.executeTool(tool,
                   {{"content", "cross-private text"}, {"name", "fixture"}, {"user_id", "702"}}, {.sessionId = caller});
                 require(
@@ -486,14 +489,14 @@ namespace {
           "private sends were copied into the calling session");
         constexpr u64 largeQQ = 9007199254740993ULL;
         SessionStore::enableSession(SessionId::privateChat(insoulforge::UserId{largeQQ}));
-        const auto large = co_await registry.executeTool("reply_and_continue",
-          {{"content", "large QQ"}, {"user_id", std::to_string(largeQQ)}},
-          {.sessionId = insoulforge::SessionId::group("100")});
+        const auto large =
+          co_await registry.executeTool("send_message", {{"content", "large QQ"}, {"user_id", std::to_string(largeQQ)}},
+            {.sessionId = insoulforge::SessionId::group("100")});
         require(large.contains(std::to_string(largeQQ)) && fixture.messages().back()["user_id"] == largeQQ,
           "private target lost integer precision");
         fixture.fail = true;
         const auto beforeFailure = fixture.messages().size();
-        for (const auto *tool: {"reply_and_continue", "send_sticker"}) {
+        for (const auto *tool: {"send_message", "send_sticker"}) {
             const auto error =
               co_await registry.executeTool(tool, {{"content", "failed"}, {"name", "fixture"}, {"user_id", "702"}},
                 {.sessionId = insoulforge::SessionId::group("100")});
@@ -503,7 +506,7 @@ namespace {
         require(fixture.messages().size() == beforeFailure + 2, "failed private sends were retried");
         fixture.fail = false;
         config.oneBotTransport = "websocket";
-        const auto disconnected = co_await registry.executeTool("reply_and_continue",
+        const auto disconnected = co_await registry.executeTool("send_message",
           {{"content", "unconfirmed"}, {"user_id", "702"}}, {.sessionId = insoulforge::SessionId::group("100")});
         require(disconnected.contains("未确认成功") && fixture.messages().size() == beforeFailure + 2,
           "disconnected private send fell back to HTTP");
@@ -518,7 +521,7 @@ namespace {
     }
 
     auto testGroupMessageQuery() -> drogon::Task<> {
-        auto &workflow = OneBotEventWorkflow::instance();
+        auto &workflow = EventWorkflow::instance();
         auto &registry = ToolRegistry::instance();
         auto &config = Config::instance();
         const auto oldWindow = config.contextWindowLimit;
@@ -626,7 +629,7 @@ namespace {
         require(sent && fixture.messages().back()["message"] == "42 self [CQ:at,qq=42] [CQ:at,qq=43]" &&
                   fixture.messages().back()["group_id"] == 990,
           "OneBot boundary failed to resolve only the self mention");
-        const auto records = OneBotEventWorkflow::instance().getSessionMessages(session);
+        const auto records = EventWorkflow::instance().getSessionMessages(session);
         require(records && records->back()["sender"]["user_id"] == "self" &&
                   records->back()["segments"][1]["target"]["user_id"] == "self" &&
                   records->back()["segments"][3]["target"]["user_id"] == "43",
@@ -640,7 +643,7 @@ namespace {
         const auto unknown = co_await MessageService::sendToSession(session, mention);
         require(!unknown && unknown.error().find("self") != std::string::npos && fixture.messages().size() == before,
           "unknown self identity was guessed or sent to OneBot");
-        const auto failed = OneBotEventWorkflow::instance().getSessionMessages(session);
+        const auto failed = EventWorkflow::instance().getSessionMessages(session);
         require(failed && failed->back().contains("send_error"), "unresolved self send was not recorded as failed");
         config.selfQQNumber = previousSelf;
     }
@@ -657,7 +660,7 @@ namespace {
             config.router.model = config.executor.model = config.memory.model = "fixture";
             auto &agent = AgentSystem::instance();
             require(agent.initialize(db, "test-bot").has_value(), "agent initialization failed");
-            auto &workflow = OneBotEventWorkflow::instance();
+            auto &workflow = EventWorkflow::instance();
             require(workflow.initialize(db, config, agent).has_value(), "workflow initialization failed");
             auto &registry = ToolRegistry::instance();
             SessionStore::enableSession(insoulforge::SessionId::group("200"));
@@ -666,9 +669,12 @@ namespace {
             require(!SessionStore::getSessionConfig(insoulforge::SessionId::group("100")).crossSessionSharing &&
                       !SessionStore::getSessionConfig(insoulforge::SessionId::group("200")).crossSessionSharing,
               "sharing fixture must be disabled");
+            for (const auto *name: {"send_message", "send_sticker", "get_group_messages"}) {
+                require(registry.hasTool(name), std::string("required tool missing: ") + name);
+            }
             for (const auto &tool: registry.getTools({})) {
                 const auto &definition = tool["function"];
-                if (definition["name"] == "reply_and_continue" || definition["name"] == "send_sticker") {
+                if (definition["name"] == "send_message" || definition["name"] == "send_sticker") {
                     require(definition["parameters"]["properties"]["group_id"]["type"] == "string" &&
                               definition["parameters"]["properties"]["user_id"]["type"] == "string" &&
                               definition["parameters"]["required"].size() == 1,
@@ -693,14 +699,15 @@ namespace {
             const auto invalidIds =
               json::array({nullptr, false, 200, "", " ", "0", "-1", "+200", "200x", "200.0", "18446744073709551616",
                 SessionId::privateChat(insoulforge::UserId{200}).toString(), "system", "201", "999"});
-            for (const auto *tool: {"reply_and_continue", "send_sticker", "get_group_messages"}) {
+            for (const auto *tool: {"send_message", "send_sticker", "get_group_messages"}) {
                 for (const auto &id: invalidIds) {
                     const json args = {{"content", "test"}, {"name", "fixture"}, {"group_id", id}};
                     const auto result =
                       co_await registry.executeTool(tool, args, {.sessionId = insoulforge::SessionId::group("100")});
                     require(
                       result.find("group_id") != std::string::npos || result.find("未在后台启用") != std::string::npos,
-                      "invalid target not rejected");
+                      "group target rejection mismatch: tool=" + std::string(tool) + " group_id=" + id.dump() +
+                        " result=" + result);
                 }
             }
             require(
@@ -712,9 +719,9 @@ namespace {
             require(fixture.messages().empty() && fixture.stickerQueries == 0 && fixture.modelQueries == 0,
               "memory query performed network or model requests");
 
-            auto result = co_await registry.executeTool("reply_and_continue",
-              {{"content", "cross-group text"}, {"group_id", "200"}},
-              {.sessionId = insoulforge::SessionId::group("100")});
+            auto result =
+              co_await registry.executeTool("send_message", {{"content", "cross-group text"}, {"group_id", "200"}},
+                {.sessionId = insoulforge::SessionId::group("100")});
             require(result.find("目标群 200") != std::string::npos && result.find("消息已发送") != std::string::npos,
               "cross-group text result omitted destination or success");
             result = co_await registry.executeTool("send_sticker", {{"name", "fixture"}, {"group_id", "200"}},
@@ -727,14 +734,14 @@ namespace {
 
             const auto privateSession = SessionId::privateChat(insoulforge::UserId{300});
             for (const auto session: {insoulforge::SessionId::group("100"), privateSession}) {
-                result = co_await registry.executeTool(
-                  "reply_and_continue", {{"content", "local text"}}, {.sessionId = session});
+                result =
+                  co_await registry.executeTool("send_message", {{"content", "local text"}}, {.sessionId = session});
                 require(result.find("消息已发送") != std::string::npos, "default text destination changed");
                 result = co_await registry.executeTool("send_sticker", {{"name", "fixture"}}, {.sessionId = session});
                 require(result.find("已发送表情") != std::string::npos, "default sticker destination changed");
             }
-            result = co_await registry.executeTool("reply_and_continue",
-              {{"content", "private-to-group"}, {"group_id", "200"}}, {.sessionId = privateSession});
+            result = co_await registry.executeTool(
+              "send_message", {{"content", "private-to-group"}, {"group_id", "200"}}, {.sessionId = privateSession});
             require(result.find("目标群 200") != std::string::npos, "private session cannot send to enabled group");
             const auto sent = fixture.messages();
             require(sent.size() == 7 && sent[0]["group_id"] == 200 && sent[0]["message"] == "cross-group text" &&
@@ -755,7 +762,7 @@ namespace {
                   "qzone default or explicit visibility was not passed to OneBot");
             }
             fixture.fail = true;
-            for (const auto *tool: {"reply_and_continue", "send_sticker"}) {
+            for (const auto *tool: {"send_message", "send_sticker"}) {
                 result = co_await registry.executeTool(tool,
                   {{"content", "failed text"}, {"name", "fixture"}, {"group_id", "200"}},
                   {.sessionId = insoulforge::SessionId::group("100")});
@@ -765,8 +772,8 @@ namespace {
             }
             require(fixture.messages().size() == 9, "failed sends were automatically retried");
             config.oneBotTransport = "websocket";
-            result = co_await registry.executeTool("reply_and_continue",
-              {{"content", "unconfirmed"}, {"group_id", "200"}}, {.sessionId = insoulforge::SessionId::group("100")});
+            result = co_await registry.executeTool("send_message", {{"content", "unconfirmed"}, {"group_id", "200"}},
+              {.sessionId = insoulforge::SessionId::group("100")});
             require(result.find("未确认成功") != std::string::npos && fixture.messages().size() == 9,
               "disconnected send retried via HTTP or reported success");
             const auto targetRecords = workflow.getSessionMessages(insoulforge::SessionId::group("200"));

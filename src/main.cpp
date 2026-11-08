@@ -28,7 +28,7 @@
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/tokenizer/TokenCounter.hpp>
 #include <onebot/transport/OneBotWebSocketTransport.hpp>
-#include <workflow/OneBotEventWorkflow.hpp>
+#include <workflow/EventWorkflow.hpp>
 #include <workflow/activity/ActivityManager.hpp>
 #include <workflow/agent/ability/AsyncTaskManager.hpp>
 #include <workflow/agent/memory/maintenance/PersonMemoryConsolidator.hpp>
@@ -137,7 +137,7 @@ auto main() -> int {
             Logger::error(std::nullopt, "MCP", result.error());
             return EXIT_FAILURE;
         }
-        auto &workflow = OneBotEventWorkflow::instance();
+        auto &workflow = EventWorkflow::instance();
         // 恢复会话消息和遗留维护任务，再开始接收新的 OneBot 事件。
         if (auto result = workflow.initialize(database, config, agentSystem); !result) {
             Logger::error(std::nullopt, "Workflow", result.error());

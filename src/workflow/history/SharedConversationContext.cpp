@@ -5,7 +5,7 @@
 
 #include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/SessionId.hpp>
-#include <workflow/OneBotEventWorkflow.hpp>
+#include <workflow/EventWorkflow.hpp>
 #include <workflow/history/SharedConversationContext.hpp>
 #include <workflow/message/MessageRecord.hpp>
 #include <workflow/session/SessionStore.hpp>
@@ -30,7 +30,8 @@ namespace insoulforge::SharedConversationContext {
                 }
             } else if (value.is_object()) {
                 for (auto &[key, child]: value.items()) {
-                    if (key != "type" && key != "id" && key != "user_id" && key != "recognition_status" && key != "kind") {
+                    if (key != "type" && key != "id" && key != "user_id" && key != "recognition_status" &&
+                        key != "kind") {
                         limitText(child, remaining, truncated);
                     }
                 }
@@ -77,7 +78,7 @@ namespace insoulforge::SharedConversationContext {
         const auto earliest = formatUnixTime(now - 3 * 24 * 60 * 60);
         const auto latest = formatUnixTime(now);
         for (const auto &[sessionId, name]: SessionStore::getSharedSessions(receiverId)) {
-            auto messages = OneBotEventWorkflow::instance().getSharedSessionMessages(
+            auto messages = EventWorkflow::instance().getSharedSessionMessages(
               sessionId, static_cast<size_t>(std::max(messagesPerSession, 1)), earliest, latest);
             if (messages.empty()) {
                 continue;

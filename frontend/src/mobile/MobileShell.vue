@@ -4,7 +4,7 @@ import NavIcon from '../components/NavIcon.vue'
 const props = defineProps<{view: string, navigate: (view: string) => boolean}>()
 const emit = defineEmits<{theme: [], logout: []}>()
 const tabs = [{key:'dashboard',label:'首页',icon:'home'},{key:'groups',label:'会话',icon:'groups'},{key:'people',label:'人物',icon:'admins'},{key:'settings',label:'设置',icon:'execution'}]
-const shortcuts = [{key:'logs',label:'运行日志'},{key:'requestDebug',label:'请求调试'},{key:'system-tokens',label:'上下文占用'},{key:'usage',label:'用量统计'},{key:'emojis',label:'表情库'},{key:'activities',label:'实时活动'}]
+const shortcuts = [{key:'logs',label:'运行日志'},{key:'requestDebug',label:'请求调试'},{key:'system-tokens',label:'上下文占用'},{key:'usage',label:'用量统计'},{key:'emojis',label:'表情库'},{key:'activities',label:'Activity'}]
 const settings = [{key:'llm',label:'模型配置'},{key:'executionConfig',label:'执行配置'},{key:'qqConfig',label:'OneBot 配置'},{key:'prompts',label:'提示词'},{key:'memoryConfig',label:'记忆与上下文'},{key:'customTools',label:'工具配置'},{key:'mcpServers',label:'MCP 服务'},{key:'admins',label:'访问管理'},{key:'themeSettings',label:'主题配色'},{key:'about',label:'关于'}]
 const routes = [...tabs,...shortcuts,...settings]
 const detailActive = ref(false)

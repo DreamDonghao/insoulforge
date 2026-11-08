@@ -15,7 +15,7 @@
 #include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
-#include <workflow/OneBotEventWorkflow.hpp>
+#include <workflow/EventWorkflow.hpp>
 #include <workflow/agent/ability/AsyncTaskManager.hpp>
 #include <workflow/message/MessageService.hpp>
 
@@ -37,12 +37,12 @@ namespace insoulforge {
             message["sender"] = {{"name", "系统异步任务"}, {"user_id", "system"}};
             message["message_id"] = fmt::format("async-task:{}:{}", taskId, phase);
             message["segments"] = {{{"type", "text"}, {"text", text}}};
-            OneBotEventWorkflow::instance().appendSystemStatusMessage(sessionId, std::move(message));
+            EventWorkflow::instance().appendSystemStatusMessage(sessionId, std::move(message));
         }
 
         /// @brief 将任务结果作为新系统消息加入入站队列，按定时任务相同的流程触发回复。
         void enqueueResultStatus(const SessionId &sessionId, const std::string &text) {
-            OneBotEventWorkflow::instance().enqueueSystemMessage(sessionId, text, "系统异步任务");
+            EventWorkflow::instance().enqueueSystemMessage(sessionId, text, "系统异步任务");
         }
     } // namespace
 

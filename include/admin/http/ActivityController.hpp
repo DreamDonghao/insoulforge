@@ -1,5 +1,5 @@
 /// @file ActivityController.hpp
-/// @brief 实时活动配置管理入口，由管理员会话保护；活动通信使用独立 WebSocket。
+/// @brief Activity 配置管理入口，由管理员会话保护；活动通信使用独立 WebSocket。
 #pragma once
 #include <drogon/HttpController.h>
 

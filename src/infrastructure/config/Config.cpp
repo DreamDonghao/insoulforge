@@ -96,8 +96,8 @@ namespace insoulforge {
             }
             if (value.contains("personCompressionTriggerTokens") && value.contains("personCompressionTargetTokens")) {
                 const auto trigger = getInt(value, "personCompressionTriggerTokens");
-                const auto target = getInt(value, "personCompressionTargetTokens");
-                if (trigger > 0 && (target <= 0 || target >= trigger)) {
+                if (const auto target = getInt(value, "personCompressionTargetTokens");
+                  trigger > 0 && (target <= 0 || target >= trigger)) {
                     return std::unexpected(ConfigError{
                       .type = ConfigErrorType::InvalidArgument, .message = "人物压缩目标必须大于 0 且小于触发 Token"});
                 }

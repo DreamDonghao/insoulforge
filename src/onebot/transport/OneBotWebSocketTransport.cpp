@@ -5,7 +5,7 @@
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <onebot/transport/OneBotWebSocketTransport.hpp>
-#include <workflow/OneBotEventWorkflow.hpp>
+#include <workflow/EventWorkflow.hpp>
 
 namespace insoulforge {
     namespace {
@@ -317,7 +317,7 @@ namespace insoulforge {
             return;
         }
         if (body.contains("post_type")) {
-            OneBotEventWorkflow::instance().enqueueOneBotEvent(body);
+            EventWorkflow::instance().enqueueOneBotEvent(body);
         }
     }
 

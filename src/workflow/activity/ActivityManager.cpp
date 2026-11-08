@@ -19,7 +19,7 @@
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/http/HttpTrace.hpp>
 #include <infrastructure/logging/Logger.hpp>
-#include <workflow/OneBotEventWorkflow.hpp>
+#include <workflow/EventWorkflow.hpp>
 #include <workflow/activity/ActivityManager.hpp>
 
 namespace insoulforge {
@@ -37,7 +37,7 @@ namespace insoulforge {
                    CRYPTO_memcmp(expected.data(), actual.data(), expected.size()) == 0;
         }
         // Decode bounded pixels rather than trusting a filename, MIME header or magic bytes alone.
-        auto validUploadImage(std::string_view bytes, std::string_view mime) -> bool {
+        auto validUploadImage(const std::string_view bytes, const std::string_view mime) -> bool {
             constexpr size_t kMaxPixels = 16U * 1024U * 1024U;
             if (mime == "image/png") {
                 auto image = png_image{};
@@ -75,16 +75,17 @@ namespace insoulforge {
                 if (level < 0)
                     static_cast<Decoder *>(info->client_data)->warning = true;
             };
-            if (setjmp(decoder->jump))
+            if (setjmp(decoder->jump)) {
                 return false;
+            }
             jpeg_create_decompress(&decoder->image);
             jpeg_mem_src(&decoder->image, reinterpret_cast<const unsigned char *>(bytes.data()), bytes.size());
             if (jpeg_read_header(&decoder->image, TRUE) != JPEG_HEADER_OK || !decoder->image.image_width ||
                 !decoder->image.image_height ||
-                size_t(decoder->image.image_width) * decoder->image.image_height > kMaxPixels)
+                static_cast<size_t>(decoder->image.image_width) * decoder->image.image_height > kMaxPixels)
                 return false;
             jpeg_start_decompress(&decoder->image);
-            decoder->row.resize(size_t(decoder->image.output_width) * decoder->image.output_components);
+            decoder->row.resize(static_cast<size_t>(decoder->image.output_width) * decoder->image.output_components);
             while (decoder->image.output_scanline < decoder->image.output_height) {
                 auto *row = decoder->row.data();
                 if (jpeg_read_scanlines(&decoder->image, &row, 1) != 1)
@@ -103,30 +104,35 @@ namespace insoulforge {
         m_statePath(std::move(statePath)), m_sink(std::move(sink)) {}
 
     auto ActivityManager::instance() -> ActivityManager & {
-        static auto manager = ActivityManager{
-          "data/activity-state.json", [](Event event) {
-              OneBotEventWorkflow::instance().enqueueActivityMessage(event.sessionId, std::move(event.text),
-                std::move(event.name), std::move(event.mode), std::move(event.origin), std::move(event.attachments));
-          }};
+        static auto manager = ActivityManager{"data/activity-state.json", [](Event event) -> void {
+                                                  EventWorkflow::instance().enqueueActivityMessage(event.sessionId,
+                                                    std::move(event.text), std::move(event.name), std::move(event.mode),
+                                                    std::move(event.origin), std::move(event.attachments));
+                                              }};
         return manager;
     }
 
     auto ActivityManager::validateConfiguration(const json &config) -> std::expected<void, std::string> {
-        if (!config.is_object() || !atOrNull(config, "servers").is_array())
+        if (!config.is_object() || !atOrNull(config, "servers").is_array()) {
             return std::unexpected("活动配置需要 servers 数组");
-        const auto token = getStr(config, "token");
-        if ((config.contains("token") && !config["token"].is_string()) ||
-            (!token.empty() && (token.size() < 16 || token.find_first_of("\r\n") != std::string::npos)))
+        }
+        if (const auto token = getStr(config, "token");
+          (config.contains("token") && !config["token"].is_string()) ||
+          (!token.empty() && (token.size() < 16 || token.find_first_of("\r\n") != std::string::npos))) {
             return std::unexpected("接入 Token 至少需要 16 个字符且不能包含换行");
+        }
         auto names = std::set<std::string>{};
         for (const auto &server: config["servers"]) {
-            const auto name = getStr(server, "name");
-            if (!server.is_object() || name.empty() || name.size() > 80 ||
-                std::ranges::any_of(name, [](unsigned char c) { return c < 32; }) || !names.insert(name).second)
+            if (const auto name = getStr(server, "name");
+              !server.is_object() || name.empty() || name.size() > 80 ||
+              std::ranges::any_of(name, [](const unsigned char c) -> bool { return c < 32; }) ||
+              !names.insert(name).second) {
                 return std::unexpected("活动名称必须非空、唯一且不含控制字符（最多 80 字节）");
+            }
             if (!atOrNull(server, "description").is_string() || !atOrNull(server, "enabled").is_boolean() ||
-                getStr(server, "description").size() > 4096)
+                getStr(server, "description").size() > 4096) {
                 return std::unexpected("活动需要描述和启用状态，描述最多 4096 字节");
+            }
         }
         return {};
     }
@@ -174,7 +180,7 @@ namespace insoulforge {
     auto ActivityManager::configuration() const -> json {
         std::lock_guard lock(m_mutex);
         auto servers = json::array();
-        for (const auto &[name, service]: m_services) {
+        for (const auto &service: m_services | std::views::values) {
             auto item = service->config;
             item["running"] = getBool(service->runtime, "running");
             item["status"] = getStr(service->runtime, "status");
@@ -189,7 +195,7 @@ namespace insoulforge {
 
     auto ActivityManager::configurationLocked() const -> json {
         auto servers = json::array();
-        for (const auto &[name, service]: m_services)
+        for (const auto &service: m_services | std::views::values)
             servers.push_back(service->config);
         return {{"token", m_token}, {"servers", std::move(servers)}};
     }
@@ -208,10 +214,11 @@ namespace insoulforge {
             if (previous == m_token)
                 return {};
             ++m_authGeneration;
-            for (const auto &[connection, registration]: m_connections)
+            for (const auto &connection: m_connections | std::views::keys) {
                 connections.push_back(connection);
+            }
             // 在释放锁前撤销旧连接的写入与请求权限，避免关闭回调到达前仍接受操作。
-            for (const auto &[name, service]: m_services) {
+            for (const auto &service: m_services | std::views::values) {
                 service->connection.reset();
                 service->ready = service->synchronized = service->busy = false;
             }
@@ -231,10 +238,12 @@ namespace insoulforge {
             return std::unexpected("活动服务不存在");
         auto &service = *found->second;
         const auto previous = getBool(service.config, "enabled");
-        if (previous == enabled)
+        if (previous == enabled) {
             return {};
-        if (service.busy || getBool(service.runtime, "running"))
+        }
+        if (service.busy || getBool(service.runtime, "running")) {
             return std::unexpected("请先确认活动结束及请求处理完成，再修改启用状态");
+        }
         service.config["enabled"] = enabled;
         if (auto saved = store.saveActivitiesConfig(configurationLocked()); !saved) {
             service.config["enabled"] = previous;
@@ -247,11 +256,13 @@ namespace insoulforge {
       -> std::expected<void, std::string> {
         std::unique_lock lock(m_mutex);
         const auto found = m_services.find(name);
-        if (found == m_services.end())
+        if (found == m_services.end()) {
             return std::unexpected("活动服务不存在");
+        }
         const auto service = found->second;
-        if (!force && (service->connection || service->busy || getBool(service->runtime, "running")))
+        if (!force && (service->connection || service->busy || getBool(service->runtime, "running"))) {
             return std::unexpected("只能删除离线且已经结束的活动服务");
+        }
         m_services.erase(found);
         if (auto saved = store.saveActivitiesConfig(configurationLocked()); !saved) {
             m_services.emplace(name, service);
@@ -271,9 +282,11 @@ namespace insoulforge {
     auto ActivityManager::directory() const -> json {
         std::lock_guard lock(m_mutex);
         auto result = json::array();
-        for (const auto &[name, service]: m_services)
-            if (getBool(service->config, "enabled"))
+        for (const auto &[name, service]: m_services) {
+            if (getBool(service->config, "enabled")) {
                 result.push_back({{"name", name}, {"description", getStr(service->config, "description")}});
+            }
+        }
         return result;
     }
 
@@ -281,12 +294,14 @@ namespace insoulforge {
         std::lock_guard lock(m_mutex);
         auto result = json::array();
         for (const auto &[name, service]: m_services) {
-            if (!getBool(service->config, "enabled") || !getBool(service->runtime, "running"))
+            if (!getBool(service->config, "enabled") || !getBool(service->runtime, "running")) {
                 continue;
+            }
             auto status = getStr(service->runtime, "status");
-            if (!service->connection || !service->connection->connected() || !service->synchronized)
+            if (!service->connection || !service->connection->connected() || !service->synchronized) {
                 status += "（状态未确认，最近更新时间 Unix 秒：" +
                           std::to_string(service->runtime.value("updated_at", i64{0})) + "）";
+            }
             result.push_back({{"name", name}, {"status", status}});
         }
         return result;
@@ -686,20 +701,26 @@ namespace insoulforge {
         {
             std::lock_guard lock(m_mutex);
             const auto found = m_services.find(name);
-            if (m_stopping || found == m_services.end() || !getBool(found->second->config, "enabled"))
+            if (m_stopping || found == m_services.end() || !getBool(found->second->config, "enabled")) {
                 co_return failure("活动不存在或未启用");
+            }
             service = found->second;
-            if (service->busy)
+            if (service->busy) {
                 co_return failure("活动正在处理请求，请稍后查询状态");
-            if (!validOrigin(origin))
+            }
+            if (!validOrigin(origin)) {
                 co_return failure("缺少可信的调用来源");
-            if (operation != "start" && operation != "command" && operation != "stop" && operation != "details")
+            }
+            if (operation != "start" && operation != "command" && operation != "stop" && operation != "details") {
                 co_return failure("未知活动操作");
-            if (!service->synchronized || !service->connection)
+            }
+            if (!service->synchronized || !service->connection) {
                 co_return failure("活动服务状态尚未确认，请等待服务连接并同步");
+            }
             if (operation == "start") {
-                if (getBool(service->runtime, "running"))
+                if (getBool(service->runtime, "running")) {
                     co_return failure("活动已在全局运行：" + getStr(service->runtime, "status"));
+                }
                 auto previous = service->runtime;
                 service->runtime = {{"running", true}, {"run_id", drogon::utils::getUuid()}, {"origin", origin},
                   {"sequence", -1}, {"starting", true}, {"status", "启动结果待确认"}, {"updated_at", now()}};
@@ -707,8 +728,9 @@ namespace insoulforge {
                     service->runtime = std::move(previous);
                     co_return failure(saved.error());
                 }
-            } else if (!getBool(service->runtime, "running"))
+            } else if (!getBool(service->runtime, "running")) {
                 co_return failure("活动当前没有运行");
+            }
             body = {{"run_id", getStr(service->runtime, "run_id")}, {"origin", service->runtime["origin"]},
               {"caller", std::move(origin)}, {"arguments", std::move(arguments)}};
             service->busy = true;
@@ -721,15 +743,17 @@ namespace insoulforge {
             if (operation != "details" &&
                 (!result.contains("snapshot") || getStr(result["snapshot"], "run_id").empty() ||
                   !atOrNull(result["snapshot"], "sequence").is_number_integer() ||
-                  !atOrNull(result["snapshot"], "status").is_string()))
+                  !atOrNull(result["snapshot"], "status").is_string())) {
                 error = "成功的活动操作必须返回完整 snapshot";
+            }
             if (error.empty() && result.contains("snapshot")) {
                 std::lock_guard lock(m_mutex);
-                if (m_stopping || service->connection != connection)
+                if (m_stopping || service->connection != connection) {
                     co_return failure("活动连接已更换，操作结果未确认");
-                const auto applied = applySnapshotLocked(*service, result["snapshot"], false);
-                if (!applied)
+                }
+                if (const auto applied = applySnapshotLocked(*service, result["snapshot"], false); !applied) {
                     error = applied.error();
+                }
             }
         } catch (const std::exception &e) {
             error = e.what();
@@ -742,15 +766,16 @@ namespace insoulforge {
             if (!error.empty())
                 service->synchronized = false;
         }
-        if (!error.empty())
+        if (!error.empty()) {
             co_return json{{"success", false}, {"confirmed", false},
               {"error", error + "；结果及状态未确认，等待服务推送或管理员立即同步，不要直接重复启动"}};
+        }
         co_return result;
     }
 
     void ActivityManager::expireUploadsLocked() {
         const auto current = std::chrono::steady_clock::now();
-        std::erase_if(m_uploads, [&](const auto &entry) {
+        std::erase_if(m_uploads, [&](const auto &entry) -> auto {
             const auto &[name, runId, id] = entry.first;
             const auto service = m_services.find(name);
             return entry.second.expires <= current || service == m_services.end() ||
@@ -762,30 +787,39 @@ namespace insoulforge {
       -> std::expected<json, std::string> {
         std::lock_guard lock(m_mutex);
         expireUploadsLocked();
-        const auto found = m_services.find(name);
-        if (m_stopping || found == m_services.end() || !found->second->connection ||
-            !found->second->connection->connected() || !found->second->synchronized ||
-            !getBool(found->second->runtime, "running") || getBool(found->second->runtime, "starting") ||
-            runId.empty() || getStr(found->second->runtime, "run_id") != runId)
+        if (const auto found = m_services.find(name);
+          m_stopping || found == m_services.end() || !found->second->connection ||
+          !found->second->connection->connected() || !found->second->synchronized ||
+          !getBool(found->second->runtime, "running") || getBool(found->second->runtime, "starting") || runId.empty() ||
+          getStr(found->second->runtime, "run_id") != runId) {
             return std::unexpected("服务未连接、未就绪或 run_id 已失效");
+        }
         const auto mime = Image::mimeType(bytes);
-        if (bytes.empty() || bytes.size() > 24U * 1024U * 1024U)
+        if (bytes.empty() || bytes.size() > 24U * 1024U * 1024U) {
             return std::unexpected("图片不能为空且不得超过 24 MiB");
-        if (!mime || (*mime != "image/png" && *mime != "image/jpeg"))
+        }
+        if (!mime || (*mime != "image/png" && *mime != "image/jpeg")) {
             return std::unexpected("仅支持完整的 PNG 或 JPEG 图片");
-        if (!validUploadImage(bytes, *mime))
+        }
+        if (!validUploadImage(bytes, *mime)) {
             return std::unexpected("图片数据无效或像素超过 16 MiPixels");
+        }
         size_t total = 0;
-        for (const auto &[key, upload]: m_uploads)
+        for (const auto &upload: m_uploads | std::views::values) {
             total += upload.size;
-        if (m_uploads.size() >= 128 || total + bytes.size() > 128U * 1024U * 1024U)
+        }
+        if (m_uploads.size() >= 128 || total + bytes.size() > 128U * 1024U * 1024U) {
             return std::unexpected("活动上传缓存已满，请稍后重试");
+        }
         auto image = Image::fromBytes(bytes);
-        if (!image)
+        if (!image) {
             return std::unexpected("图片缓存失败");
+        }
         const auto id = image->id();
-        m_uploads.insert_or_assign({name, runId, id},
-          Upload{std::move(*image), bytes.size(), std::chrono::steady_clock::now() + std::chrono::minutes(10)});
+        m_uploads.insert_or_assign(
+          {name, runId, id}, Upload{.image = std::move(*image),
+                               .size = bytes.size(),
+                               .expires = std::chrono::steady_clock::now() + std::chrono::minutes(10)});
         return json{{"success", true}, {"file_id", id}, {"media_type", *mime}};
     }
 
@@ -796,21 +830,26 @@ namespace insoulforge {
             std::lock_guard lock(m_mutex);
             const auto found = m_services.find(name);
             if (m_stopping || found == m_services.end() || !found->second->ready ||
-                found->second->connection != connection)
+                found->second->connection != connection) {
                 return std::unexpected("活动连接未就绪或已经更换");
+            }
             auto &service = *found->second;
             const auto mode = getStr(event, "mode", "silent");
-            if (event.contains("mode") && !event["mode"].is_string())
+            if (event.contains("mode") && !event["mode"].is_string()) {
                 return std::unexpected("mode 必须是字符串");
-            if (mode != "silent" && mode != "judge" && mode != "force")
+            }
+            if (mode != "silent" && mode != "judge" && mode != "force") {
                 return std::unexpected("mode 必须为 silent、judge 或 force");
+            }
             const auto text = getStr(event, "text");
-            if (event.contains("text") && (!event["text"].is_string() || text.size() > 65536))
+            if (event.contains("text") && (!event["text"].is_string() || text.size() > 65536)) {
                 return std::unexpected("通知正文最多 65536 字节");
+            }
             std::vector<Image> attachments;
             const auto &files = atOrNull(event, "attachments");
-            if (event.contains("attachments") && (!files.is_array() || files.size() > 16))
+            if (event.contains("attachments") && (!files.is_array() || files.size() > 16)) {
                 return std::unexpected("attachments 必须是最多 16 个文件的数组");
+            }
             const auto duplicate = getStr(event, "run_id") == getStr(service.runtime, "run_id") &&
                                    atOrNull(event, "sequence").is_number_integer() &&
                                    (event["sequence"] <= service.runtime.value("event_sequence", i64{-1}) ||
@@ -818,13 +857,16 @@ namespace insoulforge {
             expireUploadsLocked();
             if (files.is_array()) {
                 for (const auto &file: files) {
-                    if (!file.is_object() || file.size() != 1 || !atOrNull(file, "file_id").is_string())
+                    if (!file.is_object() || file.size() != 1 || !atOrNull(file, "file_id").is_string()) {
                         return std::unexpected("附件只能包含 file_id 字符串");
-                    if (duplicate)
+                    }
+                    if (duplicate) {
                         continue;
+                    }
                     const auto upload = m_uploads.find({name, getStr(event, "run_id"), getStr(file, "file_id")});
-                    if (upload == m_uploads.end())
+                    if (upload == m_uploads.end()) {
                         return std::unexpected("附件不存在、已过期或不属于本活动运行");
+                    }
                     attachments.push_back(upload->second.image);
                 }
             }
@@ -835,9 +877,9 @@ namespace insoulforge {
             const auto session = SessionId::parse(target);
             if (hasContent && !session)
                 return std::unexpected("无效的目标会话");
-            const auto applied = applySnapshotLocked(service, event, true);
-            if (!applied)
+            if (const auto applied = applySnapshotLocked(service, event, true); !applied) {
                 return std::unexpected(applied.error());
+            }
             auto &runtime = service.runtime;
             const auto sequence = event.at("sequence").get<i64>();
             // 查询/工具响应可先同步状态；同序号的事件仍有一次通知机会。旧事件不反向覆盖新进展。
@@ -850,7 +892,12 @@ namespace insoulforge {
                 return std::unexpected(saved.error());
             }
             if (hasContent && getBool(service.config, "enabled"))
-                notification = Event{*session, name, text, mode, std::move(attachments), runtime.at("origin")};
+                notification = Event{.sessionId = *session,
+                  .name = name,
+                  .text = text,
+                  .mode = mode,
+                  .attachments = std::move(attachments),
+                  .origin = runtime.at("origin")};
         }
         if (notification && m_sink) {
             try {
@@ -870,7 +917,7 @@ namespace insoulforge {
                 return;
             expireUploadsLocked();
             const auto current = std::chrono::steady_clock::now();
-            for (const auto &[name, service]: m_services) {
+            for (const auto &service: m_services | std::views::values) {
                 if (!service->connection)
                     continue;
                 if (current - service->lastSeen > std::chrono::seconds(45))
@@ -889,7 +936,7 @@ namespace insoulforge {
             return;
         m_stopping = false;
         m_loop = &loop;
-        m_timer = loop.runEvery(5.0, [this] { tick(); });
+        m_timer = loop.runEvery(5.0, [this] -> void { tick(); });
     }
 
     void ActivityManager::stop() {
@@ -902,7 +949,7 @@ namespace insoulforge {
                 m_loop->invalidateTimer(m_timer);
                 m_loop = nullptr;
             }
-            for (const auto &[connection, registration]: m_connections)
+            for (const auto &connection: m_connections | std::views::keys)
                 connections.push_back(connection);
         }
         for (const auto &connection: connections) {

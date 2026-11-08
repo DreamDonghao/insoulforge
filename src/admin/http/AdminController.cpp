@@ -16,7 +16,7 @@
 #include <infrastructure/monitoring/ProcessMetrics.hpp>
 #include <onebot/transport/OneBotClient.hpp>
 #include <onebot/transport/OneBotWebSocketTransport.hpp>
-#include <workflow/OneBotEventWorkflow.hpp>
+#include <workflow/EventWorkflow.hpp>
 #include <workflow/access/AdminStore.hpp>
 #include <workflow/access/BlacklistStore.hpp>
 #include <workflow/agent/llm/usage/UsageStore.hpp>
@@ -773,7 +773,7 @@ auto AdminController::getChatRecords(HttpRequestPtr req, std::function<void(cons
     }
 
     // 运行中的消息仅在正常退出时才落库；管理后台必须优先读取其完整内存快照。
-    if (const auto messages = OneBotEventWorkflow::instance().getSessionMessages(gid)) {
+    if (const auto messages = EventWorkflow::instance().getSessionMessages(gid)) {
         json result = json::array();
         const size_t first = messages->size() > static_cast<size_t>(limit) ? messages->size() - limit : 0;
         for (size_t index = first; index < messages->size(); ++index) {
@@ -833,7 +833,7 @@ auto AdminController::clearSessionChatRecords(HttpRequestPtr req, std::function<
         co_return;
     }
     const auto gid = *parsedSession;
-    OneBotEventWorkflow::instance().clearSessionMessages(gid);
+    EventWorkflow::instance().clearSessionMessages(gid);
 
     callback(jsonResponse(AdminResponse::okJson("聊天记录已清空")));
     co_return;

@@ -188,7 +188,7 @@ insoulforge/
 
 ### 消息处理工作流
 
-`OneBotEventWorkflow::instance()` 只取得对象，不恢复会话或启动维护任务。
+`EventWorkflow::instance()` 只取得对象，不恢复会话或启动维护任务。
 启动入口显式调用 `initialize(database, config, agent)`，检查返回的 `std::expected<void, std::string>`，
 成功后才启动 OneBot 接收与定时任务。数据库、配置和 Agent 必须已初始化，并覆盖工作流的生命周期。
 恢复查询及消息列表使用传入的数据库与配置；同一组依赖重复初始化不会重复恢复消息或调度任务。
@@ -205,7 +205,7 @@ HTTP 模式：OneBot HTTP POST /
 各入口均投递已解析的 OneBot JSON（HTTP 入口会立即确认请求）
     │
     ▼
-OneBotEventWorkflow::enqueueOneBotEvent
+EventWorkflow::enqueueOneBotEvent
     │ 归一化 OneBot 消息、通知和机器人回显；Agent 不可用时立即结束
     ▼
 消息预处理队列（每会话 FIFO，不同会话可并行）
@@ -271,7 +271,7 @@ MessageService → OneBot API
   fail-open 行为。
 - 预处理、路由、执行或发送的异常均限制在当前消息或当前回复任务内，不能使同会话队列停滞。工作流不使用轮询或忙等待。
 
-新增主处理步骤时，先确定其属于消息预处理阶段还是回复阶段，再在 `OneBotEventWorkflow` 的对应队列处理函数中调用一个职责单一的组件。
+新增主处理步骤时，先确定其属于消息预处理阶段还是回复阶段，再在 `EventWorkflow` 的对应队列处理函数中调用一个职责单一的组件。
 不得跨阶段持有锁或修改已交给回复队列的消息快照；需要扩展的后处理应在工作流中定义明确的调用边界。
 
 ### 工具系统
@@ -295,9 +295,9 @@ MessageService → OneBot API
   Executor 仅注入目录及查询/启用工具，具体工具在本次回复选中后的下一轮才开放；选择不跨会话或回复共享，
   执行时校验本轮授权和缓存版本。调用使用独立会话，最后一轮禁止 MCP 查询、启用和执行。
   数量限制在“执行配置”页设置。配置方式和当前 SSE 限制见 [MCP.md](./MCP.md)。
-- 全局实时活动由 `workflow/activity/ActivityManager` 管理，独立服务使用统一接入 Token 主动连接 `/activities/ws`，上报名称与描述自动登记，所有会话共享。
+- 全局 Activity 由 `workflow/activity/ActivityManager` 管理，独立服务使用统一接入 Token 主动连接 `/activities/ws`，上报名称与描述自动登记，所有会话共享。
   生命周期和来源保存在 `data/activity-state.json`；退出不停止独立服务，每次连接先注册、恢复状态再开放操作；禁用状态保留，服务描述随注册更新；工具请求、状态及通知共用 WS，服务推送每次状态变化，状态操作响应携带最新完整快照；不定时或操作后查询，后台支持立即同步。
-  模型通过独立内置插件调用通用工具，前端“实时活动”管理服务，协议与开发要求见 [ACTIVITIES.md](./ACTIVITIES.md)。
+  模型通过独立内置插件调用通用工具，前端“Activity”管理服务，协议与开发要求见 [ACTIVITIES.md](./ACTIVITIES.md)。
 - 拍一拍、撤回、引用回复、表情包收发、定时任务均由上述工具实现，由 Executor 根据上下文自动决策调用；天气、搜索、随机数、时间等能力来自
   `agentTools/` 目录的可导入自定义工具
 
@@ -637,7 +637,7 @@ OneBot 11 的数字要求仅保留在协议适配层，目标无法转换时不�
   `LogBuffer` 启动时从滚动文件恢复最近 5000 条；旧格式日志以 `Legacy` 来源保留可查看性。排查消息流水线问题时优先按会话和
   `Router`、`Executor` 来源筛选。
 - **协程**：所有异步 I/O 使用 `drogon::Task<T>` / `co_await`，注意 `co_await` 后对象生命周期（捕获 `shared_ptr` 而非裸指针）
-- **会话并发**：`OneBotEventWorkflow` 为每个会话分别维护消息预处理队列、回复队列和 `MessageList`。不要在外部直接并发修改
+- **会话并发**：`EventWorkflow` 为每个会话分别维护消息预处理队列、回复队列和 `MessageList`。不要在外部直接并发修改
   `MessageList`，也不要跨 `co_await` 持有其内部或工作流内部锁。
 - **前端**：`npm run dev` + 浏览器 DevTools；后端日志会打印收到的 OneBot 原始 JSON
 
