@@ -67,8 +67,8 @@ namespace insoulforge {
         std::mutex m_mutex;
         std::shared_ptr<MessageList> m_messageList;
         std::queue<json> m_pendingPreparationMessages;
-        bool m_isPreparationRunning{false}; ///< 预处理任务已安排或正在运行，取消息时发现队列为空则重置。
-        bool m_isReplyProcessing{false}; ///< 回复任务已安排或正在运行，检查到没有新消息要处理时重置。
-        bool m_pendingReply{false}; ///< 有新消息等待回复流程处理，读取 Router 或 Executor 输入时重置。
+        bool m_isPreparationRunning{false}; ///< 已准备启动或正在执行预处理任务，待预处理队列取空时清除。
+        bool m_isReplyProcessing{false}; ///< 已准备启动或正在执行回复任务，没有待处理的新消息时清除。
+        bool m_pendingReply{false}; ///< 有新消息尚未纳入本轮 Router 判断或 Executor 执行，取得对应输入时清除。
     };
 } // namespace insoulforge

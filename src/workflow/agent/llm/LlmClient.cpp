@@ -23,8 +23,9 @@ namespace insoulforge {
         auto requestStr(json messages, const LLMApiConfig api, const LLMModelParams params, const std::string role,
           const std::optional<SessionId> sessionId, const std::shared_ptr<LlmClient::MaintenanceRequestControl> control)
           -> drogon::Task<std::optional<std::string>> {
-            if (control && control->isCancelled())
+            if (control && control->isCancelled()) {
                 co_return std::nullopt;
+            }
             if (!LlmClient::isConfigured(api)) {
                 if (sessionId) {
                     Logger::warn(*sessionId, "LLM", fmt::format("未配置服务地址、请求路径或模型名，跳过请求"));
@@ -53,8 +54,9 @@ namespace insoulforge {
             }
 
             if (control) {
-                if (!control->recordUsage(*respJson, api.model, role, sessionId))
+                if (!control->recordUsage(*respJson, api.model, role, sessionId)) {
                     co_return std::nullopt;
+                }
             } else {
                 LlmClient::logUsage(*respJson, api.model, role, sessionId);
             }
@@ -79,8 +81,9 @@ namespace insoulforge {
         auto MaintenanceRequestControl::recordUsage(const json &response, const std::string &model,
           const std::string &role, const std::optional<SessionId> sessionId) -> bool {
             std::lock_guard lock(m_mutex);
-            if (m_cancelled)
+            if (m_cancelled) {
                 return false;
+            }
             logUsage(response, model, role, sessionId);
             return true;
         }
@@ -93,28 +96,34 @@ namespace insoulforge {
           const std::optional<SessionId> sessionId) -> json {
             json body;
             body["model"] = api.model;
-            if (params.promptCacheKeyEnabled && sessionId)
+            if (params.promptCacheKeyEnabled && sessionId) {
                 body["prompt_cache_key"] = "insoulforge:executor:" + sessionId->toString();
+            }
             body["messages"] = std::move(messages);
-            if (!tools.is_null())
+            if (!tools.is_null()) {
                 body["tools"] = std::move(tools);
+            }
             body["temperature"] = params.temperature;
             body["max_tokens"] = params.maxTokens;
             body["top_p"] = params.topP;
-            if (!api.reasoningEffort.empty())
+            if (!api.reasoningEffort.empty()) {
                 body["reasoning_effort"] = api.reasoningEffort;
+            }
             return body;
         }
 
         auto validChatJson(const drogon::HttpResponsePtr &resp) -> std::optional<json> {
-            if (!resp || resp->getStatusCode() != drogon::k200OK)
+            if (!resp || resp->getStatusCode() != drogon::k200OK) {
                 return std::nullopt;
+            }
             json parsed;
-            if (!tryParseJson(resp->body(), parsed))
+            if (!tryParseJson(resp->body(), parsed)) {
                 return std::nullopt;
+            }
             // choices 必须为非空数组（调用方直接按 [choices][0] 取 message）
-            if (const json &choices = atOrNull(parsed, "choices"); !choices.is_array() || choices.empty())
+            if (const json &choices = atOrNull(parsed, "choices"); !choices.is_array() || choices.empty()) {
                 return std::nullopt;
+            }
             return parsed;
         }
 
@@ -122,15 +131,18 @@ namespace insoulforge {
           const bool traceResponse, std::shared_ptr<MaintenanceRequestControl> control)
           -> drogon::Task<std::expected<drogon::HttpResponsePtr, std::string>> {
             for (i32 attempt = 0;; ++attempt) {
-                if (control && control->isCancelled())
+                if (control && control->isCancelled()) {
                     co_return std::unexpected("模型请求已取消");
+                }
                 auto response = co_await HttpUtil::send(label, api.baseUrl, api.path, drogon::Post, body, api.apiKey,
                   api.timeoutSeconds, sessionId, traceResponse);
-                if (control && control->isCancelled())
+                if (control && control->isCancelled()) {
                     co_return std::unexpected("模型请求已取消");
+                }
                 if (attempt >= api.maxRetries ||
-                    (response && !isRetryableStatus(static_cast<i32>((*response)->getStatusCode()))))
+                    (response && !isRetryableStatus(static_cast<i32>((*response)->getStatusCode())))) {
                     co_return response;
+                }
                 Logger::warn(sessionId, label, fmt::format("请求失败，第 {}/{} 次重试", attempt + 1, api.maxRetries));
                 co_await drogon::sleepCoro(drogon::app().getLoop(), std::chrono::seconds{1});
             }
@@ -217,8 +229,9 @@ namespace insoulforge {
 
     void LlmClient::logUsage(const json &responseJson, const std::string &model, const std::string &role,
       const std::optional<SessionId> sessionId) {
-        if (!responseJson.contains("usage"))
+        if (!responseJson.contains("usage")) {
             return;
+        }
         const json &usage = responseJson["usage"];
         i32 promptTokens = getInt(usage, "prompt_tokens");
         i32 completionTokens = getInt(usage, "completion_tokens");

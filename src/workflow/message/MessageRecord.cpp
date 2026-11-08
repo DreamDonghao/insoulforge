@@ -297,9 +297,9 @@ namespace insoulforge::MessageRecord {
     auto sentMessagesStart(const json &records) -> size_t {
         auto start = records.size();
         while (start > 0) {
-            const auto &record = records[start - 1];
-            if (!isAssistant(record) || record.contains("send_error") ||
-                getStr(record, "record_type") == "tool_execution" || getStr(record, "message_id").empty()) {
+            if (const auto &record = records[start - 1]; !isAssistant(record) || record.contains("send_error") ||
+                                                         getStr(record, "record_type") == "tool_execution" ||
+                                                         getStr(record, "message_id").empty()) {
                 break;
             }
             --start;

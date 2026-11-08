@@ -290,12 +290,11 @@ namespace insoulforge {
                       sessionId, m_dependencies->config.defaultPrivateEnabled.load(std::memory_order_relaxed));
                 }
                 if (CommandProcessor::isCommand(currentMessage)) {
-                    Logger::info(
-                      sessionId, "Command", fmt::format("执行: {}", MessageRecord::extractText(currentMessage)));
+                    Logger::info(sessionId, "Command", "执行: " + MessageRecord::extractText(currentMessage));
                     co_await executeCommand(currentMessage);
                 } else if (SessionStore::isSessionEnabled(sessionId)) {
-                    Logger::info(sessionId, "Message",
-                      fmt::format("收到: {}", dumpJson(MessageRecord::projectForAgent(currentMessage))));
+                    Logger::info(
+                      sessionId, "Message", "收到: " + dumpJson(MessageRecord::projectForAgent(currentMessage)));
 
                     currentMessage =
                       co_await MessageContentEnricher::enrichImages(std::move(currentMessage), sessionId);
@@ -340,8 +339,9 @@ namespace insoulforge {
                     if (routerDecision.shouldReply) {
                         auto [inputRecords] = sessionState->takeExecutorRequest();
                         const auto records = ChatRecordManager{sessionId, std::move(inputRecords)};
-                        co_await ExecutorAgent::execute(
-                          records, sessionId.isPrivate() ? std::nullopt : std::optional{std::move(routerDecision)});
+                        auto decision = sessionId.isPrivate() ? std::nullopt : std::optional{std::move(routerDecision)};
+
+                        co_await ExecutorAgent::execute(records, decision);
                     }
                 } else {
                     Logger::warn(sessionId, "Workflow", "回复任务跳过：Agent 不可用");
