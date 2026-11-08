@@ -1,39 +1,12 @@
+import {createModuleLoader, renderer} from './helpers/vueSetup.mjs'
 import assert from 'node:assert/strict'
-import {readFileSync} from 'node:fs'
-import {createRequire} from 'node:module'
 import {dirname, resolve} from 'node:path'
 import {fileURLToPath} from 'node:url'
 import {beforeEach, afterEach, test} from 'node:test'
-import {compileScript, parse} from 'vue/compiler-sfc'
-import ts from 'typescript'
 import * as vue from 'vue'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const require = createRequire(import.meta.url)
-const modules = new Map()
-function load(path) {
-  if (modules.has(path)) return modules.get(path).exports
-  const module = {exports: {}}
-  modules.set(path, module)
-  const source = readFileSync(path, 'utf8')
-  const code = path.endsWith('.vue') ? compileScript(parse(source).descriptor, {id: path}).content : source
-  const {outputText} = ts.transpileModule(code, {
-    compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020}
-  })
-  new Function('require', 'module', 'exports', outputText)(name => {
-    if (name === 'vue') return vue
-    if (!name.startsWith('.')) return require(name)
-    if (name.endsWith('.vue')) return {default: {render: () => null}}
-    return load(resolve(dirname(path), `${name}.ts`))
-  }, module, module.exports)
-  if (path.endsWith('.vue')) module.exports.default.render = () => null
-  return module.exports
-}
-const renderer = vue.createRenderer({
-  createElement: () => ({}), createText: () => ({}), createComment: () => ({}),
-  insert() {}, remove() {}, setText() {}, setElementText() {}, patchProp() {},
-  parentNode: () => null, nextSibling: () => null
-})
+const load = createModuleLoader()
 const response = data => ({ok: true, status: 200, headers: new Headers({'content-type': 'application/json'}), json: async () => data})
 const flush = async () => { await vue.nextTick(); await new Promise(resolve => setImmediate(resolve)) }
 let apps, originals, guards, confirmResult, confirmations, events, toasts
@@ -233,7 +206,7 @@ test('tool JSON errors stay at the schema field and corrected drafts submit once
 })
 
 test('execution dependent limits identify the exact invalid field on submit', async () => {
-  globalThis.fetch = async () => response({maxToolRounds: 8, routeWhileReplying: false, mcpToolPageSize: 10, mcpMaxToolsPerEnable: 4, mcpMaxToolsPerReply: 12})
+  globalThis.fetch = async () => response({maxToolRounds: 8, mcpToolPageSize: 10, mcpMaxToolsPerEnable: 4, mcpMaxToolsPerReply: 12})
   const state = mount('agent/ExecutionConfig')
   await flush()
   const focused = observeFocus()
@@ -244,7 +217,7 @@ test('execution dependent limits identify the exact invalid field on submit', as
 })
 
 test('execution unsaved status follows edits, reversions, failures and the submitted snapshot', async () => {
-  globalThis.fetch = async () => response({maxToolRounds: 8, routeWhileReplying: false, defaultPrivateEnabled: false,
+  globalThis.fetch = async () => response({maxToolRounds: 8, defaultPrivateEnabled: false,
     mcpToolPageSize: 10, mcpMaxToolsPerEnable: 4, mcpMaxToolsPerReply: 12})
   const state = mount('agent/ExecutionConfig')
   await flush()
@@ -271,7 +244,7 @@ test('execution unsaved status follows edits, reversions, failures and the submi
   state.config.maxToolRounds = 8
   assert.equal(state.hasUnsavedChanges, false)
 
-  state.config.routeWhileReplying = true
+  state.config.maxToolRounds = 9
   globalThis.fetch = async () => response({success: true})
   await state.saveConfig()
   assert.equal(state.hasUnsavedChanges, false)

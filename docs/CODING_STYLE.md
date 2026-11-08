@@ -40,7 +40,7 @@
 
 | 对象                       | 规则                               | 示例                                            |
 |----------------------------|------------------------------------|-------------------------------------------------|
-| 头文件、源文件             | `PascalCase.hpp`、`PascalCase.cpp` | `OneBotEventWorkflow.hpp`                       |
+| 头文件、源文件             | `PascalCase.hpp`、`PascalCase.cpp` | `EventWorkflow.hpp`                       |
 | 类型、枚举、别名           | `PascalCase`                       | `MessageList`、`ToolCategory`                   |
 | 枚举值                     | 枚举内保持一致                     | `Level::Warning` 或 `ToolCategory::INFORMATION` |
 | 函数、方法、局部变量、参数 | `camelCase`                        | `processMessage`、`groupId`                     |
@@ -87,6 +87,12 @@
 ```
 
 所有头文件使用 `#pragma once`。头文件应最小化依赖：能前置声明时不包含完整定义；实现文件包含所需的完整定义。
+
+### 控制语句
+
+- `if`、`else`、`for`（含范围循环）、`while` 和 `do-while` 的语句体必须使用花括号 `{}`，即使只有一条语句也不能省略。
+- `else if` 可以直接串联，但每个条件分支的语句体仍必须加花括号。
+- `.clang-format` 的 `InsertBraces: true` 自动补齐支持的控制语句花括号；`.clang-tidy` 的 `readability-braces-around-statements` 用于检查遗漏。宏及预处理指令附近仍须人工检查。
 
 ### 初始化与指定初始化器
 

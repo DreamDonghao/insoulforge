@@ -6,7 +6,7 @@
 #include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
-#include <workflow/OneBotEventWorkflow.hpp>
+#include <workflow/EventWorkflow.hpp>
 #include <workflow/scheduling/TaskScheduler.hpp>
 
 namespace insoulforge {
@@ -189,7 +189,7 @@ namespace insoulforge {
             delayed ? "延时，" : "", task.content.substr(0, 50), formatUnixTime(task.remindTime), formatUnixTime(now)));
 
         try {
-            OneBotEventWorkflow::instance().enqueueSystemMessage(
+            EventWorkflow::instance().enqueueSystemMessage(
               task.sessionId, buildText(task, delayed), std::string(kSystemTaskLabel));
             Logger::info(logSessionId, "Scheduler", fmt::format("定时任务 #{} 已加入消息工作流", task.id));
         } catch (const std::exception &error) {

@@ -130,9 +130,9 @@ test('memory settings save the affinity switch as a boolean with the other param
   } finally { view.dispose() }
 })
 
-test('execution settings default missing private enablement to false and save both switches with tool limits', async () => {
+test('execution settings default missing private enablement to false and save private enablement with tool limits', async () => {
   let saved
-  const loaded = {maxToolRounds: 8, routeWhileReplying: true, mcpToolPageSize: 10, mcpMaxToolsPerEnable: 4, mcpMaxToolsPerReply: 12}
+  const loaded = {maxToolRounds: 8, mcpToolPageSize: 10, mcpMaxToolsPerEnable: 4, mcpMaxToolsPerReply: 12}
   const view = setup('agent/ExecutionConfig', async (url, options) => {
     assert.equal(url, '/admin/api/execution-config')
     if (!options) return {ok: true, json: async () => loaded}
@@ -140,16 +140,13 @@ test('execution settings default missing private enablement to false and save bo
     return {ok: true, json: async () => ({success: true})}
   })
   try {
-    assert.equal(view.state.config.routeWhileReplying, false)
     await view.state.loadConfig()
-    assert.equal(view.state.config.routeWhileReplying, true)
     assert.equal(view.state.config.defaultPrivateEnabled, false)
-    view.state.config.routeWhileReplying = false
     await view.state.saveConfig()
-    assert.deepEqual(saved, {...loaded, routeWhileReplying: false, defaultPrivateEnabled: false})
+    assert.deepEqual(saved, {...loaded, defaultPrivateEnabled: false})
     view.state.config.defaultPrivateEnabled = true
     await view.state.saveConfig()
-    assert.deepEqual(saved, {...loaded, routeWhileReplying: false, defaultPrivateEnabled: true})
+    assert.deepEqual(saved, {...loaded, defaultPrivateEnabled: true})
     assert.equal(view.state.saving, false)
   } finally { view.dispose() }
 })

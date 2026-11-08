@@ -1,39 +1,12 @@
+import {createModuleLoader, renderer} from './helpers/vueSetup.mjs'
 import assert from 'node:assert/strict'
-import {readFileSync} from 'node:fs'
-import {createRequire} from 'node:module'
 import {dirname, resolve} from 'node:path'
 import {fileURLToPath} from 'node:url'
 import {beforeEach, afterEach, test} from 'node:test'
-import {compileScript, parse} from 'vue/compiler-sfc'
-import ts from 'typescript'
 import * as vue from 'vue'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const require = createRequire(import.meta.url)
-const modules = new Map()
-function load(path) {
-  if (modules.has(path)) return modules.get(path).exports
-  const module = {exports: {}}
-  modules.set(path, module)
-  const source = readFileSync(path, 'utf8')
-  const code = path.endsWith('.vue') ? compileScript(parse(source).descriptor, {id: path}).content : source
-  const {outputText} = ts.transpileModule(code, {
-    compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020}
-  })
-  new Function('require', 'module', 'exports', outputText)(name => {
-    if (name === 'vue') return vue
-    if (!name.startsWith('.')) return require(name)
-    if (name.endsWith('.vue')) return {default: {render: () => null}}
-    return load(resolve(dirname(path), `${name}.ts`))
-  }, module, module.exports)
-  if (path.endsWith('.vue')) module.exports.default.render = () => null
-  return module.exports
-}
-const renderer = vue.createRenderer({
-  createElement: () => ({}), createText: () => ({}), createComment: () => ({}),
-  insert() {}, remove() {}, setText() {}, setElementText() {}, patchProp() {},
-  parentNode: () => null, nextSibling: () => null
-})
+const load = createModuleLoader()
 const response = data => ({ok: true, status: 200, headers: new Headers({'content-type': 'application/json'}), json: async () => data})
 const flush = async () => { await vue.nextTick(); await new Promise(resolve => setImmediate(resolve)) }
 let apps, originals, guards, confirmResult, confirmations, events, toasts
@@ -278,7 +251,7 @@ test('tool editor keeps failed saves and blocks leaving while a test is running'
 })
 
 for (const [page, key, save, data, field, changed] of [
-  ['agent/ExecutionConfig', 'config', 'saveConfig', {maxToolRounds: 8, routeWhileReplying: false, mcpToolPageSize: 10, mcpMaxToolsPerEnable: 4, mcpMaxToolsPerReply: 12}, 'maxToolRounds', 9],
+  ['agent/ExecutionConfig', 'config', 'saveConfig', {maxToolRounds: 8, mcpToolPageSize: 10, mcpMaxToolsPerEnable: 4, mcpMaxToolsPerReply: 12}, 'maxToolRounds', 9],
   ['conversation/MemoryConfig', 'memoryConfig', 'saveMemoryConfig', {contextWindowLimit: 100}, 'contextWindowLimit', 101],
   ['onebot/OneBotConfig', 'qqConfig', 'saveQQConfig', {oneBotImplementation: 'napcat', oneBotTransport: 'http', selfQQNumber: '42', qqHttpHost: 'http://localhost:3000', botName: 'original'}, 'botName', 'changed']
 ]) {

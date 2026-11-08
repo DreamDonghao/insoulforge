@@ -8,7 +8,7 @@
 
 namespace insoulforge {
     /// @brief OneBot 事件的 HTTP 入口
-    /// @details 只负责 OneBot 请求解析与确认，业务处理委托给 OneBotEventWorkflow。
+    /// @details 只负责 OneBot 请求解析与确认，业务处理委托给 EventWorkflow。
     class OneBotHttpEventController : public drogon::HttpController<OneBotHttpEventController> {
     public:
         OneBotHttpEventController() = default;

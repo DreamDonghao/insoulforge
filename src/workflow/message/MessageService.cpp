@@ -12,7 +12,7 @@
 #include <infrastructure/logging/Logger.hpp>
 #include <onebot/messaging/MessageFormatter.hpp>
 #include <onebot/transport/OneBotClient.hpp>
-#include <workflow/OneBotEventWorkflow.hpp>
+#include <workflow/EventWorkflow.hpp>
 #include <workflow/message/MessageRecord.hpp>
 #include <workflow/message/MessageService.hpp>
 
@@ -44,10 +44,10 @@ namespace insoulforge::MessageService {
         }
         // 发送结果写入上下文，但不作为新消息触发回复，避免失败后循环重试。
         if (!messageId) {
-            OneBotEventWorkflow::instance().appendAssistantExecutionRecord(sessionId, std::move(record));
+            EventWorkflow::instance().appendAssistantExecutionRecord(sessionId, std::move(record));
             co_return std::unexpected(messageId.error());
         }
-        OneBotEventWorkflow::instance().appendDeliveredAssistantMessage(sessionId, std::move(record));
+        EventWorkflow::instance().appendDeliveredAssistantMessage(sessionId, std::move(record));
         Logger::info(sessionId, "OneBot",
           fmt::format("成功发送{}: {} (message_id={})", sessionId.isPrivate() ? "私聊消息" : "群消息", storedMessage,
             *messageId));

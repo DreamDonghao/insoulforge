@@ -23,12 +23,10 @@
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 #include <infrastructure/tokenizer/TokenCounter.hpp>
+#include <workflow/EventWorkflow.hpp>
 #include <workflow/MessageList.hpp>
-#include <workflow/OneBotEventWorkflow.hpp>
-#include <workflow/agent/runtime/AgentSystem.hpp>
 #include <workflow/agent/llm/prompts/PromptService.hpp>
 #include <workflow/agent/memory/LongTermMemoryStore.hpp>
-#include <workflow/agent/memory/MemoryManager.hpp>
 #include <workflow/agent/memory/MemoryStore.hpp>
 #include <workflow/agent/memory/PersonMemoryStore.hpp>
 #include <workflow/agent/memory/affinity/AffinityStore.hpp>
@@ -36,6 +34,7 @@
 #include <workflow/agent/memory/maintenance/MemoryMaintenanceService.hpp>
 #include <workflow/agent/memory/maintenance/MemoryMaintenanceStore.hpp>
 #include <workflow/agent/memory/maintenance/PersonMemoryConsolidator.hpp>
+#include <workflow/agent/runtime/AgentSystem.hpp>
 #include <workflow/agent/runtime/ExecutorAgent.hpp>
 #include <workflow/agent/tools/ToolRegistry.hpp>
 #include <workflow/agent/tools/ToolRuntime.hpp>
@@ -70,8 +69,9 @@ namespace {
         const auto path = std::filesystem::temp_directory_path() /
                           ("insoulforge-person-stop-" +
                             std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".db");
-        if (!db.initialize(path.string()))
+        if (!db.initialize(path.string())) {
             throw std::runtime_error("person test database initialization failed");
+        }
         auto &config = Config::instance();
         config.memory.baseUrl = endpoint;
         config.memory.path = "/person-consolidation-fixture";
@@ -95,22 +95,26 @@ namespace {
             PersonMemoryStore::getPerson(insoulforge::UserId{88002})["pending_entries"].size() != 1 ||
             PersonMemoryStore::getPerson(insoulforge::UserId{88003})["pending_entries"].size() != 1 ||
             PersonMemoryStore::dailyState().completedDay != "2026-10-20" ||
-            PersonMemoryStore::getPerson(insoulforge::UserId{22})["affinity"] != 3)
+            PersonMemoryStore::getPerson(insoulforge::UserId{22})["affinity"] != 3) {
             throw std::runtime_error("daily consolidation lost entries, failed isolation, or changed affinity");
+        }
         co_await service.runDue(today);
-        if (personFixture.requests != 4)
+        if (personFixture.requests != 4) {
             throw std::runtime_error("completed daily run repeated");
+        }
         personFixture.fail = false;
         ++local.tm_mday;
         const auto tomorrow = std::mktime(&local);
         PersonMemoryConsolidator restarted;
         co_await restarted.runDue(tomorrow);
-        if (personFixture.requests != 7 || !PersonMemoryStore::pendingPeople().empty())
+        if (personFixture.requests != 7 || !PersonMemoryStore::pendingPeople().empty()) {
             throw std::runtime_error("next daily run did not consume remaining entries only");
+        }
         ++local.tm_mday;
         co_await restarted.runDue(std::mktime(&local));
-        if (personFixture.requests != 7)
+        if (personFixture.requests != 7) {
             throw std::runtime_error("empty daily run called model");
+        }
 
         // 仅有旧档案也能进入第二阶段，且超限压缩只进行一次。
         const auto original = PersonMemoryStore::getPerson(UserId{88001});
@@ -154,10 +158,10 @@ namespace {
         expandedReplacement["profile"] = json::array({std::string(8000, 'b')});
         PersonMemoryStore::updatePerson(UserId{88001}, expanded, expandedReplacement);
         const auto compressionSnapshot = PersonMemoryStore::pendingSnapshot(UserId{88001}, true);
-        MemoryMaintenanceStore::apply(db, SessionId::group("100"),
-          {.personEntries = {{UserId{88001}, "压缩请求期间新增的约定"}}});
+        MemoryMaintenanceStore::apply(
+          db, SessionId::group("100"), {.personEntries = {{UserId{88001}, "压缩请求期间新增的约定"}}});
         if (!compressionSnapshot || !PersonMemoryStore::applyCompression(*compressionSnapshot, current) ||
-          PersonMemoryStore::getPerson(UserId{88001})["pending_entries"].size() != 1) {
+            PersonMemoryStore::getPerson(UserId{88001})["pending_entries"].size() != 1) {
             throw std::runtime_error("compression consumed new pending entry");
         }
 
@@ -165,7 +169,7 @@ namespace {
         const auto beforeDirect = personFixture.requests.load();
         config.personCompressionTargetTokens = 10000;
         if (co_await restarted.runPerson(UserId{88001}, true) != Result::Unchanged ||
-          personFixture.requests != beforeDirect + 2) {
+            personFixture.requests != beforeDirect + 2) {
             throw std::runtime_error("manual compression must consolidate pending then ignore automatic threshold");
         }
         config.personCompressionTargetTokens = 1500;
@@ -176,18 +180,21 @@ namespace {
             co_await restarted.runPerson(insoulforge::UserId{88001}) != Result::Updated ||
             personFixture.requests != beforeManual + 1 ||
             PersonMemoryStore::dailyState().completedDay != checkpoint.completedDay ||
-            PersonMemoryStore::dailyState().runningDay != checkpoint.runningDay)
+            PersonMemoryStore::dailyState().runningDay != checkpoint.runningDay) {
             throw std::runtime_error(
               "manual consolidation cannot reorganize existing memory or changes daily checkpoint");
+        }
         personFixture.editRelationship = true;
         if (co_await restarted.runPerson(insoulforge::UserId{88001}) != Result::Conflict ||
-            PersonMemoryStore::getPerson(insoulforge::UserId{88001})["relationship"] != json::array({"人工修改关系"}))
+            PersonMemoryStore::getPerson(insoulforge::UserId{88001})["relationship"] != json::array({"人工修改关系"})) {
             throw std::runtime_error("manual consolidation overwrote concurrent relationship edit");
+        }
         personFixture.omitRelationship = true;
         const auto beforeInvalid = PersonMemoryStore::getPerson(insoulforge::UserId{88001});
         if (co_await restarted.runPerson(insoulforge::UserId{88001}) != Result::Failed ||
-            PersonMemoryStore::getPerson(insoulforge::UserId{88001}) != beforeInvalid)
+            PersonMemoryStore::getPerson(insoulforge::UserId{88001}) != beforeInvalid) {
             throw std::runtime_error("invalid model profile overwrote original data");
+        }
         personFixture.delay = true;
         std::atomic_bool manualDone{false};
         Result manualResult = Result::Failed;
@@ -196,40 +203,48 @@ namespace {
             manualResult = co_await restarted.runPerson(insoulforge::UserId{88001});
             manualDone = true;
         });
-        while (personFixture.requests == beforeBusy)
+        while (personFixture.requests == beforeBusy) {
             co_await drogon::sleepCoro(drogon::app().getLoop(), 0.001);
+        }
         const auto busy = co_await restarted.runPerson(insoulforge::UserId{88002});
         co_await restarted.runDue(today);
-        while (!manualDone)
+        while (!manualDone) {
             co_await drogon::sleepCoro(drogon::app().getLoop(), 0.001);
+        }
         personFixture.delay = false;
-        if (busy != Result::Busy || manualResult != Result::Updated || personFixture.requests != beforeBusy + 1)
+        if (busy != Result::Busy || manualResult != Result::Updated || personFixture.requests != beforeBusy + 1) {
             throw std::runtime_error("manual and daily consolidation overlap");
+        }
         const AdminController controller;
         drogon::HttpResponsePtr apiResponse;
         const auto callback = [&](const drogon::HttpResponsePtr &response) { apiResponse = response; };
         auto request = drogon::HttpRequest::newHttpRequest();
         co_await controller.consolidatePerson(request, callback, "");
-        if (apiResponse->statusCode() != drogon::k400BadRequest)
+        if (apiResponse->statusCode() != drogon::k400BadRequest) {
             throw std::runtime_error("manual API accepts empty user ID");
+        }
         co_await controller.consolidatePerson(request, callback, "999999");
-        if (apiResponse->statusCode() != drogon::k404NotFound)
+        if (apiResponse->statusCode() != drogon::k404NotFound) {
             throw std::runtime_error("manual API accepts absent person");
+        }
         MemoryMaintenanceStore::apply(
           db, insoulforge::SessionId::group("100"), {.affinity = {{insoulforge::UserId{88005}, 1}}});
         const auto beforeEmpty = personFixture.requests.load();
         co_await controller.consolidatePerson(request, callback, "88005");
-        if (apiResponse->statusCode() != drogon::k200OK || personFixture.requests != beforeEmpty)
+        if (apiResponse->statusCode() != drogon::k200OK || personFixture.requests != beforeEmpty) {
             throw std::runtime_error("empty manual API calls model");
+        }
         co_await controller.consolidatePerson(request, callback, "88001");
-        if (apiResponse->statusCode() != drogon::k200OK || personFixture.requests != beforeEmpty + 1)
+        if (apiResponse->statusCode() != drogon::k200OK || personFixture.requests != beforeEmpty + 1) {
             throw std::runtime_error("manual API did not consolidate existing profile");
+        }
         personFixture.fail = true;
         const auto beforeFailure = PersonMemoryStore::getPerson(insoulforge::UserId{88003});
         co_await controller.consolidatePerson(request, callback, "88003");
         if (apiResponse->statusCode() != drogon::k502BadGateway ||
-            PersonMemoryStore::getPerson(insoulforge::UserId{88003}) != beforeFailure)
+            PersonMemoryStore::getPerson(insoulforge::UserId{88003}) != beforeFailure) {
             throw std::runtime_error("manual API failed to preserve original data on model failure");
+        }
         personFixture.fail = false;
         MemoryMaintenanceStore::apply(
           db, insoulforge::SessionId::group("100"), {.personEntries = {{insoulforge::UserId{88004}, "退出期间保留"}}});
@@ -245,22 +260,28 @@ namespace {
                                        {"summary", "测试重启保留聊天摘要。"}}}}};
         MemoryMaintenanceStore::apply(db, insoulforge::SessionId::group("99999"), {.shortTerm = durableMemory.dump()});
         const auto beforeStop = usageCount();
-        if (beforeStop == 0)
+        if (beforeStop == 0) {
             throw std::runtime_error("normal consolidation did not record usage");
+        }
         personFixture.stopService = &interrupted;
         co_await interrupted.runDue(interruptedDay);
-        if (db.handle() || !db.initialize(path.string()) || usageCount() != beforeStop)
+        if (db.handle() || !db.initialize(path.string()) || usageCount() != beforeStop) {
             throw std::runtime_error("late response wrote usage after service stop and database closure");
+        }
         if (MemoryStore::conversationSummaries(MemoryStore::getShortTermMemory(
-              insoulforge::SessionId::group("99999"))) != durableMemory["conversation_summaries"])
+              insoulforge::SessionId::group("99999"))) != durableMemory["conversation_summaries"]) {
             throw std::runtime_error("database reopen lost conversation summaries");
+        }
         if (PersonMemoryStore::getPerson(insoulforge::UserId{88004})["pending_entries"].empty() ||
-            PersonMemoryStore::dailyState().runningDay != "2026-10-24")
+            PersonMemoryStore::dailyState().runningDay != "2026-10-24") {
             throw std::runtime_error("stopped service committed late result or completed unfinished run");
+        }
         PersonMemoryConsolidator resumed;
         co_await resumed.runDue(interruptedDay);
-        if (!PersonMemoryStore::pendingPeople().empty() || PersonMemoryStore::dailyState().completedDay != "2026-10-24")
+        if (!PersonMemoryStore::pendingPeople().empty() ||
+            PersonMemoryStore::dailyState().completedDay != "2026-10-24") {
             throw std::runtime_error("unfinished daily run did not resume");
+        }
         const auto afterResume = usageCount();
         auto control = std::make_shared<LlmClient::MaintenanceRequestControl>();
         personFixture.cancelRequest = control.get();
@@ -274,11 +295,13 @@ namespace {
         const auto alreadyCancelled =
           co_await LlmClient::requestMaintenance(json::array(), std::nullopt, "memory", std::nullopt, control);
         if (cancelled || alreadyCancelled || personFixture.requests != requestCount || db.handle() ||
-            !db.initialize(path.string()) || usageCount() != afterResume)
+            !db.initialize(path.string()) || usageCount() != afterResume) {
             throw std::runtime_error("cancelled maintenance touched closed database or returned content");
+        }
         db.close();
-        if (!db.initialize(":memory:"))
+        if (!db.initialize(":memory:")) {
             throw std::runtime_error("could not restore test database");
+        }
         MemoryMaintenanceStore::apply(
           db, insoulforge::SessionId::group("100"), {.affinity = {{insoulforge::UserId{22}, 3}}});
         std::filesystem::remove(path);
@@ -298,8 +321,9 @@ namespace {
     auto waitFor(std::function<bool()> condition) -> drogon::Task<> {
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
         while (!condition()) {
-            if (std::chrono::steady_clock::now() > deadline)
+            if (std::chrono::steady_clock::now() > deadline) {
                 throw std::runtime_error("timed out waiting for nickname fixture");
+            }
             co_await drogon::sleepCoro(drogon::app().getLoop(), 0.01);
         }
     }
@@ -330,8 +354,9 @@ namespace {
 
     auto sessionMemory(const bool legacy = false) -> json {
         json result = {{"aliases", {{{"user_id", "11"}, {"names", {"阿梨"}}}}}};
-        if (legacy)
+        if (legacy) {
             result["pending_entries"] = {"原记忆"};
+        }
         return result;
     }
 
@@ -342,8 +367,9 @@ namespace {
     }
 
     void require(const bool condition, const char *message) {
-        if (!condition)
+        if (!condition) {
             throw std::runtime_error(message);
+        }
     }
 
     auto testPersonNames(const std::string &endpoint, std::atomic<i32> &nameRequests) -> drogon::Task<> {
@@ -351,8 +377,9 @@ namespace {
         auto &database = Database::instance();
         config.oneBotTransport = "http";
         config.qqHttpHost = endpoint;
-        for (u64 user_id = 91000; user_id < 91012; ++user_id)
+        for (u64 user_id = 91000; user_id < 91012; ++user_id) {
             AffinityStore::adjustAffinity(insoulforge::UserId{user_id}, 1);
+        }
         const AdminController controller;
         drogon::HttpResponsePtr response;
         const auto callback = [&](const drogon::HttpResponsePtr &value) { response = value; };
@@ -669,48 +696,52 @@ namespace {
             executorMemory["conversation_summaries"] = {{{"start_time", "2026-10-19 10:00:00"},
               {"end_time", "2026-10-19 10:10:00"}, {"summary", "讨论了部署方式，等待后续验证。"}}};
             MemoryStore::updateShortTermMemory(privateId, executorMemory.dump());
-            const MemoryManager memory(privateId);
+            auto &agent = AgentSystem::instance();
+            require(agent.initialize(database, config.botName).has_value() &&
+                      EventWorkflow::instance().initialize(database, config, agent).has_value(),
+              "send fixture workflow initialization failed");
+            const auto requireFinished = [](const SessionId &sessionId) {
+                const auto history = EventWorkflow::instance().getSessionMessages(sessionId);
+                require(history && !history->empty() && history->back()["execution_status"] == "no_reply",
+                  "executor context validation must reach finish_turn");
+            };
             ToolRuntime::invalidateFavoriteEmojiCache();
-            const auto reply = co_await ExecutorAgent::execute(records, memory);
-            require(
-              reply && reply->content == "context verified", "executor context ordering or global injection failed");
+            co_await ExecutorAgent::execute(records);
+            requireFinished(privateId);
             const ChatRecordManager groupRecords(insoulforge::SessionId::group("100"), records.getRecords());
             require(favoriteRequests == 1, "favorites fetched once across executor rounds and fallback");
             require(executorFallbackRequests == 1, "executor used the fallback with the frozen message prefix");
             ToolRuntime::invalidateFavoriteEmojiCache();
-            const auto groupReply = co_await ExecutorAgent::execute(
-              groupRecords, memory, RouterDecision{.reason = "group strategy", .tone = "serious", .maxLength = 123});
-            require(groupReply && groupReply->content == "context verified", "group Router strategy was lost");
+            co_await ExecutorAgent::execute(
+              groupRecords, RouterDecision{.reason = "group strategy", .tone = "serious", .maxLength = 123});
+            requireFinished(groupRecords.getSessionId());
             require(favoriteRequests == 2, "next execute refreshes changed favorites");
             ToolRuntime::invalidateFavoriteEmojiCache();
-            const auto mentionReply = co_await ExecutorAgent::execute(groupRecords, memory,
-              RouterDecision{.reason = "用户@提及", .maxLength = std::nullopt, .isPriority = true});
-            require(mentionReply && mentionReply->content == "context verified",
-              "mention context did not omit the reply length");
+            co_await ExecutorAgent::execute(
+              groupRecords, RouterDecision{.reason = "用户@提及", .maxLength = std::nullopt, .isPriority = true});
+            requireFinished(groupRecords.getSessionId());
             require(favoriteRequests == 3, "empty favorites fetched for next execute");
             ToolRuntime::invalidateFavoriteEmojiCache();
             config.affinityEnabled = false;
-            const auto withoutScoreReply = co_await ExecutorAgent::execute(
-              groupRecords, memory, RouterDecision{.reason = "group strategy", .tone = "serious", .maxLength = 123});
-            require(withoutScoreReply && withoutScoreReply->content == "context verified",
-              "disabled affinity leaked into the executor context or prompt");
+            co_await ExecutorAgent::execute(
+              groupRecords, RouterDecision{.reason = "group strategy", .tone = "serious", .maxLength = 123});
+            requireFinished(groupRecords.getSessionId());
             require(favoriteRequests == 4, "failed favorites request does not prevent execution");
             config.affinityEnabled = true;
-            auto &agent = AgentSystem::instance();
-            require(agent.initialize(database, config.botName).has_value() &&
-              OneBotEventWorkflow::instance().initialize(database, config, agent).has_value(),
-              "send fixture workflow initialization failed");
             config.executor.path = "/executor-send-fixture";
-            const auto sentReply = co_await ExecutorAgent::execute(records, memory);
-            require(sentReply && sentReply->messageSent && !sentReply->shouldReply && sentReply->content.empty(),
-              "successful terminal send must be distinguished from no reply");
-            const auto delivered = OneBotEventWorkflow::instance().getSessionMessages(privateId);
-            require(delivered && !delivered->empty() && delivered->back()["tool_history"][0]["name"] == "contract_context" &&
-              !delivered->back().contains("execution_status"), "sent message must retain tool history without no_reply");
+            co_await ExecutorAgent::execute(records);
+            const auto delivered = EventWorkflow::instance().getSessionMessages(privateId);
+            require(delivered && !delivered->empty() &&
+                      delivered->back()["tool_history"][0]["name"] == "contract_context" &&
+                      !delivered->back().contains("execution_status"),
+              "sent message must retain tool history without no_reply");
             config.executor.path = "/executor-finish-fixture";
-            const auto silentReply = co_await ExecutorAgent::execute(records, memory);
-            require(silentReply && !silentReply->messageSent && !silentReply->shouldReply,
-              "finish_turn must remain a no reply decision");
+            co_await ExecutorAgent::execute(records);
+            const auto silent = EventWorkflow::instance().getSessionMessages(privateId);
+            require(silent && silent->size() == delivered->size() + 1 &&
+                      silent->back()["execution_status"] == "no_reply" &&
+                      silent->back()["tool_history"].back()["name"] == "finish_turn",
+              "Executor must record finish_turn exactly once with its tool history");
             registry.unregisterPlugin("contract.context");
             registry.unregisterPlugin("builtin.info");
             require(registry.registerPlugin(
@@ -872,12 +903,13 @@ auto main() -> int {
           const auto user_id = profile["user_id"].get<std::string>();
           const auto prompt = body["messages"][0]["content"].get<std::string>();
           if (prompt.find("人物记忆压缩器") != std::string::npos && personFixture.requests > 0 &&
-            Config::instance().personCompressionTargetTokens == 10000 && prompt.find("100.0%") == std::string::npos) {
+              Config::instance().personCompressionTargetTokens == 10000 && prompt.find("100.0%") == std::string::npos) {
               throw std::runtime_error("manual compression ratio was not capped at 100 percent");
           }
 
-          if (!profile.contains("relationship") || profile.contains("stable_memory"))
+          if (!profile.contains("relationship") || profile.contains("stable_memory")) {
               throw std::runtime_error("consolidation receives obsolete person schema");
+          }
           if (user_id == "88001" && personFixture.injectNew.exchange(false)) {
               MemoryMaintenanceStore::apply(Database::instance(), insoulforge::SessionId::group("200"),
                 {.personEntries = {{insoulforge::UserId{88001}, "请求期间新增"}}});
@@ -911,11 +943,12 @@ auto main() -> int {
                 {"usage", {{"prompt_tokens", 10}, {"completion_tokens", 5}, {"total_tokens", 15}}}}
                   .dump());
           }
-          if (personFixture.delay)
+          if (personFixture.delay) {
               drogon::app().getLoop()->runAfter(
                 0.05, [callback = std::move(callback), response] { callback(response); });
-          else
+          } else {
               callback(response);
+          }
       },
       {drogon::Post});
     drogon::app().registerHandler("/get_stranger_info",
@@ -1032,33 +1065,42 @@ auto main() -> int {
           } else if (!extraction) {
               const auto input = json::parse(body["messages"][1]["content"].get<std::string>());
               auto aliases = input["aliases"];
-              if (current == Mode::Success)
+              if (current == Mode::Success) {
                   aliases = sessionMemory()["aliases"];
-              if (current == Mode::AliasCorrection)
+              }
+              if (current == Mode::AliasCorrection) {
                   aliases = {{{"user_id", "11"}, {"names", {"摄影佬"}}}};
+              }
               auto entries = json::array();
               if (prompt.find("向量服务未配置") == std::string::npos) {
-                  for (const auto *key: {"pending_entries", "recalled_memories"})
-                      for (const auto &entry: input[key])
+                  for (const auto *key: {"pending_entries", "recalled_memories"}) {
+                      for (const auto &entry: input[key]) {
                           entries.push_back(entry);
+                      }
+                  }
               }
-              if (current == Mode::InvalidSessionMemory)
+              if (current == Mode::InvalidSessionMemory) {
                   aliases = "invalid";
-              if (current == Mode::LegacyInjection)
+              }
+              if (current == Mode::LegacyInjection) {
                   entries = {42};
-              if (current == Mode::OutputEmbeddingFailure)
+              }
+              if (current == Mode::OutputEmbeddingFailure) {
                   entries = {"prepared embedding failure"};
+              }
               if (current == Mode::ManyShortTerm) {
                   entries = json::array();
-                  for (int i = 0; i < 20; ++i)
+                  for (int i = 0; i < 20; ++i) {
                       entries.push_back("entry " + std::to_string(i));
+                  }
               }
               output = json{{"aliases", std::move(aliases)}, {"longTerm", std::move(entries)}}.dump();
           } else {
               json extracted = {{"memories", json::array()}, {"affinity_changes", json::array()},
                 {"conversation_summary", "讨论了编程爱好和近期安排。"}};
-              if (current == Mode::MissingSummary)
+              if (current == Mode::MissingSummary) {
                   extracted.erase("conversation_summary");
+              }
               if (!Config::instance().affinityEnabled &&
                   (prompt.contains("好感度") || prompt.contains("affinity_changes"))) {
                   auto reply = drogon::HttpResponse::newHttpResponse();
@@ -1079,20 +1121,27 @@ auto main() -> int {
                   extracted["memories"][0]["user_id"] = "user:alpha";
                   extracted["affinity_changes"][0]["user_id"] = "00123";
               }
-              if (current == Mode::AliasCorrection)
+              if (current == Mode::AliasCorrection) {
                   extracted["memories"][0]["entries"] = {"以后只叫我摄影佬"};
-              if (current == Mode::InvalidQq)
+              }
+              if (current == Mode::InvalidQq) {
                   extracted["memories"][0]["user_id"] = "self";
-              if (current == Mode::ContextOnlyQq)
+              }
+              if (current == Mode::ContextOnlyQq) {
                   extracted["memories"][0]["user_id"] = "33";
-              if (current == Mode::MalformedDelta)
+              }
+              if (current == Mode::MalformedDelta) {
                   extracted["affinity_changes"][0]["delta"] = "2";
-              if (current == Mode::DuplicateAffinity)
+              }
+              if (current == Mode::DuplicateAffinity) {
                   extracted["affinity_changes"].push_back(extracted["affinity_changes"][0]);
-              if (current == Mode::DuplicateMemory)
+              }
+              if (current == Mode::DuplicateMemory) {
                   extracted["memories"].push_back(extracted["memories"][0]);
-              if (!Config::instance().affinityEnabled && current == Mode::Empty)
+              }
+              if (!Config::instance().affinityEnabled && current == Mode::Empty) {
                   extracted.erase("affinity_changes");
+              }
               output = extracted.dump();
           }
           const json response = {{"choices", {{{"message", {{"content", output}}}}}}};
@@ -1119,19 +1168,24 @@ auto main() -> int {
           auto response = drogon::HttpResponse::newHttpResponse();
           response->setBody(R"({"status":"ok","retcode":0,"data":{"message_id":123456}})");
           callback(response);
-      }, {drogon::Post});
+      },
+      {drogon::Post});
     drogon::app().registerHandler("/executor-send-fixture",
       [](const drogon::HttpRequestPtr &, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
           auto response = drogon::HttpResponse::newHttpResponse();
-          response->setBody(R"({"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"context","type":"function","function":{"name":"contract_context","arguments":"{}"}},{"id":"send","type":"function","function":{"name":"send_message_and_finish","arguments":"{\"content\":\"已发送测试\"}"}}]}}]})");
+          response->setBody(
+            R"({"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"context","type":"function","function":{"name":"contract_context","arguments":"{}"}},{"id":"send","type":"function","function":{"name":"send_message_and_finish","arguments":"{\"content\":\"已发送测试\"}"}}]}}]})");
           callback(response);
-      }, {drogon::Post});
+      },
+      {drogon::Post});
     drogon::app().registerHandler("/executor-finish-fixture",
       [](const drogon::HttpRequestPtr &, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
           auto response = drogon::HttpResponse::newHttpResponse();
-          response->setBody(R"({"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"finish","type":"function","function":{"name":"finish_turn","arguments":"{}"}}]}}]})");
+          response->setBody(
+            R"({"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"finish","type":"function","function":{"name":"finish_turn","arguments":"{}"}}]}}]})");
           callback(response);
-      }, {drogon::Post});
+      },
+      {drogon::Post});
     drogon::app().registerHandler("/executor-fixture",
       [&executorRequests, &frozenUser, &frozenStickers, &fallbackMessages](
         const drogon::HttpRequestPtr &request, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
@@ -1147,47 +1201,53 @@ auto main() -> int {
           const bool validStickers = messages[0]["role"] == "system" && messages[1]["role"] == "user" &&
                                      stickers == json{{"available_stickers", expectedNames}};
           std::vector<std::string> keys;
-          for (const auto &[key, value]: context.items())
+          for (const auto &[key, value]: context.items()) {
               keys.push_back(key);
+          }
           const bool isPrivate = context["current_session"]["type"] == "private";
           std::vector<std::string> expected = {"current_session", "session_memory", "conversation_summaries",
-            "earlier_messages", "person_memories", "shared_conversations", "recent_messages"};
-          if (!isPrivate)
+            "earlier_messages", "person_memories", "shared_conversations", "recent_messages", "new_messages",
+            "sent_messages"};
+          if (!isPrivate) {
               expected.push_back("response_requirements");
-          expected.push_back("running_activities");
+          }
           expected.push_back("execution_state");
           const auto state = context;
           bool valid = validStickers && keys == expected && messages[0]["role"] == "system" &&
                        state["execution_state"]["current_round"] == (isPrivate ? executorRequests : 1) &&
-                       context["person_memories"].size() == 1 && context["person_memories"][0]["uid"] == "11" &&
+                       context["person_memories"].size() == 1 && context["person_memories"][0]["user_id"] == "11" &&
                        context["person_memories"][0]["pending_entries"].size() == 3 &&
-                       context["shared_conversations"].empty() && context["running_activities"].empty();
+                       context["shared_conversations"].empty() && !context.contains("activities");
           valid =
             valid && (isPrivate ? context["conversation_summaries"].size() == 1 &&
                                     context["conversation_summaries"][0]["summary"] == "讨论了部署方式，等待后续验证。"
                                 : !context["conversation_summaries"].empty());
           auto expectedSessionMemory = sessionMemory();
-          MessageRecord::compactContextUserIds(expectedSessionMemory);
+          if (!isPrivate) {
+              expectedSessionMemory["aliases"][0]["names"] = json::array({"摄影佬"});
+          }
           valid =
             valid && context["session_memory"] == expectedSessionMemory &&
-            (isPrivate ? context["current_session"]["uid"] == "22" : context["current_session"]["group_id"] == "100") &&
+            (isPrivate ? context["current_session"]["user_id"] == "22" : context["current_session"]["group_id"] == "100") &&
             context["earlier_messages"].size() == 2 && context["earlier_messages"][0] == "legacy text" &&
             context["earlier_messages"][1]["segments"][0]["text"] == std::string(500, 'x') + "…" &&
             context["recent_messages"].size() == 12 &&
             context["recent_messages"][0]["segments"][0]["text"] == std::string(501, 'x');
           for (const auto key: {"earlier_messages", "recent_messages"}) {
               for (const auto &record: context[key]) {
-                  if (record.is_string())
+                  if (record.is_string()) {
                       continue;
+                  }
                   valid = valid && !record.contains("memories") &&
                           record["recalled_memories"] == json::array({"legacy recalled fact"}) &&
                           record["time"] == "2026-10-20 12:00:00" && !record.contains("assets") &&
                           !record.dump().contains("https://example.com/private.png") &&
                           record["segments"][1]["description"] == "fixture image";
-                  if (!Config::instance().affinityEnabled)
+                  if (!Config::instance().affinityEnabled) {
                       valid = valid && !record["sender"].contains("affinity");
-                  else if (record["sender"]["uid"] == "22")
+                  } else if (record["sender"]["user_id"] == "22") {
                       valid = valid && record["sender"]["affinity"] == 5;
+                  }
               }
           }
           for (const auto &entry: context["person_memories"][0]["pending_entries"]) {
@@ -1195,17 +1255,20 @@ auto main() -> int {
                       !entry["created_at"].get<std::string>().empty();
           }
           const auto systemPrompt = messages[0]["content"].get<std::string>();
-          if (!Config::instance().affinityEnabled)
+          if (!Config::instance().affinityEnabled) {
               valid = valid && !systemPrompt.contains("affinity") && !systemPrompt.contains("好感度");
+          }
           const auto formatBegin = systemPrompt.find("## 聊天记录格式说明");
           const auto exampleBegin = systemPrompt.find("```json\n", formatBegin) + std::string("```json\n").size();
           const auto exampleEnd = systemPrompt.find("\n```", exampleBegin);
           const auto example = json::parse(systemPrompt.substr(exampleBegin, exampleEnd - exampleBegin));
           std::vector<std::string> exampleKeys;
-          for (const auto &[key, value]: example.items())
+          for (const auto &[key, value]: example.items()) {
               exampleKeys.push_back(key);
+          }
           auto exampleExpected = expected;
           exampleExpected.pop_back(); // 执行状态由每轮请求动态注入，不属于静态示例。
+          exampleExpected.push_back("activities"); // 静态示例说明可选的 Activity 状态字段。
           valid = valid && exampleKeys == exampleExpected;
           if (isPrivate) {
               valid =
@@ -1233,11 +1296,14 @@ auto main() -> int {
           auto reply = drogon::HttpResponse::newHttpResponse();
           reply->setContentTypeCode(drogon::CT_APPLICATION_JSON);
           if (!valid || executorRequests == 2) {
-              if (valid)
+              if (valid) {
                   fallbackMessages = messages;
+              }
               reply->setStatusCode(drogon::k400BadRequest);
           } else {
-              json message = {{"role", "assistant"}, {"content", "context verified"}};
+              json message = {{"role", "assistant"},
+                {"tool_calls", {{{"id", "finish"}, {"type", "function"},
+                                 {"function", {{"name", "finish_turn"}, {"arguments", "{}"}}}}}}};
               if (executorRequests == 1) {
                   message["tool_calls"] = {{{"id", "fixture-call"}, {"type", "function"},
                     {"function", {{"name", "contract_context"}, {"arguments", "{}"}}}}};
@@ -1254,10 +1320,15 @@ auto main() -> int {
           const auto body = json::parse(request->body());
           auto response = drogon::HttpResponse::newHttpResponse();
           response->setContentTypeCode(drogon::CT_APPLICATION_JSON);
-          if (fallbackMessages.empty() || body["messages"] != fallbackMessages)
+          if (fallbackMessages.empty() || body["messages"] != fallbackMessages) {
               response->setStatusCode(drogon::k400BadRequest);
-          else
-              response->setBody(json{{"choices", {{{"message", {{"content", "context verified"}}}}}}}.dump());
+          } else {
+              response->setBody(json{
+                {"choices",
+                  {{{"message", {{"tool_calls", {{{"id", "finish"}, {"type", "function"},
+                                                  {"function", {{"name", "finish_turn"}, {"arguments", "{}"}}}}}}}}}}}}
+                  .dump());
+          }
           callback(response);
       },
       {drogon::Post});

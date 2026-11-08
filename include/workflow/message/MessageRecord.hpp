@@ -23,6 +23,11 @@ namespace insoulforge::MessageRecord {
         std::string url; ///< OneBot 图片下载地址
     };
 
+    /// @brief 从内部消息记录的 session_id 字段解析会话身份。
+    /// @param record 含规范编码 session_id 的内部消息，如 group:42 或 private:user-a。
+    /// @return 解析后的群聊或私聊会话 ID。
+    /// @throws std::bad_expected_access<std::string> session_id 缺失或无法解析时抛出。
+    /// @note 不推断会话来源；调用方须保留 session_id，不能传入已移除此字段的上下文投影。
     [[nodiscard]] auto getSessionId(const json &record) -> SessionId;
 
     /// @brief 将机器人尝试发送的 CQ 内容转换为统一聊天记录
@@ -71,18 +76,21 @@ namespace insoulforge::MessageRecord {
     /// @brief 判断记录是否由系统账号发送
     [[nodiscard]] auto isSystem(const json &record) -> bool;
 
+    /// @brief 取得末尾连续成功发送记录的起始位置；失败及纯执行记录不属于发送段。
+    [[nodiscard]] auto sentMessagesStart(const json &records) -> size_t;
+
+    /// @brief 判断入站记录是否尚未交给 Executor；缺少标记的旧记录视为已处理。
+    [[nodiscard]] auto isNewForExecutor(const json &record) -> bool;
+
     /// @brief 生成供 Router、Executor 与记忆任务使用的精简内容投影
     /// @param record 已解析的持久化聊天记录
     /// @return 保留时间、发送者、引用和有序语义段的记录，不含图片来源
     /// @details 图片来源只从 `assets.images` 读取。
     /// @param includeToolHistory 仅 Executor 读取工具历史；其他调用方默认不包含。
+    /// @param includeGroupCard
     /// @details 群名片按 本群设置 决定是否发送，原始记录不受影响。
     [[nodiscard]] auto projectForAgent(
       const json &record, bool includeToolHistory = false, bool includeGroupCard = false) -> json;
-
-    /// @brief 将 Executor 上下文中已知结构的用户身份字段由 user_id 缩写为 uid。
-    /// @details 仅修改发送给模型的副本；不遍历正文、工具参数、活动数据或其他不透明内容。
-    void compactContextUserIds(json &context);
 
     /// @brief 提取用于消息级向量召回的语义文本
     /// @param record 已解析的持久化聊天记录

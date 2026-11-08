@@ -31,7 +31,7 @@ function page() {
     changeView: view => { state.currentView = view },
     login: () => { submits++ }, logout: () => { state.logoutConfirmationVisible = true },
     cancelLogout: () => { state.logoutConfirmationVisible = false },
-    confirmLogout: () => { state.logoutConfirmationVisible = false; state.authenticated = false },
+    confirmLogout() {},
     toggleTheme: () => { state.theme = state.theme === 'dark' ? 'light' : 'dark' }
   })
   return {
@@ -105,27 +105,30 @@ test('login controls preserve theme, token visibility, validation state and subm
   assert.ok(html.includes('role="alert">访问令牌无效'))
 })
 
-test('logout presents confirmation and cancellation preserves the page before explicit confirmation', async () => {
+test('logout dialog wires cancel and confirm controls and displays draft and request state', async () => {
   const view = page()
-  view.state.authenticationChecked = true
-  view.state.authenticated = true
+  Object.assign(view.state, {
+    authenticationChecked: true, authenticated: true, logoutConfirmationVisible: true,
+    logoutHasUnsavedChanges: () => true
+  })
+  let cancelled = 0, confirmed = 0
+  view.state.cancelLogout = () => { cancelled++ }
+  view.state.confirmLogout = () => { confirmed++ }
+  assert.ok((await view.html()).includes('有未保存的修改'))
+  const cancel = () => view.find(node => node.props?.['data-modal-initial-focus'] !== undefined)
+  const confirm = () => view.find(node => node.props?.class === 'btn btn-primary')
+  assert.equal(cancel().props.type, 'button')
+  cancel().props.onClick()
+  confirm().props.onClick()
+  assert.equal(cancelled, 1)
+  assert.equal(confirmed, 1)
+  view.state.logoutSubmitting = true
+  view.state.logoutError = '退出失败'
   const html = await view.html()
-  assert.ok(html.includes('class="container"'))
-  assert.equal(html.includes('class="login-page"'), false)
-  view.state.logout()
-  view.state.logoutHasUnsavedChanges = () => true
-  const confirmation = await view.html()
-  assert.ok(confirmation.includes('有未保存的修改'))
-  const cancel = view.find(node => node.props?.['data-modal-initial-focus'] !== undefined)
-  assert.equal(cancel.props.type, 'button')
-  cancel.props.onClick()
-  assert.equal(view.state.authenticated, true)
-  assert.equal(view.state.logoutConfirmationVisible, false)
-  view.state.logout()
-  view.state.confirmLogout()
-  const login = await view.html()
-  assert.ok(login.includes('<form'))
-  assert.equal(login.split('class="login-identity"').length - 1, 1)
+  assert.equal(cancel().props.disabled, true)
+  assert.equal(confirm().props.disabled, true)
+  assert.ok(html.includes('退出中…'))
+  assert.ok(html.includes('role="alert">退出失败'))
 })
 
 test('compact navigation retains names, button behavior and an accurate item count', async () => {
@@ -150,12 +153,6 @@ test('compact navigation retains names, button behavior and an accurate item cou
   view.state.dailyNavItems.push({key: 'groups', label: '会话管理', icon: 'groups'})
   await view.html()
   assert.equal(sidebar().props.style['--nav-item-count'], 5)
-})
-
-test('theme settings use normal page navigation and show an active sidebar entry', async () => {
-  const view = page()
-  view.state.authenticationChecked = true
-  view.state.authenticated = true
   view.state.currentView = 'llm'
   await view.html()
   const button = view.find(node => node.props?.['aria-label'] === '主题配色')

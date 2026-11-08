@@ -74,8 +74,9 @@ namespace insoulforge::MessageRecord {
             json summary;
             summary["type"] = "image";
             summary["image_index"] = imageIndex;
-            if (const auto id = getStr(image, "image_id"); !id.empty())
+            if (const auto id = getStr(image, "image_id"); !id.empty()) {
                 summary["image_id"] = id;
+            }
             if (const std::string status = getStr(image, "recognition_status"); !status.empty()) {
                 summary["recognition_status"] = status;
             }
@@ -161,9 +162,9 @@ namespace insoulforge::MessageRecord {
                 } else {
                     json target{{"user_id", userId}};
                     if (const auto id = UserId::parse(userId); id) {
-                        const auto name = QQNameDirectory::getName(*id);
-                        if (name != "未知")
+                        if (const auto name = QQNameDirectory::getName(*id); name != "未知") {
                             target["name"] = name;
+                        }
                     }
                     segments.push_back({{"type", "at"}, {"target", std::move(target)}});
                 }
@@ -196,8 +197,9 @@ namespace insoulforge::MessageRecord {
         if (replyTo) {
             record["reply_to"] = std::move(*replyTo);
         }
-        if (const auto selfId = Config::instance().selfQQNumber; selfId != 0)
+        if (const auto selfId = Config::instance().selfQQNumber; selfId != 0) {
             (void) normalizeSelfReferences(record, UserId{selfId});
+        }
         return record;
     }
 
@@ -237,8 +239,9 @@ namespace insoulforge::MessageRecord {
     auto extractText(const json &record) -> std::string {
         std::string text;
         const json &segments = atOrNull(record, "segments");
-        if (!segments.is_array())
+        if (!segments.is_array()) {
             return text;
+        }
         for (const json &segment: segments) {
             if (getStr(segment, "type") == "text") {
                 text += getStr(segment, "text");
@@ -261,23 +264,27 @@ namespace insoulforge::MessageRecord {
 
     auto normalizeSelfReferences(json &record, const UserId &selfId) -> bool {
         bool changed = false;
-        const auto normalize = [&selfId, &changed](json &identity) {
+        const auto normalize = [&selfId, &changed](json &identity) -> void {
             if (identity.is_object() && getStr(identity, "user_id") == selfId.toString()) {
                 identity["user_id"] = "self";
                 changed = true;
             }
         };
-        if (!record.is_object())
+        if (!record.is_object()) {
             return false;
-        if (record.contains("sender"))
+        }
+        if (record.contains("sender")) {
             normalize(record["sender"]);
+        }
         if (record.contains("segments") && record["segments"].is_array()) {
             for (auto &segment: record["segments"]) {
                 const auto type = getStr(segment, "type");
-                if ((type == "at" || type == "poke") && segment.contains("target"))
+                if ((type == "at" || type == "poke") && segment.contains("target")) {
                     normalize(segment["target"]);
-                if (type == "member_event" && segment.contains("operator"))
+                }
+                if (type == "member_event" && segment.contains("operator")) {
                     normalize(segment["operator"]);
+                }
             }
         }
         return changed;
@@ -287,13 +294,31 @@ namespace insoulforge::MessageRecord {
 
     auto isSystem(const json &record) -> bool { return getStr(atOrNull(record, "sender"), "user_id") == "system"; }
 
+    auto sentMessagesStart(const json &records) -> size_t {
+        auto start = records.size();
+        while (start > 0) {
+            if (const auto &record = records[start - 1]; !isAssistant(record) || record.contains("send_error") ||
+                                                         getStr(record, "record_type") == "tool_execution" ||
+                                                         getStr(record, "message_id").empty()) {
+                break;
+            }
+            --start;
+        }
+        return start;
+    }
+
+    auto isNewForExecutor(const json &record) -> bool {
+        return !isAssistant(record) && !getBool(record, "executor_processed", true);
+    }
+
     auto projectForAgent(const json &record, const bool includeToolHistory, const bool includeGroupCard) -> json {
         if (!record.is_object()) {
             return record;
         }
         json projected;
-        if (isSystem(record) && atOrNull(record, "activity").is_object())
+        if (isSystem(record) && atOrNull(record, "activity").is_object()) {
             projected["activity"] = record["activity"];
+        }
         if (record.contains("time")) {
             projected["time"] = record["time"];
         }
@@ -346,28 +371,6 @@ namespace insoulforge::MessageRecord {
             }
         }
         return projected;
-    }
-
-    void compactContextUserIds(json &context) {
-        if (context.is_array()) {
-            for (auto &item: context) {
-                compactContextUserIds(item);
-            }
-        } else if (context.is_object()) {
-            // 白名单限定上下文结构，工具调用的原始参数必须与工具 schema 保持一致。
-            if (const auto it = context.find("user_id"); it != context.end()) {
-                auto id = std::move(*it);
-                context.erase(it);
-                context["uid"] = std::move(id);
-            }
-            for (const auto *key: {"current_session", "session_memory", "aliases", "earlier_messages",
-                   "recent_messages", "person_memories", "shared_conversations", "session", "messages", "sender",
-                   "segments", "target", "operator", "reply_to"}) {
-                if (const auto it = context.find(key); it != context.end()) {
-                    compactContextUserIds(*it);
-                }
-            }
-        }
     }
 
     auto extractRecallText(const json &record) -> std::string {

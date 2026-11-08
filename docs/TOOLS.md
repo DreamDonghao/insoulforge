@@ -27,6 +27,8 @@ Executor（`ExecutorAgent`）在单个 Agent 循环中通过工具调用生成�
 > `REPLY` 类工具的 handler 只是占位：它们在 `ExecutorAgent::processToolCalls` 内被拦截执行（需要改写回复决策而非返回工具结果），不经
 > `ToolRegistry::executeTool`。
 
+Executor 不会将模型直接输出的文本发送到会话。未调用工具时会提示模型使用结束工具，纠正请求计入最大轮数；最后一轮仍未调用工具则记录失败，不再请求模型。
+
 ## 消息发送与结束（3 个）
 
 | 工具 | 参数 | 行为 |
@@ -110,7 +112,7 @@ Executor（`ExecutorAgent`）在单个 Agent 循环中通过工具调用生成�
 | `recall_message`   | `message_id`           | 撤回消息：撤引用的消息用 `reply_to` 字段值，撤某条消息本身用 `message_id` 字段值                                                                                                          |
 
 拍一拍的接收：OneBot notice 事件（`notice_type=notify, sub_type=poke`）先由 `OneBotEventNormalizer` 归一化，再进入
-`OneBotEventWorkflow` 的会话消息预处理队列。禁用会话会提前跳过；已启用会话中，拍一拍保存为独立 `poke` 段，所有拍一拍通知均与普通消息一样由
+`EventWorkflow` 的会话消息预处理队列。禁用会话会提前跳过；已启用会话中，拍一拍保存为独立 `poke` 段，所有拍一拍通知均与普通消息一样由
 Router
 决策是否回应。群成员入群、退群以 `member_event` 段走同一工作流。
 
@@ -176,6 +178,12 @@ base64 数据只用于 OneBot 发送和视觉识别，不保存到聊天记录�
 识别得到的画面描述会在图片发送成功后写入助手图片消息段，供后续 Router、Executor 和记忆召回使用。
 如果识别不可用或失败，图片仍会发送，消息段改为明确标注“依据生成提示词”的备用描述。
 每次任务只请求一次，不自动重试以避免重复计费；接口请求最长等待 180 秒。生成服务和 OneBot 的实际联通需在部署环境验证。
+
+## Activity 请求
+
+`builtin.activity` 只提供 `request_activity(name, parameters)`，归类为 `ACTION`。`name` 取可用服务目录，`parameters` 为按服务 `instructions` 构造的对象，查询与操作共用此入口。主程序不注入身份或业务参数，也不解释返回的自定义对象。
+
+同连接请求串行；超时或断线结果未确认，不自动重试。响应附件返回可供当前回复后续图片工具使用的 `image_id`，不自动识图或发送。服务自报的 `active` 只影响持续状态上下文，不影响在线服务是否可调用。完整协议见 [Activity 开发规范](ACTIVITIES.md)。
 
 ## 自定义工具文件存储
 
@@ -339,7 +347,7 @@ HTTP 响应体仍受 Lua 执行器的 1 MiB 限制，超限时返回错误，而
 - **错误反馈**：普通工具的结果会作为 `tool` 消息回传给 Executor。处理器抛异常时，`ToolRegistry` 将异常摘要（最多 500 字符）转为工具结果，不让异常中断整轮调用；回复工具的参数错误则由 Executor 自行回传。Lua HTTP 接口返回传输错误或原始 HTTP 响应，由脚本将具体原因回传模型。仅返回布尔成功状态的 OneBot 接口无法提供更细的失败原因，工具会返回相应的通用提示。异步工具启动后的执行错误通过新的系统消息反馈，不作为原工具调用的即时结果。
 - **会话上下文**：所有工具签名统一为 `(json args, ToolCallContext)`，需要真实会话时通过 `ctx.requireSession()` 取得 `SessionId`，可选日志归属使用 `ctx.sessionId`；`ctx.messageSnapshot`
   是本轮冻结的完整消息快照，媒体工具可用它按 `message_id` 与 `image_index` 解析图片来源。群操作类工具统一检查会话存在并拦截私聊。
-- **参数来源**：用户 ID、消息 ID、图片索引等参数取自聊天记录 JSON 的 `sender.uid` / `message_id` /
+- **参数来源**：用户 ID、消息 ID、图片索引等参数取自聊天记录 JSON 的 `sender.user_id` / `message_id` /
   `segments[].image_index` / `reply_to` 等字段；图片 `file/url` 仅由服务端从 `assets.images` 读取，不会提供给模型
 - **宽容取值**：参数读取统一走 `argString` / `getInt` / `getUInt` / `getBool`（见 `include/infrastructure/JsonUtil.hpp`
   ），缺参数返回引导性错误提示而非异常

@@ -5,7 +5,7 @@
 #include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
-#include <workflow/OneBotEventWorkflow.hpp>
+#include <workflow/EventWorkflow.hpp>
 #include <workflow/agent/llm/LlmClient.hpp>
 #include <workflow/agent/memory/LongTermMemory.hpp>
 #include <workflow/agent/tools/ToolArgument.hpp>
@@ -92,7 +92,7 @@ namespace insoulforge {
                     co_return fmt::format("目标群 {} 未在后台启用，无法读取消息", *groupId);
 
                 json messages = json::array();
-                if (const auto records = OneBotEventWorkflow::instance().getSessionMessages(*groupId)) {
+                if (const auto records = EventWorkflow::instance().getSessionMessages(*groupId)) {
                     for (const auto &record: *records) {
                         if (auto projected = SharedConversationContext::projectMessage(record))
                             messages.push_back(std::move(*projected));

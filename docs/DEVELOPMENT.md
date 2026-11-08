@@ -188,7 +188,7 @@ insoulforge/
 
 ### 消息处理工作流
 
-`OneBotEventWorkflow::instance()` 只取得对象，不恢复会话或启动维护任务。
+`EventWorkflow::instance()` 只取得对象，不恢复会话或启动维护任务。
 启动入口显式调用 `initialize(database, config, agent)`，检查返回的 `std::expected<void, std::string>`，
 成功后才启动 OneBot 接收与定时任务。数据库、配置和 Agent 必须已初始化，并覆盖工作流的生命周期。
 恢复查询及消息列表使用传入的数据库与配置；同一组依赖重复初始化不会重复恢复消息或调度任务。
@@ -205,7 +205,7 @@ HTTP 模式：OneBot HTTP POST /
 各入口均投递已解析的 OneBot JSON（HTTP 入口会立即确认请求）
     │
     ▼
-OneBotEventWorkflow::enqueueOneBotEvent
+EventWorkflow::enqueueOneBotEvent
     │ 归一化 OneBot 消息、通知和机器人回显；Agent 不可用时立即结束
     ▼
 消息预处理队列（每会话 FIFO，不同会话可并行）
@@ -215,19 +215,19 @@ OneBotEventWorkflow::enqueueOneBotEvent
     │ 4. 跳过未启用会话
     │ 5. 图片/GIF 识别与长期记忆召回
     │ 6. 写入 MessageList，推送管理后台并生成不可变快照
-    │ 7. 空闲时投递回复队列；回复进行中仅 @机器人和系统任务排队
+    │ 7. 原子登记新增回复需求；空闲时启动唯一回复消费者
     ▼
 回复队列（每会话最多一个执行任务）
-    │ @机器人和系统任务在已有回复时排队；普通消息记为 AgentBusy，不再发起第二次请求
+    │ 忙碌时合并新增需求，不阻塞预处理；执行整轮结束后再判断
     ▼
 MessageRouter
-    │ 从冻结快照投影路由上下文；先执行硬规则
+    │ 只读冻结上下文；Router 根据未处理入站消息应用私聊、@机器人及普通系统任务的硬规则
     │ 群聊可选走 Jev；低置信度、不明确或失败时调用 Router LLM
-    │ 私聊直接使用原有 Router LLM 路径
+    │ Activity judge 仍按上下文判断，silent 由 Router 直接跳过，force 直接执行
     │ 输出 RouterDecision：SKIP / REPLY + 策略（语气、长度）
     ▼
 ExecutorAgent
-    │ 带工具调用循环生成回复
+    │ 重新冻结最新消息并标记已纳入本轮输入；带工具调用循环生成回复
     │ deep_think 工具按需把复杂问题交给深度思考模型求解，答案作为工具结果回传后再组织回复
     ▼
 MessageService → OneBot API
@@ -236,7 +236,7 @@ MessageService → OneBot API
 会话统计与异步记忆维护
 ```
 
-关键数据结构见 `include/workflow/agent/runtime/AgentTypes.hpp`（`RouterDecision`、`ReplyDecision`）。
+关键数据结构见 `include/workflow/agent/runtime/AgentTypes.hpp`（`RouterDecision`）；Executor 的执行结果类型仅在实现内部使用。
 
 消息处理的几个约束：
 
@@ -247,31 +247,48 @@ MessageService → OneBot API
 - 图片识别服务先下载原始媒体字节，按 SHA-256、视觉模型与提示词版本查询缓存，再以 Base64 Data URL 请求视觉模型。静态图片直接提交；GIF
   解码后最多提交 16 帧，超出时按播放时长均匀抽样并保留首尾帧。成功描述长期缓存，失败结果只缓存 10
   分钟；缓存和记录仅保存哈希、媒体类型、抽帧数与描述，不保存 Base64 内容。
-- 同一会话的消息预处理阶段严格 FIFO：图片识别与向量召回完成后才写入消息列表和创建快照，因此后到消息不能改变已启动任务的上下文。
-- 回复阶段与消息预处理阶段解耦。已有回复任务时，@机器人和系统任务进入回复队列，普通消息仅完成预处理、记录 `AgentBusy`
-  ，不会打断正在生成的回复。
+- 同一会话的消息预处理阶段严格 FIFO：图片识别与向量召回完成后才写入消息列表和创建快照，Router 与 Executor 分别冻结各自输入，后到消息不能改变已经冻结的副本。
+- 回复阶段与消息预处理阶段解耦。Router 不再阻塞预处理消费者；Executor 期间不运行 Router，
+  已富化的新消息持续入库。整轮执行及发送结束后，有新增需求才继续路由，Router 对未处理的私聊、@机器人和普通系统任务直接判定回复。
+  Activity force 直接执行，judge 根据上下文判断，silent 记录后由 Router 跳过，不请求模型。群自动回复关闭时普通消息不请求模型。
+- Router 快照只读；reply 后 Executor 重新取最新窗口，包含判断期间到达的消息，同时原子更新窗口内
+  `executor_processed` 标记。该标记表示已纳入 Executor，不表示已回复；新记录为 false，旧记录缺省为 true。
+  标记随原记录 JSON 恢复和保存，无数据库表结构变更，启动不自动补发。
+- 会话状态在同一把锁内登记消息及新增需求、取得快照和交接唯一回复消费者；不跨 co_await 持锁。
+  Router skip 后只有判断期间又登记新需求才重判；Executor 取得快照时消费此前需求。
+  用受锁保护的待处理批次表示是否有快照后新增事件，不另维护消息 ID 或版本计数；所有入站消息（包括 silent）统一唤醒消费者，Router 在仅有 silent 或无可判断的未处理消息时直接跳过；机器人输出不唤醒消费者。
+  Executor 失败不自动重放输入或工具动作；后续新事件仍可唤醒消费者。
+- 投影先提取窗口末尾连续成功发送消息为 `sent_messages`，再将未处理入站消息放入 `new_messages`，
+  其他记录进入历史字段；Router 使用 `chat_records`，Executor 保留 `earlier_messages`／`recent_messages`。
+  每条只投影一次，保留时间及引用关系；分组之间可能交错，数组顺序不表示完整会话顺序。
+  失败发送、纯工具执行记录不属于发送段；更早的助手消息属于历史。静默统计使用分组前窗口。
+  Executor 最近 12 条及文本截断规则按原快照位置确定，新增消息也参与人物档案加载和 UID 缩写。
+  保留 contextWindowLimit，窗口外记录不标记，也不因仍未处理而反复调度；旧开关 routeWhileReplying 已移除。
 - `MessageList` 是 Router、Executor 和工具的唯一运行时消息源。它保存完整消息，但快照始终最多暴露
   `contextWindowLimit` 条近期消息。预处理结束后，若消息数达到或超过 `memorySummaryTriggerCount` 且没有执行中的维护任务，
   则选取最旧的 `memorySummaryBatchSize` 条启动内存维护任务；全部结果提交成功后才按条数删除队首消息。启动时从数据库恢复消息，正常退出时调用
-  `flushToStorage()` 覆盖持久化恢复副本。
+  `flushToStorage()` 覆盖持久化恢复副本。消息追加不按 `message_id` 去重，外部事件的重复投递由 OneBot 侧避免；
+  `append()` 和 `recordIncoming()` 直接返回追加后的消息窗口，不使用空值表示重复消息。
 - `SharedConversationContext` 为 Executor 构建 `shared_conversations`。会话共享开关保存在 `group_config.cross_session_sharing`，
   默认关闭，群聊、私聊双向互通；仅已启用且参与共享的会话可提供和接收。每来源默认读取 10 条（`memory.sharedConversationMessageCount`），
   限三天内且尚未被总结移除的消息，所有内容段共用 200 字符额度，超出标记 `truncated`。只读有限条数快照，不复制整份会话历史，
   不包含消息 ID、引用目标、媒体索引、工具执行历史或召回记忆；共享背景不能作为当前会话指令。回复期间保持快照不变，不额外限制全局预算。
 - 拍一拍、入群、退群均归一化为类型化消息段：`poke`、`member_event`。拍一拍不再按参与者区分，所有拍一拍通知均与普通消息一样交由
   Router 决策。
-- Router 的空快照、找不到触发消息、系统任务、@机器人和群自动回复开关先于 Jev；只有剩余群聊消息才进入 Jev。
+- Router 只判断当前上下文是否仍需回复，不绑定触发消息。空快照及群自动回复开关先于 Jev；硬规则只扫描未处理入站消息，由 Router 统一执行。
   Jev 独立取最近 `memory.jevWindowSize` 条消息（默认 10，正整数，保存后热更新），逐条滑动；不足时全部读取，
   实际范围受 `contextWindowLimit` 限制。Router LLM 仍使用原有分段窗口；各自在窗口内计算机器人静默状态，不修改冻结快照。
   Jev 使用压平的消息段，并保留
-  `message_id` / `reply_to` 供引用关系判断。
+  `message_id` / `reply_to` 供引用关系判断。两种投影均保留系统 Activity 的 `activity.mode`，使混合批次中的 silent 通知仅作为背景。
+  Router LLM 与 Jev 共用分组和阅读状态说明，按已发送内容是否覆盖当前问题或话题判断是否还值得回复，
+  不以单条消息类型、机器人刚发言或是否出现提问单独决定。skip 不会安排延时自动回复。
 - Jev 一次请求给出 `action`、`tone` 和 `maxLength`。仅当 `answers.action.choice` 为 `send_message_and_finish` / `skip` 且
   `answers.action.confidence` 有效并达到 `jevMinConfidence` 时采纳；`unclear`、低置信度、响应异常或请求失败均交给原有
   Router LLM。`probabilities.reply` 不是当前阈值的比较对象。Jev 默认超时 10 秒、不重试，可在模型配置中调整；Router LLM 兜底仍保留原有
   fail-open 行为。
 - 预处理、路由、执行或发送的异常均限制在当前消息或当前回复任务内，不能使同会话队列停滞。工作流不使用轮询或忙等待。
 
-新增主处理步骤时，先确定其属于消息预处理阶段还是回复阶段，再在 `OneBotEventWorkflow` 的对应队列处理函数中调用一个职责单一的组件。
+新增主处理步骤时，先确定其属于消息预处理阶段还是回复阶段，再在 `EventWorkflow` 的对应队列处理函数中调用一个职责单一的组件。
 不得跨阶段持有锁或修改已交给回复队列的消息快照；需要扩展的后处理应在工作流中定义明确的调用边界。
 
 ### 工具系统
@@ -295,9 +312,11 @@ MessageService → OneBot API
   Executor 仅注入目录及查询/启用工具，具体工具在本次回复选中后的下一轮才开放；选择不跨会话或回复共享，
   执行时校验本轮授权和缓存版本。调用使用独立会话，最后一轮禁止 MCP 查询、启用和执行。
   数量限制在“执行配置”页设置。配置方式和当前 SSE 限制见 [MCP.md](./MCP.md)。
-- 全局实时活动由 `workflow/activity/ActivityManager` 管理，独立服务使用统一接入 Token 主动连接 `/activities/ws`，上报名称与描述自动登记，所有会话共享。
-  生命周期和来源保存在 `data/activity-state.json`；退出不停止独立服务，每次连接先注册、恢复状态再开放操作；禁用状态保留，服务描述随注册更新；工具请求、状态及通知共用 WS，服务推送每次状态变化，状态操作响应携带最新完整快照；不定时或操作后查询，后台支持立即同步。
-  模型通过独立内置插件调用通用工具，前端“实时活动”管理服务，协议与开发要求见 [ACTIVITIES.md](./ACTIVITIES.md)。
+- Activity 由 `workflow/activity/ActivityManager` 接入，独立服务使用统一 Token 主动连接 `/activities/ws`，上报名称、描述、请求说明和初始工作状态后直接 ready。
+  主程序只缓存主动上报的 `active` 与 `status`，每轮模型请求读取缓存，不查询远端状态、不管理业务生命周期或持久化业务状态。
+  模型统一使用 `request_activity(name, parameters)`，按服务说明构造自定义参数；同连接请求串行，无请求 ID，超时断开且不自动重发。
+  响应和通知支持可选图片；通知明确指定目标会话及 silent/judge/force 模式，不提供确认与去重。
+  后台区分启用、连接和工作状态；协议、接口及验收要求见 [Activity 开发规范](./ACTIVITIES.md)。
 - 拍一拍、撤回、引用回复、表情包收发、定时任务均由上述工具实现，由 Executor 根据上下文自动决策调用；天气、搜索、随机数、时间等能力来自
   `agentTools/` 目录的可导入自定义工具
 
@@ -395,7 +414,7 @@ MessageService → OneBot API
   人物昵称由 `PersonNameResolver` 后台查询，最多四路并发、同 QQ 去重，超时 5 秒、失败冷却 60 秒；接口立即返回缓存及 `name_pending`。
   前端有待查询昵称时每 2 秒刷新概要，不重新获取记忆正文，离开页面取消轮询和请求；进程退出时昵称队列停止接单并丢弃迟到结果。
   `PersonMemoryStore` 只批量读取 `recent_messages` 中去重后的真实发送者档案，不加载仅被提及、其他会话出现或没有档案的人。
-  上下文顺序为 `current_session → session_memory → conversation_summaries → earlier_messages → person_memories → shared_conversations → recent_messages → response_requirements → running_activities`（`response_requirements` 仅在有 Router 策略时提供）；
+  上下文顺序为 `current_session → session_memory → conversation_summaries → earlier_messages → person_memories → shared_conversations → recent_messages → response_requirements → activities（仅有启用、在线且 active 的服务时提供）`（`response_requirements` 仅在有 Router 策略时提供）；
   Executor 消息投影将原记录的 `memories` 输出为 `recalled_memories`，人物待整理条目的写入时间输出为 `created_at`；原始记录、数据库及前端 API 的字段不变。
   新条目也直接提供给模型，一次回复期间固定快照。旧自由文本记忆不猜测归属、不自动迁入人物档案。
 - **好感度评估**：联合提取返回独立的 `memories` 和 `affinity_changes` 数组，允许两者为空或涉及不同用户。
@@ -463,7 +482,7 @@ Router 在系统消息和明确 @ 机器人规则之后、Jev/Router 模型请�
 旧配置文件字段统一由 `ConfigMigration` 在启动加载时转换，校验后原子保存；正常读取和保存只使用当前字段，
 不再在模型读取时兼容 `top_P`，也不在每次保存时重复运行历史转换。
 文件日志不可用仍允许降级为控制台日志。数据库迁移错误在初始化边界转换为返回值并关闭新连接；
-Agent 仅在工具和提示词加载完成后标记为就绪，工具重载失败也通过返回值报告。
+Agent 初始化通过返回值报告工具和提示词加载结果，失败时由 `main` 报错并退出；运行期间通过运行开关控制消息处理。工具重载失败也通过返回值报告。
 启动初始化必须显式传递实际依赖：`AgentSystem::initialize(database, config.botName)` 将已初始化的数据库
 传给自定义工具查询和提示词初始化，将机器人名称传给内置工具注册。定时任务工具说明使用传入名称，
 不在注册阶段读取全局配置。运行时提示词接口仍沿用进程级数据库，初始化流程使用显式数据库重载。
@@ -637,7 +656,7 @@ OneBot 11 的数字要求仅保留在协议适配层，目标无法转换时不�
   `LogBuffer` 启动时从滚动文件恢复最近 5000 条；旧格式日志以 `Legacy` 来源保留可查看性。排查消息流水线问题时优先按会话和
   `Router`、`Executor` 来源筛选。
 - **协程**：所有异步 I/O 使用 `drogon::Task<T>` / `co_await`，注意 `co_await` 后对象生命周期（捕获 `shared_ptr` 而非裸指针）
-- **会话并发**：`OneBotEventWorkflow` 为每个会话分别维护消息预处理队列、回复队列和 `MessageList`。不要在外部直接并发修改
+- **会话并发**：`EventWorkflow` 为每个会话分别维护消息预处理队列、回复队列和 `MessageList`。不要在外部直接并发修改
   `MessageList`，也不要跨 `co_await` 持有其内部或工作流内部锁。
 - **前端**：`npm run dev` + 浏览器 DevTools；后端日志会打印收到的 OneBot 原始 JSON
 
@@ -650,7 +669,7 @@ OneBot 11 的数字要求仅保留在协议适配层，目标无法转换时不�
 - 格式化使用 `.clang-format`（Google 风格，4 空格缩进，120 列），提交前建议运行 clang-format 与 clang-tidy
 - 单例统一 `static ClassName& instance()` + 私有构造
 
-用户身份统一使用 `user_id`：聊天记录的 `sender`、提及/拍一拍的 `target`、成员事件的 `operator`、人物记忆、会话外号、管理员及黑名单接口和内置工具均遵循这一命名。真实用户使用原始字符串；机器人自身在发送者、提及/拍一拍目标和成员事件操作者位置均使用 `"self"`。实时事件优先按上报的 `self_id` 转换，缺失时使用配置中的机器人账号，两者均不可用时保留原值。Router、命令解析和回复期间的排队判断直接识别 `self`。数据库 v25 自动重命名身份列，并转换历史聊天记录与会话外号，保留原始正文和自定义工具参数。此次迁移同时将用户身份列改为文本，业务层不再要求数字身份。OneBot 原始 CQ 码的 `qq` 参数与既有连接配置键（如 `selfQQNumber`）保持兼容。
+用户身份统一使用 `user_id`，模型上下文与工具参数保持一致，不另作字段名缩写：聊天记录的 `sender`、提及/拍一拍的 `target`、成员事件的 `operator`、人物记忆、会话外号、管理员及黑名单接口和内置工具均遵循这一命名。真实用户使用原始字符串；机器人自身在发送者、提及/拍一拍目标和成员事件操作者位置均使用 `"self"`。实时事件优先按上报的 `self_id` 转换，缺失时使用配置中的机器人账号，两者均不可用时保留原值。Router、命令解析和回复期间的排队判断直接识别 `self`。数据库 v25 自动重命名身份列，并转换历史聊天记录与会话外号，保留原始正文和自定义工具参数。此次迁移同时将用户身份列改为文本，业务层不再要求数字身份。OneBot 原始 CQ 码的 `qq` 参数与既有连接配置键（如 `selfQQNumber`）保持兼容。
 
 定时任务和异步任务通过 `enqueueSystemMessage` 直接构造内部消息，不伪造 OneBot 事件；系统发送者使用 `"system"`，不再占用数字用户 ID。数据库 v25 转换历史系统发送者，并仅按记录自身的 `self_id` 或助手真实发送者身份转换历史 `self` 引用；缺少依据时保留原值，不用当前账号猜测历史身份，不改正文、工具参数或会话目标。工作流和工具中存在真实会话时必须使用 `SessionId`；只有全局日志、网络请求归属和后台工具测试等允许缺省的边界使用 `std::optional<SessionId>`。
 
@@ -703,7 +722,7 @@ Executor System 由 `ExecutorSystemPrompt` 单例按六部分构建并缓存，�
 
 人物详情的“直接压缩”调用 `POST /admin/api/people/{user_id}/compress`，与每日任务共用维护互斥和压缩流程。有待整理条目先整理，失败跳过；忽略触发阈值（关闭自动压缩时也可使用），沿用配置目标，比值最多为 100%，统计为 0 时也按 100%。目标必须大于 0。结果未减少时返回成功提示但不保存，不改变每日完成标记。
 
-`send_message_and_finish` 成功后通过 `ReplyDecision.messageSent` 标记已送达，工具历史随已发送助手消息保存；外层不重复发送、不记录“未生成可发送的回复”或追加 `no_reply`。发送失败不设置该标记，仍由模型决定后续处理；`finish_turn` 保持未回复语义。
+`send_message_and_finish` 成功后通过 `ReplyDecision.messageSent` 标记已送达，工具历史随已发送助手消息保存；Executor 自行收尾，成功发送后不追加 `no_reply`；未发送的结束决策和可记录的失败由 Executor 写入执行记录，工作流仅等待执行完成。发送失败不设置该标记，仍由模型决定后续处理；`finish_turn` 保持未回复语义。
 
 ### OneBot 实现切换与收藏操作快照
 

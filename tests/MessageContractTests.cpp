@@ -39,15 +39,17 @@
 #include <onebot/incoming/OneBotEventNormalizer.hpp>
 #include <onebot/messaging/MessageFormatter.hpp>
 #include <onebot/transport/OneBotClient.hpp>
+#include <workflow/EventWorkflow.hpp>
 #include <workflow/MessageList.hpp>
 #include <workflow/MessageRouter.hpp>
-#include <workflow/OneBotEventWorkflow.hpp>
 #include <workflow/SessionWorkflowState.hpp>
 #include <workflow/access/AdminStore.hpp>
 #include <workflow/access/BlacklistStore.hpp>
 #include <workflow/agent/ability/AsyncTaskManager.hpp>
 #include <workflow/agent/llm/JevClient.hpp>
+#include <workflow/agent/llm/prompts/ExecutorSystemPrompt.hpp>
 #include <workflow/agent/llm/prompts/PromptService.hpp>
+#include <workflow/agent/llm/prompts/PromptStore.hpp>
 #include <workflow/agent/llm/usage/UsageStore.hpp>
 #include <workflow/agent/memory/LongTermMemoryStore.hpp>
 #include <workflow/agent/memory/MemoryStore.hpp>
@@ -58,7 +60,6 @@
 #include <workflow/agent/memory/maintenance/PersonMemoryConsolidator.hpp>
 #include <workflow/agent/runtime/AgentSystem.hpp>
 #include <workflow/agent/runtime/ExecutorAgent.hpp>
-#include <workflow/agent/llm/prompts/ExecutorSystemPrompt.hpp>
 #include <workflow/agent/tools/ToolRegistry.hpp>
 #include <workflow/agent/tools/custom/LuaToolExecutor.hpp>
 #include <workflow/agent/tools/custom/ToolStore.hpp>
@@ -106,8 +107,8 @@ namespace {
         insoulforge::Logger::info(std::nullopt, "Admin", "http://127.0.0.1:7778/index.html#token=" + secret);
         insoulforge::Logger::info(std::nullopt, "PrivacyFixture", "ordinary log remains visible");
         check(output.str().find(secret) == std::string::npos, "log sinks never receive raw credentials", kTestName);
-        check(output.str().find("ordinary log remains visible") != std::string::npos,
-          "ordinary output is preserved", kTestName);
+        check(output.str().find("ordinary log remains visible") != std::string::npos, "ordinary output is preserved",
+          kTestName);
         check(insoulforge::LogBuffer::instance().query({.keyword = secret}).entries.empty(),
           "published logs cannot contain or match the credential", kTestName);
     }
@@ -121,10 +122,10 @@ namespace {
         check(convertAtToCQCode("@[QQ:81003]") == "[CQ:at,qq=81003]", "numeric mention is converted", kTestName);
         check(convertAtToCQCode("@FormatUserLong @FormatUser") == "[CQ:at,qq=81002] [CQ:at,qq=81001]",
           "longer names are matched first", kTestName);
-        check(convertAtToCQCode("@FormatUserSuffix") == "@FormatUserSuffix",
-          "partial name is not converted", kTestName);
-        check(convertAtToCQCode("[CQ:at,qq=81001]") == "[CQ:at,qq=81001]",
-          "existing CQ mention is unchanged", kTestName);
+        check(
+          convertAtToCQCode("@FormatUserSuffix") == "@FormatUserSuffix", "partial name is not converted", kTestName);
+        check(
+          convertAtToCQCode("[CQ:at,qq=81001]") == "[CQ:at,qq=81001]", "existing CQ mention is unchanged", kTestName);
     }
 
     void testNewWorkflowNormalizesOneBotEvent() {
@@ -243,7 +244,8 @@ namespace {
             check((*membership)["segments"][0]["type"] == "member_event", "membership has semantic segment", kTestName);
             check((*membership)["segments"][0]["action"] == "leave", "leave action is normalized", kTestName);
             check((*membership)["segments"][0]["reason"] == "kick", "membership reason is retained", kTestName);
-            check((*membership)["segments"][0]["operator"]["user_id"] == "12", "membership operator is retained", kTestName);
+            check((*membership)["segments"][0]["operator"]["user_id"] == "12", "membership operator is retained",
+              kTestName);
         }
     }
 
@@ -346,7 +348,8 @@ namespace {
         constexpr std::string_view kTestName = "default private session state";
         auto &db = insoulforge::Database::instance();
         const auto path = std::filesystem::temp_directory_path() /
-          ("insoulforge-private-default-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".db");
+                          ("insoulforge-private-default-" +
+                            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".db");
         check(db.initialize(path.string()).has_value(), "initializes database", kTestName);
         using namespace insoulforge;
         const auto disabled = SessionId::privateChat(insoulforge::UserId{11});
@@ -392,59 +395,68 @@ namespace {
         constexpr std::string_view kTestName = "session reply coalescing";
         auto &db = insoulforge::Database::instance();
         check(db.initialize(":memory:").has_value(), "initializes database", kTestName);
-        const auto triggerId = [](std::optional<insoulforge::ReplyRequest> request) -> std::optional<std::string> {
-            return request ? std::optional{std::move(request->messageId)} : std::nullopt;
-        };
         {
-            insoulforge::SessionWorkflowState privateState(
-              insoulforge::SessionId::privateChat(insoulforge::UserId{11}), db, insoulforge::Config::instance());
-            check(triggerId(privateState.requestReplyProcessing("first", true)) == "first",
-              "idle private session starts immediately", kTestName);
-            check(!privateState.requestReplyProcessing("second", true) &&
-                    !privateState.requestReplyProcessing("third", true),
-              "new private messages do not start concurrent replies", kTestName);
-            check(triggerId(privateState.completeReplyProcessing()) == "third",
-              "private messages coalesce into latest trigger", kTestName);
-            check(!privateState.requestReplyProcessing("fourth", true),
-              "next reply retains exclusive processing", kTestName);
-            check(triggerId(privateState.completeReplyProcessing()) == "fourth" && !privateState.completeReplyProcessing(),
-              "later messages are processed and pending trigger is consumed once", kTestName);
-            check(triggerId(privateState.requestReplyProcessing("fifth", true)) == "fifth" &&
-                    !privateState.completeReplyProcessing(),
-              "private session becomes idle after draining", kTestName);
+            using namespace insoulforge;
+            const auto session = SessionId::group("100");
+            auto &config = Config::instance();
+            SessionWorkflowState state(session, db, config);
+            const auto message = [](const std::string &id) -> json {
+                return {{"message_id", id}, {"sender", {{"user_id", "11"}}},
+                  {"segments", json::array({{{"type", "text"}, {"text", id}}})}};
+            };
+            check(state.recordIncoming(message("first")).startReply, "idle message owns consumer", kTestName);
+            const auto routing = state.takeReplyRequest();
+            check(routing && routing->records.size() == 1, "router freezes its own input", kTestName);
+            check(!state.recordIncoming(message("during-router")).startReply,
+              "preparation continues during routing without parallel consumer", kTestName);
+            const auto execution = state.takeExecutorRequest();
+            check(execution.records.size() == 2 && routing->records.size() == 1,
+              "executor refreezes newer messages after positive route", kTestName);
+            check(MessageRecord::isNewForExecutor(execution.records[0]) &&
+                    !MessageRecord::isNewForExecutor(state.messageList()->snapshot()[0]),
+              "executor copy retains old flags and originals are marked atomically", kTestName);
+            check(!state.recordIncoming(message("during-executor")).startReply,
+              "arrival during executor waits for same consumer", kTestName);
+            const auto after = state.takeReplyRequest();
+            check(after && after->records.size() == 3 && MessageRecord::isNewForExecutor(after->records.back()),
+              "executor completion has a new batch to judge", kTestName);
+            check(!state.takeReplyRequest(), "skip with no newer arrival ends without unread loop", kTestName);
+            check(state.recordIncoming(message("after-idle")).startReply,
+              "arrival after consumer exit wakes a new consumer", kTestName);
+            check(state.takeReplyRequest().has_value(), "new router batch exists", kTestName);
+            check(!state.recordIncoming(message("mention")).startReply,
+              "mandatory event during router does not start second consumer", kTestName);
+            check(!state.recordIncoming(message("ordinary")).startReply,
+              "ordinary arrival coalesces into the same pending batch", kTestName);
+            const auto mandatory = state.takeReplyRequest();
+            check(mandatory && mandatory->records.back()["message_id"] == "ordinary",
+              "negative route retains all newer messages for Router", kTestName);
+            (void) state.takeExecutorRequest();
+            check(!state.takeReplyRequest(), "positive execution consumes all pre-snapshot demands", kTestName);
+            check(state.recordIncoming(message("silent")).startReply && state.takeReplyRequest().has_value() &&
+                    !state.takeReplyRequest(),
+              "every incoming event wakes one consumer and no event repeats without new input", kTestName);
 
-            insoulforge::SessionWorkflowState groupState(
-              insoulforge::SessionId::group("100"), db, insoulforge::Config::instance());
-            check(triggerId(groupState.requestReplyProcessing("first", false)) == "first" &&
-                    !groupState.requestReplyProcessing("ordinary", false) && !groupState.completeReplyProcessing(),
-              "ordinary group messages do not schedule another reply", kTestName);
-            check(triggerId(groupState.requestReplyProcessing("next", false)) == "next" &&
-                    !groupState.requestReplyProcessing("mention", true) &&
-                    !groupState.requestReplyProcessing("ordinary", false) &&
-                    triggerId(groupState.completeReplyProcessing()) == "mention" && !groupState.completeReplyProcessing(),
-              "eligible group trigger is preserved across ordinary messages", kTestName);
-
-            check(!groupState.isReplyProcessing(), "drained session is idle", kTestName);
-            const auto first = groupState.requestReplyProcessing("active", false);
-            check(first && !first->decision && groupState.isReplyProcessing(), "starts without cached route", kTestName);
-            insoulforge::RouterDecision decision;
-            decision.reason = "new topic";
-            decision.maxLength = 50;
-            check(!groupState.requestReplyProcessing("routed", true, decision),
-              "positive route waits for current reply", kTestName);
-            check(!groupState.requestReplyProcessing("skipped", false),
-              "skipped message preserves positive pending route", kTestName);
-            const auto routed = groupState.completeReplyProcessing();
-            check(routed && routed->messageId == "routed" && routed->decision &&
-                    routed->decision->reason == "new topic" && routed->decision->maxLength == 50 &&
-                    groupState.isReplyProcessing(), "next reply reuses decision with exclusive ownership", kTestName);
-            check(!groupState.completeReplyProcessing(), "cached decision consumed once", kTestName);
-            const auto late = groupState.requestReplyProcessing("late-route", true, decision);
-            check(late && late->decision && late->messageId == "late-route",
-              "route finishing after current reply starts immediately without losing decision", kTestName);
-            check(!groupState.requestReplyProcessing("mention", true) &&
-                    triggerId(groupState.completeReplyProcessing()) == "mention" && !groupState.completeReplyProcessing(),
-              "later mandatory trigger replaces cached route and does not inherit its strategy", kTestName);
+            const auto oldLimit = config.contextWindowLimit;
+            config.contextWindowLimit = 2;
+            auto copy = state.messageList()->executorSnapshot();
+            check(copy.size() == 2 && state.messageList()->fullSnapshot().size() > 2,
+              "executor retains existing window bound", kTestName);
+            MessageList limited(SessionId::group("101"), db, config);
+            (void) limited.append(message("outside"));
+            (void) limited.append(message("inside-1"));
+            (void) limited.append(message("inside-2"));
+            (void) limited.executorSnapshot();
+            const auto all = limited.fullSnapshot();
+            check(MessageRecord::isNewForExecutor(all[0]) && !MessageRecord::isNewForExecutor(all[1]) &&
+                    !MessageRecord::isNewForExecutor(all[2]),
+              "records outside executor window remain unprocessed", kTestName);
+            config.contextWindowLimit = oldLimit;
+            state.messageList()->flushToStorage();
+            MessageList restored(session, db, config);
+            check(restored.fullSnapshot() == state.messageList()->fullSnapshot(),
+              "processed flags survive record persistence", kTestName);
+            check(!MessageRecord::isNewForExecutor(message("legacy")), "old records default processed", kTestName);
         }
         db.close();
     }
@@ -467,8 +479,8 @@ namespace {
         check(insoulforge::MessageRecord::extractText(legacyMention).empty(),
           "does not mix legacy text when segments exist", kTestName);
         const insoulforge::json legacyText = {{"text", "legacy text"}};
-        check(
-          insoulforge::MessageRecord::extractText(legacyText).empty(), "runtime requires normalized text segments", kTestName);
+        check(insoulforge::MessageRecord::extractText(legacyText).empty(), "runtime requires normalized text segments",
+          kTestName);
         check(insoulforge::MessageRecord::mentions(modernMention, insoulforge::UserId{42}),
           "matches modern mention target", kTestName);
         check(!insoulforge::MessageRecord::mentions(legacyMention, insoulforge::UserId{42}),
@@ -487,33 +499,58 @@ namespace {
         const u64 originalSelfId = config.selfQQNumber;
         config.selfQQNumber = 42;
 
-        const insoulforge::json mentionSnapshot =
-          insoulforge::json::array({{{"message_id", "mention"}, {"sender", {{"user_id", "11"}}},
-            {"segments", insoulforge::json::array({{{"type", "at"}, {"target", {{"user_id", "self"}}}},
-                           {{"type", "text"}, {"text", "在吗"}}})}}});
-        const auto mention = drogon::sync_wait(
-          insoulforge::MessageRouter::route(insoulforge::SessionId::group("100"), "mention", mentionSnapshot));
-        check(mention.shouldReply, "bot mention replies without LLM", kTestName);
-        check(mention.isPriority, "bot mention is priority", kTestName);
-        check(!mention.maxLength, "bot mention does not suggest a reply length", kTestName);
-
-        auto assistantAfterMention = mentionSnapshot;
-        assistantAfterMention.push_back(
-          {{"message_id", "assistant"}, {"sender", {{"user_id", "self"}}}, {"segments", insoulforge::json::array()}});
-        const auto queuedMention = drogon::sync_wait(
-          insoulforge::MessageRouter::route(insoulforge::SessionId::group("100"), "mention", assistantAfterMention));
-        check(queuedMention.shouldReply, "queued bot mention replies despite trailing assistant message", kTestName);
-
-        // 内部任务直接产生统一记录，不再伪造数字发送者并经过 OneBot 事件转换。
-        const insoulforge::json systemEvent = {{"session_id", "group:100"}, {"message_id", "1790000000000001"},
-          {"sender", {{"user_id", "system"}, {"name", "系统异步任务"}}},
-          {"segments", insoulforge::json::array({{{"type", "text"}, {"text", "任务完成"}}})}};
-        check(insoulforge::MessageRecord::isSystem(systemEvent), "internal task uses the system sender", kTestName);
-        const auto systemDecision = drogon::sync_wait(insoulforge::MessageRouter::route(
-          insoulforge::SessionId::group("100"), "1790000000000001", insoulforge::json::array({systemEvent})));
-        check(systemDecision.shouldReply && systemDecision.isPriority, "async task result triggers a priority reply",
+        using namespace insoulforge;
+        auto records =
+          json::array({{{"message_id", "in"}, {"sender", {{"user_id", "11"}}}, {"executor_processed", false}},
+            MessageRecord::createAssistantRecord("bot", 1001, "first"),
+            MessageRecord::createAssistantRecord("bot", 1002, "second")});
+        check(MessageRecord::sentMessagesStart(records) == 1, "all consecutive successful sends form the suffix",
           kTestName);
-        check(systemDecision.maxLength == 100, "system message keeps its reply length", kTestName);
+        check(MessageRecord::isNewForExecutor(records[0]) && !MessageRecord::isNewForExecutor(records[1]),
+          "new input excludes assistants regardless of their processed flag", kTestName);
+        records.push_back(MessageRecord::createAssistantExecutionRecord("bot", json::array(), "no_reply"));
+        check(MessageRecord::sentMessagesStart(records) == records.size(),
+          "execution status interrupts the sent suffix", kTestName);
+        records.back() = MessageRecord::createAssistantRecord("bot", std::nullopt, "failed");
+        records.back()["send_error"] = "failed";
+        check(MessageRecord::sentMessagesStart(records) == records.size(), "failed send is not a delivered suffix",
+          kTestName);
+        const auto group = SessionId::group("hard-rules");
+        SessionStore::setAutoReply(group, false);
+        auto mention = json{{"message_id", "mention"}, {"executor_processed", false}, {"sender", {{"user_id", "11"}}},
+          {"segments", json::array({{{"type", "at"}, {"target", {{"user_id", "self"}}}}})}};
+        auto pending = json::array({mention, MessageRecord::createAssistantRecord("bot", 1003, "reply"),
+          {{"message_id", "ordinary"}, {"executor_processed", false}, {"sender", {{"user_id", "12"}}}}});
+        const auto original = pending;
+        const auto mandatory = drogon::sync_wait(MessageRouter::route(group, pending));
+        check(mandatory.shouldReply && mandatory.isPriority && !mandatory.maxLength &&
+                mandatory.reason == "用户@提及" && pending == original,
+          "unprocessed mention anywhere in snapshot bypasses models without modifying flags", kTestName);
+        pending[0]["executor_processed"] = true;
+        check(!drogon::sync_wait(MessageRouter::route(group, pending)).shouldReply,
+          "processed mention does not force a reply for later ordinary input", kTestName);
+        pending[0] = {{"sender", {{"user_id", "system"}}}, {"executor_processed", false}};
+        const auto system = drogon::sync_wait(MessageRouter::route(group, pending));
+        check(system.shouldReply && system.maxLength == 100 && system.reason == "系统消息触发",
+          "unprocessed system tasks use Router hard rules", kTestName);
+        pending[0]["activity"] = {{"mode", "judge"}};
+        check(!drogon::sync_wait(MessageRouter::route(group, pending)).shouldReply,
+          "judge system notification does not bypass automatic routing", kTestName);
+        pending[0]["activity"]["mode"] = "silent";
+        SessionStore::setAutoReply(group, true);
+        const auto silentOnly = json::array({pending[0]});
+        check(!drogon::sync_wait(MessageRouter::route(group, silentOnly)).shouldReply &&
+                !drogon::sync_wait(MessageRouter::route(SessionId::privateChat(UserId{"11"}), silentOnly)).shouldReply,
+          "silent-only input skips models in both groups and private chats", kTestName);
+        SessionStore::setAutoReply(group, false);
+        pending[0]["activity"]["mode"] = "force";
+        const auto forced = drogon::sync_wait(MessageRouter::route(group, pending));
+        check(forced.shouldReply && forced.isPriority && !forced.maxLength && forced.reason == "Activity 通知",
+          "force mode is decided by Router before disabled automatic reply", kTestName);
+        const auto privateReply =
+          drogon::sync_wait(MessageRouter::route(SessionId::privateChat(UserId{"11"}), json::array({mention})));
+        check(privateReply.shouldReply && privateReply.isPrivate && privateReply.reason == "私聊直接执行",
+          "private input is decided by Router without model request", kTestName);
 
         config.selfQQNumber = originalSelfId;
         database.close();
@@ -529,18 +566,19 @@ namespace {
         config.jev = {};
         config.router = {};
 
-        const insoulforge::json plainSnapshot =
-          insoulforge::json::array({{{"message_id", "plain"}, {"sender", {{"user_id", "11"}}},
+        const insoulforge::json plainSnapshot = insoulforge::json::array(
+          {{{"executor_processed", false}, {"message_id", "plain"}, {"sender", {{"user_id", "11"}}},
             {"segments", insoulforge::json::array({{{"type", "text"}, {"text", "今天天气的大家都在干什么"}}})}}});
-        const auto fallback = drogon::sync_wait(
-          insoulforge::MessageRouter::route(insoulforge::SessionId::group("100"), "plain", plainSnapshot));
+        const auto fallback =
+          drogon::sync_wait(insoulforge::MessageRouter::route(insoulforge::SessionId::group("100"), plainSnapshot));
         check(fallback.shouldReply, "unconfigured jev falls back to existing fail-open path", kTestName);
         check(fallback.reason == "Router 请求失败", "fallback reason is unchanged", kTestName);
 
-        const insoulforge::json shortSnapshot = insoulforge::json::array({{{"message_id", "short"},
-          {"sender", {{"user_id", "11"}}}, {"segments", insoulforge::json::array({{{"type", "text"}, {"text", "嗯"}}})}}});
-        const auto shortMessage = drogon::sync_wait(
-          insoulforge::MessageRouter::route(insoulforge::SessionId::group("100"), "short", shortSnapshot));
+        const insoulforge::json shortSnapshot = insoulforge::json::array(
+          {{{"executor_processed", false}, {"message_id", "short"}, {"sender", {{"user_id", "11"}}},
+            {"segments", insoulforge::json::array({{{"type", "text"}, {"text", "嗯"}}})}}});
+        const auto shortMessage =
+          drogon::sync_wait(insoulforge::MessageRouter::route(insoulforge::SessionId::group("100"), shortSnapshot));
         check(shortMessage.shouldReply && shortMessage.reason == "Router 请求失败",
           "single-character message reaches the same routing fallback as ordinary text", kTestName);
 
@@ -553,29 +591,23 @@ namespace {
         constexpr std::string_view kTestName = "classify jev choice";
         using Action = insoulforge::RouterDecision::Action;
 
-        const auto skip = insoulforge::MessageRouter::classifyJevChoice("skip", 0.9, 0.6);
-        check(skip.has_value() && *skip == Action::SKIP, "skip label maps to SKIP", kTestName);
-        const auto reply = insoulforge::MessageRouter::classifyJevChoice("reply", 0.9, 0.6);
-        check(reply.has_value() && *reply == Action::REPLY, "reply label maps to REPLY", kTestName);
-        check(!insoulforge::MessageRouter::classifyJevChoice("skip", 0.59, 0.6).has_value(),
-          "low-confidence skip falls back", kTestName);
-        check(!insoulforge::MessageRouter::classifyJevChoice("reply", 0.59, 0.6).has_value(),
-          "low-confidence reply falls back", kTestName);
-        check(!insoulforge::MessageRouter::classifyJevChoice("skip", std::nullopt, 0.6).has_value(),
-          "missing confidence falls back", kTestName);
-        check(!insoulforge::MessageRouter::classifyJevChoice("reply", std::numeric_limits<double>::quiet_NaN(), 0.6)
-                .has_value(),
-          "non-finite confidence falls back", kTestName);
-        check(insoulforge::MessageRouter::classifyJevChoice("reply", 0.6, 0.6) == Action::REPLY,
-          "threshold confidence is accepted", kTestName);
-        check(!insoulforge::MessageRouter::classifyJevChoice("skip", 0.7, 0.8).has_value(),
+        for (const auto &[label, action]: {std::pair{"skip", Action::SKIP}, std::pair{"reply", Action::REPLY}}) {
+            check(insoulforge::MessageRouter::classifyJevChoice(label, 0.9, 0.6) == action,
+              "known label maps to its action", kTestName);
+            check(insoulforge::MessageRouter::classifyJevChoice(label, 0.6, 0.6) == action,
+              "threshold confidence is accepted", kTestName);
+            for (const auto confidence: {std::optional<double>{0.59}, std::optional<double>{},
+                   std::optional<double>{std::numeric_limits<double>::quiet_NaN()}}) {
+                check(!insoulforge::MessageRouter::classifyJevChoice(label, confidence, 0.6),
+                  "low, missing or non-finite confidence falls back", kTestName);
+            }
+        }
+        check(!insoulforge::MessageRouter::classifyJevChoice("skip", 0.7, 0.8),
           "configured threshold controls fallback", kTestName);
-        check(!insoulforge::MessageRouter::classifyJevChoice("unclear", 0.9, 0.6).has_value(),
-          "unclear label falls back to nullopt", kTestName);
-        check(!insoulforge::MessageRouter::classifyJevChoice("other", 0.9, 0.6).has_value(),
-          "unknown label falls back to nullopt", kTestName);
-        check(!insoulforge::MessageRouter::classifyJevChoice("", 0.9, 0.6).has_value(),
-          "empty label falls back to nullopt", kTestName);
+        for (const auto *label: {"unclear", "other", ""}) {
+            check(!insoulforge::MessageRouter::classifyJevChoice(label, 0.9, 0.6),
+              "unclear, unknown or empty labels fall back", kTestName);
+        }
     }
 
     void testJevClientChoiceAndConfidenceParsing() {
@@ -666,35 +698,10 @@ namespace {
         check(projected["memories"] == insoulforge::json::array({"用户偏好简洁回答"}),
           "agent projection keeps recalled memory content", kTestName);
 
-        auto context = insoulforge::json{
-          {"recent_messages", {projected}},
-          {"current_session", {{"user_id", "22"}}},
-          {"session_memory", {{"aliases", {{{"user_id", "11"}, {"names", {"Alice"}}}}}}},
-          {"person_memories", {{{"user_id", "11"}}}},
-          {"shared_conversations", {{{"session", {{"user_id", "33"}}}, {"messages", {projected}}}}},
-          {"running_activities", {{{"user_id", "44"}}}}};
-        context["recent_messages"][0]["segments"].push_back(
-          {{"type", "at"}, {"target", {{"user_id", "self"}}}});
-        context["recent_messages"][0]["tool_history"] = {{{"arguments", {{"user_id", "11"}}}}};
-        insoulforge::MessageRecord::compactContextUserIds(context);
-        check(context["recent_messages"][0]["sender"]["uid"] == "11" &&
-                !context["recent_messages"][0]["sender"].contains("user_id") &&
-                context["recent_messages"][0]["segments"].back()["target"]["uid"] == "self" &&
-                context["current_session"]["uid"] == "22" &&
-                context["session_memory"]["aliases"][0]["uid"] == "11" &&
-                context["person_memories"][0]["uid"] == "11" &&
-                context["shared_conversations"][0]["session"]["uid"] == "33" &&
-                context["shared_conversations"][0]["messages"][0]["sender"]["uid"] == "11",
-          "executor context uses compact user identities", kTestName);
-        check(context["recent_messages"][0]["tool_history"][0]["arguments"]["user_id"] == "11" &&
-                context["running_activities"][0]["user_id"] == "44" && projected["sender"]["user_id"] == "11",
-          "compaction preserves opaque data and original records", kTestName);
-
         const auto source = insoulforge::MessageRecord::findImageSource(record, 0);
         check(source && source->file == "cat.jpg", "tool can resolve image source", kTestName);
         check(insoulforge::MessageRecord::extractRecallText(record).contains("一只蓝色的猫"),
           "image description participates in recall", kTestName);
-
     }
 
     void testAssistantStickerRecordKeepsOnlyName() {
@@ -744,8 +751,9 @@ namespace {
                 const Statement indexes(db,
                   "SELECT sql FROM sqlite_master WHERE tbl_name=? AND type IN ('index','trigger') AND sql IS NOT NULL");
                 indexes.bind(1, table);
-                while (indexes.step())
+                while (indexes.step()) {
                     objects.push_back(indexes.getText(0));
+                }
             }
             if (tasks) {
                 body = std::regex_replace(body, std::regex("session_id TEXT NOT NULL"),
@@ -786,8 +794,9 @@ namespace {
             Statement(db, "DROP TABLE " + table).execOrThrow();
             Statement(db, fmt::format("ALTER TABLE {}_oldsession RENAME TO {}", table, table)).execOrThrow();
             for (auto sql: objects) {
-                if (!source && !tasks)
+                if (!source && !tasks) {
                     sql = std::regex_replace(sql, std::regex("session_id"), "group_id");
+                }
                 Statement(db, sql).execOrThrow();
             }
         }
@@ -808,11 +817,12 @@ namespace {
                 body = sql.substr(sql.find('('));
             }
             const auto start = body.find("user_id TEXT NOT NULL PRIMARY KEY");
-            if (start != std::string::npos)
+            if (start != std::string::npos) {
                 body.replace(
                   start, std::string_view("user_id TEXT NOT NULL PRIMARY KEY").size(), "user_id INTEGER PRIMARY KEY");
-            else
+            } else {
                 body.replace(body.find("user_id TEXT"), std::string_view("user_id TEXT").size(), "user_id INTEGER");
+            }
             Statement(db, fmt::format("CREATE TABLE {}_old {}", table, body)).execOrThrow();
             Statement(db, fmt::format("INSERT INTO {}_old SELECT * FROM {}", table, table)).execOrThrow();
             Statement(db, "DROP TABLE " + table).execOrThrow();
@@ -825,13 +835,14 @@ namespace {
     // v1.7.0 的身份列为 qq_number，会话仍使用最高位标记的整数编码。
     void prepareV24Schema(sqlite3 *db) {
         restoreIntegerUserSchema(db);
-        for (const auto *table: {"admins", "blacklisted_users", "person_affinity", "person_memories",
-               "person_memory_entries"})
-            insoulforge::Statement(db,
-              fmt::format("ALTER TABLE {} RENAME COLUMN user_id TO qq_number", table)).execOrThrow();
+        for (const auto *table:
+          {"admins", "blacklisted_users", "person_affinity", "person_memories", "person_memory_entries"}) {
+            insoulforge::Statement(db, fmt::format("ALTER TABLE {} RENAME COLUMN user_id TO qq_number", table))
+              .execOrThrow();
+        }
         insoulforge::Statement(db, "DROP INDEX idx_person_memory_entries_user_id").execOrThrow();
-        insoulforge::Statement(db,
-          "CREATE INDEX idx_person_memory_entries_qq ON person_memory_entries(qq_number, id)").execOrThrow();
+        insoulforge::Statement(db, "CREATE INDEX idx_person_memory_entries_qq ON person_memory_entries(qq_number, id)")
+          .execOrThrow();
         insoulforge::Statement(db, "PRAGMA user_version=24").execOrThrow();
     }
 
@@ -1010,9 +1021,10 @@ namespace {
                 SessionId::group("00123") != SessionId::group("123"),
           "hash preserves exact typed identity", kTestName);
         for (const auto *value: {"", "42", "group:", "private:", "channel:42", "group:a/b", "group:%", "group:%0G",
-               "group:%00", "group:%41", "group:a%2fb", "private:a b"})
+               "group:%00", "group:%41", "group:a%2fb", "private:a b"}) {
             check(
               !SessionId::parse(value), "rejects missing type, empty targets and noncanonical encodings", kTestName);
+        }
         bool emptyRejected = false;
         try {
             const auto invalid = SessionId::group("");
@@ -1185,8 +1197,9 @@ namespace {
         constexpr std::string_view kTestName = "system sender migration";
         sqlite3 *db = nullptr;
         check(sqlite3_open(":memory:", &db) == SQLITE_OK, "opens fixture", kTestName);
-        if (!db)
+        if (!db) {
             return;
+        }
         SchemaMigrator::migrate(db);
         json content;
         content["sender"] = {{"user_id", "10000000000"}, {"name", "系统任务"}};
@@ -1264,13 +1277,15 @@ namespace {
         using namespace insoulforge;
         sqlite3 *db = nullptr;
         check(sqlite3_open(":memory:", &db) == SQLITE_OK, "opens fixture", kTestName);
-        if (!db)
+        if (!db) {
             return;
+        }
         const auto schema = [db] {
             json result = json::array();
             const Statement query(db, "SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name");
-            while (query.step())
+            while (query.step()) {
                 result.push_back({query.getText(0), query.getText(1), query.getText(2), query.getText(3)});
+            }
             return result;
         };
         const auto version = [db] {
@@ -1279,11 +1294,14 @@ namespace {
         };
         SchemaMigrator::migrate(db);
         {
-            const Statement tables(db, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
+            const Statement tables(
+              db, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             check(tables.step() && tables.getInt(0) == 15 && version() == SchemaMigrator::kLatestVersion,
               "new installation creates all current tables and latest version directly", kTestName);
-            const Statement obsolete(db, "SELECT COUNT(*) FROM sqlite_master WHERE name IN "
-              "('custom_tools','group_affinity','memory_maintenance_jobs','affinity_maintenance_jobs','kb_config','memory_config','qq_config','llm_config','settings')");
+            const Statement obsolete(db,
+              "SELECT COUNT(*) FROM sqlite_master WHERE name IN "
+              "('custom_tools','group_affinity','memory_maintenance_jobs','affinity_maintenance_jobs','kb_config','"
+              "memory_config','qq_config','llm_config','settings')");
             check(obsolete.step() && obsolete.getInt(0) == 0, "does not create obsolete tables", kTestName);
         }
         const auto original = schema();
@@ -1293,8 +1311,11 @@ namespace {
         for (const auto legacyVersion: {0, 1, 12, 23}) {
             Statement(db, fmt::format("PRAGMA user_version={}", legacyVersion)).execOrThrow();
             std::string error;
-            try { SchemaMigrator::migrate(db); }
-            catch (const DbError &e) { error = e.what(); }
+            try {
+                SchemaMigrator::migrate(db);
+            } catch (const DbError &e) {
+                error = e.what();
+            }
             const Statement data(db, "SELECT prompt_content FROM prompts WHERE prompt_key='preserved'");
             check(error.find("v1.7.x") != std::string::npos && error.find("v24") != std::string::npos &&
                     version() == legacyVersion && schema() == original && data.step() && data.getText(0) == "original",
@@ -1302,23 +1323,33 @@ namespace {
         }
         Statement(db, fmt::format("PRAGMA user_version={}", SchemaMigrator::kLatestVersion + 1)).execOrThrow();
         bool rejectedFuture = false;
-        try { SchemaMigrator::migrate(db); }
-        catch (const DbError &) { rejectedFuture = true; }
+        try {
+            SchemaMigrator::migrate(db);
+        } catch (const DbError &) {
+            rejectedFuture = true;
+        }
         check(rejectedFuture && version() == SchemaMigrator::kLatestVersion + 1 && schema() == original,
           "newer database is rejected without downgrading or changing its schema", kTestName);
         sqlite3_close(db);
 
         db = nullptr;
         check(sqlite3_open(":memory:", &db) == SQLITE_OK, "opens fresh rollback fixture", kTestName);
-        if (!db)
+        if (!db) {
             return;
-        sqlite3_set_authorizer(db, [](void *, int action, const char *name, const char *, const char *, const char *) {
-            return action == SQLITE_CREATE_TABLE && name && std::string_view(name) == "person_memories"
-              ? SQLITE_DENY : SQLITE_OK;
-        }, nullptr);
+        }
+        sqlite3_set_authorizer(
+          db,
+          [](void *, int action, const char *name, const char *, const char *, const char *) {
+              return action == SQLITE_CREATE_TABLE && name && std::string_view(name) == "person_memories" ? SQLITE_DENY
+                                                                                                          : SQLITE_OK;
+          },
+          nullptr);
         bool failed = false;
-        try { SchemaMigrator::migrate(db); }
-        catch (const DbError &) { failed = true; }
+        try {
+            SchemaMigrator::migrate(db);
+        } catch (const DbError &) {
+            failed = true;
+        }
         sqlite3_set_authorizer(db, nullptr, nullptr);
         {
             const Statement tables(db, "SELECT COUNT(*) FROM sqlite_master WHERE type='table'");
@@ -1429,7 +1460,8 @@ namespace {
             stream >> definition;
             return definition.at("scriptContent").get<std::string>();
         };
-        for (const auto &name: {"fetch_webpage", "search_web", "random", "get_weather", "deepseek_search", "deepseek_fetch"}) {
+        for (const auto &name:
+          {"fetch_webpage", "search_web", "random", "get_weather", "deepseek_search", "deepseek_fetch"}) {
             check(!insoulforge::LuaToolExecutor::validate(load(name)), "valid Lua example", kTestName);
         }
         const auto execute = [&load](const std::string &name, insoulforge::json args) -> std::string {
@@ -1621,11 +1653,10 @@ namespace {
 
     void testIterationRequestMessages() {
         constexpr std::string_view kTestName = "iteration request messages";
-        const auto history = insoulforge::json::array(
-          {{{"role", "system"}, {"content", "original prompt"}},
-            {{"role", "user"}, {"content", R"({"response_requirements":{"max_length":100},"recent_messages":[]})"}},
-            {{"role", "assistant"}, {"tool_calls", {{{"id", "call-1"}, {"type", "function"}}}}},
-            {{"role", "tool"}, {"tool_call_id", "call-1"}, {"content", "source data"}}});
+        const auto history = insoulforge::json::array({{{"role", "system"}, {"content", "original prompt"}},
+          {{"role", "user"}, {"content", R"({"response_requirements":{"max_length":100},"recent_messages":[]})"}},
+          {{"role", "assistant"}, {"tool_calls", {{{"id", "call-1"}, {"type", "function"}}}}},
+          {{"role", "tool"}, {"tool_call_id", "call-1"}, {"content", "source data"}}});
 
         const auto first = insoulforge::ExecutorAgent::buildIterationMessages(history, 1, 8);
         const auto middle = insoulforge::ExecutorAgent::buildIterationMessages(history, 3, 8);
@@ -1640,7 +1671,9 @@ namespace {
         check(first.size() == history.size() && middle.size() == first.size() && last.size() == first.size(),
           "each request updates user context without adding messages", kTestName);
         for (size_t index = 0; index < history.size(); ++index) {
-            if (index == 1) continue;
+            if (index == 1) {
+                continue;
+            }
             check(first[index] == history[index] && middle[index] == history[index] && last[index] == history[index],
               "request status preserves the full history and tool results", kTestName);
         }
@@ -1658,19 +1691,18 @@ namespace {
                 context(last)["execution_state"]["reply_only"] == true,
           "last round explicitly requires a reply decision", kTestName);
         const auto single = insoulforge::ExecutorAgent::buildIterationMessages(history, 1, 1);
-        check(context(single)["execution_state"]["reply_only"] == true,
-          "a one-round limit is immediately reply-only", kTestName);
+        check(context(single)["execution_state"]["reply_only"] == true, "a one-round limit is immediately reply-only",
+          kTestName);
         check(first.front()["role"] == "system" && firstContext.size() == 3,
           "user context retains its fields alongside execution state", kTestName);
-        const insoulforge::json mcp = {{"page_size", 10}, {"max_per_enable", 4},
-          {"max_per_reply", 12}, {"selected_count", 2}};
+        const insoulforge::json mcp = {
+          {"page_size", 10}, {"max_per_enable", 4}, {"max_per_reply", 12}, {"selected_count", 2}};
         const auto withMcp = insoulforge::ExecutorAgent::buildIterationMessages(history, 2, 8, mcp);
         check(context(withMcp)["execution_state"]["mcp"] == mcp &&
                 context(withMcp)["execution_state"]["current_round"] == 2,
           "each request replaces stale execution state and includes current MCP limits", kTestName);
         const auto finalMcp = insoulforge::ExecutorAgent::buildIterationMessages(history, 8, 8, mcp);
-        check(!context(finalMcp)["execution_state"].contains("mcp") &&
-                !firstContext["execution_state"].contains("mcp"),
+        check(!context(finalMcp)["execution_state"].contains("mcp") && !firstContext["execution_state"].contains("mcp"),
           "MCP status is absent when unavailable or reply-only", kTestName);
         check(history.size() == 4 && history.front()["content"] == "original prompt",
           "transient status never modifies the original conversation", kTestName);
@@ -1777,22 +1809,21 @@ namespace {
         api.path = "/images";
         api.model = "test";
         bool foundGeneration = false;
-        for (const auto &tool : registry.getTools({})) {
+        for (const auto &tool: registry.getTools({})) {
             const auto &definition = tool["function"];
             check(definition["name"] != "edit_image", "old edit tool is removed", kTestName);
             if (definition["name"] == "generate_image") {
                 foundGeneration = true;
                 check(definition["parameters"]["required"] == insoulforge::json::array({"prompt"}) &&
-                    definition["parameters"]["properties"]["reference_images"]["type"] == "array",
+                        definition["parameters"]["properties"]["reference_images"]["type"] == "array",
                   "unified tool accepts optional reference array", kTestName);
             }
         }
         check(foundGeneration, "unified image tool exists", kTestName);
-        for (const auto &images : {insoulforge::json(nullptr), insoulforge::json("url"),
-                 insoulforge::json::array({42}),
-                 insoulforge::json::array({{{"message_id", "1"}, {"image_index", -1}}}),
-                 insoulforge::json::array({{{"message_id", "1"}, {"image_index", 0.5}}}),
-                 insoulforge::json::array({{{"message_id", "1"}, {"image_index", "0"}}})}) {
+        for (const auto &images: {insoulforge::json(nullptr), insoulforge::json("url"), insoulforge::json::array({42}),
+               insoulforge::json::array({{{"message_id", "1"}, {"image_index", -1}}}),
+               insoulforge::json::array({{{"message_id", "1"}, {"image_index", 0.5}}}),
+               insoulforge::json::array({{{"message_id", "1"}, {"image_index", "0"}}})}) {
             const auto error = drogon::sync_wait(
               registry.executeTool("generate_image", {{"prompt", "参考图片"}, {"reference_images", images}},
                 {.sessionId = insoulforge::SessionId::group("123")}));
@@ -1811,13 +1842,16 @@ namespace {
     void testQzoneToolValidation() {
         constexpr std::string_view kTestName = "qzone tool validation";
         auto &registry = insoulforge::ToolRegistry::instance();
-        check(registry.registerPlugin("contract.qzone", [](insoulforge::ToolRegistry &staged) -> void {
-            insoulforge::ActionToolsPlugin{"test-bot"}.registerTools(staged);
-        }), "action tools register", kTestName);
-        for (const auto &tool : registry.getTools({})) {
-            if (tool["function"]["name"] == "send_qzone_msg")
+        check(registry.registerPlugin("contract.qzone",
+                [](insoulforge::ToolRegistry &staged) -> void {
+                    insoulforge::ActionToolsPlugin{"test-bot"}.registerTools(staged);
+                }),
+          "action tools register", kTestName);
+        for (const auto &tool: registry.getTools({})) {
+            if (tool["function"]["name"] == "send_qzone_msg") {
                 check(tool["function"]["parameters"]["properties"]["ugc_right"]["default"] == 1,
                   "qzone default visibility is public", kTestName);
+            }
         }
         const auto reject = [&](const insoulforge::json &args, const std::string_view expected) -> void {
             const auto result = drogon::sync_wait(
@@ -1846,55 +1880,72 @@ namespace {
         auto &registry = insoulforge::ToolRegistry::instance();
         auto &config = insoulforge::Config::instance();
         const auto path = std::filesystem::temp_directory_path() /
-          ("insoulforge-builtin-tools-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".json");
+                          ("insoulforge-builtin-tools-" +
+                            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".json");
         check(config.initialize(path.string()).has_value(), "initializes config", kTestName);
         int executed = 0;
         const auto registrar = [&](insoulforge::ToolRegistry &staged) {
-            staged.registerTool({.name = "contract_builtin", .description = "default description",
-              .handler = [&](insoulforge::json, insoulforge::ToolCallContext) -> drogon::Task<std::string> {
-                  ++executed;
-                  co_return "executed";
-              }}, insoulforge::ToolCategory::REPLY);
+            staged.registerTool(
+              {.name = "contract_builtin",
+                .description = "default description",
+                .handler = [&](insoulforge::json, insoulforge::ToolCallContext) -> drogon::Task<std::string> {
+                    ++executed;
+                    co_return "executed";
+                }},
+              insoulforge::ToolCategory::REPLY);
         };
         check(registry.registerPlugin("builtin.contract-config", registrar), "registers builtin", kTestName);
         const auto definition = [&]() -> insoulforge::json {
-            for (const auto &tool : registry.getTools({})) {
-                if (tool["function"]["name"] == "contract_builtin") return tool["function"];
+            for (const auto &tool: registry.getTools({})) {
+                if (tool["function"]["name"] == "contract_builtin") {
+                    return tool["function"];
+                }
             }
             return nullptr;
         };
         const auto defaultDefinitions = registry.getTools({.defaultDefinitionsOnly = true});
         bool includesBuiltin = false;
-        for (const auto &tool : defaultDefinitions)
+        for (const auto &tool: defaultDefinitions) {
             includesBuiltin = includesBuiltin || tool["function"]["name"] == "contract_builtin";
+        }
         check(includesBuiltin, "default token input includes enabled builtin definitions", kTestName);
         const auto cachedUsage = registry.getDefaultToolsTokenUsage(false);
         check(cachedUsage == registry.getDefaultToolsTokenUsage(false), "reuses cached count or error", kTestName);
         check(definition()["description"] == "default description", "default description preserved", kTestName);
         check(!registry.isToolDisabled("missing_builtin"), "unknown tool is not explicitly disabled", kTestName);
-        check(registry.saveBuiltinToolConfig("contract_builtin", {{"enabled", false}, {"description", "custom description"}}).has_value(),
+        check(registry
+                .saveBuiltinToolConfig("contract_builtin", {{"enabled", false}, {"description", "custom description"}})
+                .has_value(),
           "saves disabled tool", kTestName);
-        check(definition().is_null() && registry.hasTool("contract_builtin") && registry.isToolDisabled("contract_builtin"),
+        check(
+          definition().is_null() && registry.hasTool("contract_builtin") && registry.isToolDisabled("contract_builtin"),
           "disabled tool hidden but name remains reserved", kTestName);
-        check(drogon::sync_wait(registry.executeTool("contract_builtin", {}, {})).find("已关闭") != std::string::npos && executed == 0,
+        check(drogon::sync_wait(registry.executeTool("contract_builtin", {}, {})).find("已关闭") != std::string::npos &&
+                executed == 0,
           "disabled tool cannot execute", kTestName);
         check(config.initialize(path.string()).has_value(), "reloads file", kTestName);
         registry.loadBuiltinToolsConfig(config.getBuiltinToolsConfig());
-        check(registry.registerPlugin("builtin.contract-config", registrar) && registry.isToolDisabled("contract_builtin"),
+        check(
+          registry.registerPlugin("builtin.contract-config", registrar) && registry.isToolDisabled("contract_builtin"),
           "reload preserves disabled state", kTestName);
         check(registry.saveBuiltinToolConfig("contract_builtin", {{"enabled", true}}).has_value() &&
-          definition()["description"] == "custom description", "custom description reaches model", kTestName);
+                definition()["description"] == "custom description",
+          "custom description reaches model", kTestName);
         check(drogon::sync_wait(registry.executeTool("contract_builtin", {}, {})) == "executed" && executed == 1,
           "enabled tool executes", kTestName);
-        check(!registry.saveBuiltinToolConfig("contract_builtin", {{"enabled", false}, {"description", 42}}) && !registry.isToolDisabled("contract_builtin"),
+        check(!registry.saveBuiltinToolConfig("contract_builtin", {{"enabled", false}, {"description", 42}}) &&
+                !registry.isToolDisabled("contract_builtin"),
           "invalid config preserves runtime state", kTestName);
         check(!registry.saveBuiltinToolConfig("contract_builtin", {{"description", std::string(16001, 'a')}}) &&
-          !registry.isToolDisabled("contract_builtin"), "oversized description preserves state", kTestName);
-        check(!registry.saveBuiltinToolConfig("missing_builtin", {{"enabled", false}}), "unknown tool rejected", kTestName);
+                !registry.isToolDisabled("contract_builtin"),
+          "oversized description preserves state", kTestName);
+        check(
+          !registry.saveBuiltinToolConfig("missing_builtin", {{"enabled", false}}), "unknown tool rejected", kTestName);
         check(registry.saveBuiltinToolConfig("contract_builtin", {{"description", nullptr}}).has_value() &&
-          definition()["description"] == "default description", "null restores default description", kTestName);
+                definition()["description"] == "default description",
+          "null restores default description", kTestName);
         bool listed = false;
-        for (const auto &tool : registry.getBuiltinTools()) {
+        for (const auto &tool: registry.getBuiltinTools()) {
             if (tool["name"] == "contract_builtin") {
                 listed = tool["enabled"] == true && tool["customDescription"] == false && tool["category"] == "回复";
             }
@@ -1908,23 +1959,30 @@ namespace {
             drogon::sync_wait(controller.saveBuiltinTool(request, [&](const auto &value) { response = value; }));
             return insoulforge::parseJson(std::string(response->body()));
         };
-        check(save({{"name", "contract_builtin"}, {"enabled", false}, {"description", "edited via API"}})["success"] == true &&
-          registry.isToolDisabled("contract_builtin"), "endpoint applies setting", kTestName);
+        check(save({{"name", "contract_builtin"}, {"enabled", false}, {"description", "edited via API"}})["success"] ==
+                  true &&
+                registry.isToolDisabled("contract_builtin"),
+          "endpoint applies setting", kTestName);
         check(save({{"name", "contract_builtin"}, {"enabled", "true"}, {"description", nullptr}}).contains("error") &&
-          registry.isToolDisabled("contract_builtin"), "endpoint rejects invalid enabled type", kTestName);
+                registry.isToolDisabled("contract_builtin"),
+          "endpoint rejects invalid enabled type", kTestName);
         check(save({{"name", "contract_builtin"}, {"description", "description-only edit"}})["success"] == true &&
-          registry.isToolDisabled("contract_builtin"), "description edit preserves disabled state", kTestName);
+                registry.isToolDisabled("contract_builtin"),
+          "description edit preserves disabled state", kTestName);
         check(save({{"name", "contract_builtin"}, {"enabled", true}})["success"] == true &&
-          definition()["description"] == "description-only edit", "toggle preserves edited description", kTestName);
+                definition()["description"] == "description-only edit",
+          "toggle preserves edited description", kTestName);
         check(save({{"name", "contract_builtin"}, {"description", nullptr}})["success"] == true &&
-          !registry.isToolDisabled("contract_builtin") && definition()["description"] == "default description",
+                !registry.isToolDisabled("contract_builtin") && definition()["description"] == "default description",
           "restore preserves enabled state", kTestName);
         check(save({{"name", "contract_builtin"}}).contains("error"), "empty patch rejected", kTestName);
-        check(save({{"name", "contract_builtin"}, {"parameters", nullptr}}).contains("error"), "unknown field rejected", kTestName);
+        check(save({{"name", "contract_builtin"}, {"parameters", nullptr}}).contains("error"), "unknown field rejected",
+          kTestName);
         std::filesystem::remove(path);
         std::filesystem::create_directory(path);
         check(!registry.saveBuiltinToolConfig("contract_builtin", {{"enabled", false}}) &&
-          !registry.isToolDisabled("contract_builtin"), "write failure preserves runtime state", kTestName);
+                !registry.isToolDisabled("contract_builtin"),
+          "write failure preserves runtime state", kTestName);
         registry.unregisterPlugin("builtin.contract-config");
         registry.loadBuiltinToolsConfig(insoulforge::json::object());
         std::filesystem::remove(path);
@@ -1935,8 +1993,9 @@ namespace {
         constexpr std::string_view kTestName = "scoped transaction";
         sqlite3 *handle = nullptr;
         check(sqlite3_open(":memory:", &handle) == SQLITE_OK, "opens fixture", kTestName);
-        if (!handle)
+        if (!handle) {
             return;
+        }
         const std::unique_ptr<sqlite3, decltype(&sqlite3_close)> database(handle, sqlite3_close);
         Statement(handle, "CREATE TABLE entries(value INTEGER)").execOrThrow();
         const auto count = [handle] {
@@ -2024,8 +2083,7 @@ namespace {
             return absent;
         };
         check(noTaskTables(), "fresh schema has no maintenance queues", kTestName);
-        const insoulforge::PreparedLongTermMemory longTerm{
-          .content = "Alice 喜欢 C++", .embedding = {0.1F, 0.2F}};
+        const insoulforge::PreparedLongTermMemory longTerm{.content = "Alice 喜欢 C++", .embedding = {0.1F, 0.2F}};
         insoulforge::MemoryMaintenanceStore::apply(database, insoulforge::SessionId::group("100"),
           {.shortTerm = "近期状态",
             .longTerm = {longTerm},
@@ -2040,9 +2098,10 @@ namespace {
                    insoulforge::PersonMemoryStore::getForSenders(personSenders) == initialProfiles;
         };
         check(resultsPreserved(), "commits memory and affinity together", kTestName);
-        check(sqlite3_exec(database.handle(),
-                "CREATE TRIGGER reject_affinity BEFORE INSERT ON person_affinity BEGIN SELECT RAISE(ABORT, 'test'); END",
-                nullptr, nullptr, nullptr) == SQLITE_OK,
+        check(
+          sqlite3_exec(database.handle(),
+            "CREATE TRIGGER reject_affinity BEFORE INSERT ON person_affinity BEGIN SELECT RAISE(ABORT, 'test'); END",
+            nullptr, nullptr, nullptr) == SQLITE_OK,
           "creates failure fixture", kTestName);
         bool failed = false;
         try {
@@ -2078,17 +2137,15 @@ namespace {
         check(resultsPreserved(), "empty result preserves saved memory", kTestName);
         const auto memory = drogon::sync_wait(insoulforge::MemoryMaintenanceService::prepare(
           insoulforge::SessionId::group("100"), insoulforge::json::array(), insoulforge::json::array()));
-        check(memory.has_value() && memory->affinity.empty(), "empty input is a successful empty calculation",
-          kTestName);
+        check(
+          memory.has_value() && memory->affinity.empty(), "empty input is a successful empty calculation", kTestName);
         insoulforge::MemoryMaintenanceStore::apply(
           database, insoulforge::SessionId::group("200"), {.longTerm = {longTerm}});
         const auto oldEntries =
           insoulforge::LongTermMemoryStore::listMemories(insoulforge::SessionId::group("200"), 1, 0);
         const i64 sourceId = oldEntries.front().id;
-        const insoulforge::PreparedLongTermMemory replacementA{
-          .content = "Alice 喜欢编程", .embedding = {0.1F, 0.2F}};
-        const insoulforge::PreparedLongTermMemory replacementB{
-          .content = "Alice 使用 C++", .embedding = {0.2F, 0.3F}};
+        const insoulforge::PreparedLongTermMemory replacementA{.content = "Alice 喜欢编程", .embedding = {0.1F, 0.2F}};
+        const insoulforge::PreparedLongTermMemory replacementB{.content = "Alice 使用 C++", .embedding = {0.2F, 0.3F}};
         insoulforge::MemoryMaintenanceStore::apply(database, insoulforge::SessionId::group("200"),
           {.longTerm = {replacementA, replacementB}, .replacedLongTermIds = {sourceId, sourceId}});
         const auto replacements =
@@ -2167,7 +2224,8 @@ namespace {
         MemoryMaintenanceStore::apply(
           db, insoulforge::SessionId::group("100"), {.personEntries = {{insoulforge::UserId{42}, "待整理内容"}}});
         Statement(db.handle(), R"(UPDATE person_memories SET profile='["喜欢摄影"]',
-          relationship='["经常交流"]', recent_interactions='["约好拍照"]' WHERE user_id=42)").execOrThrow();
+          relationship='["经常交流"]', recent_interactions='["约好拍照"]' WHERE user_id=42)")
+          .execOrThrow();
         PersonMemoryStore::saveDailyState({"2026-10-30", ""});
         const auto originalPerson = PersonMemoryStore::getPerson(insoulforge::UserId{42});
         ChatRecordStore::addChatRecord(
@@ -2193,8 +2251,9 @@ namespace {
         const auto legacyRecord = [&] {
             const Statement row(
               db.handle(), "SELECT content FROM chat_records WHERE group_id=100 ORDER BY id DESC LIMIT 1");
-            if (!row.step())
+            if (!row.step()) {
                 throw std::runtime_error("missing legacy record");
+            }
             return json::parse(row.getText(0));
         };
         const auto legacyMemory = [&](i64 id, std::string_view content) {
@@ -2209,22 +2268,30 @@ namespace {
         Statement(db.handle(), "CREATE TABLE settings(key TEXT,value TEXT)").execOrThrow();
         check(sqlite3_exec(db.handle(),
                 "CREATE TRIGGER reject_identity_migration BEFORE UPDATE ON chat_records "
-                "BEGIN SELECT RAISE(ABORT,'test'); END", nullptr, nullptr, nullptr) == SQLITE_OK,
+                "BEGIN SELECT RAISE(ABORT,'test'); END",
+                nullptr, nullptr, nullptr) == SQLITE_OK,
           "installs migration failure fixture", kTestName);
         bool failed = false;
-        try { SchemaMigrator::migrate(db.handle()); }
-        catch (const DbError &) { failed = true; }
+        try {
+            SchemaMigrator::migrate(db.handle());
+        } catch (const DbError &) {
+            failed = true;
+        }
         {
             const Statement score(db.handle(), "SELECT affinity FROM person_affinity WHERE qq_number=42");
             check(failed && score.step() && score.getInt(0) == 7 && legacyRecord() == record,
               "failed conversion rolls back both schema and records", kTestName);
         }
-        check(sqlite3_exec(db.handle(), "DROP TRIGGER reject_identity_migration", nullptr, nullptr, nullptr) == SQLITE_OK,
+        check(
+          sqlite3_exec(db.handle(), "DROP TRIGGER reject_identity_migration", nullptr, nullptr, nullptr) == SQLITE_OK,
           "removes failure fixture", kTestName);
         legacyMemory(105, R"({"aliases":[],"legacy_entries":42})");
         bool invalidMemoryRejected = false;
-        try { SchemaMigrator::migrate(db.handle()); }
-        catch (const DbError &error) { invalidMemoryRejected = std::string(error.what()).find("105") != std::string::npos; }
+        try {
+            SchemaMigrator::migrate(db.handle());
+        } catch (const DbError &error) {
+            invalidMemoryRejected = std::string(error.what()).find("105") != std::string::npos;
+        }
         {
             const Statement version(db.handle(), "PRAGMA user_version");
             check(invalidMemoryRejected && version.step() && version.getInt(0) == 24 && legacyRecord() == record,
@@ -2285,8 +2352,10 @@ namespace {
                   MemoryStore::getShortTermMemory(insoulforge::SessionId::group("103")))[0]["summary"] == "聊天摘要",
           "converts historical memory once while preserving pending contents, aliases and summaries", kTestName);
         {
-            const Statement obsolete(db.handle(), "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('llm_config','settings')");
-            check(obsolete.step() && obsolete.getInt(0) == 0, "removes configuration tables with no runtime readers", kTestName);
+            const Statement obsolete(
+              db.handle(), "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('llm_config','settings')");
+            check(obsolete.step() && obsolete.getInt(0) == 0, "removes configuration tables with no runtime readers",
+              kTestName);
         }
         SchemaMigrator::migrate(db.handle());
         check(readRecord(100) == migrated && readRecord(101) == oldMedia && readRecord(102) == oldSegments,
@@ -2320,7 +2389,6 @@ namespace {
         const auto profiles = PersonMemoryStore::getForSenders(senders);
         if (!profiles.empty()) {
             auto expected = profiles.front();
-            MessageRecord::compactContextUserIds(expected);
             std::shared_lock lock(db.mutex());
             check(PersonMemoryStore::contextSnapshot(UserId{11}) == expected,
               "token snapshot matches actual context including pending entries", kTestName);
@@ -2343,8 +2411,7 @@ namespace {
                 person["pending_entries"][0]["source_session"] == privateId.toString(),
           "person detail combines global score and newest-first entries with exact session IDs", kTestName);
         check(profiles[0]["pending_entries"][0].contains("created_at") &&
-                !profiles[0]["pending_entries"][0].contains("time") &&
-                person["pending_entries"][1].contains("time") &&
+                !profiles[0]["pending_entries"][0].contains("time") && person["pending_entries"][1].contains("time") &&
                 !person["pending_entries"][1].contains("created_at") &&
                 profiles[0]["pending_entries"][0]["created_at"] == person["pending_entries"][1]["time"],
           "model uses created_at while admin API retains original timestamp contract", kTestName);
@@ -2355,8 +2422,9 @@ namespace {
         const AdminController controller;
         auto response = drogon::HttpResponsePtr{};
         const auto callback = [&](const drogon::HttpResponsePtr &value) { response = value; };
-        for (const u64 user_id: {11, 22, 33, 44})
+        for (const u64 user_id: {11, 22, 33, 44}) {
             QQNameDirectory::recordName(insoulforge::UserId{user_id}, "Known " + std::to_string(user_id));
+        }
         drogon::sync_wait(controller.getPeople(drogon::HttpRequest::newHttpRequest(), callback));
         check(json::parse(response->body()).size() == 4, "people API returns all profiles", kTestName);
         drogon::sync_wait(controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, "11"));
@@ -2364,12 +2432,14 @@ namespace {
         drogon::sync_wait(controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, "invalid"));
         check(json::parse(response->body()).contains("error"), "person API rejects invalid identities", kTestName);
         std::thread first([] {
-            for (int index = 0; index < 50; ++index)
+            for (int index = 0; index < 50; ++index) {
                 AffinityStore::adjustAffinity(insoulforge::UserId{77}, 1);
+            }
         });
         std::thread second([] {
-            for (int index = 0; index < 50; ++index)
+            for (int index = 0; index < 50; ++index) {
                 AffinityStore::adjustAffinity(insoulforge::UserId{77}, 1);
+            }
         });
         first.join();
         second.join();
@@ -2402,11 +2472,10 @@ namespace {
             return std::mktime(&value);
         };
         const auto due = PersonMemoryConsolidator::dueDay;
-        check(!due(localTime(2026, 10, 20, 2, 59, 59), {}) &&
-                due(localTime(2026, 10, 20, 3), {}) == "2026-10-20",
+        check(!due(localTime(2026, 10, 20, 2, 59, 59), {}) && due(localTime(2026, 10, 20, 3), {}) == "2026-10-20",
           "first run waits until local 03:00 exactly", kTestName);
-        check(!due(localTime(2026, 10, 20, 23), {"2026-10-20", ""}) &&
-                !due(localTime(2026, 10, 21, 2), {"2026-10-20", ""}),
+        check(
+          !due(localTime(2026, 10, 20, 23), {"2026-10-20", ""}) && !due(localTime(2026, 10, 21, 2), {"2026-10-20", ""}),
           "completed day is not repeated across midnight", kTestName);
         check(due(localTime(2027, 1, 1, 2), {"2026-12-29", ""}) == "2026-12-31" &&
                 due(localTime(2026, 10, 22, 8), {"2026-10-19", "2026-10-20"}) == "2026-10-22" &&
@@ -2426,19 +2495,24 @@ namespace {
         if (snapshot) {
             MemoryMaintenanceStore::apply(db, SessionId::privateChat(insoulforge::UserId{11}),
               {.personEntries = {{insoulforge::UserId{11}, "并发新增"}}});
-            const json profile = {{"profile", {"喜欢摄影"}}, {"relationship", {"经常交流摄影"}},
-              {"recent_interactions", {"准备一起拍照"}}};
+            const json profile = {
+              {"profile", {"喜欢摄影"}}, {"relationship", {"经常交流摄影"}}, {"recent_interactions", {"准备一起拍照"}}};
             check(sqlite3_exec(db.handle(),
                     "CREATE TRIGGER reject_person_delete BEFORE DELETE ON person_memory_entries "
-                    "BEGIN SELECT RAISE(ABORT, 'test'); END", nullptr, nullptr, nullptr) == SQLITE_OK,
+                    "BEGIN SELECT RAISE(ABORT, 'test'); END",
+                    nullptr, nullptr, nullptr) == SQLITE_OK,
               "creates delete failure trigger", kTestName);
             bool failed = false;
-            try { PersonMemoryStore::applyConsolidation(*snapshot, profile); }
-            catch (const DbError &) { failed = true; }
+            try {
+                PersonMemoryStore::applyConsolidation(*snapshot, profile);
+            } catch (const DbError &) {
+                failed = true;
+            }
             check(failed && PersonMemoryStore::getPerson(insoulforge::UserId{11})["profile"].empty() &&
                     PersonMemoryStore::getPerson(insoulforge::UserId{11})["pending_entries"].size() == 2,
               "delete failure rolls back profile update and preserves entries", kTestName);
-            check(sqlite3_exec(db.handle(), "DROP TRIGGER reject_person_delete", nullptr, nullptr, nullptr) == SQLITE_OK,
+            check(
+              sqlite3_exec(db.handle(), "DROP TRIGGER reject_person_delete", nullptr, nullptr, nullptr) == SQLITE_OK,
               "removes failure trigger", kTestName);
             PersonMemoryStore::applyConsolidation(*snapshot, profile);
             const auto person = PersonMemoryStore::getPerson(insoulforge::UserId{11});
@@ -2464,9 +2538,12 @@ namespace {
                 !PersonMemoryStore::deletePerson(insoulforge::UserId{11}, original),
           "rejects stale admin snapshots", kTestName);
         bool conflict = false;
-        try { PersonMemoryStore::applyConsolidation(*stale,
-            {{"profile", {"过期结果"}}, {"recent_interactions", json::array()}}); }
-        catch (const PersonMemoryStore::ConsolidationConflict &) { conflict = true; }
+        try {
+            PersonMemoryStore::applyConsolidation(
+              *stale, {{"profile", {"过期结果"}}, {"recent_interactions", json::array()}});
+        } catch (const PersonMemoryStore::ConsolidationConflict &) {
+            conflict = true;
+        }
         check(conflict && PersonMemoryStore::getPerson(insoulforge::UserId{11})["profile"].empty(),
           "daily consolidation cannot overwrite manual edits", kTestName);
         original = PersonMemoryStore::getPerson(insoulforge::UserId{11});
@@ -2484,9 +2561,12 @@ namespace {
                 !PersonMemoryStore::getPerson(insoulforge::UserId{22}).is_null(),
           "deletes all person data without touching others", kTestName);
         conflict = false;
-        try { PersonMemoryStore::applyConsolidation(*beforeDelete,
-            {{"profile", {"过期结果"}}, {"recent_interactions", json::array()}}); }
-        catch (const PersonMemoryStore::ConsolidationConflict &) { conflict = true; }
+        try {
+            PersonMemoryStore::applyConsolidation(
+              *beforeDelete, {{"profile", {"过期结果"}}, {"recent_interactions", json::array()}});
+        } catch (const PersonMemoryStore::ConsolidationConflict &) {
+            conflict = true;
+        }
         check(conflict && PersonMemoryStore::getPerson(insoulforge::UserId{11}).is_null(),
           "daily consolidation cannot recreate deleted person", kTestName);
         MemoryMaintenanceStore::apply(
@@ -2508,22 +2588,26 @@ namespace {
         check(
           PersonMemoryStore::updatePerson(insoulforge::UserId{33}, original, edited), "edits relationship", kTestName);
         conflict = false;
-        try { PersonMemoryStore::applyConsolidation(*manual, original); }
-        catch (const PersonMemoryStore::ConsolidationConflict &) { conflict = true; }
+        try {
+            PersonMemoryStore::applyConsolidation(*manual, original);
+        } catch (const PersonMemoryStore::ConsolidationConflict &) {
+            conflict = true;
+        }
         check(
           conflict && PersonMemoryStore::getPerson(insoulforge::UserId{33})["relationship"] == edited["relationship"],
           "manual consolidation checks relationship even without pending entries", kTestName);
-        const auto context = PersonMemoryStore::getForSenders(
-          json::array({{{"sender", {{"user_id", "33"}}}}}));
+        const auto context = PersonMemoryStore::getForSenders(json::array({{{"sender", {{"user_id", "33"}}}}}));
         check(context.size() == 1 && context[0]["relationship"] == edited["relationship"] &&
-                !context[0].contains("stable_memory"), "context exposes new profile and relationship fields", kTestName);
+                !context[0].contains("stable_memory"),
+          "context exposes new profile and relationship fields", kTestName);
         const AdminController controller;
         drogon::HttpResponsePtr response;
         const auto callback = [&](const drogon::HttpResponsePtr &value) { response = value; };
         const auto unchanged = PersonMemoryStore::getPerson(insoulforge::UserId{22});
         check(sqlite3_exec(db.handle(),
                 "CREATE TRIGGER reject_unchanged_entry_update BEFORE UPDATE ON person_memory_entries "
-                "BEGIN SELECT RAISE(ABORT, 'unexpected entry update'); END", nullptr, nullptr, nullptr) == SQLITE_OK,
+                "BEGIN SELECT RAISE(ABORT, 'unexpected entry update'); END",
+                nullptr, nullptr, nullptr) == SQLITE_OK,
           "creates no-op update guard", kTestName);
         check(PersonMemoryStore::updatePerson(insoulforge::UserId{22}, unchanged, unchanged),
           "unchanged pending entries do not issue updates", kTestName);
@@ -2545,7 +2629,7 @@ namespace {
         };
         original = PersonMemoryStore::getPerson(insoulforge::UserId{33});
         edited = original;
-        for (const json &score : {json(-101), json(101), json(0.5), json("1")}) {
+        for (const json &score: {json(-101), json(101), json(0.5), json("1")}) {
             edited["affinity"] = score;
             check(update({{"expected", original}, {"replacement", edited}}) == drogon::k400BadRequest,
               "API rejects invalid affinity without writing", kTestName);
@@ -2581,8 +2665,9 @@ namespace {
         using namespace insoulforge;
         auto &db = Database::instance();
         check(db.initialize(":memory:").has_value(), "initializes database", kTestName);
-        const json input = {{"aliases", {{{"user_id", "11"}, {"names", {" 老王 ", "老王"}}},
-          {{"user_id", "11"}, {"names", {"摄影佬"}}}}}, {"pending_entries", {" 联机待定 ", "联机待定"}}};
+        const json input = {
+          {"aliases", {{{"user_id", "11"}, {"names", {" 老王 ", "老王"}}}, {{"user_id", "11"}, {"names", {"摄影佬"}}}}},
+          {"pending_entries", {" 联机待定 ", "联机待定"}}};
         const auto normalized = MemoryStore::normalizeSessionMemory(input);
         check(normalized && (*normalized)["aliases"].size() == 1 &&
                 (*normalized)["aliases"][0]["names"] == json::array({"老王", "摄影佬"}) &&
@@ -2590,11 +2675,11 @@ namespace {
           "deduplicates current aliases, names and pending entries", kTestName);
         check(MemoryStore::pendingEntries(dumpJson(*normalized)) == std::vector<std::string>{"联机待定"},
           "reads canonical pending entries", kTestName);
-        for (const auto &invalid: json::array({nullptr, json::array(),
-               json{{"aliases", json::array()}, {"pending_entries", "wrong"}},
-               json{{"aliases", {{{"user_id", "self"}, {"names", {"bot"}}}}}},
-               json{{"aliases", json::array()}, {"pending_entries", {42}}},
-               json{{"aliases", json::array()}, {"recent_events", {"old"}}}})) {
+        for (const auto &invalid:
+          json::array({nullptr, json::array(), json{{"aliases", json::array()}, {"pending_entries", "wrong"}},
+            json{{"aliases", {{{"user_id", "self"}, {"names", {"bot"}}}}}},
+            json{{"aliases", json::array()}, {"pending_entries", {42}}},
+            json{{"aliases", json::array()}, {"recent_events", {"old"}}}})) {
             check(!MemoryStore::normalizeSessionMemory(invalid), "rejects noncanonical structures", kTestName);
         }
         const AdminController controller;
@@ -2618,8 +2703,8 @@ namespace {
         check(json::parse(response->body())["conversationSummaries"] == json::array(),
           "sessions without summaries return an empty list", kTestName);
         auto withSummaries = *normalized;
-        withSummaries["conversation_summaries"] = json::array({
-          {{"start_time", "2026-10-29 10:00:00"}, {"end_time", "2026-10-29 11:00:00"}, {"summary", "讨论部署"}}});
+        withSummaries["conversation_summaries"] = json::array(
+          {{{"start_time", "2026-10-29 10:00:00"}, {"end_time", "2026-10-29 11:00:00"}, {"summary", "讨论部署"}}});
         save(dumpJson(withSummaries));
         drogon::sync_wait(controller.getSessionMemory(
           drogon::HttpRequest::newHttpRequest(), [&](const auto &value) { response = value; }, "group:100"));
@@ -2650,9 +2735,11 @@ namespace {
             output << R"({"memory":{"shortTermMemoryMax":"obsolete","contextWindowLimit":73,"futureSetting":true}})";
         }
         auto &config = insoulforge::Config::instance();
-        check(config.initialize(path.string()).has_value(), "loads old field without validating its obsolete type", kTestName);
+        check(config.initialize(path.string()).has_value(), "loads old field without validating its obsolete type",
+          kTestName);
         auto memory = config.getMemoryConfig();
-        check(!memory.contains("shortTermMemoryMax") && memory["contextWindowLimit"] == 73 && memory["futureSetting"] == true,
+        check(!memory.contains("shortTermMemoryMax") && memory["contextWindowLimit"] == 73 &&
+                memory["futureSetting"] == true,
           "removes obsolete field and preserves other settings", kTestName);
         {
             std::ifstream input(path);
@@ -2667,29 +2754,32 @@ namespace {
     void testImageApiConfig() {
         constexpr std::string_view kTestName = "image API configuration";
         const auto path = std::filesystem::temp_directory_path() /
-            ("insoulforge-image-api-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".json");
+                          ("insoulforge-image-api-" +
+                            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".json");
         auto &config = insoulforge::Config::instance();
         check(config.initialize(path.string()).has_value(), "new configuration initializes", kTestName);
         auto settings = config.getLLMConfig("imageGeneration");
         check(settings["apiType"] == "openai" && settings["editPath"] == "/images/edits" &&
-                config.imageGeneration.apiType == "openai", "new installations default to OpenAI", kTestName);
+                config.imageGeneration.apiType == "openai",
+          "new installations default to OpenAI", kTestName);
         settings["baseUrl"] = "https://proxy.example.com/v1";
         settings["model"] = "gpt-image-2.5-sunburst";
         settings["editPath"] = "/custom/edits";
         check(config.saveLLMConfig("imageGeneration", settings).has_value() &&
-                config.imageGeneration.editPath == "/custom/edits", "edit path updates at runtime", kTestName);
-        for (const auto &invalid : insoulforge::json::array({"unknown", "", 123, nullptr})) {
+                config.imageGeneration.editPath == "/custom/edits",
+          "edit path updates at runtime", kTestName);
+        for (const auto &invalid: insoulforge::json::array({"unknown", "", 123, nullptr})) {
             auto bad = settings;
             bad["apiType"] = invalid;
-            check(!config.saveLLMConfig("imageGeneration", bad) &&
-                    config.getLLMConfig("imageGeneration") == settings && config.imageGeneration.apiType == "openai",
-                "invalid protocol preserves configuration", kTestName);
+            check(!config.saveLLMConfig("imageGeneration", bad) && config.getLLMConfig("imageGeneration") == settings &&
+                    config.imageGeneration.apiType == "openai",
+              "invalid protocol preserves configuration", kTestName);
         }
-        for (const auto &invalid : insoulforge::json::array({"", " \t", 123, nullptr})) {
+        for (const auto &invalid: insoulforge::json::array({"", " \t", 123, nullptr})) {
             auto bad = settings;
             bad["editPath"] = invalid;
             check(!config.saveLLMConfig("imageGeneration", bad) && config.getLLMConfig("imageGeneration") == settings,
-                "invalid edit path preserves configuration", kTestName);
+              "invalid edit path preserves configuration", kTestName);
         }
         auto oldClient = settings;
         oldClient.erase("apiType");
@@ -2697,20 +2787,23 @@ namespace {
         check(config.saveLLMConfig("imageGeneration", oldClient).has_value() &&
                 nlohmann::json::parse(config.getLLMConfig("imageGeneration").dump()) ==
                   nlohmann::json::parse(settings.dump()),
-            "older clients preserve protocol and edit path", kTestName);
+          "older clients preserve protocol and edit path", kTestName);
         settings["apiType"] = "openrouter";
         check(config.saveLLMConfig("imageGeneration", settings).has_value() &&
-                config.imageGeneration.apiType == "openrouter", "protocol switches without restart", kTestName);
+                config.imageGeneration.apiType == "openrouter",
+          "protocol switches without restart", kTestName);
         check(config.initialize(path.string()).has_value() && config.imageGeneration.apiType == "openrouter" &&
-                config.imageGeneration.editPath == "/custom/edits", "protocol persists after restart", kTestName);
+                config.imageGeneration.editPath == "/custom/edits",
+          "protocol persists after restart", kTestName);
         {
             std::ofstream output(path);
-            output << R"({"llm":{"imageGeneration":{"apiKey":"old-key","baseUrl":"https://old.example.com","path":"/custom/images","model":"old-model"}}})";
+            output
+              << R"({"llm":{"imageGeneration":{"apiKey":"old-key","baseUrl":"https://old.example.com","path":"/custom/images","model":"old-model"}}})";
         }
         check(config.initialize(path.string()).has_value() && config.imageGeneration.apiType == "openrouter" &&
                 config.imageGeneration.path == "/custom/images" && config.imageGeneration.apiKey == "old-key" &&
                 config.getLLMConfig("imageGeneration")["apiType"] == "openrouter",
-            "legacy image settings retain their original protocol and connection", kTestName);
+          "legacy image settings retain their original protocol and connection", kTestName);
         std::filesystem::remove(path);
     }
 
@@ -2778,12 +2871,13 @@ namespace {
         check(defaultGeneration.value("model", "") == "gpt-image-2.5-flare",
           "creates official image generation model default", kTestName);
         const auto executor = insoulforge::Config::instance().getLLMConfig("executor");
-        check(executor["topP"] == 0.8 && !executor.contains("top_P"), "startup converts legacy top_P before runtime reads", kTestName);
+        check(executor["topP"] == 0.8 && !executor.contains("top_P"),
+          "startup converts legacy top_P before runtime reads", kTestName);
         {
             std::ifstream input(path);
             const auto persisted = insoulforge::json::parse(input);
-            check(persisted["llm"]["executor"]["topP"] == 0.8 &&
-                    !persisted["llm"]["executor"].contains("top_P"), "converted configuration is persisted", kTestName);
+            check(persisted["llm"]["executor"]["topP"] == 0.8 && !persisted["llm"]["executor"].contains("top_P"),
+              "converted configuration is persisted", kTestName);
         }
         const auto memory = insoulforge::Config::instance().getLLMConfig("memory");
         check(memory.value("model", "") == "old-model", "inherits executor model", kTestName);
@@ -2798,14 +2892,16 @@ namespace {
           "affinity switch hot updates", kTestName);
         check(config.saveMemoryConfig({{"sharedConversationMessageCount", 10}}).has_value() && !config.affinityEnabled,
           "old client preserves affinity switch", kTestName);
-        for (const auto &invalid: insoulforge::json::array({0, 1, "false", nullptr}))
+        for (const auto &invalid: insoulforge::json::array({0, 1, "false", nullptr})) {
             check(!config.saveMemoryConfig({{"affinityEnabled", invalid}}) && !config.affinityEnabled,
               "affinity switch rejects non-boolean values", kTestName);
-        check(config.initialize(path.string()).has_value() && !config.affinityEnabled,
-          "affinity switch persists", kTestName);
+        }
+        check(config.initialize(path.string()).has_value() && !config.affinityEnabled, "affinity switch persists",
+          kTestName);
         check(config.saveMemoryConfig({{"affinityEnabled", true}}).has_value() && config.affinityEnabled,
           "affinity can be re-enabled", kTestName);
-        check(config.sharedConversationMessageCount == 10 && config.getMemoryConfig()["sharedConversationMessageCount"] == 10,
+        check(config.sharedConversationMessageCount == 10 &&
+                config.getMemoryConfig()["sharedConversationMessageCount"] == 10,
           "old configuration receives ten shared messages per session", kTestName);
         check(config.saveMemoryConfig({{"sharedConversationMessageCount", 25}}).has_value() &&
                 config.sharedConversationMessageCount == 25,
@@ -2852,8 +2948,7 @@ namespace {
           "migration failure returns an error and preserves connection", kTestName);
 
         auto &agent = insoulforge::AgentSystem::instance();
-        check(agent.initialize(database, "explicit-bot-name").has_value() && agent.isReady(),
-          "successful Agent initialization marks ready", kTestName);
+        check(agent.initialize(database, "explicit-bot-name").has_value(), "Agent initialization succeeds", kTestName);
         bool foundScheduleTool = false;
         for (const auto &tool: insoulforge::ToolRegistry::instance().getAllTools()) {
             if (const auto &function = tool["function"]; function["name"] == "create_scheduled_task") {
@@ -2867,10 +2962,9 @@ namespace {
         check(sqlite3_exec(database.handle(), "DROP TABLE prompts", nullptr, nullptr, nullptr) == SQLITE_OK,
           "simulates unavailable prompt storage", kTestName);
         const auto agentFailure = agent.initialize(database, "explicit-bot-name");
-        check(!agentFailure && !agentFailure.error().empty() && !agent.isReady(),
-          "Agent dependency failure returns an error and clears ready state", kTestName);
+        check(!agentFailure && !agentFailure.error().empty(), "Agent dependency failure returns an error", kTestName);
         database.close();
-        check(!agent.initialize(database, "explicit-bot-name") && !agent.isReady(),
+        check(!agent.initialize(database, "explicit-bot-name"),
           "uninitialized database is rejected before dependency access", kTestName);
         std::filesystem::remove_all(directory);
     }
@@ -3067,11 +3161,12 @@ namespace {
         const auto originalRouter = config.router;
         config.selfQQNumber = 42;
         config.router = {};
-        auto message = insoulforge::json{{"message_id", "auto-test"}, {"sender", {{"user_id", "11"}}},
-          {"segments", insoulforge::json::array({{{"type", "text"}, {"text", "ordinary group message"}}})}};
+        auto message =
+          insoulforge::json{{"executor_processed", false}, {"message_id", "auto-test"}, {"sender", {{"user_id", "11"}}},
+            {"segments", insoulforge::json::array({{{"type", "text"}, {"text", "ordinary group message"}}})}};
         const auto route = [&]() {
             return drogon::sync_wait(insoulforge::MessageRouter::route(
-              insoulforge::SessionId::group("100"), "auto-test", insoulforge::json::array({message})));
+              insoulforge::SessionId::group("100"), insoulforge::json::array({message})));
         };
         check(route().action == insoulforge::RouterDecision::Action::SKIP, "normal messages skip without model request",
           kTestName);
@@ -3079,16 +3174,22 @@ namespace {
         check(route().action == insoulforge::RouterDecision::Action::SKIP, "mentioning another user still skips",
           kTestName);
         message["segments"].back()["target"]["user_id"] = "self";
-        check(route().action == insoulforge::RouterDecision::Action::REPLY, "bot mention still replies", kTestName);
+        check(route().action == insoulforge::RouterDecision::Action::REPLY,
+          "unprocessed bot mention bypasses disabled automatic reply", kTestName);
+        message["executor_processed"] = true;
+        check(route().action == insoulforge::RouterDecision::Action::SKIP,
+          "processed bot mention does not repeat the mandatory rule", kTestName);
+        message["executor_processed"] = false;
         message["segments"].erase(1);
         message["sender"]["user_id"] = "system";
-        check(route().action == insoulforge::RouterDecision::Action::REPLY, "system tasks still reply", kTestName);
+        check(route().action == insoulforge::RouterDecision::Action::REPLY,
+          "unprocessed system task bypasses automatic reply setting", kTestName);
         message["sender"]["user_id"] = "11";
         const auto privateId = insoulforge::SessionId::privateChat(insoulforge::UserId{11});
         insoulforge::SessionStore::setAutoReply(privateId, false);
-        check(drogon::sync_wait(
-                insoulforge::MessageRouter::route(privateId, "auto-test", insoulforge::json::array({message})))
-                  .action == insoulforge::RouterDecision::Action::REPLY,
+        check(
+          drogon::sync_wait(insoulforge::MessageRouter::route(privateId, insoulforge::json::array({message}))).action ==
+            insoulforge::RouterDecision::Action::REPLY,
           "private replies are unaffected", kTestName);
         config.selfQQNumber = originalSelf;
         config.router = originalRouter;
@@ -3265,9 +3366,8 @@ namespace {
 
         insoulforge::MessageList list(insoulforge::SessionId::group("100"), db, insoulforge::Config::instance());
         const auto message = [](const std::string &time, const std::string &text) {
-            return json{{"time", time}, {"sender", {{"name", "test"}, {"user_id", "11"}}},
-              {"message_id", "123"}, {"reply_to", {{"message_id", "122"}}},
-              {"segments", json::array({{{"type", "text"}, {"text", text}}})}};
+            return json{{"time", time}, {"sender", {{"name", "test"}, {"user_id", "11"}}}, {"message_id", "123"},
+              {"reply_to", {{"message_id", "122"}}}, {"segments", json::array({{{"type", "text"}, {"text", text}}})}};
         };
         const auto append = [&](json record) {
             record.erase("message_id");
@@ -3294,10 +3394,12 @@ namespace {
                 list.fullSnapshot().size() == 7,
           "sharing limit is independent and does not alter history", kTestName);
         std::string chinese;
-        for (int index = 0; index < 120; ++index) chinese += "中";
+        for (int index = 0; index < 120; ++index) {
+            chinese += "中";
+        }
         auto longMessage = message("2026-10-18 12:00:00", chinese);
-        longMessage["segments"].push_back({{"type", "image"}, {"recognition_status", "succeeded"},
-          {"description", chinese}, {"image_index", 0}});
+        longMessage["segments"].push_back(
+          {{"type", "image"}, {"recognition_status", "succeeded"}, {"description", chinese}, {"image_index", 0}});
         longMessage["memories"] = {"not shared"};
         longMessage["tool_history"] = {"not shared"};
         const auto projected = insoulforge::SharedConversationContext::projectMessage(longMessage);
@@ -3306,27 +3408,55 @@ namespace {
                 (*projected)["segments"][1]["description"].get<std::string>().size() == 80 * 3 &&
                 !(*projected)["segments"][1].contains("image_index") && !projected->contains("memories") &&
                 !projected->contains("tool_history"),
-          "text and image descriptions share a 200-codepoint budget without media indices or recalled memories", kTestName);
+          "text and image descriptions share a 200-codepoint budget without media indices or recalled memories",
+          kTestName);
         auto exact = message("2026-10-18 12:00:00", std::string(199, 'a') + "😀");
         exact["sender"]["card"] = "not shared";
         const auto exactProjection = insoulforge::SharedConversationContext::projectMessage(exact);
-        check(exactProjection && !exactProjection->contains("truncated") &&
-                !(*exactProjection)["sender"].contains("card"),
+        check(
+          exactProjection && !exactProjection->contains("truncated") && !(*exactProjection)["sender"].contains("card"),
           "exactly 200 codepoints are intact and group cards are not leaked", kTestName);
         exact["segments"][0]["text"] = std::string(199, 'a') + "😀尾";
         const auto cut = insoulforge::SharedConversationContext::projectMessage(exact);
-        check(cut && (*cut)["truncated"] == true &&
-                (*cut)["segments"][0]["text"] == std::string(199, 'a') + "😀",
+        check(cut && (*cut)["truncated"] == true && (*cut)["segments"][0]["text"] == std::string(199, 'a') + "😀",
           "truncation preserves four-byte Unicode characters", kTestName);
         exact["sender"]["user_id"] = "system";
-        check(!insoulforge::SharedConversationContext::projectMessage(exact),
-          "internal system messages are not shared", kTestName);
+        check(!insoulforge::SharedConversationContext::projectMessage(exact), "internal system messages are not shared",
+          kTestName);
         db.close();
         check(db.initialize(path.string()).has_value() &&
                 insoulforge::SessionStore::getSessionConfig(insoulforge::SessionId::group("100")).crossSessionSharing,
           "sharing survives restart", kTestName);
         db.close();
         std::filesystem::remove(path);
+    }
+
+    void testContextPromptMigration() {
+        using namespace insoulforge;
+        constexpr std::string_view kTestName = "context prompt migration";
+        auto &db = Database::instance();
+        check(db.initialize(":memory:").has_value(), "initializes database", kTestName);
+        PromptStore::setPrompt(db, "router_system",
+          "custom prefix\n是否应该回复最新一条消息\n1. 看最新一条消息的性质\n- [{botName}]: 机器人发送的消息\n   - "
+          "如果{botName}在最近1-2条内刚发过言，除非新消息明确针对它（追问、反驳、接它的话），否则 skip\ncustom suffix");
+        PromptStore::setPrompt(db, "executor_system", "custom\n只回复最新的一条消息或话题，不要同时回复多条消息");
+        PromptService::initialize(db);
+        const auto router = PromptStore::getPrompt(db, "router_system", "");
+        const auto executor = PromptStore::getPrompt(db, "executor_system", "");
+        check(router.starts_with("custom prefix") && router.ends_with("custom suffix") &&
+                router.find("最新一条消息") == std::string::npos && router.find("最近1-2条") == std::string::npos &&
+                router.find("[{botName}]") == std::string::npos,
+          "known legacy rules upgrade without overwriting custom content", kTestName);
+        check(executor.starts_with("custom") && executor.find("只回复最新") == std::string::npos,
+          "executor legacy focus rule also upgrades", kTestName);
+        const auto privatePrompt = PromptStore::getPrompt(db, "router_private_system", "");
+        check(privatePrompt.find("未交给 Executor 不等于尚未回答") != std::string::npos &&
+                privatePrompt.find("可以稍等") == std::string::npos &&
+                privatePrompt.find("其余情况一律 reply") == std::string::npos,
+          "default private Router reasons about coverage without fictitious delayed replies", kTestName);
+        PromptService::initialize(db);
+        check(PromptStore::getPrompt(db, "router_system", "") == router, "prompt upgrade is idempotent", kTestName);
+        db.close();
     }
 
     void testGroupAdditionalPrompt() {
@@ -3347,17 +3477,20 @@ namespace {
         insoulforge::SessionStore::setAutoReply(insoulforge::SessionId::group("100"), false);
         insoulforge::SessionStore::incrementMessageCount(insoulforge::SessionId::group("100"));
         const auto combined = insoulforge::ExecutorAgent::buildSystemPrompt(insoulforge::SessionId::group("100"));
-        const auto snapshot = insoulforge::ExecutorSystemPrompt::instance().buildSnapshot(insoulforge::SessionId::group("100"));
+        const auto snapshot =
+          insoulforge::ExecutorSystemPrompt::instance().buildSnapshot(insoulforge::SessionId::group("100"));
         std::string reconstructed;
-        for (const auto &part : snapshot.parts) {
+        for (const auto &part: snapshot.parts) {
             reconstructed += part.text;
         }
         check(reconstructed == combined && snapshot.text == combined && snapshot.parts[5].text.ends_with(prompt),
           "six part texts reconstruct the unchanged system", kTestName);
-        const auto repeated = insoulforge::ExecutorSystemPrompt::instance().buildSnapshot(insoulforge::SessionId::group("100"));
-        for (std::size_t i = 0; i < snapshot.parts.size(); ++i)
-            check(snapshot.parts[i].tokens == repeated.parts[i].tokens,
-              "unchanged parts reuse their token results", kTestName);
+        const auto repeated =
+          insoulforge::ExecutorSystemPrompt::instance().buildSnapshot(insoulforge::SessionId::group("100"));
+        for (std::size_t i = 0; i < snapshot.parts.size(); ++i) {
+            check(snapshot.parts[i].tokens == repeated.parts[i].tokens, "unchanged parts reuse their token results",
+              kTestName);
+        }
 
         check(combined.starts_with(base) && combined.ends_with(prompt), "appends without replacing global prompt",
           kTestName);
@@ -3365,8 +3498,7 @@ namespace {
           "other groups do not inherit prompt", kTestName);
         const auto privateId = insoulforge::SessionId::privateChat(insoulforge::UserId{11});
         insoulforge::SessionStore::setAdditionalPrompt(privateId, "private-marker");
-        check(insoulforge::ExecutorAgent::buildSystemPrompt(privateId).find("private-marker") ==
-                std::string::npos,
+        check(insoulforge::ExecutorAgent::buildSystemPrompt(privateId).find("private-marker") == std::string::npos,
           "private session does not receive group prompt", kTestName);
         insoulforge::SessionStore::disableSession(insoulforge::SessionId::group("100"));
         insoulforge::SessionStore::enableSession(insoulforge::SessionId::group("100"));
@@ -3446,11 +3578,15 @@ namespace {
                 .has_value(),
           "saves execution config", kTestName);
 
-        check(insoulforge::Config::instance().saveExecutionConfig({{"maxToolRounds", 8}, {"defaultPrivateEnabled", true}}).has_value() &&
+        check(insoulforge::Config::instance()
+                  .saveExecutionConfig({{"maxToolRounds", 8}, {"defaultPrivateEnabled", true}})
+                  .has_value() &&
                 insoulforge::Config::instance().defaultPrivateEnabled.load() &&
                 insoulforge::Config::instance().getExecutionConfig()["defaultPrivateEnabled"] == true,
           "execution page updates private default", kTestName);
-        check(insoulforge::Config::instance().saveExecutionConfig({{"maxToolRounds", 8}, {"defaultPrivateEnabled", false}}).has_value(),
+        check(insoulforge::Config::instance()
+                .saveExecutionConfig({{"maxToolRounds", 8}, {"defaultPrivateEnabled", false}})
+                .has_value(),
           "restore private default", kTestName);
         auto &oneBotConfig = insoulforge::Config::instance();
         const auto originalQQConfig = oneBotConfig.getQQConfig();
@@ -3465,10 +3601,11 @@ namespace {
                 oneBotConfig.oneBotImplementation == "snowluma",
           "old client preserves selected implementation", kTestName);
         const auto connectionBeforeInvalid = oneBotConfig.oneBotSnapshot();
-        for (const auto &invalid: insoulforge::json::array({"unknown", "", 1, true, nullptr}))
+        for (const auto &invalid: insoulforge::json::array({"unknown", "", 1, true, nullptr})) {
             check(!oneBotConfig.saveQQConfig({{"oneBotImplementation", invalid}}) &&
                     oneBotConfig.oneBotSnapshot() == connectionBeforeInvalid,
               "invalid implementation cannot change runtime", kTestName);
+        }
         check(oneBotConfig.saveQQConfig(originalQQConfig).has_value(), "restore NapCat", kTestName);
 
         const insoulforge::AdminController controller;
@@ -3667,11 +3804,10 @@ namespace {
         insoulforge::MessageList messages(
           insoulforge::SessionId::group("987654"), database, insoulforge::Config::instance());
         const auto update = messages.append(record);
-        check(update && update->back()["tool_history"] == history, "no_reply history enters the context snapshot",
-          kTestName);
+        check(update.back()["tool_history"] == history, "no_reply history enters the context snapshot", kTestName);
         const auto failedUpdate = messages.append(failed);
-        check(failedUpdate && failedUpdate->back()["send_error"] == failed["send_error"],
-          "failed delivery enters the context snapshot", kTestName);
+        check(failedUpdate.back()["send_error"] == failed["send_error"], "failed delivery enters the context snapshot",
+          kTestName);
         messages.flushToStorage();
         insoulforge::MessageList restored(
           insoulforge::SessionId::group("987654"), database, insoulforge::Config::instance());
@@ -3731,8 +3867,8 @@ namespace {
             .has_value(),
           "saves memory model config", kTestName);
         auto cacheConfig = insoulforge::Config::instance().getLLMConfig("executor");
-        check(!insoulforge::Config::instance().executorParams.promptCacheKeyEnabled,
-          "cache key defaults to disabled", kTestName);
+        check(!insoulforge::Config::instance().executorParams.promptCacheKeyEnabled, "cache key defaults to disabled",
+          kTestName);
         cacheConfig["promptCacheKeyEnabled"] = true;
         check(insoulforge::Config::instance().saveLLMConfig("executor", cacheConfig).has_value() &&
                 insoulforge::Config::instance().executorParams.promptCacheKeyEnabled,
@@ -3836,9 +3972,8 @@ namespace {
         using insoulforge::ChatRecordManager;
         using insoulforge::json;
         static_assert(std::is_same_v<decltype(std::declval<const ChatRecordManager &>().getRecords()), const json &>);
-        auto messages = json::array({"legacy text",
-          {{"message_id", "1"}, {"sender", {{"user_id", "11"}}},
-            {"segments", {{{"type", "text"}, {"text", "original"}}}}}});
+        auto messages = json::array({"legacy text", {{"message_id", "1"}, {"sender", {{"user_id", "11"}}},
+                                                      {"segments", {{{"type", "text"}, {"text", "original"}}}}}});
         const auto expected = messages;
         const ChatRecordManager copied(insoulforge::SessionId::group("100"), messages);
         messages[1]["segments"][0]["text"] = "changed";
@@ -3858,8 +3993,8 @@ namespace {
         auto &database = insoulforge::Database::instance();
         check(database.initialize(":memory:").has_value(), "initializes database", kTestName);
         const auto makeMessage = [](const char *id, const char *user_id) -> insoulforge::json {
-            return {{"message_id", id}, {"sender", {{"user_id", user_id}}},
-              {"segments", {{{"type", "text"}, {"text", id}}}}};
+            return {
+              {"message_id", id}, {"sender", {{"user_id", user_id}}}, {"segments", {{{"type", "text"}, {"text", id}}}}};
         };
         const auto oldMessages = insoulforge::json::array({makeMessage("old", "11")});
         insoulforge::ChatRecordStore::replaceSessionChatRecords(
@@ -3944,24 +4079,31 @@ namespace {
             return message;
         };
 
+        {
+            insoulforge::MessageList repeatedMessages(insoulforge::SessionId::group("101"), database, config);
+            static_cast<void>(repeatedMessages.append(makeMessage(1)));
+            const auto repeated = repeatedMessages.append(makeMessage(1));
+            check(repeated.size() == 2 && repeated[0]["message_id"] == repeated[1]["message_id"],
+              "append retains messages with the same ID", kTestName);
+        }
+
         insoulforge::MessageList messages(insoulforge::SessionId::group("100"), database, config);
         const auto first = messages.append(makeMessage(1));
         check(!messages.createSummaryBatch(), "does not summarize below threshold", kTestName);
         static_cast<void>(messages.append(makeMessage(2)));
         static_cast<void>(messages.append(makeMessage(3)));
         const auto fourth = messages.append(makeMessage(4));
-        check(!messages.append(makeMessage(4)), "duplicate message ID returns no snapshot", kTestName);
         const auto batch = messages.createSummaryBatch();
 
-        check(first->size() == 1, "first snapshot stays immutable after later appends", kTestName);
+        check(first.size() == 1, "first snapshot stays immutable after later appends", kTestName);
         check(batch.has_value(), "reserves summary when message count exceeds threshold", kTestName);
         check(batch->messages.size() == 2, "summary batch has configured size", kTestName);
         check(batch->messages[0]["message_id"] == "1", "summary batch keeps chronological order", kTestName);
         check(batch->contextMessages.size() == 1, "summary batch includes configured context", kTestName);
         check(!messages.createSummaryBatch(), "does not create another summary while one is pending", kTestName);
-        check(fourth->size() == 2, "snapshot retains configured recent window", kTestName);
-        check((*fourth)[0]["message_id"] == "3", "snapshot starts at configured context limit", kTestName);
-        check((*fourth)[1]["assets"]["images"][0]["source"]["url"] == "https://example.com/image.jpg",
+        check(fourth.size() == 2, "snapshot retains configured recent window", kTestName);
+        check(fourth[0]["message_id"] == "3", "snapshot starts at configured context limit", kTestName);
+        check(fourth[1]["assets"]["images"][0]["source"]["url"] == "https://example.com/image.jpg",
           "complete image source remains available to tools", kTestName);
         check(insoulforge::ChatRecordStore::getChatRecords(insoulforge::SessionId::group("100")).empty(),
           "runtime append does not write database", kTestName);
@@ -3974,7 +4116,7 @@ namespace {
         const auto restoredRecords = insoulforge::ChatRecordStore::getChatRecords(insoulforge::SessionId::group("100"));
         check(restoredRecords.size() == 2, "flush persists only retained messages", kTestName);
         insoulforge::MessageList restored(insoulforge::SessionId::group("100"), database, config);
-        check(restored.snapshot() == (*fourth), "startup restoration rebuilds retained snapshot", kTestName);
+        check(restored.snapshot() == fourth, "startup restoration rebuilds retained snapshot", kTestName);
 
         messages.clear();
         check(messages.fullSnapshot().empty(), "clear removes runtime messages", kTestName);
@@ -4026,7 +4168,7 @@ namespace {
         auto &database = insoulforge::Database::instance();
         auto &config = insoulforge::Config::instance();
         auto &agent = insoulforge::AgentSystem::instance();
-        auto &workflow = insoulforge::OneBotEventWorkflow::instance();
+        auto &workflow = insoulforge::EventWorkflow::instance();
         database.close();
         check(!workflow.getSessionMessages(insoulforge::SessionId::group("555")),
           "getting the workflow does not restore sessions", kTestName);
@@ -4045,11 +4187,12 @@ namespace {
           "restore failure returns an error without publishing sessions", kTestName);
         check(database.initialize(":memory:").has_value(), "recreates database after failure", kTestName);
         check(agent.initialize(database, config.botName).has_value(), "reinitializes Agent dependencies", kTestName);
-        const auto restoredMessage = insoulforge::MessageRecord::createAssistantRecord("test", 777, "restored");
+        auto restoredMessage = insoulforge::MessageRecord::createAssistantRecord("test", 777, "restored");
         insoulforge::ChatRecordStore::addChatRecord(
           database, insoulforge::SessionId::group("555"), "assistant", insoulforge::dumpJson(restoredMessage));
         check(workflow.initialize(database, config, agent).has_value(), "initializes workflow", kTestName);
         const auto restored = workflow.getSessionMessages(insoulforge::SessionId::group("555"));
+        restoredMessage["executor_processed"] = true;
         check(restored && restored->size() == 1 && restored->front() == restoredMessage,
           "explicit initialization restores persisted messages", kTestName);
         workflow.appendDeliveredAssistantMessage(insoulforge::SessionId::group("555"),
@@ -4064,15 +4207,13 @@ namespace {
         }
         workflow.appendDeliveredAssistantMessage(insoulforge::SessionId::group("556"),
           insoulforge::MessageRecord::createAssistantRecord("test", 779, "other group"));
-        workflow.appendDeliveredAssistantMessage(privateId,
-          insoulforge::MessageRecord::createAssistantRecord("test", 780, "private conversation"));
+        workflow.appendDeliveredAssistantMessage(
+          privateId, insoulforge::MessageRecord::createAssistantRecord("test", 780, "private conversation"));
         const auto shared = insoulforge::SharedConversationContext::build(insoulforge::SessionId::group("555"), 1);
-        const auto sharedGroup = std::ranges::find_if(shared, [](const auto &item) {
-            return item["session"]["type"] == "group";
-        });
-        const auto sharedPrivate = std::ranges::find_if(shared, [](const auto &item) {
-            return item["session"]["type"] == "private";
-        });
+        const auto sharedGroup =
+          std::ranges::find_if(shared, [](const auto &item) { return item["session"]["type"] == "group"; });
+        const auto sharedPrivate =
+          std::ranges::find_if(shared, [](const auto &item) { return item["session"]["type"] == "private"; });
         check(shared.size() == 2 && sharedGroup != shared.end() && sharedPrivate != shared.end() &&
                 (*sharedGroup)["session"]["group_id"] == "556" && (*sharedGroup)["messages"].size() == 1 &&
                 (*sharedPrivate)["session"]["user_id"] == "42",
@@ -4097,7 +4238,7 @@ namespace {
           "different session starts independently", kTestName);
 
         const auto messages =
-          insoulforge::OneBotEventWorkflow::instance().getSessionMessages(insoulforge::SessionId::group("100"));
+          insoulforge::EventWorkflow::instance().getSessionMessages(insoulforge::SessionId::group("100"));
         check(messages && messages->size() == 1, "start writes one status record", kTestName);
         if (messages && !messages->empty()) {
             check(insoulforge::MessageRecord::isSystem((*messages)[0]), "status has system sender", kTestName);
@@ -4112,7 +4253,7 @@ namespace {
         check(stopped.status == insoulforge::AsyncTaskManager::StartResult::Status::Stopping,
           "shutdown rejects new tasks", kTestName);
         const auto stoppedMessages =
-          insoulforge::OneBotEventWorkflow::instance().getSessionMessages(insoulforge::SessionId::group("100"));
+          insoulforge::EventWorkflow::instance().getSessionMessages(insoulforge::SessionId::group("100"));
         check(stoppedMessages && stoppedMessages->size() == 2 &&
                 insoulforge::MessageRecord::extractText(stoppedMessages->back()).find("中断") != std::string::npos,
           "shutdown records interruption", kTestName);
@@ -4174,6 +4315,7 @@ auto main() -> int {
     testGroupAutoReply();
     testGroupCommandSettings();
     testCrossSessionSharing();
+    testContextPromptMigration();
     testGroupAdditionalPrompt();
     testToolHistoryRecords();
     testImageDescriptionCacheStore();

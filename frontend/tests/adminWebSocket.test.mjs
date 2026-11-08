@@ -1,43 +1,12 @@
+import {createModuleLoader, renderer} from './helpers/vueSetup.mjs'
 import assert from 'node:assert/strict'
-import {readFileSync} from 'node:fs'
-import {createRequire} from 'node:module'
 import {dirname, resolve} from 'node:path'
 import {fileURLToPath} from 'node:url'
 import {afterEach, beforeEach, test} from 'node:test'
-import {compileScript, parse} from 'vue/compiler-sfc'
-import ts from 'typescript'
 import * as vue from 'vue'
 
-const require = createRequire(import.meta.url)
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const modules = new Map()
-
-// Execute the actual setup scripts with Vue's lifecycle, without a browser DOM.
-function loadModule(path) {
-  if (modules.has(path)) return modules.get(path).exports
-  const module = {exports: {}}
-  modules.set(path, module)
-  const source = readFileSync(path, 'utf8')
-  const script = path.endsWith('.vue')
-    ? compileScript(parse(source).descriptor, {id: path}).content : source
-  const {outputText} = ts.transpileModule(script, {
-    compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020}
-  })
-  new Function('require', 'module', 'exports', outputText)(specifier => {
-    if (specifier === 'vue') return vue
-    if (!specifier.startsWith('.')) return require(specifier)
-    if (specifier.endsWith('.vue')) return {default: {render: () => null}}
-    return loadModule(resolve(dirname(path), `${specifier}.ts`))
-  }, module, module.exports)
-  if (path.endsWith('.vue')) module.exports.default.render = () => null
-  return module.exports
-}
-
-const renderer = vue.createRenderer({
-  createElement: () => ({}), createText: () => ({}), createComment: () => ({}),
-  insert() {}, remove() {}, setText() {}, setElementText() {}, patchProp() {},
-  parentNode: () => null, nextSibling: () => null
-})
+const loadModule = createModuleLoader()
 
 class Socket extends EventTarget {
   static OPEN = 1

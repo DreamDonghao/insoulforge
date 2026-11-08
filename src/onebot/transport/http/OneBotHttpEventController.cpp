@@ -1,7 +1,7 @@
-#include <workflow/OneBotEventWorkflow.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <onebot/transport/http/OneBotHttpEventController.hpp>
+#include <workflow/EventWorkflow.hpp>
 
 auto insoulforge::OneBotHttpEventController::receiveOneBotEvent(const drogon::HttpRequestPtr req,
   const std::function<void(const drogon::HttpResponsePtr &)> callback) -> drogon::Task<> {
@@ -13,7 +13,7 @@ auto insoulforge::OneBotHttpEventController::receiveOneBotEvent(const drogon::Ht
         callback(jsonResponse(response));
         co_return;
     }
-    auto body = parseJsonBody(req);
+    const auto body = parseJsonBody(req);
     if (!body) {
         Logger::warn(std::nullopt, "OneBot", fmt::format("OneBot 上报被拒绝：请求体不是 JSON 对象"));
         const auto resp = drogon::HttpResponse::newHttpResponse();
@@ -29,6 +29,6 @@ auto insoulforge::OneBotHttpEventController::receiveOneBotEvent(const drogon::Ht
     Logger::debug(std::nullopt, "OneBot",
       fmt::format("上报已确认: post_type={}, message_id={}", getStr(*body, "post_type"), getStr(*body, "message_id")));
 
-    OneBotEventWorkflow::instance().enqueueOneBotEvent(*body);
+    EventWorkflow::instance().enqueueOneBotEvent(*body);
     co_return;
 }

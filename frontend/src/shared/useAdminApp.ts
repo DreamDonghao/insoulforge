@@ -24,7 +24,7 @@ const systemNavItems: NavItem[] = [
   {key: 'prompts', label: '提示词', icon: 'prompts'},
   {key: 'customTools', label: '工具配置', icon: 'tool'},
   {key: 'mcpServers', label: 'MCP 服务', icon: 'tool'},
-  {key: 'activities', label: '实时活动', icon: 'execution'},
+  {key: 'activities', label: 'Activity', icon: 'execution'},
   {key: 'memoryConfig', label: '记忆与上下文', icon: 'memory'}
 ]
 

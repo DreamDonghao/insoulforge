@@ -1,7 +1,8 @@
 /// @file SessionWorkflowState.cpp
 /// @brief 单个会话的消息工作流并发状态实现
 
-#include <infrastructure/NumericTypes.hpp>
+#include <utility>
+
 #include <infrastructure/SessionId.hpp>
 #include <workflow/SessionWorkflowState.hpp>
 
@@ -34,30 +35,29 @@ namespace insoulforge {
         return message;
     }
 
-    auto SessionWorkflowState::isReplyProcessing() -> bool {
+    auto SessionWorkflowState::recordIncoming(json message) -> IncomingMessageUpdate {
         std::lock_guard lock(m_mutex);
-        return m_isReplyProcessing;
+        auto records = m_messageList->append(std::move(message));
+        m_pendingReply = true;
+        const bool startReply = !m_isReplyProcessing;
+        m_isReplyProcessing = true;
+        return IncomingMessageUpdate{.records = std::move(records), .startReply = startReply};
     }
 
-    auto SessionWorkflowState::requestReplyProcessing(std::string triggerMessageId, const bool mayWaitForCurrentReply,
-      std::optional<RouterDecision> decision) -> std::optional<ReplyRequest> {
+    auto SessionWorkflowState::takeReplyRequest() -> std::optional<ReplyRequest> {
         std::lock_guard lock(m_mutex);
-        if (m_isReplyProcessing) {
-            if (mayWaitForCurrentReply) {
-                m_pendingReply = ReplyRequest{std::move(triggerMessageId), std::move(decision)};
-            }
+        if (!m_pendingReply) {
+            m_isReplyProcessing = false;
             return std::nullopt;
         }
-        m_isReplyProcessing = true;
-        return ReplyRequest{.messageId = std::move(triggerMessageId), .decision = std::move(decision)};
+        m_pendingReply = false;
+        return ReplyRequest{m_messageList->snapshot()};
     }
 
-    auto SessionWorkflowState::completeReplyProcessing() -> std::optional<ReplyRequest> {
+    auto SessionWorkflowState::takeExecutorRequest() -> ReplyRequest {
         std::lock_guard lock(m_mutex);
-        if (m_pendingReply) {
-            return std::exchange(m_pendingReply, std::nullopt);
-        }
-        m_isReplyProcessing = false;
-        return std::nullopt;
+        auto records = m_messageList->executorSnapshot();
+        m_pendingReply = false;
+        return ReplyRequest{std::move(records)};
     }
 } // namespace insoulforge

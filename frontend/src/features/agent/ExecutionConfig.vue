@@ -8,7 +8,7 @@ import {numberError} from '../../utils/validation'
 import type {ApiResponse, ExecutionConfig} from '../../vite-env.d'
 
 const showToast = inject<(message: string, isError?: boolean) => void>('showToast')
-const config = reactive<ExecutionConfig>({maxToolRounds: 8, routeWhileReplying: false, mcpToolPageSize: 10, mcpMaxToolsPerEnable: 4, mcpMaxToolsPerReply: 12})
+const config = reactive<ExecutionConfig>({maxToolRounds: 8, mcpToolPageSize: 10, mcpMaxToolsPerEnable: 4, mcpMaxToolsPerReply: 12})
 const mcpFields = [
   {key: 'mcpToolPageSize', label: '查询每页工具数量', maximum: 50},
   {key: 'mcpMaxToolsPerEnable', label: '单次启用工具上限', maximum: 20},
@@ -40,7 +40,6 @@ const loadConfig = async (): Promise<void> => {
       throw new Error('执行配置数据无效')
     }
     config.maxToolRounds = data.maxToolRounds
-    config.routeWhileReplying = data.routeWhileReplying ?? false
     config.defaultPrivateEnabled = data.defaultPrivateEnabled ?? false
     for (const field of mcpFields) {
       if (!Number.isInteger(data[field.key]) || data[field.key] < 1 || data[field.key] > field.maximum) throw new Error('MCP 数量配置无效')
@@ -120,26 +119,6 @@ onMounted(loadConfig)
             <p :id="field.key + '-hint'" class="form-hint" role="tooltip">1～{{ field.maximum }}</p>
             <FieldError :field="field.key" :message="errors[field.key]"/>
           </div>
-        </div>
-      </section>
-      <section class="execution-section">
-        <h2 class="card-title section-heading">群聊消息判断</h2>
-        <div class="form-group setting-row">
-          <div class="setting-description">
-            <div class="setting-name">
-              <label for="route-enabled">回复期间继续判断新消息</label>
-              <span class="setting-help" :class="{'is-expanded': expandedHelp === 'route'}"
-                    @mouseenter="hintsDismissed = false" @focusin="hintsDismissed = false" @focusout="expandedHelp = ''">
-                <button type="button" class="help-trigger" aria-label="查看回复期间继续判断新消息的详细说明"
-                        aria-describedby="route-details" @click="toggleHelp('route')">
-                  <NavIcon name="info" aria-hidden="true"/>
-                </button>
-                <span id="route-details" class="help-details" role="tooltip">默认关闭。开启后，普通群消息在回复期间仍由 Jev 优先判断，无法确定时回退回复决策模型；需要回复的消息合并到下一轮，不打断当前回复，也不同时生成多条回复。</span>
-              </span>
-            </div>
-            <p id="route-while-replying-hint" class="setting-summary">开启后会增加请求量。</p>
-          </div>
-          <input id="route-enabled" v-model="config.routeWhileReplying" :disabled="saving" type="checkbox" aria-describedby="route-while-replying-hint">
         </div>
       </section>
       <section class="execution-section">
