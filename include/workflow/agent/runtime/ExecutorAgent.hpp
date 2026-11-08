@@ -30,7 +30,7 @@ namespace insoulforge::ExecutorAgent {
     /// @brief 执行回复生成
     /// @param chatRecords 本轮冻结的完整消息快照，同时供模型投影和工具读取；调用方须持有至协程完成。
     /// @param decision 群聊 Router 的决策结果；私聊省略，不注入回复策略。
-    /// @return 回复或不回复决策；有工具历史的流程失败附带 failureReason，无可记录内容时返回空值。
-    [[nodiscard]] auto execute(const ChatRecordManager &chatRecords,
-      std::optional<RouterDecision> decision = std::nullopt) -> drogon::Task<std::optional<ReplyDecision>>;
+    /// @details 发送由工具完成；未发送的结束决策及可记录的流程失败由执行层写入会话执行记录。
+    [[nodiscard]] auto execute(
+      const ChatRecordManager &chatRecords, std::optional<RouterDecision> decision = std::nullopt) -> drogon::Task<>;
 } // namespace insoulforge::ExecutorAgent

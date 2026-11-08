@@ -338,26 +338,10 @@ namespace insoulforge {
                         routerDecision.maxLength ? std::to_string(*routerDecision.maxLength) : "未指定"));
 
                     if (routerDecision.shouldReply) {
-                        auto input = sessionState->takeExecutorRequest();
-                        const auto records = ChatRecordManager{sessionId, std::move(input.records)};
-                        if (const auto replyDecision = co_await ExecutorAgent::execute(
-                              records, sessionId.isPrivate() ? std::nullopt : std::optional{std::move(routerDecision)});
-                          replyDecision && replyDecision->shouldReply && !replyDecision->content.empty()) {
-                            co_await MessageService::sendToSession(
-                              sessionId, replyDecision->content, std::nullopt, replyDecision->toolHistory);
-                        } else if (replyDecision && replyDecision->messageSent) {
-                            // 发送结果和工具历史已经写入助手消息，不再追加未回复记录。
-                            Logger::debug(sessionId, "Executor", "回复已通过工具发送，本轮结束");
-                        } else {
-                            Logger::info(sessionId, "Executor", "未生成可发送的回复");
-                            if (replyDecision) {
-                                appendAssistantExecutionRecord(sessionId,
-                                  MessageRecord::createAssistantExecutionRecord(m_dependencies->config.botName + "(我)",
-                                    replyDecision->toolHistory,
-                                    replyDecision->failureReason.empty() ? "no_reply" : "failed",
-                                    replyDecision->failureReason));
-                            }
-                        }
+                        auto [inputRecords] = sessionState->takeExecutorRequest();
+                        const auto records = ChatRecordManager{sessionId, std::move(inputRecords)};
+                        co_await ExecutorAgent::execute(
+                          records, sessionId.isPrivate() ? std::nullopt : std::optional{std::move(routerDecision)});
                     }
                 } else {
                     Logger::warn(sessionId, "Workflow", "回复任务跳过：Agent 不可用");

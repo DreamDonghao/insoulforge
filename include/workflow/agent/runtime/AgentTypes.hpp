@@ -2,7 +2,6 @@
 /// @brief Agent 类型定义 - 两层代理架构的核心数据结构
 /// @details 定义两层代理架构中使用的核心数据类型：
 ///          - RouterDecision: Router Agent 的路由决策（含回复策略）
-///          - ReplyDecision: Executor Agent 的回复结果
 
 #pragma once
 
@@ -40,14 +39,6 @@ namespace insoulforge {
         }
     };
 
-    /// @brief Executor Agent 回复结果
-    struct ReplyDecision {
-        bool shouldReply = false; ///< 是否仍需由工作流发送正文
-        bool messageSent = false; ///< 终结回复工具已成功发送；不再追加 no_reply 记录
-        std::string content;
-        json toolHistory = json::array(); ///< 按实际处理顺序记录工具与参数，不保留工具完整输出
-        std::string failureReason; ///< 无法完成回复流程时的原因，与主动 no_reply 区分
-    };
 } // namespace insoulforge
 
 // fmt::formatter 特化

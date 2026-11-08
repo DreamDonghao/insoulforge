@@ -10,6 +10,7 @@
 #include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
+#include <workflow/EventWorkflow.hpp>
 #include <workflow/activity/ActivityManager.hpp>
 #include <workflow/agent/llm/LlmClient.hpp>
 #include <workflow/agent/llm/prompts/ExecutorSystemPrompt.hpp>
@@ -28,6 +29,13 @@
 
 namespace insoulforge::ExecutorAgent {
     namespace {
+        /// @brief Executor Agent 回复结果
+        struct ReplyDecision {
+            bool messageSent = false; ///< 终结回复工具已成功发送；不再追加 no_reply 记录
+            json toolHistory = json::array(); ///< 按实际处理顺序记录工具与参数，不保留工具完整输出
+            std::string failureReason; ///< 无法完成回复流程时的原因，与主动 no_reply 区分
+        };
+
         /// @brief 按 UTF-8 字符边界截断，超长时末尾追加省略号
         [[nodiscard]] auto truncateUtf8(const std::string &text, const size_t maxChars) -> std::string {
             size_t i = 0;
@@ -288,7 +296,6 @@ namespace insoulforge::ExecutorAgent {
                     continue;
                 }
                 if (name == "finish_turn") {
-                    decision.shouldReply = false;
                     recordCall("decision");
                     hasDecision = true;
                     continue;
@@ -324,7 +331,6 @@ namespace insoulforge::ExecutorAgent {
                     }
                     recordCall("succeeded");
                     decision.messageSent = true;
-                    decision.shouldReply = false;
                     hasDecision = true;
                     continue;
                 }
@@ -432,16 +438,20 @@ namespace insoulforge::ExecutorAgent {
 
                 const json &message = atOrNull((*respJson)["choices"][0], "message");
 
-                // 无工具调用：文本即回复；无文本视为不回复
+                // 未调用工具不能发送正文或结束回合；纠正请求仍计入轮数上限。
                 if (!message.contains("tool_calls") || !message["tool_calls"].is_array() ||
                     message["tool_calls"].empty()) {
-                    ReplyDecision decision;
-                    decision.toolHistory = std::move(toolHistory);
-                    if (message.contains("content") && !message["content"].is_null()) {
-                        decision.shouldReply = true;
-                        decision.content = cleanReplyContent(jsonToString(message["content"]));
+                    if (replyOnly) {
+                        ReplyDecision decision;
+                        decision.toolHistory = std::move(toolHistory);
+                        decision.failureReason = "达到最大迭代轮数，未调用结束工具";
+                        co_return decision;
                     }
-                    co_return decision;
+                    messages.push_back({{"role", "assistant"}, {"content", getStr(message, "content")}});
+                    messages.push_back(
+                      {{"role", "user"}, {"content", "直接输出的文本不会发送。请调用 send_message_and_finish "
+                                                     "发送并结束，或调用 finish_turn 结束本轮。"}});
+                    continue;
                 }
 
                 // 有工具调用：回传 assistant 消息后逐个处理，未命中回复工具则继续下一轮
@@ -525,8 +535,7 @@ namespace insoulforge::ExecutorAgent {
         return result;
     }
 
-    auto execute(const ChatRecordManager &chatRecords, std::optional<RouterDecision> decision)
-      -> drogon::Task<std::optional<ReplyDecision>> {
+    auto execute(const ChatRecordManager &chatRecords, std::optional<RouterDecision> decision) -> drogon::Task<> {
         const SessionId sessionId = chatRecords.getSessionId();
         if (decision) {
             Logger::info(sessionId, "Executor",
@@ -546,7 +555,14 @@ namespace insoulforge::ExecutorAgent {
         }
         json messages = buildPrompt(chatRecords, decision);
 
-        co_return co_await executeWithAgent(std::move(messages), sessionId, chatRecords.getRecords(),
+        const auto result = co_await executeWithAgent(std::move(messages), sessionId, chatRecords.getRecords(),
           std::move(mcpSelection), getInt(executionConfig, "maxToolRounds", 8));
+        if (result && result->messageSent) {
+            Logger::debug(sessionId, "Executor", "回复已通过工具发送，本轮结束");
+        } else if (result) {
+            EventWorkflow::instance().appendAssistantExecutionRecord(sessionId,
+              MessageRecord::createAssistantExecutionRecord(Config::instance().botName + "(我)", result->toolHistory,
+                result->failureReason.empty() ? "no_reply" : "failed", result->failureReason));
+        }
     }
 } // namespace insoulforge::ExecutorAgent

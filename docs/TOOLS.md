@@ -27,6 +27,8 @@ Executor（`ExecutorAgent`）在单个 Agent 循环中通过工具调用生成�
 > `REPLY` 类工具的 handler 只是占位：它们在 `ExecutorAgent::processToolCalls` 内被拦截执行（需要改写回复决策而非返回工具结果），不经
 > `ToolRegistry::executeTool`。
 
+Executor 不会将模型直接输出的文本发送到会话。未调用工具时会提示模型使用结束工具，纠正请求计入最大轮数；最后一轮仍未调用工具则记录失败，不再请求模型。
+
 ## 消息发送与结束（3 个）
 
 | 工具 | 参数 | 行为 |

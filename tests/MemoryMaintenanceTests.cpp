@@ -696,49 +696,52 @@ namespace {
             executorMemory["conversation_summaries"] = {{{"start_time", "2026-10-19 10:00:00"},
               {"end_time", "2026-10-19 10:10:00"}, {"summary", "讨论了部署方式，等待后续验证。"}}};
             MemoryStore::updateShortTermMemory(privateId, executorMemory.dump());
-            ToolRuntime::invalidateFavoriteEmojiCache();
-            const auto reply = co_await ExecutorAgent::execute(records);
-            require(
-              reply && reply->content == "context verified", "executor context ordering or global injection failed");
-            const ChatRecordManager groupRecords(insoulforge::SessionId::group("100"), records.getRecords());
-            require(favoriteRequests == 1, "favorites fetched once across executor rounds and fallback");
-            require(executorFallbackRequests == 1, "executor used the fallback with the frozen message prefix");
-            ToolRuntime::invalidateFavoriteEmojiCache();
-            const auto groupReply = co_await ExecutorAgent::execute(
-              groupRecords, RouterDecision{.reason = "group strategy", .tone = "serious", .maxLength = 123});
-            require(groupReply && groupReply->content == "context verified", "group Router strategy was lost");
-            require(favoriteRequests == 2, "next execute refreshes changed favorites");
-            ToolRuntime::invalidateFavoriteEmojiCache();
-            const auto mentionReply = co_await ExecutorAgent::execute(
-              groupRecords, RouterDecision{.reason = "用户@提及", .maxLength = std::nullopt, .isPriority = true});
-            require(mentionReply && mentionReply->content == "context verified",
-              "mention context did not omit the reply length");
-            require(favoriteRequests == 3, "empty favorites fetched for next execute");
-            ToolRuntime::invalidateFavoriteEmojiCache();
-            config.affinityEnabled = false;
-            const auto withoutScoreReply = co_await ExecutorAgent::execute(
-              groupRecords, RouterDecision{.reason = "group strategy", .tone = "serious", .maxLength = 123});
-            require(withoutScoreReply && withoutScoreReply->content == "context verified",
-              "disabled affinity leaked into the executor context or prompt");
-            require(favoriteRequests == 4, "failed favorites request does not prevent execution");
-            config.affinityEnabled = true;
             auto &agent = AgentSystem::instance();
             require(agent.initialize(database, config.botName).has_value() &&
                       EventWorkflow::instance().initialize(database, config, agent).has_value(),
               "send fixture workflow initialization failed");
+            const auto requireFinished = [](const SessionId &sessionId) {
+                const auto history = EventWorkflow::instance().getSessionMessages(sessionId);
+                require(history && !history->empty() && history->back()["execution_status"] == "no_reply",
+                  "executor context validation must reach finish_turn");
+            };
+            ToolRuntime::invalidateFavoriteEmojiCache();
+            co_await ExecutorAgent::execute(records);
+            requireFinished(privateId);
+            const ChatRecordManager groupRecords(insoulforge::SessionId::group("100"), records.getRecords());
+            require(favoriteRequests == 1, "favorites fetched once across executor rounds and fallback");
+            require(executorFallbackRequests == 1, "executor used the fallback with the frozen message prefix");
+            ToolRuntime::invalidateFavoriteEmojiCache();
+            co_await ExecutorAgent::execute(
+              groupRecords, RouterDecision{.reason = "group strategy", .tone = "serious", .maxLength = 123});
+            requireFinished(groupRecords.getSessionId());
+            require(favoriteRequests == 2, "next execute refreshes changed favorites");
+            ToolRuntime::invalidateFavoriteEmojiCache();
+            co_await ExecutorAgent::execute(
+              groupRecords, RouterDecision{.reason = "用户@提及", .maxLength = std::nullopt, .isPriority = true});
+            requireFinished(groupRecords.getSessionId());
+            require(favoriteRequests == 3, "empty favorites fetched for next execute");
+            ToolRuntime::invalidateFavoriteEmojiCache();
+            config.affinityEnabled = false;
+            co_await ExecutorAgent::execute(
+              groupRecords, RouterDecision{.reason = "group strategy", .tone = "serious", .maxLength = 123});
+            requireFinished(groupRecords.getSessionId());
+            require(favoriteRequests == 4, "failed favorites request does not prevent execution");
+            config.affinityEnabled = true;
             config.executor.path = "/executor-send-fixture";
-            const auto sentReply = co_await ExecutorAgent::execute(records);
-            require(sentReply && sentReply->messageSent && !sentReply->shouldReply && sentReply->content.empty(),
-              "successful terminal send must be distinguished from no reply");
+            co_await ExecutorAgent::execute(records);
             const auto delivered = EventWorkflow::instance().getSessionMessages(privateId);
             require(delivered && !delivered->empty() &&
                       delivered->back()["tool_history"][0]["name"] == "contract_context" &&
                       !delivered->back().contains("execution_status"),
               "sent message must retain tool history without no_reply");
             config.executor.path = "/executor-finish-fixture";
-            const auto silentReply = co_await ExecutorAgent::execute(records);
-            require(silentReply && !silentReply->messageSent && !silentReply->shouldReply,
-              "finish_turn must remain a no reply decision");
+            co_await ExecutorAgent::execute(records);
+            const auto silent = EventWorkflow::instance().getSessionMessages(privateId);
+            require(silent && silent->size() == delivered->size() + 1 &&
+                      silent->back()["execution_status"] == "no_reply" &&
+                      silent->back()["tool_history"].back()["name"] == "finish_turn",
+              "Executor must record finish_turn exactly once with its tool history");
             registry.unregisterPlugin("contract.context");
             registry.unregisterPlugin("builtin.info");
             require(registry.registerPlugin(
@@ -1299,7 +1302,9 @@ auto main() -> int {
               }
               reply->setStatusCode(drogon::k400BadRequest);
           } else {
-              json message = {{"role", "assistant"}, {"content", "context verified"}};
+              json message = {{"role", "assistant"},
+                {"tool_calls", {{{"id", "finish"}, {"type", "function"},
+                                 {"function", {{"name", "finish_turn"}, {"arguments", "{}"}}}}}}};
               if (executorRequests == 1) {
                   message["tool_calls"] = {{{"id", "fixture-call"}, {"type", "function"},
                     {"function", {{"name", "contract_context"}, {"arguments", "{}"}}}}};
@@ -1319,7 +1324,11 @@ auto main() -> int {
           if (fallbackMessages.empty() || body["messages"] != fallbackMessages) {
               response->setStatusCode(drogon::k400BadRequest);
           } else {
-              response->setBody(json{{"choices", {{{"message", {{"content", "context verified"}}}}}}}.dump());
+              response->setBody(json{
+                {"choices",
+                  {{{"message", {{"tool_calls", {{{"id", "finish"}, {"type", "function"},
+                                                  {"function", {{"name", "finish_turn"}, {"arguments", "{}"}}}}}}}}}}}}
+                  .dump());
           }
           callback(response);
       },

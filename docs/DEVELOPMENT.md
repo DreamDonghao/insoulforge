@@ -236,7 +236,7 @@ MessageService → OneBot API
 会话统计与异步记忆维护
 ```
 
-关键数据结构见 `include/workflow/agent/runtime/AgentTypes.hpp`（`RouterDecision`、`ReplyDecision`）。
+关键数据结构见 `include/workflow/agent/runtime/AgentTypes.hpp`（`RouterDecision`）；Executor 的执行结果类型仅在实现内部使用。
 
 消息处理的几个约束：
 
@@ -720,7 +720,7 @@ Executor System 由 `ExecutorSystemPrompt` 单例按六部分构建并缓存，�
 
 人物详情的“直接压缩”调用 `POST /admin/api/people/{user_id}/compress`，与每日任务共用维护互斥和压缩流程。有待整理条目先整理，失败跳过；忽略触发阈值（关闭自动压缩时也可使用），沿用配置目标，比值最多为 100%，统计为 0 时也按 100%。目标必须大于 0。结果未减少时返回成功提示但不保存，不改变每日完成标记。
 
-`send_message_and_finish` 成功后通过 `ReplyDecision.messageSent` 标记已送达，工具历史随已发送助手消息保存；外层不重复发送、不记录“未生成可发送的回复”或追加 `no_reply`。发送失败不设置该标记，仍由模型决定后续处理；`finish_turn` 保持未回复语义。
+`send_message_and_finish` 成功后通过 `ReplyDecision.messageSent` 标记已送达，工具历史随已发送助手消息保存；Executor 自行收尾，成功发送后不追加 `no_reply`；未发送的结束决策和可记录的失败由 Executor 写入执行记录，工作流仅等待执行完成。发送失败不设置该标记，仍由模型决定后续处理；`finish_turn` 保持未回复语义。
 
 ### OneBot 实现切换与收藏操作快照
 

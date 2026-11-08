@@ -619,6 +619,12 @@ auto main() -> int {
           json message = {{"content", isRouter ? (routerReply ? "{\"action\":\"reply\",\"reason\":\"fixture\"}"
                                                               : "{\"action\":\"skip\",\"reason\":\"fixture\"}")
                                                : "ok"}};
+          if (!isRouter) {
+              message = {{"content", nullptr},
+                {"tool_calls",
+                  json::array({{{"id", "send-final"}, {"type", "function"},
+                    {"function", {{"name", "send_message_and_finish"}, {"arguments", "{\"content\":\"ok\"}"}}}}})}};
+          }
           if (!isRouter && toolRound.exchange(false)) {
               message = {{"content", nullptr},
                 {"tool_calls",
