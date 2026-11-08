@@ -6,7 +6,6 @@
 
 #include <string>
 
-#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
 
 namespace insoulforge {

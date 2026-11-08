@@ -11,7 +11,6 @@ namespace insoulforge {
         ADD_METHOD_TO(ActivityController::saveConfig, "/admin/api/activities", drogon::Post);
         ADD_METHOD_TO(ActivityController::setEnabled, "/admin/api/activities", drogon::Patch);
         ADD_METHOD_TO(ActivityController::removeService, "/admin/api/activities", drogon::Delete);
-        ADD_METHOD_TO(ActivityController::synchronize, "/admin/api/activities/sync", drogon::Post);
         ADD_METHOD_TO(
           ActivityController::uploadFile, "/activities/files", drogon::Post, "insoulforge::ActivityAuthentication");
         METHOD_LIST_END
@@ -24,8 +23,6 @@ namespace insoulforge {
         void setEnabled(
           const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) const;
         void removeService(
-          const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) const;
-        void synchronize(
           const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) const;
     };
 } // namespace insoulforge

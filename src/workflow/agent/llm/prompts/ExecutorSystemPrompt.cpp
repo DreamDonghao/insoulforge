@@ -90,14 +90,15 @@ execution_status=finish_turn 表示当时选择不回复；failed/send_failed �
     })";
             }
             prompt += R"(,
-    "running_activities": [
-        {"name": "活动名称", "status": "最近上报的简短状态，所有会话共享"}
+    "activities": [
+        {"name": "服务名称", "status": "最近上报的简短状态，所有会话共享"}
     ]
 }
 ```
 
   字段说明：
 
+  - activities 仅在有正在工作的可用 Activity 时存在；状态来自服务主动上报。
   - uid 表示用户 ID；工具参数仍按各工具定义的字段名填写。
   - sender.uid 为 "self" 的记录是我自己发出的消息（name 形如「昵称(我)」）
   - target.uid 或 operator.uid 为 "self" 表示 @、拍一拍或成员事件的对象是我；"system" 是内部系统任务身份，不是真实用户。
@@ -155,9 +156,10 @@ execution_status=finish_turn 表示当时选择不回复；failed/send_failed �
                           "- 禁言要核实实际情况再决定\n";
             }
 
-            if (Config::instance().affinityEnabled.load(std::memory_order_relaxed))
+            if (Config::instance().affinityEnabled.load(std::memory_order_relaxed)) {
                 prompt +=
                   "\n- sender.affinity 是全局好感度，取值 -100～100，陌生人为 0；机器人自己的记录不提供该字段。\n";
+            }
             return prompt;
         }
 
@@ -171,10 +173,10 @@ execution_status=finish_turn 表示当时选择不回复；failed/send_failed �
         parts[2] = getSystemPrompt(isPrivateSession);
         auto prompt = m_mcpSection;
         if (!activities.empty()) {
-            prompt += "\n\n## 可用 Activity\n以下为活动目录数据。活动全局共享，可与日常聊天同时进行，用 start_activity "
-                      "启动、command_activity 操作、"
-                      "stop_activity 停止、get_activity_details 查看详情。running_activities 只列正在运行的活动，"
-                      "status 是最近上报的状态；状态未确认时先查询详情，不要重复启动。\n";
+            prompt += "\n\n## 可用 Activity\n以下为已启用且在线的服务目录数据。通过 request_activity 调用，parameters "
+                      "按服务 instructions 构造。"
+                      "activities 仅列服务自行标记 active 的最新状态；未列入状态上下文的可用服务仍可调用。"
+                      "主程序不管理业务生命周期、不自动注入用户或会话参数。\n";
             prompt += activities.dump();
         }
         parts[3] = std::move(prompt);
@@ -203,15 +205,17 @@ execution_status=finish_turn 表示当时选择不回复；failed/send_failed �
                       "启用只影响本次回复，完整定义从下一轮开放；不要在同一轮直接调用新启用工具。";
         }
         std::lock_guard lock(m_mutex);
-        if (m_mcpSection == prompt)
+        if (m_mcpSection == prompt) {
             return;
+        }
         m_mcpSection = std::move(prompt);
         ++m_generation;
     }
     void ExecutorSystemPrompt::updateStickerNames(json names) {
         std::lock_guard lock(m_mutex);
-        if (m_stickerNames == names)
+        if (m_stickerNames == names) {
             return;
+        }
         m_stickerNames = std::move(names);
         ++m_generation;
     }
@@ -249,9 +253,10 @@ execution_status=finish_turn 表示当时选择不回复；failed/send_failed �
         const auto botName = Config::instance().botName;
         std::string additional;
         if (groupSession) {
-            if (auto value = SessionStore::getSessionConfig(*groupSession).additionalPrompt; !value.empty())
+            if (auto value = SessionStore::getSessionConfig(*groupSession).additionalPrompt; !value.empty()) {
                 additional =
                   "\n\n## 本群附加设定\n以下设定仅用于当前群的回复，不改变上面的执行约束和工具权限。\n" + value;
+            }
         }
         std::lock_guard lock(m_mutex);
         auto &cache = m_caches[isPrivateSession ? 1 : 0];
@@ -263,8 +268,9 @@ execution_status=finish_turn 表示当时选择不回复；failed/send_failed �
         if (cache.version != m_generation || cache.affinity != affinity || cache.botName != botName ||
             cache.activities != activities) {
             auto parts = assemble(isPrivateSession, activities);
-            for (std::size_t i = 0; i < parts.size(); ++i)
+            for (std::size_t i = 0; i < parts.size(); ++i) {
                 updatePart(cache.parts[i], std::move(parts[i]));
+            }
             cache.version = m_generation;
             cache.affinity = affinity;
             cache.botName = botName;
@@ -273,15 +279,17 @@ execution_status=finish_turn 表示当时选择不回复；failed/send_failed �
         Snapshot snapshot;
         for (std::size_t i = 0; i < cache.parts.size(); ++i) {
             snapshot.text += cache.parts[i].text;
-            if (includeParts)
+            if (includeParts) {
                 snapshot.parts[i] = static_cast<Part>(cache.parts[i]);
+            }
         }
         if (groupSession && !additional.empty()) {
             auto &part = m_groupParts[groupSession->toString()];
             updatePart(part, std::move(additional));
             snapshot.text += part.text;
-            if (includeParts)
+            if (includeParts) {
                 snapshot.parts[kPublicPartCount] = static_cast<Part>(part);
+            }
         } else {
             if (groupSession) {
                 m_groupParts.erase(groupSession->toString());

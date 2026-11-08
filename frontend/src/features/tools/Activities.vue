@@ -10,9 +10,9 @@ interface Service {
   name: string
   description: string
   enabled: boolean
-  running: boolean
+  active: boolean
+  instructions: string
   connected: boolean
-  synchronized: boolean
   busy: boolean
   status: string
   updatedAt: number
@@ -26,7 +26,6 @@ const loading = ref(true)
 const loaded = ref(false)
 const reading = ref(false)
 const saving = ref(false)
-const syncing = ref('')
 const error = ref('')
 let active = true
 let timer: ReturnType<typeof setInterval> | undefined
@@ -53,23 +52,20 @@ async function load(background = false): Promise<void> {
   try {
     const data = await api()
     if (!active) return
-    if (!Array.isArray(data.servers) || typeof data.token !== 'string') throw new Error('活动配置数据无效')
+    if (!Array.isArray(data.servers) || typeof data.token !== 'string') throw new Error('Activity 配置数据无效')
     // 后台刷新只跟随未修改的 Token，不覆盖正在编辑的内容。
     if (!dirty.value || !background) token.value = data.token
     config.value = data
     loaded.value = true
     error.value = ''
   } catch (cause) {
-    if (active) error.value = requestError(cause, '读取活动配置失败')
+    if (active) error.value = requestError(cause, '读取 Activity 配置失败')
   } finally {
     reading.value = false
     if (active) loading.value = false
   }
 }
-function locked(service: Service): boolean {
-  return service.running || service.busy
-}
-async function mutate(path: string, method: string, body?: object, successMessage = '活动配置已保存'): Promise<void> {
+async function mutate(path: string, method: string, body?: object, successMessage = 'Activity 配置已保存'): Promise<void> {
   if (saving.value || reading.value || !loaded.value) return
   saving.value = true
   try {
@@ -93,32 +89,15 @@ async function saveToken(): Promise<void> {
 async function setEnabled(service: Service, enabled: boolean): Promise<void> {
   await mutate('', 'PATCH', {name: service.name, enabled})
 }
-function canSync(service: Service): boolean {
-  return loaded.value && !saving.value && !reading.value && service.connected && !service.busy
-}
 function stateLabel(service: Service): string {
-  if (!service.enabled) return '服务已禁用'
-  if (!service.connected || !service.synchronized) return '状态未确认'
-  return service.running ? '活动运行中' : '当前无活动'
-}
-async function syncService(service: Service): Promise<void> {
-  if (!canSync(service)) return
-  syncing.value = service.name
-  try {
-    await mutate('/sync', 'POST', {name: service.name}, '活动状态已同步')
-  } finally {
-    syncing.value = ''
-  }
+  if (!service.connected) return '工作状态未知'
+  return service.active ? '正在工作' : '未工作'
 }
 async function remove(service: Service): Promise<void> {
-  const force = locked(service) || service.connected
-  const message = force
-    ? `强制删除“${service.name}”？将清除本地运行记录、断开连接并取消等待中的请求，不会结束独立服务中的活动。服务再次连接时会重新登记并自动启用。`
-    : `删除活动服务“${service.name}”的记录？服务再次连接时会重新登记并自动启用。`
-  if (window.confirm(message))
-    await mutate('', 'DELETE', {name: service.name, ...(force ? {force: true} : {})})
+  if (window.confirm(`删除 Activity“${service.name}”的接入记录？将断开连接并取消等待中的请求，不影响服务内部业务。服务重连后会重新登记。`))
+    await mutate('', 'DELETE', {name: service.name})
 }
-const runningCount = computed(() => config.value.servers.filter(service => service.running).length)
+const activeCount = computed(() => config.value.servers.filter(service => service.enabled && service.connected && service.active).length)
 onMounted(() => {
   void load()
   timer = setInterval(() => { if (!document.hidden) void load(true) }, 5000)
@@ -132,18 +111,18 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="page-header">
-    <div><h1 class="page-title">Activity</h1><p class="page-subtitle">服务自动注册，所有会话共享 · {{ runningCount }} 个运行记录</p></div>
+    <div><h1 class="page-title">Activity</h1><p class="page-subtitle">服务自动注册，所有会话共享 · {{ activeCount }} 个正在工作</p></div>
     <button class="btn btn-secondary" :disabled="loading || reading || saving" @click="load()">刷新</button>
   </div>
   <div class="content activity-content">
     <p v-if="error" class="activity-error" role="alert">{{ error }}</p>
     <form class="token-form" @submit.prevent="saveToken">
       <div class="form-group">
-        <label class="form-label" for="activity-token">活动服务接入 Token</label>
+        <label class="form-label" for="activity-token">Activity 服务接入 Token</label>
         <div class="secret-input">
           <input id="activity-token" v-model="token" class="form-input" :type="showToken ? 'text' : 'password'"
                  autocomplete="new-password" autocapitalize="off" :spellcheck="false" minlength="16"
-                 aria-describedby="activity-token-hint" :disabled="!loaded || saving" placeholder="设置所有活动服务连接时携带的 Token">
+                 aria-describedby="activity-token-hint" :disabled="!loaded || saving" placeholder="设置所有 Activity 服务连接时携带的 Token">
           <button type="button" class="secret-toggle" :disabled="!loaded || saving"
                   aria-controls="activity-token" :aria-pressed="showToken"
                   :title="showToken ? '隐藏接入 Token' : '显示接入 Token'"
@@ -153,30 +132,29 @@ onBeforeUnmount(() => {
         </div>
         <p id="activity-token-hint" class="form-hint">至少 16 个字符。修改后已连接服务会断开，清空则关闭接入。服务连接 <code>/activities/ws</code>，携带此 Token 后自动上报名称和描述。</p>
       </div>
-      <button class="btn btn-primary" :disabled="!loaded || reading || saving || !dirty">{{ saving && !syncing ? '保存中…' : '保存 Token' }}</button>
+      <button class="btn btn-primary" :disabled="!loaded || reading || saving || !dirty">{{ saving ? '保存中…' : '保存 Token' }}</button>
     </form>
-    <p v-if="loading">正在读取活动服务…</p>
-    <div v-else-if="!config.servers.length" class="empty-state">暂无活动服务。设置接入 Token，再运行服务程序；连接注册后会自动出现在这里。</div>
+    <p v-if="loading">正在读取 Activity 服务…</p>
+    <div v-else-if="!config.servers.length" class="empty-state">暂无 Activity 服务。设置接入 Token，再运行服务程序；连接注册后会自动出现在这里。</div>
     <div v-else class="activity-list">
       <article v-for="service in config.servers" :key="service.name" class="activity-row">
         <EnabledSwitch :model-value="service.enabled" :label="`${service.name}服务`"
-                       :disabled="saving || reading || locked(service)" @update:model-value="setEnabled(service, $event)" />
+                       :disabled="saving || reading" @update:model-value="setEnabled(service, $event)" />
         <div class="activity-info">
           <div class="activity-title"><h2>{{ service.name }}</h2>
-            <span :class="{'is-running': service.running && service.connected && service.synchronized}">{{ stateLabel(service) }}</span>
-            <span :class="{'activity-error': !service.connected || !service.synchronized}">{{ !service.connected ? '服务未连接' : service.synchronized ? '已连接，状态已确认' : '已连接，状态未确认' }}</span>
+            <span :class="{'is-active': service.active && service.connected}">{{ stateLabel(service) }}</span>
+            <span>{{ service.connected ? '已连接' : '已断开' }}</span>
           </div>
           <p>{{ service.description || '暂无描述' }}</p>
-          <p v-if="service.running" class="activity-status">{{ service.status }}</p>
+          <p v-if="service.connected && service.status" class="activity-status">{{ service.status }}</p>
           <small v-if="service.updatedAt">最近状态：{{ new Date(service.updatedAt * 1000).toLocaleString() }}</small>
         </div>
         <div class="activity-actions">
-          <button class="btn btn-secondary" :disabled="!canSync(service)" @click="syncService(service)">{{ syncing === service.name ? '同步中…' : '立即同步' }}</button>
-          <button class="btn btn-danger" :disabled="saving || reading" @click="remove(service)">{{ locked(service) || service.connected ? '强制删除' : '删除记录' }}</button>
+          <button class="btn btn-danger" :disabled="saving || reading" @click="remove(service)">删除记录</button>
         </div>
       </article>
     </div>
-    <p class="form-hint">状态由服务通过 WS 实时推送，操作响应携带最新快照；“立即同步”主动查询服务，“刷新”和页面每 5 秒刷新只读取本地快照。状态未确认时可立即同步，也可等待有效推送恢复。强制删除不会结束独立服务，服务重连会重新登记。</p>
+    <p class="form-hint">状态由 Activity 主动上报；只有已启用、在线且正在工作的服务进入模型状态上下文。未工作的在线服务仍可调用。“刷新”和页面自动刷新只读取本地缓存。删除接入记录不会停止服务内部业务。</p>
   </div>
 </template>
 
@@ -190,7 +168,7 @@ onBeforeUnmount(() => {
 .activity-actions {display: flex; gap: 16px; flex-wrap: wrap; align-items: center}
 .activity-title h2 {margin: 0; font-size: 18px; color: var(--text-primary)}
 .activity-title span, small {font-size: 13px; color: var(--text-secondary)}
-.activity-title .is-running {color: var(--primary)}
+.activity-title .is-active {color: var(--primary)}
 .activity-row {display: grid; grid-template-columns: 120px minmax(0, 1fr) auto; gap: 24px; padding: 24px; border-bottom: 0; align-items: start; background: var(--card-bg); margin-bottom: 16px; border-radius: var(--radius-md); }
 .activity-info p {margin: 10px 0; overflow-wrap: anywhere; color: var(--text-secondary)}
 .activity-info .activity-status {color: var(--text-primary)}

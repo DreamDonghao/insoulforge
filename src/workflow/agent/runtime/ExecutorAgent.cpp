@@ -17,8 +17,8 @@
 #include <workflow/agent/memory/PersonMemoryStore.hpp>
 #include <workflow/agent/memory/affinity/AffinityStore.hpp>
 #include <workflow/agent/runtime/ExecutorAgent.hpp>
-#include <workflow/agent/tools/ToolRegistry.hpp>
 #include <workflow/agent/tools/ToolArgument.hpp>
+#include <workflow/agent/tools/ToolRegistry.hpp>
 #include <workflow/agent/tools/ToolRuntime.hpp>
 #include <workflow/agent/tools/mcp/McpTools.hpp>
 #include <workflow/history/SharedConversationContext.hpp>
@@ -44,8 +44,9 @@ namespace insoulforge::ExecutorAgent {
                 }
                 ++count;
             }
-            if (i >= text.size())
+            if (i >= text.size()) {
                 return text;
+            }
             return text.substr(0, i) + "…";
         }
 
@@ -76,8 +77,9 @@ namespace insoulforge::ExecutorAgent {
         /// @brief 注入发送者当前好感度（读时注入，保证 LLM 看到的永远是最新值）
         /// @details 跳过机器人身份标记；映射中不存在的用户按 0（中立）注入
         [[nodiscard]] auto injectAffinity(json content, const std::unordered_map<UserId, i32> &affinityMap) -> json {
-            if (!content.is_object() || !content.contains("sender"))
+            if (!content.is_object() || !content.contains("sender")) {
                 return content;
+            }
             if (const auto userId = UserId::parse(getStr(content["sender"], "user_id"));
               userId && userId->toString() != "self") {
                 const auto it = affinityMap.find(*userId);
@@ -121,7 +123,7 @@ namespace insoulforge::ExecutorAgent {
         /// @details 上下文组装为键序固定的单个 JSON 对象（ordered_json 按插入顺序序列化）作为单条
         /// user 消息：current_session → session_memory → conversation_summaries → earlier_messages → person_memories →
         /// shared_conversations → recent_messages → response_requirements（仅有 Router 策略时）→
-        /// running_activities，避免连续多条 user（部分 OpenAI 兼容后端不支持）
+        /// activities，避免连续多条 user（部分 OpenAI 兼容后端不支持）
         [[nodiscard]] auto buildPrompt(const ChatRecordManager &chatRecords, const MemoryManager &memory,
           const std::optional<RouterDecision> &decision) -> json {
             json messages = json::array();
@@ -164,7 +166,9 @@ namespace insoulforge::ExecutorAgent {
                 }
                 context["response_requirements"]["reply_reason"] = decision->reason;
             }
-            context["running_activities"] = ActivityManager::instance().runningActivities();
+            if (auto activities = ActivityManager::instance().activeActivities(); !activities.empty()) {
+                context["activities"] = std::move(activities);
+            }
 
             json userMsg;
             userMsg["role"] = "user";
@@ -201,8 +205,9 @@ namespace insoulforge::ExecutorAgent {
         /// @details OpenAI 兼容格式使用 JSON 字符串，部分接口直接返回 JSON 对象；两种格式均归一化为对象。
         [[nodiscard]] auto parseToolArguments(const json &toolCall) -> json {
             const json &rawArguments = atOrNull(atOrNull(toolCall, "function"), "arguments");
-            if (rawArguments.is_object())
+            if (rawArguments.is_object()) {
                 return rawArguments;
+            }
             json args;
             if (rawArguments.is_string()) {
                 std::ignore = tryParseJson(jsonToString(rawArguments), args);
@@ -213,8 +218,9 @@ namespace insoulforge::ExecutorAgent {
         /// @brief 将工具参数序列化为 OpenAI tool 消息要求的 JSON 字符串
         [[nodiscard]] auto serializeToolArguments(const json &toolCall) -> std::string {
             const json &rawArguments = atOrNull(atOrNull(toolCall, "function"), "arguments");
-            if (rawArguments.is_string())
+            if (rawArguments.is_string()) {
                 return jsonToString(rawArguments);
+            }
             return rawArguments.is_object() ? dumpJson(rawArguments) : "{}";
         }
 
@@ -241,8 +247,8 @@ namespace insoulforge::ExecutorAgent {
         /// 作为 tool 消息回传，CQ 码类工具的结果累积备用
         /// @return {回复决策, 工具结果消息列表, 累积 CQ 码, 按顺序保存的工具历史}
         auto processToolCalls(json message, json messages, std::string accumulatedCQCodes, const SessionId sessionId,
-          const json &messageSnapshot, const bool replyOnly, json toolHistory,
-          std::shared_ptr<McpToolSelection> mcpSelection, std::map<std::string, u64> offeredMcpTools,
+          const json &messageSnapshot, std::shared_ptr<std::vector<Image>> toolImages, const bool replyOnly,
+          json toolHistory, std::shared_ptr<McpToolSelection> mcpSelection, std::map<std::string, u64> offeredMcpTools,
           UserId callerUserId) -> drogon::Task<std::tuple<std::optional<ReplyDecision>, json, std::string, json>> {
             ReplyDecision decision;
             bool hasDecision = false;
@@ -284,20 +290,25 @@ namespace insoulforge::ExecutorAgent {
                     const auto quote = argString(args, "quote_message_id");
                     if (!quote.empty()) {
                         bool found = false;
-                        for (const auto &record: messageSnapshot)
-                            if (getStr(record, "message_id") == quote) found = true;
+                        for (const auto &record: messageSnapshot) {
+                            if (getStr(record, "message_id") == quote) {
+                                found = true;
+                            }
+                        }
                         if (!found) {
                             appendToolResult(messages, toolCall, "quote_message_id 必须来自当前会话可见消息");
                             continue;
                         }
                         content = "[CQ:reply,id=" + quote + "]" + content;
                     }
-                    const auto sent = co_await MessageService::sendToSession(sessionId, content, std::nullopt, toolHistory);
+                    const auto sent =
+                      co_await MessageService::sendToSession(sessionId, content, std::nullopt, toolHistory);
                     accumulatedCQCodes.clear();
                     if (!sent) {
                         recordCall("send_failed");
-                        appendToolResult(messages, toolCall, "发送失败或结果未知：" + sent.error() +
-                          "。本轮未结束，由你决定重发、继续处理或 finish_turn；超时不代表确定未送达。");
+                        appendToolResult(messages, toolCall,
+                          "发送失败或结果未知：" + sent.error() +
+                            "。本轮未结束，由你决定重发、继续处理或 finish_turn；超时不代表确定未送达。");
                         continue;
                     }
                     recordCall("succeeded");
@@ -311,6 +322,7 @@ namespace insoulforge::ExecutorAgent {
                 ctx.sessionId = sessionId;
                 ctx.callerUserId = callerUserId;
                 ctx.messageSnapshot = messageSnapshot;
+                ctx.toolImages = toolImages;
                 ctx.replyOnly = replyOnly;
                 ctx.mcpSelection = mcpSelection;
                 ctx.offeredMcpTools = offeredMcpTools;
@@ -342,6 +354,7 @@ namespace insoulforge::ExecutorAgent {
 
             std::string accumulatedCQCodes; // 跨轮累积 CQ 码，产出 reply 时自动拼入正文
             json toolHistory = json::array();
+            const auto toolImages = std::make_shared<std::vector<Image>>();
             const auto failedDecision = [&](std::string reason) -> std::optional<ReplyDecision> {
                 if (toolHistory.empty()) {
                     return std::nullopt;
@@ -363,11 +376,14 @@ namespace insoulforge::ExecutorAgent {
                 auto offeredMcpTools = std::map<std::string, u64>{};
                 for (const auto &tool: roundTools) {
                     const auto name = getStr(tool["function"], "name");
-                    if (const auto selected = mcpSelection->enabled.find(name); selected != mcpSelection->enabled.end())
+                    if (const auto selected = mcpSelection->enabled.find(name);
+                      selected != mcpSelection->enabled.end()) {
                         offeredMcpTools.emplace(*selected);
+                    }
                 }
-                if (!replyOnly)
+                if (!replyOnly) {
                     mcpSelection->enabled = offeredMcpTools;
+                }
                 if (roundTools.empty()) {
                     Logger::error(sessionId, "Executor", "最后一轮未注册可用的回复工具");
                     co_return failedDecision("最后一轮没有可用的回复工具");
@@ -378,6 +394,16 @@ namespace insoulforge::ExecutorAgent {
                       {"max_per_enable", mcpSelection->limits.maxPerEnable},
                       {"max_per_reply", mcpSelection->limits.maxPerReply},
                       {"selected_count", mcpSelection->enabled.size()}};
+                }
+                // 每轮使用最新缓存，不执行网络查询，也不把活动状态冻结在首轮。
+                if (messages.size() > 1 && getStr(messages[1], "role") == "user") {
+                    auto context = json::parse(getStr(messages[1], "content"));
+                    context.erase("activities");
+                    const auto activities = ActivityManager::instance().activeActivities();
+                    if (!activities.empty()) {
+                        context["activities"] = activities;
+                    }
+                    messages[1]["content"] = dumpJson(context);
                 }
                 auto requestMessages = buildIterationMessages(messages, round + 1, maxToolRounds, std::move(mcpState));
                 // 兜底只重试当前请求，不改变后续轮次的默认模型，也不重新执行工具。
@@ -412,8 +438,8 @@ namespace insoulforge::ExecutorAgent {
                 // 有工具调用：回传 assistant 消息后逐个处理，未命中回复工具则继续下一轮
                 messages.push_back(buildAssistantToolCallMessage(message));
                 auto [roundDecision, nextMessages, nextAccumulatedCQCodes, nextToolHistory] = co_await processToolCalls(
-                  message, std::move(messages), std::move(accumulatedCQCodes), sessionId, messageSnapshot, replyOnly,
-                  std::move(toolHistory), mcpSelection, std::move(offeredMcpTools), callerUserId);
+                  message, std::move(messages), std::move(accumulatedCQCodes), sessionId, messageSnapshot, toolImages,
+                  replyOnly, std::move(toolHistory), mcpSelection, std::move(offeredMcpTools), callerUserId);
                 if (roundDecision) {
                     roundDecision->toolHistory = std::move(nextToolHistory);
                     co_return std::move(roundDecision);
@@ -438,7 +464,8 @@ namespace insoulforge::ExecutorAgent {
             throw std::invalid_argument("执行轮次必须在 1 到总轮数之间，消息必须是数组");
         }
         json state = {{"current_round", currentRound}, {"max_rounds", maxToolRounds},
-          {"remaining_rounds", maxToolRounds - currentRound}, {"reply_only", currentRound == maxToolRounds}, {"current_time", currentDateTime()}};
+          {"remaining_rounds", maxToolRounds - currentRound}, {"reply_only", currentRound == maxToolRounds},
+          {"current_time", currentDateTime()}};
         if (!mcpState.is_null() && currentRound != maxToolRounds) {
             state["mcp"] = std::move(mcpState);
         }
@@ -469,7 +496,9 @@ namespace insoulforge::ExecutorAgent {
           {std::regex(R"(<\/?[|｜]*DSML[|｜]+[^>]*>)", std::regex::icase), ""},
           // </think> 与 function(...) 调用残留
           {std::regex("</think>", std::regex::icase), ""},
-          {std::regex(R"((send_message_and_finish|send_message|finish_turn|reply_with_quote|reply|no_reply)\s*\([^)]*\))"), ""},
+          {std::regex(
+             R"((send_message_and_finish|send_message|finish_turn|reply_with_quote|reply|no_reply)\s*\([^)]*\))"),
+            ""},
           // 压缩空白：去除首尾空白与 3 个以上连续换行
           {std::regex("^\\s+|\\s+$"), ""},
           {std::regex("\n{3,}"), "\n\n"},
@@ -512,8 +541,9 @@ namespace insoulforge::ExecutorAgent {
         auto callerUserId = UserId{"system"};
         for (const auto &record: chatRecords.getRecords()) {
             if (getStr(record, "message_id") == triggerMessageId) {
-                if (const auto user = UserId::parse(getStr(atOrNull(record, "sender"), "user_id")); user)
+                if (const auto user = UserId::parse(getStr(atOrNull(record, "sender"), "user_id")); user) {
                     callerUserId = *user;
+                }
                 break;
             }
         }

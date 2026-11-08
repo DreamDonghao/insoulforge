@@ -23,7 +23,7 @@ namespace insoulforge {
     class Config;
     class AgentSystem;
     /// @brief 统一事件处理工作流
-    /// @details 接收 OneBot 事件、系统任务和活动通知。
+    /// @details 接收 OneBot 事件、系统任务和Activity 通知。
     ///          每个会话串行预处理入站消息；回复处理同一时间只运行一轮。预处理完成后，
     ///          回复阶段从 MessageList 读取快照并调用 Router、Executor 和发送服务。
     ///          空闲时协程退出，不轮询。数据库中的聊天记录用于启动恢复和正常退出时保存消息列表。
@@ -103,17 +103,16 @@ namespace insoulforge {
         /// @note 线程安全。沿用普通入队检查和会话启用设置，返回时不保证处理完成。
         void enqueueSystemMessage(const SessionId &sessionId, std::string text, std::string senderName = "系统任务");
 
-        /// @brief 活动事件使用会话串行队列；silent 仅记录，judge 路由判断，force 跳过回复判断。
+        /// @brief Activity 通知使用会话串行队列；silent 仅记录，judge 路由判断，force 跳过回复判断。
         /// @param sessionId 接收通知的会话。
-        /// @param text 活动通知正文，可与图片附件一起提供。
-        /// @param name 活动名称，用于发送者显示及活动元数据。
-        /// @param mode 经活动管理器校验的 silent、judge 或 force；此处不重复校验。
-        /// @param origin 活动最初的启动来源，含 session_id 和 user_id，不替代系统发送者身份。
+        /// @param text Activity 通知正文，可与图片附件一起提供。
+        /// @param name Activity 名称，用于发送者显示及Activity 元数据。
+        /// @param mode 经Activity 管理器校验的 silent、judge 或 force；此处不重复校验。
         /// @param attachments 已缓存的图片；仅在本次调用期间借用，消息中保存图片 ID。
         /// @note 线程安全。仍受机器人就绪状态和会话启用设置限制，force 不绕过这些检查。
         ///       函数返回不表示通知已处理或回复已发送，也不接管图片句柄的生命周期。
         void enqueueActivityMessage(const SessionId &sessionId, std::string text, std::string name, std::string mode,
-          json origin = json::object(), const std::vector<Image> &attachments = {});
+          const std::vector<Image> &attachments = {});
 
     private:
         /// @brief 检查归一化消息的发送者与 Agent 状态，并在需要时启动会话预处理协程。

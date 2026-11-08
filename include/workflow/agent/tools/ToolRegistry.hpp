@@ -7,12 +7,12 @@
 
 #pragma once
 
-#include <functional>
-#include <atomic>
 #include <array>
-#include <mutex>
+#include <atomic>
+#include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <shared_mutex>
 #include <string>
@@ -24,6 +24,7 @@
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
+#include <infrastructure/image/Image.hpp>
 
 namespace insoulforge {
     struct McpToolSelection;
@@ -32,10 +33,12 @@ namespace insoulforge {
         std::optional<SessionId> sessionId;
         UserId callerUserId{"system"}; ///< 本轮触发者，内部事件使用 system，不从模型参数读取。
         [[nodiscard]] auto requireSession() const -> const SessionId & {
-            if (!sessionId)
+            if (!sessionId) {
                 throw std::invalid_argument("工具调用缺少会话 ID");
+            }
             return *sessionId;
         }
+        std::shared_ptr<std::vector<Image>> toolImages; ///< 当前回复内工具返回的图片，保持缓存并允许后续工具引用。
         json messageSnapshot; ///< 本轮冻结的完整消息快照，图片保存等工具读取服务端媒体来源
         bool replyOnly = false; ///< 最后一轮只允许回复类工具，拒绝其他处理器执行
         std::shared_ptr<McpToolSelection> mcpSelection; ///< 当前回复的选择状态，启用只影响后续轮次。

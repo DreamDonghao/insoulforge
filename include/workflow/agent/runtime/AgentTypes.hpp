@@ -28,7 +28,6 @@ namespace insoulforge {
         Action action = Action::SKIP;
         std::string reason;
 
-        // 回复策略
         bool shouldReply = true;
         std::string tone = "friendly";
         std::optional<i32> maxLength = 25; ///< 未指定时由回复模型根据问题与人设决定长度

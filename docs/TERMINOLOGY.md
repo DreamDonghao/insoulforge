@@ -4,7 +4,7 @@
 
 ## Activity
 
-Activity 是模型可以启动、操作并持续接收状态的独立服务，例如网页棋局。一个名称对应一个全局单例，所有启用的群聊与私聊共享。接入与生命周期要求见 [Activity 开发指南](ACTIVITIES.md)。
+Activity 是自行运行、维护业务状态、供模型请求并主动上报信息的独立服务。一个名称对应一个服务接入，内部业务组织由服务自行设计。接入要求见 [Activity 开发指南](ACTIVITIES.md)。
 
 | 项目 | 约定 |
 | --- | --- |
@@ -12,7 +12,7 @@ Activity 是模型可以启动、操作并持续接收状态的独立服务，�
 | 原称呼 | 实时活动；后续统一使用 Activity |
 | 使用范围 | 页面入口、标题、按钮、提示词、开发文档和代码注释 |
 | 中文写法 | 首次出现时简要解释用途，后续直接使用 Activity；组合用词写作“Activity 服务”“Activity 状态”等 |
-| 代码与协议 | 遵循各自的命名风格，保留 `Activity`、`activity`、`activities`，如 `ActivityManager`、`start_activity`、`/activities/ws` |
+| 代码与协议 | 遵循各自的命名风格，保留 `Activity`、`activity`、`activities`，如 `ActivityManager`、`request_activity`、`/activities/ws` |
 
 采用 Activity 是为了让产品名称与代码概念一致，避免“实时活动”被理解为动态信息流或系统的 Live Activities。此约定针对功能名称；普通中文语境中的“活动”无需机械替换。
 

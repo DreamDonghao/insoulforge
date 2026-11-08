@@ -135,7 +135,7 @@ test('activity enable updates only one registered service without saving the tok
   assert.equal(state.token, 'unsaved-fixture-secret')
 })
 
-test('activity force deletion requires confirmation and sends an explicit boolean', async () => {
+test('activity deletion requires confirmation and removes online working services with only their name', async () => {
   const posted = []
   globalThis.fetch = async (_url, options) => {
     if (options?.method === 'DELETE') { posted.push(JSON.parse(options.body)); return response({success: true}) }
@@ -143,65 +143,48 @@ test('activity force deletion requires confirmation and sends an explicit boolea
   }
   const state = mount('tools/Activities')
   await flush()
-  const abandoned = {name: 'chess', running: true, connected: false, busy: false}
-  await state.remove(abandoned)
+  const service = {name: 'service', active: true, connected: true, busy: true}
+  await state.remove(service)
   assert.equal(posted.length, 0)
   confirmResult = true
-  await state.remove(abandoned)
-  assert.deepEqual(posted[0], {name: 'chess', force: true})
-  await state.remove({...abandoned, running: false})
-  assert.deepEqual(posted[1], {name: 'chess'})
+  await state.remove(service)
+  assert.deepEqual(posted[0], {name: 'service'})
+  await state.remove({...service, active: false, connected: false})
+  assert.deepEqual(posted[1], {name: 'service'})
 })
 
-for (const success of [true, false]) {
-  test(`activity synchronization ${success ? 'success' : 'failure'} preserves token draft and clears pending state`, async () => {
-    let posted
-    globalThis.fetch = async (url, options) => {
-      if (url.endsWith('/sync')) {
-        posted = JSON.parse(options.body)
-        return success ? response({success: true}) : {...response({success: false, error: '同步失败'}), ok: false, status: 400}
-      }
-      return response({token: 'configured-fixture-secret', servers: [{name: 'chess', connected: true, busy: false}]})
-    }
-    const state = mount('tools/Activities')
-    await flush()
-    state.token = 'unsaved-fixture-secret'
-    await state.syncService(state.config.servers[0])
-    assert.deepEqual(posted, {name: 'chess'})
-    assert.equal(state.token, 'unsaved-fixture-secret')
-    assert.equal(state.syncing, '')
-    assert.equal(state.saving, false)
-    const notices = load(resolve(root, 'src/composables/useToast.ts')).useToast().notifications.value
-    assert.equal(notices.some(item => item.message.includes(success ? '已同步' : '同步失败')), true)
-  })
-}
+test('activity working counts require enabled online services without confusing connectivity with business state', async () => {
+  const service = {name: 'service', enabled: true, connected: true, active: true, busy: true}
+  let patches = 0
+  globalThis.fetch = async (_url, options) => {
+    if (options?.method === 'PATCH') { patches++; return response({success: true}) }
+    return response({token: 'configured-fixture-secret', servers: [service,
+      {...service, name: 'idle', active: false},
+      {...service, name: 'offline', connected: false},
+      {...service, name: 'disabled', enabled: false}]})
+  }
+  const state = mount('tools/Activities')
+  await flush()
+  assert.equal(state.activeCount, 1)
+  assert.equal(state.stateLabel(service), '正在工作')
+  assert.equal(state.stateLabel({...service, active: false}), '未工作')
+  assert.equal(state.stateLabel({...service, connected: false}), '工作状态未知')
+  state.token = 'unsaved-fixture-secret'
+  await state.setEnabled(service, false)
+  assert.equal(patches, 1)
+  assert.equal(state.token, 'unsaved-fixture-secret')
+})
 
-test('activity uncertainty keeps connected idle services syncable and never claims confirmed runtime', async () => {
-  let syncs = 0
-  globalThis.fetch = async (url) => {
-    if (url.endsWith('/sync')) { syncs++; return response({success: true}) }
+test('activity refresh reads local configuration and does not perform service requests', async () => {
+  const urls = []
+  globalThis.fetch = async (url, options) => {
+    urls.push([url, options?.method ?? 'GET'])
     return response({token: 'configured-fixture-secret', servers: []})
   }
   const state = mount('tools/Activities')
   await flush()
-  const service = {name: 'chess', enabled: true, running: true, connected: true, synchronized: false, busy: false}
-  assert.equal(state.stateLabel(service), '状态未确认')
-  assert.equal(state.stateLabel({...service, running: false}), '状态未确认')
-  assert.equal(state.canSync(service), true)
-  await state.syncService(service)
-  assert.equal(syncs, 1)
-  for (const blocked of [{...service, connected: false}, {...service, busy: true}]) {
-    assert.equal(state.canSync(blocked), false)
-    await state.syncService(blocked)
-  }
-  assert.equal(syncs, 1)
-  assert.equal(state.stateLabel({...service, synchronized: true}), '活动运行中')
-  assert.equal(state.stateLabel({...service, synchronized: true, running: false}), '当前无活动')
-  assert.equal(state.stateLabel({...service, synchronized: true, connected: false}), '状态未确认')
-  const source = readFileSync(resolve(root, 'src/features/tools/Activities.vue'), 'utf8')
-  assert.match(source, /:disabled="!canSync\(service\)"/)
-  assert.match(source, /stateLabel\(service\)/)
-  assert.doesNotMatch(source, /连接中，等待同步/)
+  await state.load(true)
+  assert.deepEqual(urls, [['/admin/api/activities', 'GET'], ['/admin/api/activities', 'GET']])
 })
 
 test('activity token save failure retains the draft', async () => {

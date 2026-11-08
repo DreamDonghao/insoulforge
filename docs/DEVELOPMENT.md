@@ -295,9 +295,11 @@ MessageService → OneBot API
   Executor 仅注入目录及查询/启用工具，具体工具在本次回复选中后的下一轮才开放；选择不跨会话或回复共享，
   执行时校验本轮授权和缓存版本。调用使用独立会话，最后一轮禁止 MCP 查询、启用和执行。
   数量限制在“执行配置”页设置。配置方式和当前 SSE 限制见 [MCP.md](./MCP.md)。
-- 全局 Activity 由 `workflow/activity/ActivityManager` 管理，独立服务使用统一接入 Token 主动连接 `/activities/ws`，上报名称与描述自动登记，所有会话共享。
-  生命周期和来源保存在 `data/activity-state.json`；退出不停止独立服务，每次连接先注册、恢复状态再开放操作；禁用状态保留，服务描述随注册更新；工具请求、状态及通知共用 WS，服务推送每次状态变化，状态操作响应携带最新完整快照；不定时或操作后查询，后台支持立即同步。
-  模型通过独立内置插件调用通用工具，前端“Activity”管理服务，协议与开发要求见 [ACTIVITIES.md](./ACTIVITIES.md)。
+- Activity 由 `workflow/activity/ActivityManager` 接入，独立服务使用统一 Token 主动连接 `/activities/ws`，上报名称、描述、请求说明和初始工作状态后直接 ready。
+  主程序只缓存主动上报的 `active` 与 `status`，每轮模型请求读取缓存，不查询远端状态、不管理业务生命周期或持久化业务状态。
+  模型统一使用 `request_activity(name, parameters)`，按服务说明构造自定义参数；同连接请求串行，无请求 ID，超时断开且不自动重发。
+  响应和通知支持可选图片；通知明确指定目标会话及 silent/judge/force 模式，不提供确认与去重。
+  后台区分启用、连接和工作状态；协议、接口及验收要求见 [Activity 开发规范](./ACTIVITIES.md)。
 - 拍一拍、撤回、引用回复、表情包收发、定时任务均由上述工具实现，由 Executor 根据上下文自动决策调用；天气、搜索、随机数、时间等能力来自
   `agentTools/` 目录的可导入自定义工具
 
@@ -395,7 +397,7 @@ MessageService → OneBot API
   人物昵称由 `PersonNameResolver` 后台查询，最多四路并发、同 QQ 去重，超时 5 秒、失败冷却 60 秒；接口立即返回缓存及 `name_pending`。
   前端有待查询昵称时每 2 秒刷新概要，不重新获取记忆正文，离开页面取消轮询和请求；进程退出时昵称队列停止接单并丢弃迟到结果。
   `PersonMemoryStore` 只批量读取 `recent_messages` 中去重后的真实发送者档案，不加载仅被提及、其他会话出现或没有档案的人。
-  上下文顺序为 `current_session → session_memory → conversation_summaries → earlier_messages → person_memories → shared_conversations → recent_messages → response_requirements → running_activities`（`response_requirements` 仅在有 Router 策略时提供）；
+  上下文顺序为 `current_session → session_memory → conversation_summaries → earlier_messages → person_memories → shared_conversations → recent_messages → response_requirements → activities（仅有启用、在线且 active 的服务时提供）`（`response_requirements` 仅在有 Router 策略时提供）；
   Executor 消息投影将原记录的 `memories` 输出为 `recalled_memories`，人物待整理条目的写入时间输出为 `created_at`；原始记录、数据库及前端 API 的字段不变。
   新条目也直接提供给模型，一次回复期间固定快照。旧自由文本记忆不猜测归属、不自动迁入人物档案。
 - **好感度评估**：联合提取返回独立的 `memories` 和 `affinity_changes` 数组，允许两者为空或涉及不同用户。

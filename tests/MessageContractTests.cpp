@@ -678,7 +678,7 @@ namespace {
           {"session_memory", {{"aliases", {{{"user_id", "11"}, {"names", {"Alice"}}}}}}},
           {"person_memories", {{{"user_id", "11"}}}},
           {"shared_conversations", {{{"session", {{"user_id", "33"}}}, {"messages", {projected}}}}},
-          {"running_activities", {{{"user_id", "44"}}}}};
+          {"activities", {{{"user_id", "44"}}}}};
         context["recent_messages"][0]["segments"].push_back({{"type", "at"}, {"target", {{"user_id", "self"}}}});
         context["recent_messages"][0]["tool_history"] = {{{"arguments", {{"user_id", "11"}}}}};
         insoulforge::MessageRecord::compactContextUserIds(context);
@@ -691,7 +691,7 @@ namespace {
                 context["shared_conversations"][0]["messages"][0]["sender"]["uid"] == "11",
           "executor context uses compact user identities", kTestName);
         check(context["recent_messages"][0]["tool_history"][0]["arguments"]["user_id"] == "11" &&
-                context["running_activities"][0]["user_id"] == "44" && projected["sender"]["user_id"] == "11",
+                context["activities"][0]["user_id"] == "44" && projected["sender"]["user_id"] == "11",
           "compaction preserves opaque data and original records", kTestName);
 
         const auto source = insoulforge::MessageRecord::findImageSource(record, 0);
@@ -747,8 +747,9 @@ namespace {
                 const Statement indexes(db,
                   "SELECT sql FROM sqlite_master WHERE tbl_name=? AND type IN ('index','trigger') AND sql IS NOT NULL");
                 indexes.bind(1, table);
-                while (indexes.step())
+                while (indexes.step()) {
                     objects.push_back(indexes.getText(0));
+                }
             }
             if (tasks) {
                 body = std::regex_replace(body, std::regex("session_id TEXT NOT NULL"),
@@ -789,8 +790,9 @@ namespace {
             Statement(db, "DROP TABLE " + table).execOrThrow();
             Statement(db, fmt::format("ALTER TABLE {}_oldsession RENAME TO {}", table, table)).execOrThrow();
             for (auto sql: objects) {
-                if (!source && !tasks)
+                if (!source && !tasks) {
                     sql = std::regex_replace(sql, std::regex("session_id"), "group_id");
+                }
                 Statement(db, sql).execOrThrow();
             }
         }
@@ -811,11 +813,12 @@ namespace {
                 body = sql.substr(sql.find('('));
             }
             const auto start = body.find("user_id TEXT NOT NULL PRIMARY KEY");
-            if (start != std::string::npos)
+            if (start != std::string::npos) {
                 body.replace(
                   start, std::string_view("user_id TEXT NOT NULL PRIMARY KEY").size(), "user_id INTEGER PRIMARY KEY");
-            else
+            } else {
                 body.replace(body.find("user_id TEXT"), std::string_view("user_id TEXT").size(), "user_id INTEGER");
+            }
             Statement(db, fmt::format("CREATE TABLE {}_old {}", table, body)).execOrThrow();
             Statement(db, fmt::format("INSERT INTO {}_old SELECT * FROM {}", table, table)).execOrThrow();
             Statement(db, "DROP TABLE " + table).execOrThrow();
@@ -829,9 +832,10 @@ namespace {
     void prepareV24Schema(sqlite3 *db) {
         restoreIntegerUserSchema(db);
         for (const auto *table:
-          {"admins", "blacklisted_users", "person_affinity", "person_memories", "person_memory_entries"})
+          {"admins", "blacklisted_users", "person_affinity", "person_memories", "person_memory_entries"}) {
             insoulforge::Statement(db, fmt::format("ALTER TABLE {} RENAME COLUMN user_id TO qq_number", table))
               .execOrThrow();
+        }
         insoulforge::Statement(db, "DROP INDEX idx_person_memory_entries_user_id").execOrThrow();
         insoulforge::Statement(db, "CREATE INDEX idx_person_memory_entries_qq ON person_memory_entries(qq_number, id)")
           .execOrThrow();
@@ -1013,9 +1017,10 @@ namespace {
                 SessionId::group("00123") != SessionId::group("123"),
           "hash preserves exact typed identity", kTestName);
         for (const auto *value: {"", "42", "group:", "private:", "channel:42", "group:a/b", "group:%", "group:%0G",
-               "group:%00", "group:%41", "group:a%2fb", "private:a b"})
+               "group:%00", "group:%41", "group:a%2fb", "private:a b"}) {
             check(
               !SessionId::parse(value), "rejects missing type, empty targets and noncanonical encodings", kTestName);
+        }
         bool emptyRejected = false;
         try {
             const auto invalid = SessionId::group("");
@@ -1188,8 +1193,9 @@ namespace {
         constexpr std::string_view kTestName = "system sender migration";
         sqlite3 *db = nullptr;
         check(sqlite3_open(":memory:", &db) == SQLITE_OK, "opens fixture", kTestName);
-        if (!db)
+        if (!db) {
             return;
+        }
         SchemaMigrator::migrate(db);
         json content;
         content["sender"] = {{"user_id", "10000000000"}, {"name", "系统任务"}};
@@ -1267,13 +1273,15 @@ namespace {
         using namespace insoulforge;
         sqlite3 *db = nullptr;
         check(sqlite3_open(":memory:", &db) == SQLITE_OK, "opens fixture", kTestName);
-        if (!db)
+        if (!db) {
             return;
+        }
         const auto schema = [db] {
             json result = json::array();
             const Statement query(db, "SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name");
-            while (query.step())
+            while (query.step()) {
                 result.push_back({query.getText(0), query.getText(1), query.getText(2), query.getText(3)});
+            }
             return result;
         };
         const auto version = [db] {
@@ -1322,8 +1330,9 @@ namespace {
 
         db = nullptr;
         check(sqlite3_open(":memory:", &db) == SQLITE_OK, "opens fresh rollback fixture", kTestName);
-        if (!db)
+        if (!db) {
             return;
+        }
         sqlite3_set_authorizer(
           db,
           [](void *, int action, const char *name, const char *, const char *, const char *) {
@@ -1658,8 +1667,9 @@ namespace {
         check(first.size() == history.size() && middle.size() == first.size() && last.size() == first.size(),
           "each request updates user context without adding messages", kTestName);
         for (size_t index = 0; index < history.size(); ++index) {
-            if (index == 1)
+            if (index == 1) {
                 continue;
+            }
             check(first[index] == history[index] && middle[index] == history[index] && last[index] == history[index],
               "request status preserves the full history and tool results", kTestName);
         }
@@ -1834,9 +1844,10 @@ namespace {
                 }),
           "action tools register", kTestName);
         for (const auto &tool: registry.getTools({})) {
-            if (tool["function"]["name"] == "send_qzone_msg")
+            if (tool["function"]["name"] == "send_qzone_msg") {
                 check(tool["function"]["parameters"]["properties"]["ugc_right"]["default"] == 1,
                   "qzone default visibility is public", kTestName);
+            }
         }
         const auto reject = [&](const insoulforge::json &args, const std::string_view expected) -> void {
             const auto result = drogon::sync_wait(
@@ -1882,15 +1893,17 @@ namespace {
         check(registry.registerPlugin("builtin.contract-config", registrar), "registers builtin", kTestName);
         const auto definition = [&]() -> insoulforge::json {
             for (const auto &tool: registry.getTools({})) {
-                if (tool["function"]["name"] == "contract_builtin")
+                if (tool["function"]["name"] == "contract_builtin") {
                     return tool["function"];
+                }
             }
             return nullptr;
         };
         const auto defaultDefinitions = registry.getTools({.defaultDefinitionsOnly = true});
         bool includesBuiltin = false;
-        for (const auto &tool: defaultDefinitions)
+        for (const auto &tool: defaultDefinitions) {
             includesBuiltin = includesBuiltin || tool["function"]["name"] == "contract_builtin";
+        }
         check(includesBuiltin, "default token input includes enabled builtin definitions", kTestName);
         const auto cachedUsage = registry.getDefaultToolsTokenUsage(false);
         check(cachedUsage == registry.getDefaultToolsTokenUsage(false), "reuses cached count or error", kTestName);
@@ -1976,8 +1989,9 @@ namespace {
         constexpr std::string_view kTestName = "scoped transaction";
         sqlite3 *handle = nullptr;
         check(sqlite3_open(":memory:", &handle) == SQLITE_OK, "opens fixture", kTestName);
-        if (!handle)
+        if (!handle) {
             return;
+        }
         const std::unique_ptr<sqlite3, decltype(&sqlite3_close)> database(handle, sqlite3_close);
         Statement(handle, "CREATE TABLE entries(value INTEGER)").execOrThrow();
         const auto count = [handle] {
@@ -2233,8 +2247,9 @@ namespace {
         const auto legacyRecord = [&] {
             const Statement row(
               db.handle(), "SELECT content FROM chat_records WHERE group_id=100 ORDER BY id DESC LIMIT 1");
-            if (!row.step())
+            if (!row.step()) {
                 throw std::runtime_error("missing legacy record");
+            }
             return json::parse(row.getText(0));
         };
         const auto legacyMemory = [&](i64 id, std::string_view content) {
@@ -2404,8 +2419,9 @@ namespace {
         const AdminController controller;
         auto response = drogon::HttpResponsePtr{};
         const auto callback = [&](const drogon::HttpResponsePtr &value) { response = value; };
-        for (const u64 user_id: {11, 22, 33, 44})
+        for (const u64 user_id: {11, 22, 33, 44}) {
             QQNameDirectory::recordName(insoulforge::UserId{user_id}, "Known " + std::to_string(user_id));
+        }
         drogon::sync_wait(controller.getPeople(drogon::HttpRequest::newHttpRequest(), callback));
         check(json::parse(response->body()).size() == 4, "people API returns all profiles", kTestName);
         drogon::sync_wait(controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, "11"));
@@ -2413,12 +2429,14 @@ namespace {
         drogon::sync_wait(controller.getPerson(drogon::HttpRequest::newHttpRequest(), callback, "invalid"));
         check(json::parse(response->body()).contains("error"), "person API rejects invalid identities", kTestName);
         std::thread first([] {
-            for (int index = 0; index < 50; ++index)
+            for (int index = 0; index < 50; ++index) {
                 AffinityStore::adjustAffinity(insoulforge::UserId{77}, 1);
+            }
         });
         std::thread second([] {
-            for (int index = 0; index < 50; ++index)
+            for (int index = 0; index < 50; ++index) {
                 AffinityStore::adjustAffinity(insoulforge::UserId{77}, 1);
+            }
         });
         first.join();
         second.join();
@@ -2871,9 +2889,10 @@ namespace {
           "affinity switch hot updates", kTestName);
         check(config.saveMemoryConfig({{"sharedConversationMessageCount", 10}}).has_value() && !config.affinityEnabled,
           "old client preserves affinity switch", kTestName);
-        for (const auto &invalid: insoulforge::json::array({0, 1, "false", nullptr}))
+        for (const auto &invalid: insoulforge::json::array({0, 1, "false", nullptr})) {
             check(!config.saveMemoryConfig({{"affinityEnabled", invalid}}) && !config.affinityEnabled,
               "affinity switch rejects non-boolean values", kTestName);
+        }
         check(config.initialize(path.string()).has_value() && !config.affinityEnabled, "affinity switch persists",
           kTestName);
         check(config.saveMemoryConfig({{"affinityEnabled", true}}).has_value() && config.affinityEnabled,
@@ -3367,8 +3386,9 @@ namespace {
                 list.fullSnapshot().size() == 7,
           "sharing limit is independent and does not alter history", kTestName);
         std::string chinese;
-        for (int index = 0; index < 120; ++index)
+        for (int index = 0; index < 120; ++index) {
             chinese += "中";
+        }
         auto longMessage = message("2026-10-18 12:00:00", chinese);
         longMessage["segments"].push_back(
           {{"type", "image"}, {"recognition_status", "succeeded"}, {"description", chinese}, {"image_index", 0}});
@@ -3431,9 +3451,10 @@ namespace {
           "six part texts reconstruct the unchanged system", kTestName);
         const auto repeated =
           insoulforge::ExecutorSystemPrompt::instance().buildSnapshot(insoulforge::SessionId::group("100"));
-        for (std::size_t i = 0; i < snapshot.parts.size(); ++i)
+        for (std::size_t i = 0; i < snapshot.parts.size(); ++i) {
             check(snapshot.parts[i].tokens == repeated.parts[i].tokens, "unchanged parts reuse their token results",
               kTestName);
+        }
 
         check(combined.starts_with(base) && combined.ends_with(prompt), "appends without replacing global prompt",
           kTestName);
@@ -3544,10 +3565,11 @@ namespace {
                 oneBotConfig.oneBotImplementation == "snowluma",
           "old client preserves selected implementation", kTestName);
         const auto connectionBeforeInvalid = oneBotConfig.oneBotSnapshot();
-        for (const auto &invalid: insoulforge::json::array({"unknown", "", 1, true, nullptr}))
+        for (const auto &invalid: insoulforge::json::array({"unknown", "", 1, true, nullptr})) {
             check(!oneBotConfig.saveQQConfig({{"oneBotImplementation", invalid}}) &&
                     oneBotConfig.oneBotSnapshot() == connectionBeforeInvalid,
               "invalid implementation cannot change runtime", kTestName);
+        }
         check(oneBotConfig.saveQQConfig(originalQQConfig).has_value(), "restore NapCat", kTestName);
 
         const insoulforge::AdminController controller;

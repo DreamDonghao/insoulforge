@@ -282,11 +282,11 @@ namespace insoulforge {
     }
 
     void EventWorkflow::enqueueActivityMessage(const SessionId &sessionId, std::string text, std::string name,
-      std::string mode, json origin, const std::vector<Image> &attachments) {
+      std::string mode, const std::vector<Image> &attachments) {
         auto message = json({{"session_id", sessionId.toString()}, {"time", currentDateTime()},
           {"message_id", "activity-" + drogon::utils::getUuid()},
           {"sender", {{"user_id", "system"}, {"name", "Activity：" + name}}},
-          {"activity", {{"name", std::move(name)}, {"mode", std::move(mode)}, {"origin", std::move(origin)}}},
+          {"activity", {{"name", std::move(name)}, {"mode", std::move(mode)}}},
           {"segments", {{{"type", "text"}, {"text", std::move(text)}}}}});
         for (const auto &image: attachments) {
             const auto index = message["assets"]["images"].is_array() ? message["assets"]["images"].size() : 0;
@@ -404,9 +404,7 @@ namespace insoulforge {
             auto messageSnapshot = sessionState->messageList()->snapshot();
 
             try {
-                if (!m_dependencies->agent.isReady() || !SessionStore::isSessionEnabled(sessionId)) {
-                    Logger::warn(sessionId, "Workflow", "回复任务跳过：Agent 不可用");
-                } else {
+                if (m_dependencies->agent.isReady() && SessionStore::isSessionEnabled(sessionId)) {
                     auto routerDecision = std::move(request.decision);
                     if (sessionId.isPrivate()) {
                         Logger::info(sessionId, "Workflow", "私聊直接执行，跳过 Router");
@@ -444,6 +442,8 @@ namespace insoulforge {
                             }
                         }
                     }
+                } else {
+                    Logger::warn(sessionId, "Workflow", "回复任务跳过：Agent 不可用");
                 }
             } catch (const std::exception &error) {
                 // Router、Executor 或发送失败不影响同会话后续回复任务。
