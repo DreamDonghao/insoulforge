@@ -515,13 +515,6 @@ namespace {
         records.back()["send_error"] = "failed";
         check(MessageRecord::sentMessagesStart(records) == records.size(), "failed send is not a delivered suffix",
           kTestName);
-        json context = {{"new_messages", json::array({{{"sender", {{"user_id", "11"}}}}})},
-          {"sent_messages", json::array({{{"sender", {{"user_id", "self"}}}}})}};
-        MessageRecord::compactContextUserIds(context);
-        check(
-          context["new_messages"][0]["sender"]["uid"] == "11" && context["sent_messages"][0]["sender"]["uid"] == "self",
-          "both new groups compact user ids", kTestName);
-
         const auto group = SessionId::group("hard-rules");
         SessionStore::setAutoReply(group, false);
         auto mention = json{{"message_id", "mention"}, {"executor_processed", false}, {"sender", {{"user_id", "11"}}},
@@ -710,26 +703,6 @@ namespace {
           !projected.dump().contains("https://example.com/cat.jpg"), "agent projection excludes image URL", kTestName);
         check(projected["memories"] == insoulforge::json::array({"用户偏好简洁回答"}),
           "agent projection keeps recalled memory content", kTestName);
-
-        auto context = insoulforge::json{{"recent_messages", {projected}}, {"current_session", {{"user_id", "22"}}},
-          {"session_memory", {{"aliases", {{{"user_id", "11"}, {"names", {"Alice"}}}}}}},
-          {"person_memories", {{{"user_id", "11"}}}},
-          {"shared_conversations", {{{"session", {{"user_id", "33"}}}, {"messages", {projected}}}}},
-          {"activities", {{{"user_id", "44"}}}}};
-        context["recent_messages"][0]["segments"].push_back({{"type", "at"}, {"target", {{"user_id", "self"}}}});
-        context["recent_messages"][0]["tool_history"] = {{{"arguments", {{"user_id", "11"}}}}};
-        insoulforge::MessageRecord::compactContextUserIds(context);
-        check(context["recent_messages"][0]["sender"]["uid"] == "11" &&
-                !context["recent_messages"][0]["sender"].contains("user_id") &&
-                context["recent_messages"][0]["segments"].back()["target"]["uid"] == "self" &&
-                context["current_session"]["uid"] == "22" && context["session_memory"]["aliases"][0]["uid"] == "11" &&
-                context["person_memories"][0]["uid"] == "11" &&
-                context["shared_conversations"][0]["session"]["uid"] == "33" &&
-                context["shared_conversations"][0]["messages"][0]["sender"]["uid"] == "11",
-          "executor context uses compact user identities", kTestName);
-        check(context["recent_messages"][0]["tool_history"][0]["arguments"]["user_id"] == "11" &&
-                context["activities"][0]["user_id"] == "44" && projected["sender"]["user_id"] == "11",
-          "compaction preserves opaque data and original records", kTestName);
 
         const auto source = insoulforge::MessageRecord::findImageSource(record, 0);
         check(source && source->file == "cat.jpg", "tool can resolve image source", kTestName);
@@ -2422,7 +2395,6 @@ namespace {
         const auto profiles = PersonMemoryStore::getForSenders(senders);
         if (!profiles.empty()) {
             auto expected = profiles.front();
-            MessageRecord::compactContextUserIds(expected);
             std::shared_lock lock(db.mutex());
             check(PersonMemoryStore::contextSnapshot(UserId{11}) == expected,
               "token snapshot matches actual context including pending entries", kTestName);

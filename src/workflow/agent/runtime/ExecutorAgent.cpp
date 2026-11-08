@@ -192,7 +192,6 @@ namespace insoulforge::ExecutorAgent {
 
             json userMsg;
             userMsg["role"] = "user";
-            MessageRecord::compactContextUserIds(context);
             userMsg["content"] = dumpJson(context);
             messages.push_back(userMsg);
 

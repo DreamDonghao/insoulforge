@@ -309,15 +309,15 @@ namespace insoulforge::PersonMemoryStore {
         const auto person = readPerson(userId);
         if (person.is_null())
             return nullptr;
-        json result = {{"profile", person["profile"]}, {"relationship", person["relationship"]},
+        json result = {{"user_id", userId.toString()}, {"profile", person["profile"]}, {"relationship", person["relationship"]},
           {"recent_interactions", person["recent_interactions"]}, {"pending_entries", json::array()}};
-        for (auto it = person["pending_entries"].rbegin(); it != person["pending_entries"].rend(); ++it)
+        for (auto it = person["pending_entries"].rbegin(); it != person["pending_entries"].rend(); ++it) {
             result["pending_entries"].push_back({{"created_at", (*it)["time"]},
               {"source_session", (*it)["source_session"]}, {"content", (*it)["content"]}});
+        }
         if (result["profile"].empty() && result["relationship"].empty() && result["recent_interactions"].empty() &&
             result["pending_entries"].empty())
             return nullptr;
-        result["uid"] = userId.toString();
         return result;
     }
 

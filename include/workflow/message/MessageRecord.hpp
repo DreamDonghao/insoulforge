@@ -92,10 +92,6 @@ namespace insoulforge::MessageRecord {
     [[nodiscard]] auto projectForAgent(
       const json &record, bool includeToolHistory = false, bool includeGroupCard = false) -> json;
 
-    /// @brief 将 Executor 上下文中已知结构的用户身份字段由 user_id 缩写为 uid。
-    /// @details 仅修改发送给模型的副本；不遍历正文、工具参数、活动数据或其他不透明内容。
-    void compactContextUserIds(json &context);
-
     /// @brief 提取用于消息级向量召回的语义文本
     /// @param record 已解析的持久化聊天记录
     /// @return 文本段与成功识别的图片描述拼接后的查询文本

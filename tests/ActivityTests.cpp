@@ -240,7 +240,8 @@ namespace {
             std::lock_guard lock(fixtureMutex);
             require(
               hasMessage(lastModelContext["new_messages"], "during-router"), "executor reused stale router snapshot");
-            require(lastModelContext["new_messages"][0]["sender"].contains("uid"), "new message uid was not compacted");
+            require(
+              lastModelContext["new_messages"][0]["sender"].contains("user_id"), "new message is missing user_id");
             require(!lastModelContext["new_messages"][0].contains("executor_processed"),
               "internal processing marker leaked into model request");
         }
