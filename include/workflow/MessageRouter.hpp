@@ -13,15 +13,13 @@
 #include <workflow/agent/runtime/AgentTypes.hpp>
 
 namespace insoulforge::MessageRouter {
-    /// @brief 判断是否应回复指定触发消息并生成回复策略
+    /// @brief 结合历史、新入站消息及末尾已发送内容，判断当前是否还需回复。
     /// @param sessionId 所属会话 ID
-    /// @param triggerMessageId 本轮触发回复判断的入站消息 ID
-    /// @param snapshot 按时间顺序排列的完整消息快照
-    /// @return Router 决策；找不到触发消息或快照为空时返回跳过决策
-    /// @details 触发消息决定硬规则，完整快照仅提供上下文，允许其末条为机器人已经发送的消息。
-    ///          群自动回复关闭时跳过普通消息；系统消息、@ 机器人和私聊不受影响。
-    [[nodiscard]] auto route(SessionId sessionId, std::string_view triggerMessageId, const json &snapshot)
-      -> drogon::Task<RouterDecision>;
+    /// @param snapshot 本次判断的冻结消息窗口；调用方须持有至协程完成。
+    /// @return 回复策略；空快照跳过，群自动回复关闭时仅允许必须回复的消息。
+    /// @note 不修改消息处理标记；仅有 silent 或没有未处理入站消息时跳过；其他消息先应用硬规则，再由 Jev、LLM
+    /// 判断上下文。
+    [[nodiscard]] auto route(SessionId sessionId, const json &snapshot) -> drogon::Task<RouterDecision>;
 
     /// @brief 把 Jev action choice 的胜出 label 映射为路由动作
     /// @param label Jev choice 答案的胜出 label（skip / reply / unclear）
@@ -38,6 +36,6 @@ namespace insoulforge::MessageRouter {
     ///          才整体前移。此设计意在保留稳定的上下文前缀，提高请求缓存命中率；逐条
     ///          滑动会让聊天记录部分几乎每轮都变，命中率显著下降。
     ///          仅 Router LLM 使用此窗口；Jev 独立读取最近 jevWindowSize 条消息。
-    ///          导出到头文件用于支持无网络的离线测试，保持 route() 的既有签名不变。
+    ///          导出到头文件用于支持无网络的离线测试，与请求构建共用同一窗口算法。
     [[nodiscard]] auto windowStartIndex(size_t snapshotSize) -> size_t;
 } // namespace insoulforge::MessageRouter

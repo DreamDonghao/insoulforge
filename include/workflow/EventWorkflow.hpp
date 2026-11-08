@@ -40,7 +40,7 @@ namespace insoulforge {
         /// @param database 已成功打开并完成迁移的数据库。
         /// @param config 已成功加载的运行时配置。
         /// @param agent 已成功初始化的 Agent，用于检查是否允许处理消息。
-        /// @return 初始化成功时为空；数据库或 Agent 未就绪、依赖被替换或恢复失败时返回错误说明。
+        /// @return 初始化成功时为空；数据库未初始化、依赖被替换或恢复失败时返回错误说明。
         /// @note 仅在启动期、接收事件前调用；依赖对象必须比工作流存活更久。
         /// 同一组依赖重复初始化不会重复恢复消息。
         [[nodiscard]] auto initialize(const Database &database, const Config &config, const AgentSystem &agent)
@@ -152,9 +152,8 @@ namespace insoulforge {
 
         /// @brief 处理一个会话的串行回复工作流，无待处理回复时立即退出
         /// @param sessionId 回复任务所属会话，按值保存在协程帧中。
-        /// @param request 首轮触发消息及可选的提前路由结果
-        /// @note 仅在取得该会话回复执行权后启动；每轮读取最新消息快照，私聊跳过 Router。
-        ///       当前轮结束后接续最新待处理请求，无请求时释放执行权并退出。
-        auto processReplyWorkflow(SessionId sessionId, ReplyRequest request) -> drogon::Task<>;
+        /// @note 仅在取得该会话回复执行权后启动；Router 只读冻结，Executor 重新冻结并消费新增需求。
+        ///       执行期间不进行路由，结束后接续新增需求；无新增时原子释放执行权。
+        auto processReplyWorkflow(SessionId sessionId) -> drogon::Task<>;
     };
 } // namespace insoulforge

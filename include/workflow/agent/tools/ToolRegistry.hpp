@@ -31,7 +31,6 @@ namespace insoulforge {
     /// @brief 单次工具调用的执行环境（随调用显式传参，无共享状态）
     struct ToolCallContext {
         std::optional<SessionId> sessionId;
-        UserId callerUserId{"system"}; ///< 本轮触发者，内部事件使用 system，不从模型参数读取。
         [[nodiscard]] auto requireSession() const -> const SessionId & {
             if (!sessionId) {
                 throw std::invalid_argument("工具调用缺少会话 ID");

@@ -157,7 +157,7 @@ request_activity(name, parameters)
 
 | 模式 | 行为 |
 | --- | --- |
-| `silent` | 记录通知，不触发回复 |
+| `silent` | 记录通知，Router 对仅有 silent 的未处理消息直接跳过，不请求模型或生成回复 |
 | `judge` | 记录通知，由 Router 判断是否回复 |
 | `force` | 记录通知，直接进入回复流程 |
 

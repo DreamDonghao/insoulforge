@@ -65,9 +65,9 @@ namespace insoulforge {
         /// @return 存在 `group_config` 记录时返回 true
         [[nodiscard]] auto hasSessionConfig(const SessionId &sessionId) -> bool;
 
-        /// @brief 检查会话是否启用常规消息处理
+        /// @brief 查询会话的启用状态
         /// @param sessionId 统一会话 ID
-        /// @return 启用记录存在且 `enabled` 为 true 时返回 true
+        /// @return 存在 `enabled_groups` 记录且 `enabled` 为 1 时返回 true，否则返回 false
         [[nodiscard]] auto isSessionEnabled(const SessionId &sessionId) -> bool;
 
         /// @brief 启用会话的常规消息处理

@@ -1,6 +1,8 @@
 /// @file PromptService.cpp
 /// @brief 提示词服务 - 实现
 
+#include <array>
+
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <workflow/agent/llm/prompts/ExecutorSystemPrompt.hpp>
@@ -26,7 +28,7 @@ namespace insoulforge {
 - 本轮提供 response_requirements 时遵循其中的回复要求
 
 【重要原则】
-- 只回复最新的一条消息或话题，不要同时回复多条消息
+- 结合上下文选择值得回应的消息或话题，避免重复已发送的内容
 - 不要说"关于xxx的问题...关于yyy的问题..."这种分点回复
 - 自然地针对最后发言者回复即可
 )",
@@ -34,7 +36,7 @@ namespace insoulforge {
           // Router - 消息路由决策提示词
           {.key = "router_system",
             .content =
-              R"(你是{botName}的消息路由决策器。结合完整聊天记录判断{botName}是否应该回复最新一条消息，并给出回复策略。
+              R"(你是{botName}的消息路由决策器。结合完整聊天记录判断{botName}根据当前聊天上下文是否仍需回复，并给出回复策略。
 
 角色定位：
 - {botName}是群里的普通群友，不是客服，也不是随时待命的AI
@@ -44,10 +46,11 @@ namespace insoulforge {
 聊天记录格式：
 - [{botName}]: 机器人发送的消息
 - [用户]: 用户发送的消息
-- 最后一条消息标记为 [用户]，总是用户发送的新消息
+- chat_records 是历史，new_messages 是尚未交给 Executor 的入站消息，sent_messages 是末尾已发送的消息
+- 各组可能在时间上交错，结合已发送内容判断是否还有必要回复，不绑定单条消息
 
 判断流程：
-1. 看最新一条消息的性质
+1. 结合新增消息、历史和已发送内容，判断是否还有未覆盖的话题值得回应
 2. 看聊天记录中{botName}的发言位置：
    - 如果{botName}在最近1-2条内刚发过言，除非新消息明确针对它（追问、反驳、接它的话），否则 skip
    - 如果群友之间正在互相聊天，与{botName}无关，不要插话
@@ -101,7 +104,7 @@ reply 的场景：
 - 本轮提供 response_requirements 时遵循其中的回复要求
 
 【重要原则】
-- 只回复最新的一条消息或话题
+- 结合上下文选择值得回应的消息或话题，避免重复已发送的内容
 - 不要说"关于xxx的问题...关于yyy的问题..."这种分点回复
 - 私聊发送时省略 quote_message_id，直接发送即可
 )",
@@ -109,7 +112,7 @@ reply 的场景：
           // Router - 私聊消息路由决策提示词
           {.key = "router_private_system",
             .content =
-              R"(你是{botName}的路由决策器。当前是{botName}与用户的一对一私聊，判断是否应该回复最新一条消息，并给出回复策略。
+              R"(你是{botName}的路由决策器。当前是{botName}与用户的一对一私聊，判断根据当前聊天上下文是否仍需回复，并给出回复策略。
 
 角色定位：
 - 用户主动来私聊，就是想和{botName}说话，默认应该 reply
@@ -118,10 +121,11 @@ reply 的场景：
 聊天记录格式：
 - [{botName}]: 机器人发送的消息
 - [用户]: 用户发送的消息
-- 最后一条消息标记为 [用户]，总是用户发送的新消息
+- chat_records 是历史，new_messages 是尚未交给 Executor 的入站消息，sent_messages 是末尾已发送的消息
+- 各组可能在时间上交错，结合已发送内容判断是否还有必要回复，不绑定单条消息
 
 判断流程：
-1. 看最新一条消息的性质
+1. 结合新增消息、历史和已发送内容，判断是否还有未覆盖的话题值得回应
 2. 如果{botName}刚发过言，且新消息是明确的补充或延续（如补发的后半句话），可以稍等话题完整后再回
 3. 其余情况一律 reply
 
@@ -168,6 +172,28 @@ reply 的场景：
           stored.find("不要其他内容）：\n{{") != std::string::npos) {
             PromptStore::setPrompt(database, "router_system", defaultPrompts[1].content, defaultPrompts[1].desc);
             Logger::warn(std::nullopt, "Prompt", fmt::format("已自愈 router_system 默认值中的双花括号残留"));
+        }
+
+        // 只替换旧默认指令中的确定措辞，保留其余自定义内容。
+        for (const auto *key:
+          {"router_system", "router_private_system", "executor_system", "executor_private_system"}) {
+            auto stored = PromptStore::getPrompt(database, key, "");
+            auto updated = stored;
+            for (const auto &[before, after]: std::array<std::pair<std::string_view, std::string_view>, 5>{
+                   {{"只回复最新的一条消息或话题，不要同时回复多条消息",
+                      "结合上下文选择值得回应的消息或话题，避免重复已发送的内容"},
+                     {"只回复最新的一条消息或话题", "结合上下文选择值得回应的消息或话题，避免重复已发送的内容"},
+                     {"是否应该回复最新一条消息", "根据当前聊天上下文是否仍需回复"},
+                     {"1. 看最新一条消息的性质", "1. 结合新增消息、历史和已发送内容判断是否仍需回复"},
+                     {"- 最后一条消息标记为 [用户]，总是用户发送的新消息",
+                       "- 记录按分组提供，不保证末条是用户消息；结合已发送内容判断是否仍需回复"}}}) {
+                if (const auto pos = updated.find(before); pos != std::string::npos) {
+                    updated.replace(pos, before.size(), after);
+                }
+            }
+            if (updated != stored) {
+                PromptStore::setPrompt(database, key, updated);
+            }
         }
 
         // 思考模式已改为 Executor 的 deep_think 工具：从 Router 提示词中移除 enableThinking 策略项

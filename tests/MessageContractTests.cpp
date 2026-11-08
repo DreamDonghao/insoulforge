@@ -49,6 +49,7 @@
 #include <workflow/agent/llm/JevClient.hpp>
 #include <workflow/agent/llm/prompts/ExecutorSystemPrompt.hpp>
 #include <workflow/agent/llm/prompts/PromptService.hpp>
+#include <workflow/agent/llm/prompts/PromptStore.hpp>
 #include <workflow/agent/llm/usage/UsageStore.hpp>
 #include <workflow/agent/memory/LongTermMemoryStore.hpp>
 #include <workflow/agent/memory/MemoryStore.hpp>
@@ -394,64 +395,68 @@ namespace {
         constexpr std::string_view kTestName = "session reply coalescing";
         auto &db = insoulforge::Database::instance();
         check(db.initialize(":memory:").has_value(), "initializes database", kTestName);
-        const auto triggerId = [](std::optional<insoulforge::ReplyRequest> request) -> std::optional<std::string> {
-            return request ? std::optional{std::move(request->messageId)} : std::nullopt;
-        };
         {
-            insoulforge::SessionWorkflowState privateState(
-              insoulforge::SessionId::privateChat(insoulforge::UserId{11}), db, insoulforge::Config::instance());
-            check(triggerId(privateState.requestReplyProcessing("first", true)) == "first",
-              "idle private session starts immediately", kTestName);
-            check(!privateState.requestReplyProcessing("second", true) &&
-                    !privateState.requestReplyProcessing("third", true),
-              "new private messages do not start concurrent replies", kTestName);
-            check(triggerId(privateState.completeReplyProcessing()) == "third",
-              "private messages coalesce into latest trigger", kTestName);
-            check(!privateState.requestReplyProcessing("fourth", true), "next reply retains exclusive processing",
-              kTestName);
-            check(
-              triggerId(privateState.completeReplyProcessing()) == "fourth" && !privateState.completeReplyProcessing(),
-              "later messages are processed and pending trigger is consumed once", kTestName);
-            check(triggerId(privateState.requestReplyProcessing("fifth", true)) == "fifth" &&
-                    !privateState.completeReplyProcessing(),
-              "private session becomes idle after draining", kTestName);
+            using namespace insoulforge;
+            const auto session = SessionId::group("100");
+            auto &config = Config::instance();
+            SessionWorkflowState state(session, db, config);
+            const auto message = [](const std::string &id) -> json {
+                return {{"message_id", id}, {"sender", {{"user_id", "11"}}},
+                  {"segments", json::array({{{"type", "text"}, {"text", id}}})}};
+            };
+            check(state.recordIncoming(message("first")).startReply, "idle message owns consumer", kTestName);
+            const auto routing = state.takeReplyRequest();
+            check(routing && routing->records.size() == 1, "router freezes its own input", kTestName);
+            check(!state.recordIncoming(message("during-router")).startReply,
+              "preparation continues during routing without parallel consumer", kTestName);
+            const auto execution = state.takeExecutorRequest();
+            check(execution.records.size() == 2 && routing->records.size() == 1,
+              "executor refreezes newer messages after positive route", kTestName);
+            check(MessageRecord::isNewForExecutor(execution.records[0]) &&
+                    !MessageRecord::isNewForExecutor(state.messageList()->snapshot()[0]),
+              "executor copy retains old flags and originals are marked atomically", kTestName);
+            check(!state.recordIncoming(message("during-executor")).startReply,
+              "arrival during executor waits for same consumer", kTestName);
+            const auto after = state.takeReplyRequest();
+            check(after && after->records.size() == 3 && MessageRecord::isNewForExecutor(after->records.back()),
+              "executor completion has a new batch to judge", kTestName);
+            check(!state.takeReplyRequest(), "skip with no newer arrival ends without unread loop", kTestName);
+            check(state.recordIncoming(message("after-idle")).startReply,
+              "arrival after consumer exit wakes a new consumer", kTestName);
+            check(state.takeReplyRequest().has_value(), "new router batch exists", kTestName);
+            check(!state.recordIncoming(message("mention")).startReply,
+              "mandatory event during router does not start second consumer", kTestName);
+            check(!state.recordIncoming(message("ordinary")).startReply,
+              "ordinary arrival coalesces into the same pending batch", kTestName);
+            const auto mandatory = state.takeReplyRequest();
+            check(mandatory && mandatory->records.back()["message_id"] == "ordinary",
+              "negative route retains all newer messages for Router", kTestName);
+            (void) state.takeExecutorRequest();
+            check(!state.takeReplyRequest(), "positive execution consumes all pre-snapshot demands", kTestName);
+            check(state.recordIncoming(message("silent")).startReply && state.takeReplyRequest().has_value() &&
+                    !state.takeReplyRequest(),
+              "every incoming event wakes one consumer and no event repeats without new input", kTestName);
 
-            insoulforge::SessionWorkflowState groupState(
-              insoulforge::SessionId::group("100"), db, insoulforge::Config::instance());
-            check(triggerId(groupState.requestReplyProcessing("first", false)) == "first" &&
-                    !groupState.requestReplyProcessing("ordinary", false) && !groupState.completeReplyProcessing(),
-              "ordinary group messages do not schedule another reply", kTestName);
-            check(triggerId(groupState.requestReplyProcessing("next", false)) == "next" &&
-                    !groupState.requestReplyProcessing("mention", true) &&
-                    !groupState.requestReplyProcessing("ordinary", false) &&
-                    triggerId(groupState.completeReplyProcessing()) == "mention" &&
-                    !groupState.completeReplyProcessing(),
-              "eligible group trigger is preserved across ordinary messages", kTestName);
-
-            check(!groupState.isReplyProcessing(), "drained session is idle", kTestName);
-            const auto first = groupState.requestReplyProcessing("active", false);
-            check(
-              first && !first->decision && groupState.isReplyProcessing(), "starts without cached route", kTestName);
-            insoulforge::RouterDecision decision;
-            decision.reason = "new topic";
-            decision.maxLength = 50;
-            check(!groupState.requestReplyProcessing("routed", true, decision),
-              "positive route waits for current reply", kTestName);
-            check(!groupState.requestReplyProcessing("skipped", false),
-              "skipped message preserves positive pending route", kTestName);
-            const auto routed = groupState.completeReplyProcessing();
-            check(routed && routed->messageId == "routed" && routed->decision &&
-                    routed->decision->reason == "new topic" && routed->decision->maxLength == 50 &&
-                    groupState.isReplyProcessing(),
-              "next reply reuses decision with exclusive ownership", kTestName);
-            check(!groupState.completeReplyProcessing(), "cached decision consumed once", kTestName);
-            const auto late = groupState.requestReplyProcessing("late-route", true, decision);
-            check(late && late->decision && late->messageId == "late-route",
-              "route finishing after current reply starts immediately without losing decision", kTestName);
-            check(!groupState.requestReplyProcessing("mention", true) &&
-                    triggerId(groupState.completeReplyProcessing()) == "mention" &&
-                    !groupState.completeReplyProcessing(),
-              "later mandatory trigger replaces cached route and does not inherit its strategy", kTestName);
+            const auto oldLimit = config.contextWindowLimit;
+            config.contextWindowLimit = 2;
+            auto copy = state.messageList()->executorSnapshot();
+            check(copy.size() == 2 && state.messageList()->fullSnapshot().size() > 2,
+              "executor retains existing window bound", kTestName);
+            MessageList limited(SessionId::group("101"), db, config);
+            (void) limited.append(message("outside"));
+            (void) limited.append(message("inside-1"));
+            (void) limited.append(message("inside-2"));
+            (void) limited.executorSnapshot();
+            const auto all = limited.fullSnapshot();
+            check(MessageRecord::isNewForExecutor(all[0]) && !MessageRecord::isNewForExecutor(all[1]) &&
+                    !MessageRecord::isNewForExecutor(all[2]),
+              "records outside executor window remain unprocessed", kTestName);
+            config.contextWindowLimit = oldLimit;
+            state.messageList()->flushToStorage();
+            MessageList restored(session, db, config);
+            check(restored.fullSnapshot() == state.messageList()->fullSnapshot(),
+              "processed flags survive record persistence", kTestName);
+            check(!MessageRecord::isNewForExecutor(message("legacy")), "old records default processed", kTestName);
         }
         db.close();
     }
@@ -494,33 +499,65 @@ namespace {
         const u64 originalSelfId = config.selfQQNumber;
         config.selfQQNumber = 42;
 
-        const insoulforge::json mentionSnapshot =
-          insoulforge::json::array({{{"message_id", "mention"}, {"sender", {{"user_id", "11"}}},
-            {"segments", insoulforge::json::array({{{"type", "at"}, {"target", {{"user_id", "self"}}}},
-                           {{"type", "text"}, {"text", "在吗"}}})}}});
-        const auto mention = drogon::sync_wait(
-          insoulforge::MessageRouter::route(insoulforge::SessionId::group("100"), "mention", mentionSnapshot));
-        check(mention.shouldReply, "bot mention replies without LLM", kTestName);
-        check(mention.isPriority, "bot mention is priority", kTestName);
-        check(!mention.maxLength, "bot mention does not suggest a reply length", kTestName);
-
-        auto assistantAfterMention = mentionSnapshot;
-        assistantAfterMention.push_back(
-          {{"message_id", "assistant"}, {"sender", {{"user_id", "self"}}}, {"segments", insoulforge::json::array()}});
-        const auto queuedMention = drogon::sync_wait(
-          insoulforge::MessageRouter::route(insoulforge::SessionId::group("100"), "mention", assistantAfterMention));
-        check(queuedMention.shouldReply, "queued bot mention replies despite trailing assistant message", kTestName);
-
-        // 内部任务直接产生统一记录，不再伪造数字发送者并经过 OneBot 事件转换。
-        const insoulforge::json systemEvent = {{"session_id", "group:100"}, {"message_id", "1790000000000001"},
-          {"sender", {{"user_id", "system"}, {"name", "系统异步任务"}}},
-          {"segments", insoulforge::json::array({{{"type", "text"}, {"text", "任务完成"}}})}};
-        check(insoulforge::MessageRecord::isSystem(systemEvent), "internal task uses the system sender", kTestName);
-        const auto systemDecision = drogon::sync_wait(insoulforge::MessageRouter::route(
-          insoulforge::SessionId::group("100"), "1790000000000001", insoulforge::json::array({systemEvent})));
-        check(systemDecision.shouldReply && systemDecision.isPriority, "async task result triggers a priority reply",
+        using namespace insoulforge;
+        auto records =
+          json::array({{{"message_id", "in"}, {"sender", {{"user_id", "11"}}}, {"executor_processed", false}},
+            MessageRecord::createAssistantRecord("bot", 1001, "first"),
+            MessageRecord::createAssistantRecord("bot", 1002, "second")});
+        check(MessageRecord::sentMessagesStart(records) == 1, "all consecutive successful sends form the suffix",
           kTestName);
-        check(systemDecision.maxLength == 100, "system message keeps its reply length", kTestName);
+        check(MessageRecord::isNewForExecutor(records[0]) && !MessageRecord::isNewForExecutor(records[1]),
+          "new input excludes assistants regardless of their processed flag", kTestName);
+        records.push_back(MessageRecord::createAssistantExecutionRecord("bot", json::array(), "no_reply"));
+        check(MessageRecord::sentMessagesStart(records) == records.size(),
+          "execution status interrupts the sent suffix", kTestName);
+        records.back() = MessageRecord::createAssistantRecord("bot", std::nullopt, "failed");
+        records.back()["send_error"] = "failed";
+        check(MessageRecord::sentMessagesStart(records) == records.size(), "failed send is not a delivered suffix",
+          kTestName);
+        json context = {{"new_messages", json::array({{{"sender", {{"user_id", "11"}}}}})},
+          {"sent_messages", json::array({{{"sender", {{"user_id", "self"}}}}})}};
+        MessageRecord::compactContextUserIds(context);
+        check(
+          context["new_messages"][0]["sender"]["uid"] == "11" && context["sent_messages"][0]["sender"]["uid"] == "self",
+          "both new groups compact user ids", kTestName);
+
+        const auto group = SessionId::group("hard-rules");
+        SessionStore::setAutoReply(group, false);
+        auto mention = json{{"message_id", "mention"}, {"executor_processed", false}, {"sender", {{"user_id", "11"}}},
+          {"segments", json::array({{{"type", "at"}, {"target", {{"user_id", "self"}}}}})}};
+        auto pending = json::array({mention, MessageRecord::createAssistantRecord("bot", 1003, "reply"),
+          {{"message_id", "ordinary"}, {"executor_processed", false}, {"sender", {{"user_id", "12"}}}}});
+        const auto original = pending;
+        const auto mandatory = drogon::sync_wait(MessageRouter::route(group, pending));
+        check(mandatory.shouldReply && mandatory.isPriority && !mandatory.maxLength &&
+                mandatory.reason == "用户@提及" && pending == original,
+          "unprocessed mention anywhere in snapshot bypasses models without modifying flags", kTestName);
+        pending[0]["executor_processed"] = true;
+        check(!drogon::sync_wait(MessageRouter::route(group, pending)).shouldReply,
+          "processed mention does not force a reply for later ordinary input", kTestName);
+        pending[0] = {{"sender", {{"user_id", "system"}}}, {"executor_processed", false}};
+        const auto system = drogon::sync_wait(MessageRouter::route(group, pending));
+        check(system.shouldReply && system.maxLength == 100 && system.reason == "系统消息触发",
+          "unprocessed system tasks use Router hard rules", kTestName);
+        pending[0]["activity"] = {{"mode", "judge"}};
+        check(!drogon::sync_wait(MessageRouter::route(group, pending)).shouldReply,
+          "judge system notification does not bypass automatic routing", kTestName);
+        pending[0]["activity"]["mode"] = "silent";
+        SessionStore::setAutoReply(group, true);
+        const auto silentOnly = json::array({pending[0]});
+        check(!drogon::sync_wait(MessageRouter::route(group, silentOnly)).shouldReply &&
+                !drogon::sync_wait(MessageRouter::route(SessionId::privateChat(UserId{"11"}), silentOnly)).shouldReply,
+          "silent-only input skips models in both groups and private chats", kTestName);
+        SessionStore::setAutoReply(group, false);
+        pending[0]["activity"]["mode"] = "force";
+        const auto forced = drogon::sync_wait(MessageRouter::route(group, pending));
+        check(forced.shouldReply && forced.isPriority && !forced.maxLength && forced.reason == "Activity 通知",
+          "force mode is decided by Router before disabled automatic reply", kTestName);
+        const auto privateReply =
+          drogon::sync_wait(MessageRouter::route(SessionId::privateChat(UserId{"11"}), json::array({mention})));
+        check(privateReply.shouldReply && privateReply.isPrivate && privateReply.reason == "私聊直接执行",
+          "private input is decided by Router without model request", kTestName);
 
         config.selfQQNumber = originalSelfId;
         database.close();
@@ -536,19 +573,19 @@ namespace {
         config.jev = {};
         config.router = {};
 
-        const insoulforge::json plainSnapshot =
-          insoulforge::json::array({{{"message_id", "plain"}, {"sender", {{"user_id", "11"}}},
+        const insoulforge::json plainSnapshot = insoulforge::json::array(
+          {{{"executor_processed", false}, {"message_id", "plain"}, {"sender", {{"user_id", "11"}}},
             {"segments", insoulforge::json::array({{{"type", "text"}, {"text", "今天天气的大家都在干什么"}}})}}});
-        const auto fallback = drogon::sync_wait(
-          insoulforge::MessageRouter::route(insoulforge::SessionId::group("100"), "plain", plainSnapshot));
+        const auto fallback =
+          drogon::sync_wait(insoulforge::MessageRouter::route(insoulforge::SessionId::group("100"), plainSnapshot));
         check(fallback.shouldReply, "unconfigured jev falls back to existing fail-open path", kTestName);
         check(fallback.reason == "Router 请求失败", "fallback reason is unchanged", kTestName);
 
-        const insoulforge::json shortSnapshot =
-          insoulforge::json::array({{{"message_id", "short"}, {"sender", {{"user_id", "11"}}},
+        const insoulforge::json shortSnapshot = insoulforge::json::array(
+          {{{"executor_processed", false}, {"message_id", "short"}, {"sender", {{"user_id", "11"}}},
             {"segments", insoulforge::json::array({{{"type", "text"}, {"text", "嗯"}}})}}});
-        const auto shortMessage = drogon::sync_wait(
-          insoulforge::MessageRouter::route(insoulforge::SessionId::group("100"), "short", shortSnapshot));
+        const auto shortMessage =
+          drogon::sync_wait(insoulforge::MessageRouter::route(insoulforge::SessionId::group("100"), shortSnapshot));
         check(shortMessage.shouldReply && shortMessage.reason == "Router 请求失败",
           "single-character message reaches the same routing fallback as ordinary text", kTestName);
 
@@ -2945,8 +2982,7 @@ namespace {
           "migration failure returns an error and preserves connection", kTestName);
 
         auto &agent = insoulforge::AgentSystem::instance();
-        check(agent.initialize(database, "explicit-bot-name").has_value() && agent.isReady(),
-          "successful Agent initialization marks ready", kTestName);
+        check(agent.initialize(database, "explicit-bot-name").has_value(), "Agent initialization succeeds", kTestName);
         bool foundScheduleTool = false;
         for (const auto &tool: insoulforge::ToolRegistry::instance().getAllTools()) {
             if (const auto &function = tool["function"]; function["name"] == "create_scheduled_task") {
@@ -2960,10 +2996,9 @@ namespace {
         check(sqlite3_exec(database.handle(), "DROP TABLE prompts", nullptr, nullptr, nullptr) == SQLITE_OK,
           "simulates unavailable prompt storage", kTestName);
         const auto agentFailure = agent.initialize(database, "explicit-bot-name");
-        check(!agentFailure && !agentFailure.error().empty() && !agent.isReady(),
-          "Agent dependency failure returns an error and clears ready state", kTestName);
+        check(!agentFailure && !agentFailure.error().empty(), "Agent dependency failure returns an error", kTestName);
         database.close();
-        check(!agent.initialize(database, "explicit-bot-name") && !agent.isReady(),
+        check(!agent.initialize(database, "explicit-bot-name"),
           "uninitialized database is rejected before dependency access", kTestName);
         std::filesystem::remove_all(directory);
     }
@@ -3160,11 +3195,12 @@ namespace {
         const auto originalRouter = config.router;
         config.selfQQNumber = 42;
         config.router = {};
-        auto message = insoulforge::json{{"message_id", "auto-test"}, {"sender", {{"user_id", "11"}}},
-          {"segments", insoulforge::json::array({{{"type", "text"}, {"text", "ordinary group message"}}})}};
+        auto message =
+          insoulforge::json{{"executor_processed", false}, {"message_id", "auto-test"}, {"sender", {{"user_id", "11"}}},
+            {"segments", insoulforge::json::array({{{"type", "text"}, {"text", "ordinary group message"}}})}};
         const auto route = [&]() {
             return drogon::sync_wait(insoulforge::MessageRouter::route(
-              insoulforge::SessionId::group("100"), "auto-test", insoulforge::json::array({message})));
+              insoulforge::SessionId::group("100"), insoulforge::json::array({message})));
         };
         check(route().action == insoulforge::RouterDecision::Action::SKIP, "normal messages skip without model request",
           kTestName);
@@ -3172,16 +3208,22 @@ namespace {
         check(route().action == insoulforge::RouterDecision::Action::SKIP, "mentioning another user still skips",
           kTestName);
         message["segments"].back()["target"]["user_id"] = "self";
-        check(route().action == insoulforge::RouterDecision::Action::REPLY, "bot mention still replies", kTestName);
+        check(route().action == insoulforge::RouterDecision::Action::REPLY,
+          "unprocessed bot mention bypasses disabled automatic reply", kTestName);
+        message["executor_processed"] = true;
+        check(route().action == insoulforge::RouterDecision::Action::SKIP,
+          "processed bot mention does not repeat the mandatory rule", kTestName);
+        message["executor_processed"] = false;
         message["segments"].erase(1);
         message["sender"]["user_id"] = "system";
-        check(route().action == insoulforge::RouterDecision::Action::REPLY, "system tasks still reply", kTestName);
+        check(route().action == insoulforge::RouterDecision::Action::REPLY,
+          "unprocessed system task bypasses automatic reply setting", kTestName);
         message["sender"]["user_id"] = "11";
         const auto privateId = insoulforge::SessionId::privateChat(insoulforge::UserId{11});
         insoulforge::SessionStore::setAutoReply(privateId, false);
-        check(drogon::sync_wait(
-                insoulforge::MessageRouter::route(privateId, "auto-test", insoulforge::json::array({message})))
-                  .action == insoulforge::RouterDecision::Action::REPLY,
+        check(
+          drogon::sync_wait(insoulforge::MessageRouter::route(privateId, insoulforge::json::array({message}))).action ==
+            insoulforge::RouterDecision::Action::REPLY,
           "private replies are unaffected", kTestName);
         config.selfQQNumber = originalSelf;
         config.router = originalRouter;
@@ -3421,6 +3463,27 @@ namespace {
           "sharing survives restart", kTestName);
         db.close();
         std::filesystem::remove(path);
+    }
+
+    void testContextPromptMigration() {
+        using namespace insoulforge;
+        constexpr std::string_view kTestName = "context prompt migration";
+        auto &db = Database::instance();
+        check(db.initialize(":memory:").has_value(), "initializes database", kTestName);
+        PromptStore::setPrompt(
+          db, "router_system", "custom prefix\n是否应该回复最新一条消息\n1. 看最新一条消息的性质\ncustom suffix");
+        PromptStore::setPrompt(db, "executor_system", "custom\n只回复最新的一条消息或话题，不要同时回复多条消息");
+        PromptService::initialize(db);
+        const auto router = PromptStore::getPrompt(db, "router_system", "");
+        const auto executor = PromptStore::getPrompt(db, "executor_system", "");
+        check(router.starts_with("custom prefix") && router.ends_with("custom suffix") &&
+                router.find("最新一条消息") == std::string::npos,
+          "known legacy rules upgrade without overwriting custom content", kTestName);
+        check(executor.starts_with("custom") && executor.find("只回复最新") == std::string::npos,
+          "executor legacy focus rule also upgrades", kTestName);
+        PromptService::initialize(db);
+        check(PromptStore::getPrompt(db, "router_system", "") == router, "prompt upgrade is idempotent", kTestName);
+        db.close();
     }
 
     void testGroupAdditionalPrompt() {
@@ -3768,11 +3831,10 @@ namespace {
         insoulforge::MessageList messages(
           insoulforge::SessionId::group("987654"), database, insoulforge::Config::instance());
         const auto update = messages.append(record);
-        check(update && update->back()["tool_history"] == history, "no_reply history enters the context snapshot",
-          kTestName);
+        check(update.back()["tool_history"] == history, "no_reply history enters the context snapshot", kTestName);
         const auto failedUpdate = messages.append(failed);
-        check(failedUpdate && failedUpdate->back()["send_error"] == failed["send_error"],
-          "failed delivery enters the context snapshot", kTestName);
+        check(failedUpdate.back()["send_error"] == failed["send_error"], "failed delivery enters the context snapshot",
+          kTestName);
         messages.flushToStorage();
         insoulforge::MessageList restored(
           insoulforge::SessionId::group("987654"), database, insoulforge::Config::instance());
@@ -4044,24 +4106,31 @@ namespace {
             return message;
         };
 
+        {
+            insoulforge::MessageList repeatedMessages(insoulforge::SessionId::group("101"), database, config);
+            static_cast<void>(repeatedMessages.append(makeMessage(1)));
+            const auto repeated = repeatedMessages.append(makeMessage(1));
+            check(repeated.size() == 2 && repeated[0]["message_id"] == repeated[1]["message_id"],
+              "append retains messages with the same ID", kTestName);
+        }
+
         insoulforge::MessageList messages(insoulforge::SessionId::group("100"), database, config);
         const auto first = messages.append(makeMessage(1));
         check(!messages.createSummaryBatch(), "does not summarize below threshold", kTestName);
         static_cast<void>(messages.append(makeMessage(2)));
         static_cast<void>(messages.append(makeMessage(3)));
         const auto fourth = messages.append(makeMessage(4));
-        check(!messages.append(makeMessage(4)), "duplicate message ID returns no snapshot", kTestName);
         const auto batch = messages.createSummaryBatch();
 
-        check(first->size() == 1, "first snapshot stays immutable after later appends", kTestName);
+        check(first.size() == 1, "first snapshot stays immutable after later appends", kTestName);
         check(batch.has_value(), "reserves summary when message count exceeds threshold", kTestName);
         check(batch->messages.size() == 2, "summary batch has configured size", kTestName);
         check(batch->messages[0]["message_id"] == "1", "summary batch keeps chronological order", kTestName);
         check(batch->contextMessages.size() == 1, "summary batch includes configured context", kTestName);
         check(!messages.createSummaryBatch(), "does not create another summary while one is pending", kTestName);
-        check(fourth->size() == 2, "snapshot retains configured recent window", kTestName);
-        check((*fourth)[0]["message_id"] == "3", "snapshot starts at configured context limit", kTestName);
-        check((*fourth)[1]["assets"]["images"][0]["source"]["url"] == "https://example.com/image.jpg",
+        check(fourth.size() == 2, "snapshot retains configured recent window", kTestName);
+        check(fourth[0]["message_id"] == "3", "snapshot starts at configured context limit", kTestName);
+        check(fourth[1]["assets"]["images"][0]["source"]["url"] == "https://example.com/image.jpg",
           "complete image source remains available to tools", kTestName);
         check(insoulforge::ChatRecordStore::getChatRecords(insoulforge::SessionId::group("100")).empty(),
           "runtime append does not write database", kTestName);
@@ -4074,7 +4143,7 @@ namespace {
         const auto restoredRecords = insoulforge::ChatRecordStore::getChatRecords(insoulforge::SessionId::group("100"));
         check(restoredRecords.size() == 2, "flush persists only retained messages", kTestName);
         insoulforge::MessageList restored(insoulforge::SessionId::group("100"), database, config);
-        check(restored.snapshot() == (*fourth), "startup restoration rebuilds retained snapshot", kTestName);
+        check(restored.snapshot() == fourth, "startup restoration rebuilds retained snapshot", kTestName);
 
         messages.clear();
         check(messages.fullSnapshot().empty(), "clear removes runtime messages", kTestName);
@@ -4145,11 +4214,12 @@ namespace {
           "restore failure returns an error without publishing sessions", kTestName);
         check(database.initialize(":memory:").has_value(), "recreates database after failure", kTestName);
         check(agent.initialize(database, config.botName).has_value(), "reinitializes Agent dependencies", kTestName);
-        const auto restoredMessage = insoulforge::MessageRecord::createAssistantRecord("test", 777, "restored");
+        auto restoredMessage = insoulforge::MessageRecord::createAssistantRecord("test", 777, "restored");
         insoulforge::ChatRecordStore::addChatRecord(
           database, insoulforge::SessionId::group("555"), "assistant", insoulforge::dumpJson(restoredMessage));
         check(workflow.initialize(database, config, agent).has_value(), "initializes workflow", kTestName);
         const auto restored = workflow.getSessionMessages(insoulforge::SessionId::group("555"));
+        restoredMessage["executor_processed"] = true;
         check(restored && restored->size() == 1 && restored->front() == restoredMessage,
           "explicit initialization restores persisted messages", kTestName);
         workflow.appendDeliveredAssistantMessage(insoulforge::SessionId::group("555"),
@@ -4272,6 +4342,7 @@ auto main() -> int {
     testGroupAutoReply();
     testGroupCommandSettings();
     testCrossSessionSharing();
+    testContextPromptMigration();
     testGroupAdditionalPrompt();
     testToolHistoryRecords();
     testImageDescriptionCacheStore();

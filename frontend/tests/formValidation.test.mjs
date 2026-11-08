@@ -233,7 +233,7 @@ test('tool JSON errors stay at the schema field and corrected drafts submit once
 })
 
 test('execution dependent limits identify the exact invalid field on submit', async () => {
-  globalThis.fetch = async () => response({maxToolRounds: 8, routeWhileReplying: false, mcpToolPageSize: 10, mcpMaxToolsPerEnable: 4, mcpMaxToolsPerReply: 12})
+  globalThis.fetch = async () => response({maxToolRounds: 8, mcpToolPageSize: 10, mcpMaxToolsPerEnable: 4, mcpMaxToolsPerReply: 12})
   const state = mount('agent/ExecutionConfig')
   await flush()
   const focused = observeFocus()
@@ -244,7 +244,7 @@ test('execution dependent limits identify the exact invalid field on submit', as
 })
 
 test('execution unsaved status follows edits, reversions, failures and the submitted snapshot', async () => {
-  globalThis.fetch = async () => response({maxToolRounds: 8, routeWhileReplying: false, defaultPrivateEnabled: false,
+  globalThis.fetch = async () => response({maxToolRounds: 8, defaultPrivateEnabled: false,
     mcpToolPageSize: 10, mcpMaxToolsPerEnable: 4, mcpMaxToolsPerReply: 12})
   const state = mount('agent/ExecutionConfig')
   await flush()
@@ -271,7 +271,7 @@ test('execution unsaved status follows edits, reversions, failures and the submi
   state.config.maxToolRounds = 8
   assert.equal(state.hasUnsavedChanges, false)
 
-  state.config.routeWhileReplying = true
+  state.config.maxToolRounds = 9
   globalThis.fetch = async () => response({success: true})
   await state.saveConfig()
   assert.equal(state.hasUnsavedChanges, false)

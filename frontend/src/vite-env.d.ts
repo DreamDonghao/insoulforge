@@ -58,7 +58,6 @@ export interface MemoryConfig {
 export interface ExecutionConfig {
     maxToolRounds: number
   defaultPrivateEnabled?: boolean
-  routeWhileReplying: boolean
   mcpToolPageSize: number
   mcpMaxToolsPerEnable: number
   mcpMaxToolsPerReply: number

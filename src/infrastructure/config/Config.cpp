@@ -50,22 +50,26 @@ namespace insoulforge {
                            key == "personProfileMaxChars" || key == "personRelationshipEntryMaxChars" ||
                            key == "personRelationshipMaxChars" || key == "personInteractionEntryMaxChars" ||
                            key == "personInteractionMaxChars") &&
-                          field < 1))
+                          field < 1)) {
                         return std::unexpected(
                           ConfigError{.type = ConfigErrorType::InvalidArgument, .message = key + " 超出允许范围"});
+                    }
                 } else if (key == "oneBotImplementation") {
-                    if (!field.is_string() || (field != "napcat" && field != "snowluma"))
+                    if (!field.is_string() || (field != "napcat" && field != "snowluma")) {
                         return std::unexpected(ConfigError{.type = ConfigErrorType::InvalidArgument,
                           .message = "oneBotImplementation 必须为 napcat 或 snowluma"});
+                    }
                 } else if (key == "apiType") {
-                    if (!field.is_string() || (field != "openai" && field != "openrouter"))
+                    if (!field.is_string() || (field != "openai" && field != "openrouter")) {
                         return std::unexpected(ConfigError{
                           .type = ConfigErrorType::InvalidArgument, .message = "apiType 必须为 openai 或 openrouter"});
+                    }
                 } else if (key == "editPath") {
-                    if (!field.is_string() || trim(field.get<std::string>()).empty())
+                    if (!field.is_string() || trim(field.get<std::string>()).empty()) {
                         return std::unexpected(ConfigError{
                           .type = ConfigErrorType::InvalidArgument, .message = "editPath 必须是非空字符串"});
-                } else if (key == "defaultPrivateEnabled" || key == "affinityEnabled" || key == "routeWhileReplying" ||
+                    }
+                } else if (key == "defaultPrivateEnabled" || key == "affinityEnabled" ||
                            key == "promptCacheKeyEnabled") {
                     if (!field.is_boolean()) {
                         return std::unexpected(
@@ -112,8 +116,9 @@ namespace insoulforge {
         void loadLLMConfig(const json &llm, const std::string_view name, LLMApiConfig &apiConfig,
           LLMModelParams *modelParams = nullptr) {
             const auto &cfg = llm.at(std::string(name));
-            if (cfg.is_null())
+            if (cfg.is_null()) {
                 return;
+            }
 
             apiConfig.apiKey = trim(getStr(cfg, "apiKey"));
             apiConfig.baseUrl = trim(getStr(cfg, "baseUrl"));
@@ -174,8 +179,6 @@ namespace insoulforge {
         execution.maxToolRounds.store(
           getInt(value.at("execution"), "maxToolRounds", ExecutionSettings::kDefaultMaxToolRounds),
           std::memory_order_relaxed);
-        execution.routeWhileReplying.store(
-          getBool(value.at("execution"), "routeWhileReplying"), std::memory_order_relaxed);
 
         // 加载记忆配置
         if (const auto &memCfg = value.at("memory"); !memCfg.is_null()) {
@@ -212,23 +215,30 @@ namespace insoulforge {
             routerWindowKeepCount = getInt(memCfg, "routerWindowKeepCount");
             longTermRecallThreshold = getDouble(memCfg, "longTermRecallThreshold");
             longTermInjectThreshold = getDouble(memCfg, "longTermInjectThreshold");
-            if (contextWindowLimit <= 0)
+            if (contextWindowLimit <= 0) {
                 contextWindowLimit = 100;
-            if (memorySummaryTriggerCount <= 0)
+            }
+            if (memorySummaryTriggerCount <= 0) {
                 memorySummaryTriggerCount = 100;
-            if (memorySummaryBatchSize <= 0 || memorySummaryBatchSize > memorySummaryTriggerCount)
+            }
+            if (memorySummaryBatchSize <= 0 || memorySummaryBatchSize > memorySummaryTriggerCount) {
                 memorySummaryBatchSize = std::max(memorySummaryTriggerCount / 2, 1);
-            if (memorySummaryContextCount < 0)
+            }
+            if (memorySummaryContextCount < 0) {
                 memorySummaryContextCount = 0;
-            if (routerWindowTriggerCount <= 0)
+            }
+            if (routerWindowTriggerCount <= 0) {
                 routerWindowTriggerCount = 20;
+            }
             if (routerWindowKeepCount <= 0 || routerWindowKeepCount >= routerWindowTriggerCount) {
                 routerWindowKeepCount = routerWindowTriggerCount / 2;
             }
-            if (longTermRecallThreshold <= 0.0 || longTermRecallThreshold >= 1.0)
+            if (longTermRecallThreshold <= 0.0 || longTermRecallThreshold >= 1.0) {
                 longTermRecallThreshold = 0.65;
-            if (longTermInjectThreshold <= 0.0 || longTermInjectThreshold >= 1.0)
+            }
+            if (longTermInjectThreshold <= 0.0 || longTermInjectThreshold >= 1.0) {
                 longTermInjectThreshold = 0.45;
+            }
         }
 
         // 加载 QQ Bot 配置
@@ -261,8 +271,6 @@ namespace insoulforge {
         applyMemoryValues(value);
         execution.maxToolRounds.store(
           value.execution.maxToolRounds.load(std::memory_order_relaxed), std::memory_order_relaxed);
-        execution.routeWhileReplying.store(
-          value.execution.routeWhileReplying.load(std::memory_order_relaxed), std::memory_order_relaxed);
     }
 
     void Config::applyLLMValues(const std::string_view name, Config &value) {
@@ -304,8 +312,9 @@ namespace insoulforge {
     void Config::applyQQValues(Config &value) {
         if (oneBotImplementation != value.oneBotImplementation || oneBotTransport != value.oneBotTransport ||
             qqHttpHost != value.qqHttpHost || qqWebSocketHost != value.qqWebSocketHost ||
-            accessToken != value.accessToken || selfQQNumber != value.selfQQNumber)
+            accessToken != value.accessToken || selfQQNumber != value.selfQQNumber) {
             ++m_oneBotRevision;
+        }
         oneBotImplementation = std::move(value.oneBotImplementation);
         accessToken = std::move(value.accessToken);
         selfQQNumber = value.selfQQNumber;
@@ -413,8 +422,9 @@ namespace insoulforge {
     auto Config::saveQQConfig(const json &value) -> std::expected<void, ConfigError> {
         std::scoped_lock lock(m_updateMutex);
         auto normalized = value;
-        if (normalized.is_object() && !normalized.contains("oneBotImplementation"))
+        if (normalized.is_object() && !normalized.contains("oneBotImplementation")) {
             normalized["oneBotImplementation"] = oneBotImplementation;
+        }
         // 管理界面以十进制字符串提交 用户 ID，存储与运行时继续使用 u64。
         if (normalized.is_object() && normalized.contains("selfQQNumber") && normalized["selfQQNumber"].is_string()) {
             const auto number = tryParseUInt64(normalized["selfQQNumber"].get<std::string>());
@@ -430,9 +440,10 @@ namespace insoulforge {
         const auto transport = getStr(value, "oneBotTransport", "http");
         normalized["oneBotTransport"] =
           (transport == "websocket" || transport == "reverse_websocket") ? transport : "http";
-        if (transport == "reverse_websocket" && trim(getStr(normalized, "accessToken")).empty())
+        if (transport == "reverse_websocket" && trim(getStr(normalized, "accessToken")).empty()) {
             return std::unexpected(
               ConfigError{.type = ConfigErrorType::InvalidArgument, .message = "反向 WebSocket 必须配置 Access Token"});
+        }
         Config next;
         return ConfigStore::saveQQConfig(normalized, [&next](const json &stored) -> std::expected<void, ConfigError> {
             return next.loadValues(stored);
@@ -452,32 +463,44 @@ namespace insoulforge {
         if (!normalized.contains("personCompressionTargetTokens")) {
             normalized["personCompressionTargetTokens"] = personCompressionTargetTokens.load(std::memory_order_relaxed);
         }
-        if (!normalized.contains("conversationSummaryMaxChars"))
+        if (!normalized.contains("conversationSummaryMaxChars")) {
             normalized["conversationSummaryMaxChars"] = conversationSummaryMaxChars.load(std::memory_order_relaxed);
-        if (!normalized.contains("conversationSummaryMaxCount"))
+        }
+        if (!normalized.contains("conversationSummaryMaxCount")) {
             normalized["conversationSummaryMaxCount"] = conversationSummaryMaxCount.load(std::memory_order_relaxed);
-        if (!normalized.contains("personMemoryEntryMaxChars"))
+        }
+        if (!normalized.contains("personMemoryEntryMaxChars")) {
             normalized["personMemoryEntryMaxChars"] = personMemoryEntryMaxChars.load(std::memory_order_relaxed);
-        if (!normalized.contains("longTermMemoryEntryMaxChars"))
+        }
+        if (!normalized.contains("longTermMemoryEntryMaxChars")) {
             normalized["longTermMemoryEntryMaxChars"] = longTermMemoryEntryMaxChars.load(std::memory_order_relaxed);
-        if (!normalized.contains("personProfileEntryMaxChars"))
+        }
+        if (!normalized.contains("personProfileEntryMaxChars")) {
             normalized["personProfileEntryMaxChars"] = personProfileEntryMaxChars.load(std::memory_order_relaxed);
-        if (!normalized.contains("personProfileMaxChars"))
+        }
+        if (!normalized.contains("personProfileMaxChars")) {
             normalized["personProfileMaxChars"] = personProfileMaxChars.load(std::memory_order_relaxed);
-        if (!normalized.contains("personRelationshipEntryMaxChars"))
+        }
+        if (!normalized.contains("personRelationshipEntryMaxChars")) {
             normalized["personRelationshipEntryMaxChars"] =
               personRelationshipEntryMaxChars.load(std::memory_order_relaxed);
-        if (!normalized.contains("personRelationshipMaxChars"))
+        }
+        if (!normalized.contains("personRelationshipMaxChars")) {
             normalized["personRelationshipMaxChars"] = personRelationshipMaxChars.load(std::memory_order_relaxed);
-        if (!normalized.contains("personInteractionEntryMaxChars"))
+        }
+        if (!normalized.contains("personInteractionEntryMaxChars")) {
             normalized["personInteractionEntryMaxChars"] =
               personInteractionEntryMaxChars.load(std::memory_order_relaxed);
-        if (!normalized.contains("personInteractionMaxChars"))
+        }
+        if (!normalized.contains("personInteractionMaxChars")) {
             normalized["personInteractionMaxChars"] = personInteractionMaxChars.load(std::memory_order_relaxed);
-        if (!normalized.contains("jevWindowSize"))
+        }
+        if (!normalized.contains("jevWindowSize")) {
             normalized["jevWindowSize"] = jevWindowSize.load(std::memory_order_relaxed);
-        if (!normalized.contains("affinityEnabled"))
+        }
+        if (!normalized.contains("affinityEnabled")) {
             normalized["affinityEnabled"] = affinityEnabled.load(std::memory_order_relaxed);
+        }
         if (auto result = validateFields(normalized); !result) {
             return result;
         }
@@ -537,8 +560,6 @@ namespace insoulforge {
               next.defaultPrivateEnabled.load(std::memory_order_relaxed), std::memory_order_relaxed);
             execution.maxToolRounds.store(
               next.execution.maxToolRounds.load(std::memory_order_relaxed), std::memory_order_relaxed);
-            execution.routeWhileReplying.store(
-              next.execution.routeWhileReplying.load(std::memory_order_relaxed), std::memory_order_relaxed);
         });
     }
 } // namespace insoulforge

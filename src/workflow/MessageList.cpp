@@ -16,20 +16,18 @@ namespace insoulforge {
         for (const json &record:
           ChatRecordStore::getChatRecords(m_database, sessionId, std::numeric_limits<i32>::max())) {
             if (json message; tryParseJson(getStr(record, "content"), message) && message.is_object()) {
+                if (!message.contains("executor_processed")) {
+                    message["executor_processed"] = true;
+                }
                 m_messages.push_back(std::move(message));
             }
         }
     }
 
-    auto MessageList::append(json message) -> std::optional<json> {
+    auto MessageList::append(json message) -> json {
         message.erase("session_id");
-        const std::string messageId = getStr(message, "message_id");
+        message["executor_processed"] = false;
         std::lock_guard lock(m_mutex);
-        if (!messageId.empty() && std::ranges::any_of(m_messages, [&messageId](const json &existing) -> bool {
-                return getStr(existing, "message_id") == messageId;
-            })) {
-            return std::nullopt;
-        }
         m_messages.push_back(std::move(message));
         return snapshotLocked();
     }
@@ -46,6 +44,16 @@ namespace insoulforge {
     auto MessageList::snapshot() const -> json {
         std::lock_guard lock(m_mutex);
         return snapshotLocked();
+    }
+
+    auto MessageList::executorSnapshot() -> json {
+        std::lock_guard lock(m_mutex);
+        auto records = snapshotLocked();
+        const auto first = m_messages.size() - records.size();
+        for (size_t index = first; index < m_messages.size(); ++index) {
+            m_messages[index]["executor_processed"] = true;
+        }
+        return records;
     }
 
     auto MessageList::fullSnapshot() const -> json {

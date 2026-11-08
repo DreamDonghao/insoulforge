@@ -34,8 +34,9 @@ namespace insoulforge::ConfigStore {
             json result = {{"apiKey", ""}, {"baseUrl", ""}, {"path", "/chat/completions"}, {"model", ""},
               {"maxTokens", maxTokens}, {"temperature", temperature}, {"topP", topP}, {"reasoningEffort", ""},
               {"timeoutSeconds", timeoutSeconds}, {"maxRetries", maxRetries}};
-            if (replyModel)
+            if (replyModel) {
                 result["promptCacheKeyEnabled"] = false;
+            }
             return result;
         }
 
@@ -80,8 +81,8 @@ namespace insoulforge::ConfigStore {
                   {"personInteractionEntryMaxChars", 60}, {"personInteractionMaxChars", 250}, {"jevWindowSize", 10},
                   {"routerWindowTriggerCount", 20}, {"routerWindowKeepCount", 10}, {"longTermRecallThreshold", 0.65},
                   {"longTermInjectThreshold", 0.45}}},
-              {"execution", {{"maxToolRounds", ExecutionSettings::kDefaultMaxToolRounds}, {"routeWhileReplying", false},
-                              {"mcpToolPageSize", 10}, {"mcpMaxToolsPerEnable", 4}, {"mcpMaxToolsPerReply", 12}}},
+              {"execution", {{"maxToolRounds", ExecutionSettings::kDefaultMaxToolRounds}, {"mcpToolPageSize", 10},
+                              {"mcpMaxToolsPerEnable", 4}, {"mcpMaxToolsPerReply", 12}}},
               {"activities", {{"token", ""}, {"servers", json::array()}}}, {"builtinTools", json::object()},
               {"mcp", {{"servers", json::array()}}}};
         }
@@ -104,8 +105,8 @@ namespace insoulforge::ConfigStore {
 
         /// @brief 启动时修复整数类型以外或越界的执行参数，不截断小数。
         auto normalizeExecutionConfig(json &config) -> bool {
-            bool changed = false;
             auto &execution = config["execution"];
+            bool changed = execution.erase("routeWhileReplying") != 0;
             const auto defaults = defaultConfig()["execution"];
             for (const auto &[key, maximum]: std::array<std::pair<const char *, i32>, 3>{
                    {{"mcpToolPageSize", 50}, {"mcpMaxToolsPerEnable", 20}, {"mcpMaxToolsPerReply", 64}}}) {
@@ -128,8 +129,9 @@ namespace insoulforge::ConfigStore {
         }
 
         auto compatibleType(const json &value, const json &defaultValue) -> bool {
-            if (defaultValue.is_number())
+            if (defaultValue.is_number()) {
                 return value.is_number();
+            }
             return value.type() == defaultValue.type();
         }
 
@@ -147,8 +149,9 @@ namespace insoulforge::ConfigStore {
                       key == "longTermMemoryEntryMaxChars" || key == "personProfileEntryMaxChars" ||
                       key == "personProfileMaxChars" || key == "personRelationshipEntryMaxChars" ||
                       key == "personRelationshipMaxChars" || key == "personInteractionEntryMaxChars" ||
-                      key == "personInteractionMaxChars"))
+                      key == "personInteractionMaxChars")) {
                     continue;
+                }
                 if (value == config.end() || !compatibleType(*value, defaultValue)) {
                     config[key] = defaultValue;
                     changed = true;
@@ -318,22 +321,26 @@ namespace insoulforge::ConfigStore {
         json persistedConfig = config;
         persistedConfig.erase("name");
         for (const auto *key: {"timeoutSeconds", "maxRetries"}) {
-            if (!persistedConfig.contains(key) && atOrNull(llm, name.c_str()).contains(key))
+            if (!persistedConfig.contains(key) && atOrNull(llm, name.c_str()).contains(key)) {
                 persistedConfig[key] = llm[name][key];
+            }
         }
         if (name == "executor" || name == "executorFallback") {
-            if (!persistedConfig.contains("promptCacheKeyEnabled"))
+            if (!persistedConfig.contains("promptCacheKeyEnabled")) {
                 persistedConfig["promptCacheKeyEnabled"] =
                   getBool(atOrNull(llm, name.c_str()), "promptCacheKeyEnabled", false);
+            }
         } else {
             persistedConfig.erase("promptCacheKeyEnabled");
         }
         if (name == "imageGeneration") {
             const auto &current = atOrNull(llm, "imageGeneration");
-            if (!persistedConfig.contains("apiType"))
+            if (!persistedConfig.contains("apiType")) {
                 persistedConfig["apiType"] = getStr(current, "apiType", "openrouter");
-            if (!persistedConfig.contains("editPath"))
+            }
+            if (!persistedConfig.contains("editPath")) {
                 persistedConfig["editPath"] = getStr(current, "editPath", "/images/edits");
+            }
         } else {
             persistedConfig.erase("apiType");
             persistedConfig.erase("editPath");
@@ -427,6 +434,8 @@ namespace insoulforge::ConfigStore {
         requireInitializedLocked();
         auto nextConfig = fileState.content;
         auto executionConfig = config;
+        executionConfig.erase("routeWhileReplying");
+        nextConfig["execution"].erase("routeWhileReplying");
         if (executionConfig.contains("defaultPrivateEnabled")) {
             nextConfig["qq"]["defaultPrivateEnabled"] = executionConfig["defaultPrivateEnabled"];
             executionConfig.erase("defaultPrivateEnabled");

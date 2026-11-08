@@ -76,6 +76,12 @@ namespace insoulforge::MessageRecord {
     /// @brief 判断记录是否由系统账号发送
     [[nodiscard]] auto isSystem(const json &record) -> bool;
 
+    /// @brief 取得末尾连续成功发送记录的起始位置；失败及纯执行记录不属于发送段。
+    [[nodiscard]] auto sentMessagesStart(const json &records) -> size_t;
+
+    /// @brief 判断入站记录是否尚未交给 Executor；缺少标记的旧记录视为已处理。
+    [[nodiscard]] auto isNewForExecutor(const json &record) -> bool;
+
     /// @brief 生成供 Router、Executor 与记忆任务使用的精简内容投影
     /// @param record 已解析的持久化聊天记录
     /// @return 保留时间、发送者、引用和有序语义段的记录，不含图片来源

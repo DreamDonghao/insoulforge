@@ -31,12 +31,6 @@
 
 namespace insoulforge {
     namespace {
-        /// @brief 判断已有回复任务时是否保留该消息作为下一轮触发目标
-        [[nodiscard]] auto shouldQueueWhileReplying(const SessionId &sessionId, const json &message) -> bool {
-            return sessionId.isPrivate() || MessageRecord::isSystem(message) ||
-                   MessageRecord::mentions(message, UserId{"self"});
-        }
-
         /// @brief 记录已完成主处理消息的会话统计
         void recordMessageProcessingStats(const SessionId &sessionId) {
             try {
@@ -65,7 +59,8 @@ namespace insoulforge {
             }
         }
 
-        /// @brief 预留一个内存批次并启动后台维护，成功后删除对应数量的队首消息
+        /// @brief 消息数达到阈值且没有记忆维护任务时，启动后台记忆维护。
+        /// @details 成功后从内存消息列表中移除已处理的旧消息，失败则保留。
         void scheduleMemoryMaintenance(
           const Database &database, const SessionId &sessionId, const std::shared_ptr<MessageList> &messageList) {
             auto batch = messageList->createSummaryBatch();
@@ -114,9 +109,6 @@ namespace insoulforge {
         if (!database.handle()) {
             return std::unexpected("工作流初始化要求数据库已成功初始化");
         }
-        if (!agent.isReady()) {
-            return std::unexpected("工作流初始化要求 Agent 已就绪");
-        }
         try {
             // 在接收消息前清理超过十天未使用的图片描述缓存。
             const auto expiredImageCount = u64{ImageDescriptionStore::purgeExpired()};
@@ -160,10 +152,7 @@ namespace insoulforge {
     void EventWorkflow::appendDeliveredAssistantMessage(const SessionId &sessionId, json message) {
         const auto sessionState = getOrCreateSessionState(sessionId);
         const auto update = sessionState->messageList()->append(std::move(message));
-        if (!update) {
-            return;
-        }
-        pushRecordedMessage(sessionId, update->back());
+        pushRecordedMessage(sessionId, update.back());
     }
 
     void EventWorkflow::appendAssistantExecutionRecord(const SessionId &sessionId, json message) {
@@ -173,10 +162,7 @@ namespace insoulforge {
     void EventWorkflow::appendSystemStatusMessage(const SessionId &sessionId, json message) {
         const auto sessionState = getOrCreateSessionState(sessionId);
         const auto update = sessionState->messageList()->append(std::move(message));
-        if (!update) {
-            return;
-        }
-        pushRecordedMessage(sessionId, update->back());
+        pushRecordedMessage(sessionId, update.back());
     }
 
     auto EventWorkflow::getSessionMessages(const SessionId &sessionId) -> std::optional<json> {
@@ -231,10 +217,7 @@ namespace insoulforge {
         const auto sessionId = MessageRecord::getSessionId(message);
         const auto sessionState = getOrCreateSessionState(sessionId);
         const auto update = sessionState->messageList()->append(message);
-        if (!update) {
-            co_return;
-        }
-        pushRecordedMessage(sessionId, update->back());
+        pushRecordedMessage(sessionId, update.back());
 
         try {
             const auto response = co_await CommandProcessor::execute(message);
@@ -265,7 +248,7 @@ namespace insoulforge {
     }
 
     void EventWorkflow::enqueueNormalizedMessage(json message) {
-        if (!m_initialized.load(std::memory_order_acquire) || !m_dependencies->agent.isReady() ||
+        if (!m_initialized.load(std::memory_order_acquire) || !m_dependencies->agent.isRunning() ||
             MessageRecord::isAssistant(message)) {
             return;
         }
@@ -298,11 +281,7 @@ namespace insoulforge {
 
     auto EventWorkflow::processPreparationQueue(const SessionId sessionId) -> drogon::Task<> {
         const auto sessionState = getOrCreateSessionState(sessionId);
-        while (true) {
-            auto nextMessage = sessionState->takePreparationMessage();
-            if (!nextMessage) {
-                co_return;
-            }
+        while (auto nextMessage = sessionState->takePreparationMessage()) {
             auto currentMessage = json(std::move(*nextMessage));
 
             try {
@@ -314,9 +293,7 @@ namespace insoulforge {
                     Logger::info(
                       sessionId, "Command", fmt::format("执行: {}", MessageRecord::extractText(currentMessage)));
                     co_await executeCommand(currentMessage);
-                } else if (!SessionStore::isSessionEnabled(sessionId)) {
-                    continue;
-                } else {
+                } else if (SessionStore::isSessionEnabled(sessionId)) {
                     Logger::info(sessionId, "Message",
                       fmt::format("收到: {}", dumpJson(MessageRecord::projectForAgent(currentMessage))));
 
@@ -326,65 +303,17 @@ namespace insoulforge {
                       co_await MessageContentEnricher::injectMemories(std::move(currentMessage), sessionId);
                     currentMessage.erase("session_id");
 
-                    const auto update = sessionState->messageList()->append(std::move(currentMessage));
-                    if (!update) {
-                        continue;
-                    }
+                    const auto [records, startReply] = sessionState->recordIncoming(std::move(currentMessage));
 
-                    pushRecordedMessage(sessionId, update->back());
+                    pushRecordedMessage(sessionId, records.back());
+                    recordMessageProcessingStats(sessionId);
 
-                    const auto triggerMessageId = getStr(update->back(), "message_id");
-                    const auto activityMode = getStr(atOrNull(update->back(), "activity"), "mode");
-                    if (activityMode == "silent") {
-                        recordMessageProcessingStats(sessionId);
-                        scheduleMemoryMaintenance(m_dependencies->database, sessionId, sessionState->messageList());
-                        continue;
-                    }
-                    bool mayWait = shouldQueueWhileReplying(sessionId, update->back());
-                    std::optional<RouterDecision> decision;
-                    if (activityMode == "force") {
-                        decision = RouterDecision{.action = RouterDecision::Action::REPLY,
-                          .reason = "Activity 通知",
-                          .shouldReply = true,
-                          .tone = "friendly",
-                          .maxLength = std::nullopt,
-                          .isPriority = true,
-                          .isPrivate = sessionId.isPrivate()};
-                    } else if (activityMode == "judge") {
-                        decision = co_await MessageRouter::route(
-                          sessionId, triggerMessageId, sessionState->messageList()->snapshot());
-                        if (!decision->shouldReply) {
-                            recordMessageProcessingStats(sessionId);
-                            scheduleMemoryMaintenance(m_dependencies->database, sessionId, sessionState->messageList());
-                            continue;
-                        }
-                    }
-                    if (!mayWait &&
-                        m_dependencies->config.execution.routeWhileReplying.load(std::memory_order_relaxed) &&
-                        sessionState->isReplyProcessing()) {
-                        // 同会话预处理串行判断新消息，避免乱序结果覆盖较新的触发；当前回复继续执行。
-                        const auto routingSnapshot = sessionState->messageList()->snapshot();
-                        decision = co_await MessageRouter::route(sessionId, triggerMessageId, routingSnapshot);
-                        Logger::info(sessionId, "Router",
-                          fmt::format(
-                            "回复期间决策={} | reason={}", decision->shouldReply ? "reply" : "skip", decision->reason));
-                        if (!decision->shouldReply) {
-                            recordMessageProcessingStats(sessionId);
-                            scheduleMemoryMaintenance(m_dependencies->database, sessionId, sessionState->messageList());
-                            continue;
-                        }
-                        mayWait = true;
-                    }
-                    if (auto replyTrigger =
-                          sessionState->requestReplyProcessing(triggerMessageId, mayWait, std::move(decision));
-                      replyTrigger) {
+                    if (startReply) {
                         drogon::async_run(
-                          [this, sessionId, request = std::move(*replyTrigger)]() mutable -> drogon::Task<> {
-                              co_await processReplyWorkflow(sessionId, std::move(request));
-                          });
-                    } else {
-                        recordMessageProcessingStats(sessionId);
+                          [this, sessionId]() -> drogon::Task<> { co_await processReplyWorkflow(sessionId); });
                     }
+                } else {
+                    continue;
                 }
                 scheduleMemoryMaintenance(m_dependencies->database, sessionId, sessionState->messageList());
             } catch (const std::exception &error) {
@@ -396,36 +325,24 @@ namespace insoulforge {
         }
     }
 
-    auto EventWorkflow::processReplyWorkflow(SessionId sessionId, ReplyRequest request) -> drogon::Task<> {
+    auto EventWorkflow::processReplyWorkflow(SessionId sessionId) -> drogon::Task<> {
         const auto sessionState = getOrCreateSessionState(sessionId);
-        bool isInitialReply = true;
-        while (true) {
-            // 每轮回复均读取最新快照，避免遗漏等待期间已发送的助手消息。
-            auto messageSnapshot = sessionState->messageList()->snapshot();
-
+        while (auto request = sessionState->takeReplyRequest()) {
             try {
-                if (m_dependencies->agent.isReady() && SessionStore::isSessionEnabled(sessionId)) {
-                    auto routerDecision = std::move(request.decision);
-                    if (sessionId.isPrivate()) {
-                        Logger::info(sessionId, "Workflow", "私聊直接执行，跳过 Router");
-                    } else {
-                        if (!routerDecision) {
-                            routerDecision =
-                              co_await MessageRouter::route(sessionId, request.messageId, messageSnapshot);
-                        }
-                        Logger::info(sessionId, "Router",
-                          fmt::format("决策={} | reason={} | priority={} | maxLength={}",
-                            routerDecision->shouldReply ? "reply" : "skip", routerDecision->reason,
-                            routerDecision->isPriority,
-                            routerDecision->maxLength ? std::to_string(*routerDecision->maxLength) : "未指定"));
-                    }
+                if (m_dependencies->agent.isRunning() && SessionStore::isSessionEnabled(sessionId)) {
+                    auto routerDecision = co_await MessageRouter::route(sessionId, request->records);
 
-                    if (!routerDecision || routerDecision->shouldReply) {
-                        const auto records = ChatRecordManager{sessionId, std::move(messageSnapshot)};
-                        const auto memory = MemoryManager{sessionId};
-                        const auto replyDecision = co_await ExecutorAgent::execute(records, memory,
-                          sessionId.isPrivate() ? std::nullopt : std::move(routerDecision), request.messageId);
-                        if (replyDecision && replyDecision->shouldReply && !replyDecision->content.empty()) {
+                    Logger::info(sessionId, "Router",
+                      fmt::format("决策={} | reason={} | priority={} | maxLength={}", routerDecision.shouldReply,
+                        routerDecision.reason, routerDecision.isPriority,
+                        routerDecision.maxLength ? std::to_string(*routerDecision.maxLength) : "未指定"));
+
+                    if (routerDecision.shouldReply) {
+                        auto input = sessionState->takeExecutorRequest();
+                        const auto records = ChatRecordManager{sessionId, std::move(input.records)};
+                        if (const auto replyDecision = co_await ExecutorAgent::execute(
+                              records, sessionId.isPrivate() ? std::nullopt : std::optional{std::move(routerDecision)});
+                          replyDecision && replyDecision->shouldReply && !replyDecision->content.empty()) {
                             co_await MessageService::sendToSession(
                               sessionId, replyDecision->content, std::nullopt, replyDecision->toolHistory);
                         } else if (replyDecision && replyDecision->messageSent) {
@@ -451,15 +368,6 @@ namespace insoulforge {
             } catch (...) {
                 Logger::error(sessionId, "Workflow", "回复处理失败: 未知异常");
             }
-            if (isInitialReply) {
-                recordMessageProcessingStats(sessionId);
-                isInitialReply = false;
-            }
-            auto nextRequest = sessionState->completeReplyProcessing();
-            if (!nextRequest) {
-                co_return;
-            }
-            request = std::move(*nextRequest);
         }
     }
 } // namespace insoulforge

@@ -27,7 +27,6 @@
 #include <workflow/MessageList.hpp>
 #include <workflow/agent/llm/prompts/PromptService.hpp>
 #include <workflow/agent/memory/LongTermMemoryStore.hpp>
-#include <workflow/agent/memory/MemoryManager.hpp>
 #include <workflow/agent/memory/MemoryStore.hpp>
 #include <workflow/agent/memory/PersonMemoryStore.hpp>
 #include <workflow/agent/memory/affinity/AffinityStore.hpp>
@@ -697,9 +696,8 @@ namespace {
             executorMemory["conversation_summaries"] = {{{"start_time", "2026-10-19 10:00:00"},
               {"end_time", "2026-10-19 10:10:00"}, {"summary", "讨论了部署方式，等待后续验证。"}}};
             MemoryStore::updateShortTermMemory(privateId, executorMemory.dump());
-            const MemoryManager memory(privateId);
             ToolRuntime::invalidateFavoriteEmojiCache();
-            const auto reply = co_await ExecutorAgent::execute(records, memory);
+            const auto reply = co_await ExecutorAgent::execute(records);
             require(
               reply && reply->content == "context verified", "executor context ordering or global injection failed");
             const ChatRecordManager groupRecords(insoulforge::SessionId::group("100"), records.getRecords());
@@ -707,19 +705,19 @@ namespace {
             require(executorFallbackRequests == 1, "executor used the fallback with the frozen message prefix");
             ToolRuntime::invalidateFavoriteEmojiCache();
             const auto groupReply = co_await ExecutorAgent::execute(
-              groupRecords, memory, RouterDecision{.reason = "group strategy", .tone = "serious", .maxLength = 123});
+              groupRecords, RouterDecision{.reason = "group strategy", .tone = "serious", .maxLength = 123});
             require(groupReply && groupReply->content == "context verified", "group Router strategy was lost");
             require(favoriteRequests == 2, "next execute refreshes changed favorites");
             ToolRuntime::invalidateFavoriteEmojiCache();
-            const auto mentionReply = co_await ExecutorAgent::execute(groupRecords, memory,
-              RouterDecision{.reason = "用户@提及", .maxLength = std::nullopt, .isPriority = true});
+            const auto mentionReply = co_await ExecutorAgent::execute(
+              groupRecords, RouterDecision{.reason = "用户@提及", .maxLength = std::nullopt, .isPriority = true});
             require(mentionReply && mentionReply->content == "context verified",
               "mention context did not omit the reply length");
             require(favoriteRequests == 3, "empty favorites fetched for next execute");
             ToolRuntime::invalidateFavoriteEmojiCache();
             config.affinityEnabled = false;
             const auto withoutScoreReply = co_await ExecutorAgent::execute(
-              groupRecords, memory, RouterDecision{.reason = "group strategy", .tone = "serious", .maxLength = 123});
+              groupRecords, RouterDecision{.reason = "group strategy", .tone = "serious", .maxLength = 123});
             require(withoutScoreReply && withoutScoreReply->content == "context verified",
               "disabled affinity leaked into the executor context or prompt");
             require(favoriteRequests == 4, "failed favorites request does not prevent execution");
@@ -729,7 +727,7 @@ namespace {
                       EventWorkflow::instance().initialize(database, config, agent).has_value(),
               "send fixture workflow initialization failed");
             config.executor.path = "/executor-send-fixture";
-            const auto sentReply = co_await ExecutorAgent::execute(records, memory);
+            const auto sentReply = co_await ExecutorAgent::execute(records);
             require(sentReply && sentReply->messageSent && !sentReply->shouldReply && sentReply->content.empty(),
               "successful terminal send must be distinguished from no reply");
             const auto delivered = EventWorkflow::instance().getSessionMessages(privateId);
@@ -738,7 +736,7 @@ namespace {
                       !delivered->back().contains("execution_status"),
               "sent message must retain tool history without no_reply");
             config.executor.path = "/executor-finish-fixture";
-            const auto silentReply = co_await ExecutorAgent::execute(records, memory);
+            const auto silentReply = co_await ExecutorAgent::execute(records);
             require(silentReply && !silentReply->messageSent && !silentReply->shouldReply,
               "finish_turn must remain a no reply decision");
             registry.unregisterPlugin("contract.context");
@@ -1205,7 +1203,8 @@ auto main() -> int {
           }
           const bool isPrivate = context["current_session"]["type"] == "private";
           std::vector<std::string> expected = {"current_session", "session_memory", "conversation_summaries",
-            "earlier_messages", "person_memories", "shared_conversations", "recent_messages"};
+            "earlier_messages", "person_memories", "shared_conversations", "recent_messages", "new_messages",
+            "sent_messages"};
           if (!isPrivate) {
               expected.push_back("response_requirements");
           }
@@ -1221,6 +1220,9 @@ auto main() -> int {
                                     context["conversation_summaries"][0]["summary"] == "讨论了部署方式，等待后续验证。"
                                 : !context["conversation_summaries"].empty());
           auto expectedSessionMemory = sessionMemory();
+          if (!isPrivate) {
+              expectedSessionMemory["aliases"][0]["names"] = json::array({"摄影佬"});
+          }
           MessageRecord::compactContextUserIds(expectedSessionMemory);
           valid =
             valid && context["session_memory"] == expectedSessionMemory &&

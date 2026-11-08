@@ -91,6 +91,9 @@ namespace insoulforge::ExecutorAgent {
         /// @brief 聊天记录上下文（窗口内，旧 → 新）
         struct ChatContext {
             json earlier = json::array(); // 更早记录：文本段截断到 500 字
+            json fresh = json::array();
+            json sent = json::array();
+            json senders = json::array();
             json recent = json::array(); // 最近记录：注入好感度与召回的长期记忆
         };
 
@@ -110,9 +113,16 @@ namespace insoulforge::ExecutorAgent {
                                           SessionStore::getSessionConfig(chatRecords.getSessionId()).sendGroupCard;
             ChatContext context;
 
+            const auto sentStart = MessageRecord::sentMessagesStart(records);
             for (size_t index = 0; index < totalRecords; ++index) {
                 const bool isOlder = index < olderCount;
-                auto &target = isOlder ? context.earlier : context.recent;
+                auto &target = index >= sentStart                                ? context.sent
+                               : MessageRecord::isNewForExecutor(records[index]) ? context.fresh
+                               : isOlder                                         ? context.earlier
+                                                                                 : context.recent;
+                if (!isOlder || MessageRecord::isNewForExecutor(records[index])) {
+                    context.senders.push_back(records[index]);
+                }
                 auto record = projectRecordForAgent(records[index], isOlder, includeGroupCard);
                 target.push_back(affinityEnabled ? injectAffinity(std::move(record), affinityMap) : std::move(record));
             }
@@ -122,10 +132,10 @@ namespace insoulforge::ExecutorAgent {
         /// @brief 构建 Executor 消息列表（包含收藏表情的单条 system + 单条 user）
         /// @details 上下文组装为键序固定的单个 JSON 对象（ordered_json 按插入顺序序列化）作为单条
         /// user 消息：current_session → session_memory → conversation_summaries → earlier_messages → person_memories →
-        /// shared_conversations → recent_messages → response_requirements（仅有 Router 策略时）→
-        /// activities，避免连续多条 user（部分 OpenAI 兼容后端不支持）
-        [[nodiscard]] auto buildPrompt(const ChatRecordManager &chatRecords, const MemoryManager &memory,
-          const std::optional<RouterDecision> &decision) -> json {
+        /// shared_conversations → recent_messages → new_messages → sent_messages → response_requirements（仅有 Router
+        /// 策略时）→ activities，避免连续多条 user（部分 OpenAI 兼容后端不支持）
+        [[nodiscard]] auto buildPrompt(
+          const ChatRecordManager &chatRecords, const std::optional<RouterDecision> &decision) -> json {
             json messages = json::array();
 
             json systemMsg;
@@ -133,7 +143,7 @@ namespace insoulforge::ExecutorAgent {
             systemMsg["content"] = ExecutorSystemPrompt::instance().build(chatRecords.getSessionId());
             messages.push_back(systemMsg);
 
-            auto [earlierRecords, recentRecords] = buildChatContext(chatRecords);
+            auto chat = buildChatContext(chatRecords);
 
             json context;
             // 会话详情放最前：群名/群号供模型直接取用，无需再向工具查询
@@ -150,15 +160,17 @@ namespace insoulforge::ExecutorAgent {
                 }
             }
             context["current_session"] = std::move(sessionInfo);
-            const auto sessionMemory = memory.getMemory();
+            const auto sessionMemory = MemoryStore::getShortTermMemory(sessionId);
             context["session_memory"] = MemoryStore::projectShortTermMemory(sessionMemory);
             context["conversation_summaries"] = MemoryStore::conversationSummaries(sessionMemory);
-            context["earlier_messages"] = std::move(earlierRecords);
-            auto personMemories = PersonMemoryStore::getForSenders(recentRecords);
+            context["earlier_messages"] = std::move(chat.earlier);
+            auto personMemories = PersonMemoryStore::getForSenders(chat.senders);
             context["person_memories"] = std::move(personMemories);
             context["shared_conversations"] = SharedConversationContext::build(
               sessionId, Config::instance().sharedConversationMessageCount.load(std::memory_order_relaxed));
-            context["recent_messages"] = std::move(recentRecords);
+            context["recent_messages"] = std::move(chat.recent);
+            context["new_messages"] = std::move(chat.fresh);
+            context["sent_messages"] = std::move(chat.sent);
             if (decision) {
                 context["response_requirements"] = {{"tone", decision->tone}};
                 if (decision->maxLength) {
@@ -248,8 +260,8 @@ namespace insoulforge::ExecutorAgent {
         /// @return {回复决策, 工具结果消息列表, 累积 CQ 码, 按顺序保存的工具历史}
         auto processToolCalls(json message, json messages, std::string accumulatedCQCodes, const SessionId sessionId,
           const json &messageSnapshot, std::shared_ptr<std::vector<Image>> toolImages, const bool replyOnly,
-          json toolHistory, std::shared_ptr<McpToolSelection> mcpSelection, std::map<std::string, u64> offeredMcpTools,
-          UserId callerUserId) -> drogon::Task<std::tuple<std::optional<ReplyDecision>, json, std::string, json>> {
+          json toolHistory, std::shared_ptr<McpToolSelection> mcpSelection, std::map<std::string, u64> offeredMcpTools)
+          -> drogon::Task<std::tuple<std::optional<ReplyDecision>, json, std::string, json>> {
             ReplyDecision decision;
             bool hasDecision = false;
 
@@ -287,8 +299,7 @@ namespace insoulforge::ExecutorAgent {
                         appendToolResult(messages, toolCall, "content 必须是非空消息正文");
                         continue;
                     }
-                    const auto quote = argString(args, "quote_message_id");
-                    if (!quote.empty()) {
+                    if (const auto quote = argString(args, "quote_message_id"); !quote.empty()) {
                         bool found = false;
                         for (const auto &record: messageSnapshot) {
                             if (getStr(record, "message_id") == quote) {
@@ -320,7 +331,6 @@ namespace insoulforge::ExecutorAgent {
 
                 ToolCallContext ctx;
                 ctx.sessionId = sessionId;
-                ctx.callerUserId = callerUserId;
                 ctx.messageSnapshot = messageSnapshot;
                 ctx.toolImages = toolImages;
                 ctx.replyOnly = replyOnly;
@@ -345,7 +355,7 @@ namespace insoulforge::ExecutorAgent {
 
         /// @brief Agent 模式执行（带 tools）：循环「请求模型 → 处理工具调用」，直到产出回复决策或达最大轮数
         auto executeWithAgent(json messages, const SessionId sessionId, const json &messageSnapshot,
-          std::shared_ptr<McpToolSelection> mcpSelection, const i32 maxToolRounds, UserId callerUserId)
+          std::shared_ptr<McpToolSelection> mcpSelection, const i32 maxToolRounds)
           -> drogon::Task<std::optional<ReplyDecision>> {
             const auto &config = Config::instance();
             const auto isPrivateSession = sessionId.isPrivate();
@@ -399,8 +409,7 @@ namespace insoulforge::ExecutorAgent {
                 if (messages.size() > 1 && getStr(messages[1], "role") == "user") {
                     auto context = json::parse(getStr(messages[1], "content"));
                     context.erase("activities");
-                    const auto activities = ActivityManager::instance().activeActivities();
-                    if (!activities.empty()) {
+                    if (const auto activities = ActivityManager::instance().activeActivities(); !activities.empty()) {
                         context["activities"] = activities;
                     }
                     messages[1]["content"] = dumpJson(context);
@@ -439,7 +448,7 @@ namespace insoulforge::ExecutorAgent {
                 messages.push_back(buildAssistantToolCallMessage(message));
                 auto [roundDecision, nextMessages, nextAccumulatedCQCodes, nextToolHistory] = co_await processToolCalls(
                   message, std::move(messages), std::move(accumulatedCQCodes), sessionId, messageSnapshot, toolImages,
-                  replyOnly, std::move(toolHistory), mcpSelection, std::move(offeredMcpTools), callerUserId);
+                  replyOnly, std::move(toolHistory), mcpSelection, std::move(offeredMcpTools));
                 if (roundDecision) {
                     roundDecision->toolHistory = std::move(nextToolHistory);
                     co_return std::move(roundDecision);
@@ -516,8 +525,7 @@ namespace insoulforge::ExecutorAgent {
         return result;
     }
 
-    auto execute(const ChatRecordManager &chatRecords, const MemoryManager &memory,
-      std::optional<RouterDecision> decision, std::string triggerMessageId)
+    auto execute(const ChatRecordManager &chatRecords, std::optional<RouterDecision> decision)
       -> drogon::Task<std::optional<ReplyDecision>> {
         const SessionId sessionId = chatRecords.getSessionId();
         if (decision) {
@@ -536,18 +544,9 @@ namespace insoulforge::ExecutorAgent {
         } catch (const std::exception &error) {
             Logger::warn(sessionId, "Executor", fmt::format("收藏表情列表获取失败: {}", error.what()));
         }
-        json messages = buildPrompt(chatRecords, memory, decision);
+        json messages = buildPrompt(chatRecords, decision);
 
-        auto callerUserId = UserId{"system"};
-        for (const auto &record: chatRecords.getRecords()) {
-            if (getStr(record, "message_id") == triggerMessageId) {
-                if (const auto user = UserId::parse(getStr(atOrNull(record, "sender"), "user_id")); user) {
-                    callerUserId = *user;
-                }
-                break;
-            }
-        }
         co_return co_await executeWithAgent(std::move(messages), sessionId, chatRecords.getRecords(),
-          std::move(mcpSelection), getInt(executionConfig, "maxToolRounds", 8), callerUserId);
+          std::move(mcpSelection), getInt(executionConfig, "maxToolRounds", 8));
     }
 } // namespace insoulforge::ExecutorAgent

@@ -11,17 +11,21 @@
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/SessionId.hpp>
 #include <workflow/MessageList.hpp>
-#include <workflow/agent/runtime/AgentTypes.hpp>
 
 namespace insoulforge {
-    /// @brief 下一轮的触发消息及可复用的路由结果；没有结果时在执行前正常路由。
+    /// @brief 一次回复判断或执行的冻结上下文。
     struct ReplyRequest {
-        std::string messageId;
-        std::optional<RouterDecision> decision;
+        json records;
+    };
+
+    /// @brief 入站消息的记录结果与回复消费者启动权。
+    struct IncomingMessageUpdate {
+        json records;
+        bool startReply{false};
     };
 
     /// @brief 管理单个会话的工作流队列及其消费者状态
-    /// @details 预处理使用 FIFO 队列；回复处理中只保存最新一条必须继续处理的消息 ID。
+    /// @details 预处理使用 FIFO 队列；新增回复需求合并为一个待处理批次。
     ///          队列和运行状态由同一把互斥锁保护，不跨协程等待持锁。
     class SessionWorkflowState {
     public:
@@ -47,32 +51,24 @@ namespace insoulforge {
         /// @note 线程安全。仅应由该会话唯一的预处理消费者调用。
         [[nodiscard]] auto takePreparationMessage() -> std::optional<json>;
 
-        /// @brief 当前是否已有串行回复任务。结果仅用于决定是否提前路由，任务所有权仍由请求方法判定。
-        [[nodiscard]] auto isReplyProcessing() -> bool;
+        /// @brief 记录已完成预处理的入站消息，并原子登记回复需求。
+        /// @return 追加后的消息窗口，以及调用者是否取得消费者启动权。
+        [[nodiscard]] auto recordIncoming(json message) -> IncomingMessageUpdate;
 
-        /// @brief 请求会话回复处理
-        /// @param triggerMessageId 本轮由其触发的入站消息 ID
-        /// @param mayWaitForCurrentReply 已有回复任务时，是否保留该消息供下一轮处理
-        /// @param decision 可选的提前路由结果，随触发消息一起保存，避免下一轮重复判断
-        /// @return 当前无回复任务时返回应立即处理的请求；其他情况返回空值
-        /// @details 已有回复任务时，允许等待的消息覆盖待处理触发 ID，连续多条合并为一轮。
-        ///          调用方允许私聊、群内 @机器人、系统消息及提前路由判定需回复的消息等待。
-        ///          下一轮从 MessageList 重新取得快照，因此不会丢失期间记录的消息。
-        /// @note 线程安全。
-        [[nodiscard]] auto requestReplyProcessing(std::string triggerMessageId, bool mayWaitForCurrentReply,
-          std::optional<RouterDecision> decision = std::nullopt) -> std::optional<ReplyRequest>;
+        /// @brief 取得下一批 Router 输入；没有新增需求时原子释放消费者所有权。
+        /// @note 仅由该会话唯一的回复消费者调用；读取不改变消息处理标记。
+        [[nodiscard]] auto takeReplyRequest() -> std::optional<ReplyRequest>;
 
-        /// @brief 完成当前一轮回复处理并决定是否开始下一轮
-        /// @return 等待期间最新的待处理请求；没有时返回空值并结束回复处理状态
-        /// @note 线程安全。仅应由该会话唯一的回复处理协程调用。
-        [[nodiscard]] auto completeReplyProcessing() -> std::optional<ReplyRequest>;
+        /// @brief 重新冻结 Executor 输入，消费冻结前所有待回复需求并标记窗口记录。
+        /// @note 与 recordIncoming 使用同一把锁，避免快照和入站通知交错导致重复执行。
+        [[nodiscard]] auto takeExecutorRequest() -> ReplyRequest;
 
     private:
         std::mutex m_mutex;
         std::shared_ptr<MessageList> m_messageList;
         std::queue<json> m_pendingPreparationMessages;
-        bool m_isPreparationRunning{false};
-        bool m_isReplyProcessing{false};
-        std::optional<ReplyRequest> m_pendingReply;
+        bool m_isPreparationRunning{false}; ///< 预处理任务已安排或正在运行，取消息时发现队列为空则重置。
+        bool m_isReplyProcessing{false}; ///< 回复任务已安排或正在运行，检查到没有新消息要处理时重置。
+        bool m_pendingReply{false}; ///< 有新消息等待回复流程处理，读取 Router 或 Executor 输入时重置。
     };
 } // namespace insoulforge

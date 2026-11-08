@@ -7,6 +7,7 @@
 
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
+#include <infrastructure/UserId.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
 #include <workflow/MessageRouter.hpp>
@@ -47,10 +48,18 @@ namespace insoulforge::MessageRouter {
         [[nodiscard]] auto compactMessage(const json &message, const bool includeGroupCard) -> json {
             const json projected = MessageRecord::projectForAgent(message, false, includeGroupCard);
             json compact;
-            if (const auto card = getStr(atOrNull(projected, "sender"), "card"); !card.empty())
+            if (const auto card = getStr(atOrNull(projected, "sender"), "card"); !card.empty()) {
                 compact["card"] = card;
-            if (const auto role = getStr(atOrNull(projected, "sender"), "role"); !role.empty())
+            }
+            if (const auto role = getStr(atOrNull(projected, "sender"), "role"); !role.empty()) {
                 compact["role"] = role;
+            }
+            if (message.contains("time")) {
+                compact["time"] = message["time"];
+            }
+            if (projected.contains("reply_to")) {
+                compact["reply_to"] = projected["reply_to"];
+            }
             compact["message_id"] = getStr(message, "message_id");
             if (const std::string name = getStr(atOrNull(projected, "sender"), "name"); !name.empty()) {
                 compact["sender"] = name;
@@ -142,10 +151,15 @@ namespace insoulforge::MessageRouter {
             } else {
                 record["sender"] = getStr(atOrNull(projected, "sender"), "user_id");
             }
-            if (const auto card = getStr(atOrNull(projected, "sender"), "card"); !card.empty())
+            if (const auto card = getStr(atOrNull(projected, "sender"), "card"); !card.empty()) {
                 record["card"] = card;
-            if (const auto role = getStr(atOrNull(projected, "sender"), "role"); !role.empty())
+            }
+            if (const auto role = getStr(atOrNull(projected, "sender"), "role"); !role.empty()) {
                 record["role"] = role;
+            }
+            if (projected.contains("time")) {
+                record["time"] = projected["time"];
+            }
             record["text"] = std::move(text);
             if (const json &replyTo = atOrNull(projected, "reply_to"); !replyTo.is_null() && !replyTo.empty()) {
                 record["reply_to"] = replyTo;
@@ -154,27 +168,30 @@ namespace insoulforge::MessageRouter {
         }
 
         /// @brief 使用独立的最近 N 条滑动窗口构建 Jev 状态。
-        [[nodiscard]] auto buildJevState(
-          const SessionId &sessionId, const std::string_view triggerMessageId, const json &snapshot) -> json {
+        [[nodiscard]] auto buildJevState(const SessionId &sessionId, const json &snapshot) -> json {
             const bool includeGroupCard =
               !sessionId.isPrivate() && SessionStore::getSessionConfig(sessionId).sendGroupCard;
-            const auto windowSize = static_cast<size_t>(
-              std::max(1, Config::instance().jevWindowSize.load(std::memory_order_relaxed)));
+            const auto windowSize =
+              static_cast<size_t>(std::max(1, Config::instance().jevWindowSize.load(std::memory_order_relaxed)));
             const size_t startIndex = snapshot.size() > windowSize ? snapshot.size() - windowSize : 0;
             const auto [spokeInWindow, silentCount] = computeBotSilence(snapshot, startIndex);
 
             json records = json::array();
-            for (const json &message: snapshot | std::views::drop(startIndex)) {
-                json record = renderJevRecord(message, includeGroupCard);
-                if (getStr(message, "message_id") == triggerMessageId) {
-                    record["is_current"] = true;
-                }
-                records.push_back(std::move(record));
+            json newMessages = json::array();
+            json sentMessages = json::array();
+            const auto sentStart = MessageRecord::sentMessagesStart(snapshot);
+            for (size_t index = startIndex; index < snapshot.size(); ++index) {
+                const auto &message = snapshot[index];
+                auto &target = index >= sentStart                         ? sentMessages
+                               : MessageRecord::isNewForExecutor(message) ? newMessages
+                                                                          : records;
+                target.push_back(renderJevRecord(message, includeGroupCard));
             }
 
             json state;
-            state["trigger_message_id"] = triggerMessageId;
             state["chat_records"] = std::move(records);
+            state["new_messages"] = std::move(newMessages);
+            state["sent_messages"] = std::move(sentMessages);
             state["bot_silence"] = {{"spoke_in_window", spokeInWindow},
               {"messages_since_last_speak", spokeInWindow ? silentCount : snapshot.size() - startIndex}};
             return state;
@@ -184,9 +201,11 @@ namespace insoulforge::MessageRouter {
         [[nodiscard]] auto buildJevQuestions() -> json {
             json action;
             action["type"] = "choice";
-            action["instructions"] = "以下是群聊记录。只判断 is_current 标记的消息，其后的记录仅用于理解上下文。"
-                                     "reply_to 是被引用消息的 message_id，[bot] 标记机器人发言。"
-                                     "判断机器人是否应该回复这条消息。";
+            action["instructions"] =
+              "以下是群聊上下文。chat_records 是历史，new_messages 是尚未交给回复生成器的入站消息，sent_messages "
+              "是末尾连续已发送的回复。"
+              "reply_to 是被引用消息的 message_id，[bot] 标记机器人发言。"
+              "结合已经发送的内容，判断当前是否仍有必要回复；各组时间可能交错，不按字段顺序推断消息先后。";
             const std::string &botName = Config::instance().botName;
             action["criteria"] = {
               {"skip", fmt::format("纯表情/贴纸、单字或复读、广告、群友互聊且未涉及{0}、"
@@ -215,26 +234,29 @@ namespace insoulforge::MessageRouter {
               {std::string(kJevMaxLengthQuestion), std::move(maxLength)}};
         }
 
-        [[nodiscard]] auto buildPrompt(
-          const SessionId &sessionId, const std::string_view triggerMessageId, const json &snapshot) -> json {
+        [[nodiscard]] auto buildPrompt(const SessionId &sessionId, const json &snapshot) -> json {
             const bool includeGroupCard =
               !sessionId.isPrivate() && SessionStore::getSessionConfig(sessionId).sendGroupCard;
             const size_t startIndex = windowStartIndex(snapshot.size());
 
             json records = json::array();
-            for (const json &message: snapshot | std::views::drop(startIndex)) {
-                json record = compactMessage(message, includeGroupCard);
-                if (getStr(message, "message_id") == triggerMessageId) {
-                    record["is_current"] = true;
-                }
-                records.push_back(std::move(record));
+            json newMessages = json::array();
+            json sentMessages = json::array();
+            const auto sentStart = MessageRecord::sentMessagesStart(snapshot);
+            for (size_t index = startIndex; index < snapshot.size(); ++index) {
+                const auto &message = snapshot[index];
+                auto &target = index >= sentStart                         ? sentMessages
+                               : MessageRecord::isNewForExecutor(message) ? newMessages
+                                                                          : records;
+                target.push_back(compactMessage(message, includeGroupCard));
             }
 
             const auto [spokeInWindow, silentCount] = computeBotSilence(snapshot, startIndex);
 
             json context;
-            context["trigger_message_id"] = triggerMessageId;
             context["chat_records"] = std::move(records);
+            context["new_messages"] = std::move(newMessages);
+            context["sent_messages"] = std::move(sentMessages);
             context["bot_silence"] = {{"spoke_in_window", spokeInWindow},
               {"messages_since_last_speak", spokeInWindow ? silentCount : snapshot.size() - startIndex}};
 
@@ -243,9 +265,10 @@ namespace insoulforge::MessageRouter {
               {{"role", "system"}, {"content", sessionId.isPrivate() ? PromptService::getRouterPrivateSystemPrompt()
                                                                      : PromptService::getRouterSystemPrompt()}});
             prompt.push_back({{"role", "system"},
-              {"content",
-                "本轮只判断 trigger_message_id 指定的触发消息；chat_records 中 is_current 为 true 的记录就是该消息。"
-                "其后的记录仅用于理解上下文，不应改变本轮判断对象。"}});
+              {"content", "chat_records 是历史；new_messages 是尚未交给回复生成器的入站消息；sent_messages "
+                          "是末尾连续成功发送的回复。"
+                          "结合全部上下文和已发送内容判断当前是否还需回复，不指定回复某条消息。各组时间可能交错，不按字"
+                          "段顺序推断先后。"}});
             prompt.push_back({{"role", "user"}, {"content", dumpJson(context)}});
             return prompt;
         }
@@ -307,27 +330,49 @@ namespace insoulforge::MessageRouter {
         return std::nullopt;
     }
 
-    auto route(const SessionId sessionId, const std::string_view triggerMessageId, const json &snapshot)
-      -> drogon::Task<RouterDecision> {
+    auto route(const SessionId sessionId, const json &snapshot) -> drogon::Task<RouterDecision> {
         if (!snapshot.is_array() || snapshot.empty()) {
             co_return applySessionType(makeDecision(RouterDecision::Action::SKIP, "消息快照为空"), sessionId);
         }
 
-        const auto trigger = std::ranges::find_if(snapshot, [triggerMessageId](const json &message) -> bool {
-            return getStr(message, "message_id") == triggerMessageId;
-        });
-        if (trigger == snapshot.end()) {
-            co_return applySessionType(makeDecision(RouterDecision::Action::SKIP, "找不到触发消息"), sessionId);
+        bool hasRoutableInput = false;
+        // 只对未交给 Executor 的入站消息应用硬规则，已处理的历史提及不能再次强制触发。
+        for (const auto &message: snapshot | std::views::reverse) {
+            if (!MessageRecord::isNewForExecutor(message)) {
+                continue;
+            }
+            const auto mode = getStr(atOrNull(message, "activity"), "mode");
+            if (mode == "silent") {
+                continue;
+            }
+            hasRoutableInput = true;
+            if (mode == "judge") {
+                continue;
+            }
+            if (mode == "force") {
+                co_return applySessionType(
+                  makeDecision(RouterDecision::Action::REPLY, "Activity 通知", std::nullopt, true), sessionId);
+            }
+            if (MessageRecord::isSystem(message)) {
+                co_return applySessionType(
+                  makeDecision(RouterDecision::Action::REPLY, "系统消息触发", 100, true), sessionId);
+            }
+            if (sessionId.isPrivate()) {
+                co_return applySessionType(
+                  makeDecision(RouterDecision::Action::REPLY, "私聊直接执行", std::nullopt, true), sessionId);
+            }
+            if (MessageRecord::mentions(message, UserId{"self"})) {
+                co_return applySessionType(
+                  makeDecision(RouterDecision::Action::REPLY, "用户@提及", std::nullopt, true), sessionId);
+            }
         }
-        if (MessageRecord::isSystem(*trigger) && getStr(atOrNull(*trigger, "activity"), "mode") != "judge") {
+
+        if (!hasRoutableInput) {
             co_return applySessionType(
-              makeDecision(RouterDecision::Action::REPLY, "系统消息触发", 100, true), sessionId);
+              makeDecision(RouterDecision::Action::SKIP, "无需要判断的未处理入站消息"), sessionId);
         }
-        if (MessageRecord::mentions(*trigger, UserId{"self"})) {
-            co_return applySessionType(
-              makeDecision(RouterDecision::Action::REPLY, "用户@提及", std::nullopt, true), sessionId);
-        }
-        // 只阻止普通群消息的自动路由；明确提及和系统任务已经在上方处理。
+
+        // 必须回复的硬规则优先于群自动回复开关、Jev 和 Router LLM。
         if (!sessionId.isPrivate() && !SessionStore::getSessionConfig(sessionId).autoReply) {
             co_return makeDecision(RouterDecision::Action::SKIP, "本群已关闭自动回复");
         }
@@ -336,7 +381,7 @@ namespace insoulforge::MessageRouter {
         // 群聊先由 Jev 判断；无法确定时沿用原有 Router LLM。
         if (!sessionId.isPrivate() && JevClient::isConfigured(config.jev)) {
             const auto jevResponse = co_await JevClient::requestSystemOne(
-              config.jev, buildJevState(sessionId, triggerMessageId, snapshot), buildJevQuestions(), sessionId);
+              config.jev, buildJevState(sessionId, snapshot), buildJevQuestions(), sessionId);
             if (jevResponse) {
                 const auto choice = JevClient::readChoice(
                   *jevResponse, std::string(kJevActionQuestion), {kJevActionSkip, kJevActionReply, kJevActionUnclear});
@@ -358,8 +403,8 @@ namespace insoulforge::MessageRouter {
         }
 
         // 保持原有 fail-open 行为：LLM 请求失败或响应无效时仍尝试回复。
-        const auto response = std::optional{co_await LlmClient::requestChat("Router", "router", config.router,
-          config.routerParams, buildPrompt(sessionId, triggerMessageId, snapshot), {}, sessionId)};
+        const auto response = std::optional{co_await LlmClient::requestChat(
+          "Router", "router", config.router, config.routerParams, buildPrompt(sessionId, snapshot), {}, sessionId)};
         if (!response) {
             co_return applySessionType(makeDecision(RouterDecision::Action::REPLY, "Router 请求失败"), sessionId);
         }

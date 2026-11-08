@@ -1,5 +1,6 @@
 /// @file ActivityTests.cpp
 /// @brief 使用本地模拟服务验证全局活动协议，不启动机器人或访问外部服务。
+#include <algorithm>
 #include <atomic>
 #include <cstdlib>
 #include <filesystem>
@@ -37,7 +38,22 @@ namespace {
     std::mutex fixtureMutex;
     std::atomic<int> executorRequests{0}, routerRequests{0}, deliveries{0}, concurrentExecutors{0},
       maxConcurrentExecutors{0};
-    json lastModelContext;
+    json lastModelContext, lastRouterContext;
+    std::atomic<bool> holdRouter{false}, holdExecutor{false}, routerReply{false}, toolRound{false};
+    std::function<void()> pendingRouter, pendingExecutor;
+
+    void releaseModel(const bool router) {
+        std::function<void()> complete;
+        {
+            std::lock_guard lock(fixtureMutex);
+            complete = std::move(router ? pendingRouter : pendingExecutor);
+        }
+        if (!complete) {
+            throw std::runtime_error("expected a held model request");
+        }
+        complete();
+    }
+
     void require(bool condition, const char *message) {
         if (!condition) {
             throw std::runtime_error(message);
@@ -146,15 +162,183 @@ namespace {
             require(
               !lastModelContext.contains("response_requirements"), "activity added reply strategy to private chat");
         }
+        const int shortcutsRouterBase = routerRequests;
+        const int shortcutsDeliveryBase = deliveries;
+        SessionStore::setAutoReply(session, false);
+        workflow.enqueueOneBotEvent(
+          {{"post_type", "message"}, {"message_type", "group"}, {"group_id", 12345}, {"message_id", 799001},
+            {"self_id", 42}, {"user_id", 11}, {"sender", {{"user_id", 11}, {"nickname", "fixture user"}}},
+            {"message", json::array({{{"type", "at"}, {"data", {{"qq", "42"}}}},
+                          {{"type", "text"}, {"data", {{"text", "mention"}}}}})}});
+        co_await waitFor(
+          [&] { return deliveries == shortcutsDeliveryBase + 1; }, "mention did not bypass disabled auto reply");
+        co_await drogon::sleepCoro(trantor::EventLoop::getEventLoopOfCurrentThread(), 0.05);
+        {
+            std::lock_guard lock(fixtureMutex);
+            require(
+              !lastModelContext["response_requirements"].contains("max_length"), "mention imposed a reply length");
+        }
+        workflow.enqueueSystemMessage(session, "系统任务完成");
+        co_await waitFor(
+          [&] { return deliveries == shortcutsDeliveryBase + 2; }, "system task did not bypass disabled auto reply");
+        co_await drogon::sleepCoro(trantor::EventLoop::getEventLoopOfCurrentThread(), 0.05);
+        {
+            std::lock_guard lock(fixtureMutex);
+            require(
+              lastModelContext["response_requirements"]["max_length"] == 100, "system task lost its reply length");
+        }
+        workflow.enqueueOneBotEvent({{"post_type", "message"}, {"message_type", "private"}, {"message_id", 799002},
+          {"user_id", 67890}, {"sender", {{"user_id", 67890}, {"nickname", "private fixture"}}},
+          {"message", json::array({{{"type", "text"}, {"data", {{"text", "private"}}}}})}});
+        co_await waitFor(
+          [&] { return deliveries == shortcutsDeliveryBase + 3; }, "private input did not execute directly");
+        co_await drogon::sleepCoro(trantor::EventLoop::getEventLoopOfCurrentThread(), 0.05);
+        require(routerRequests == shortcutsRouterBase, "direct events called router");
+        SessionStore::setAutoReply(session, true);
+
+        // 控制请求挂起点，验证 Router 与 Executor 使用不同快照，且预处理不被路由阻塞。
+        const auto enqueue = [&](const std::string &id) {
+            static i64 nextMessageId = 800000;
+            workflow.enqueueOneBotEvent({{"post_type", "message"}, {"message_type", "group"}, {"group_id", 12345},
+              {"message_id", ++nextMessageId}, {"user_id", 11},
+              {"sender", {{"user_id", 11}, {"nickname", "fixture user"}}},
+              {"message", json::array({{{"type", "text"}, {"data", {{"text", id}}}}})}});
+        };
+        const auto hasMessage = [](const json &records, const std::string &id) {
+            return std::ranges::any_of(records, [&](const json &record) {
+                return MessageRecord::extractText(record.contains("content") ? record["content"] : record) == id;
+            });
+        };
+        const int routerBase = routerRequests;
+        const int executorBase = executorRequests;
+        const int deliveryBase = deliveries;
+        holdRouter = true;
+        holdExecutor = true;
+        routerReply = true;
+        enqueue("before-router");
+        co_await waitFor(
+          [&] {
+              std::lock_guard lock(fixtureMutex);
+              return bool(pendingRouter);
+          },
+          "router was not held");
+        enqueue("during-router");
+        co_await waitFor(
+          [&] {
+              const auto records = workflow.getSessionMessages(session);
+              return records && hasMessage(*records, "during-router");
+          },
+          "router blocked message preparation");
+        releaseModel(true);
+        co_await waitFor(
+          [&] {
+              std::lock_guard lock(fixtureMutex);
+              return bool(pendingExecutor);
+          },
+          "executor was not held");
+        {
+            std::lock_guard lock(fixtureMutex);
+            require(
+              hasMessage(lastModelContext["new_messages"], "during-router"), "executor reused stale router snapshot");
+            require(lastModelContext["new_messages"][0]["sender"].contains("uid"), "new message uid was not compacted");
+            require(!lastModelContext["new_messages"][0].contains("executor_processed"),
+              "internal processing marker leaked into model request");
+        }
+        enqueue("during-executor");
+        co_await waitFor(
+          [&] {
+              const auto records = workflow.getSessionMessages(session);
+              return records && hasMessage(*records, "during-executor");
+          },
+          "executor blocked message preparation");
+        require(routerRequests == routerBase + 1, "router ran during executor");
+        routerReply = false;
+        releaseModel(false);
+        co_await waitFor(
+          [&] {
+              std::lock_guard lock(fixtureMutex);
+              return bool(pendingRouter);
+          },
+          "new input was not routed after delivery");
+        {
+            std::lock_guard lock(fixtureMutex);
+            require(hasMessage(lastRouterContext["new_messages"], "during-executor") &&
+                      lastRouterContext["sent_messages"].size() == 1,
+              "follow-up router omitted new input or delivered output");
+            require(!lastRouterContext.contains("trigger_message_id"), "router retained target binding");
+        }
+        enqueue("during-skipped-router");
+        co_await waitFor(
+          [&] {
+              const auto records = workflow.getSessionMessages(session);
+              return records && hasMessage(*records, "during-skipped-router");
+          },
+          "new message during skip was not recorded");
+        releaseModel(true);
+        co_await waitFor(
+          [&] {
+              std::lock_guard lock(fixtureMutex);
+              return bool(pendingRouter);
+          },
+          "skip lost newer message instead of judging again");
+        {
+            std::lock_guard lock(fixtureMutex);
+            require(hasMessage(lastRouterContext["new_messages"], "during-skipped-router"),
+              "repeated judgment did not include latest message");
+        }
+        releaseModel(true);
+        co_await drogon::sleepCoro(trantor::EventLoop::getEventLoopOfCurrentThread(), 0.1);
+        require(
+          routerRequests == routerBase + 3 && executorRequests == executorBase + 1 && deliveries == deliveryBase + 1,
+          "skip looped or generated a duplicate reply");
+
+        // 多轮工具调用中途发送消息也不能启动 Router。
+        toolRound = true;
+        workflow.enqueueActivityMessage(session, "工具回合", "chess", "force");
+        co_await waitFor(
+          [&] {
+              std::lock_guard lock(fixtureMutex);
+              return bool(pendingExecutor);
+          },
+          "tool round first request was not held");
+        releaseModel(false);
+        co_await waitFor(
+          [&] {
+              std::lock_guard lock(fixtureMutex);
+              return bool(pendingExecutor);
+          },
+          "tool round did not request a continuation");
+        require(deliveries == deliveryBase + 2, "intermediate send did not complete");
+        enqueue("during-tool-continuation");
+        co_await waitFor(
+          [&] {
+              const auto records = workflow.getSessionMessages(session);
+              return records && hasMessage(*records, "during-tool-continuation");
+          },
+          "tool continuation blocked preparation");
+        require(routerRequests == routerBase + 3, "intermediate send started routing too early");
+        releaseModel(false);
+        co_await waitFor(
+          [&] {
+              std::lock_guard lock(fixtureMutex);
+              return bool(pendingRouter);
+          },
+          "tool completion did not route new message");
+        releaseModel(true);
+        holdRouter = false;
+        holdExecutor = false;
+        co_await drogon::sleepCoro(trantor::EventLoop::getEventLoopOfCurrentThread(), 0.1);
+        require(maxConcurrentExecutors == 1, "workflow generated replies concurrently");
+        const int finalDeliveries = deliveries;
         agent.setRunning(false);
         workflow.enqueueActivityMessage(session, "禁用", "chess", "force");
         co_await drogon::sleepCoro(trantor::EventLoop::getEventLoopOfCurrentThread(), 0.05);
-        require(deliveries == 3, "force bypassed bot run switch");
+        require(deliveries == finalDeliveries, "force bypassed bot run switch");
         agent.setRunning(true);
         SessionStore::disableSession(session);
         workflow.enqueueActivityMessage(session, "禁用", "chess", "force");
         co_await drogon::sleepCoro(trantor::EventLoop::getEventLoopOfCurrentThread(), 0.05);
-        require(deliveries == 3, "force bypassed session switch");
+        require(deliveries == finalDeliveries, "force bypassed session switch");
         workflow.flushMessageListsToStorage();
         database.close();
     }
@@ -417,6 +601,8 @@ auto main() -> int {
           const auto isRouter = getStr(body, "model") == "router";
           if (isRouter) {
               ++routerRequests;
+              std::lock_guard lock(fixtureMutex);
+              lastRouterContext = json::parse(getStr(body["messages"].back(), "content"));
           } else {
               ++executorRequests;
               const auto active = ++concurrentExecutors;
@@ -430,16 +616,29 @@ auto main() -> int {
                   }
               }
           }
-          const auto response = jsonResponse({{"choices",
-            json::array(
-              {{{"message", {{"content", isRouter ? "{\"action\":\"skip\",\"reason\":\"fixture\"}" : "ok"}}}}})}});
-          if (isRouter) {
-              callback(response);
-          } else {
-              drogon::app().getLoop()->runAfter(0.15, [callback = std::move(callback), response] {
+          json message = {{"content", isRouter ? (routerReply ? "{\"action\":\"reply\",\"reason\":\"fixture\"}"
+                                                              : "{\"action\":\"skip\",\"reason\":\"fixture\"}")
+                                               : "ok"}};
+          if (!isRouter && toolRound.exchange(false)) {
+              message = {{"content", nullptr},
+                {"tool_calls",
+                  json::array({{{"id", "send-intermediate"}, {"type", "function"},
+                    {"function", {{"name", "send_message"}, {"arguments", "{\"content\":\"intermediate\"}"}}}}})}};
+          }
+          const auto response = jsonResponse({{"choices", json::array({{{"message", std::move(message)}}})}});
+          auto complete = [callback = std::move(callback), response, isRouter] {
+              if (!isRouter) {
                   --concurrentExecutors;
-                  callback(response);
-              });
+              }
+              callback(response);
+          };
+          if (isRouter ? holdRouter.load() : holdExecutor.load()) {
+              std::lock_guard lock(fixtureMutex);
+              (isRouter ? pendingRouter : pendingExecutor) = std::move(complete);
+          } else if (isRouter) {
+              complete();
+          } else {
+              drogon::app().getLoop()->runAfter(0.15, std::move(complete));
           }
       },
       {drogon::Post});

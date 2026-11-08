@@ -278,7 +278,7 @@ test('tool editor keeps failed saves and blocks leaving while a test is running'
 })
 
 for (const [page, key, save, data, field, changed] of [
-  ['agent/ExecutionConfig', 'config', 'saveConfig', {maxToolRounds: 8, routeWhileReplying: false, mcpToolPageSize: 10, mcpMaxToolsPerEnable: 4, mcpMaxToolsPerReply: 12}, 'maxToolRounds', 9],
+  ['agent/ExecutionConfig', 'config', 'saveConfig', {maxToolRounds: 8, mcpToolPageSize: 10, mcpMaxToolsPerEnable: 4, mcpMaxToolsPerReply: 12}, 'maxToolRounds', 9],
   ['conversation/MemoryConfig', 'memoryConfig', 'saveMemoryConfig', {contextWindowLimit: 100}, 'contextWindowLimit', 101],
   ['onebot/OneBotConfig', 'qqConfig', 'saveQQConfig', {oneBotImplementation: 'napcat', oneBotTransport: 'http', selfQQNumber: '42', qqHttpHost: 'http://localhost:3000', botName: 'original'}, 'botName', 'changed']
 ]) {

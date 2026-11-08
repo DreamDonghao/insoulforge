@@ -24,7 +24,9 @@ namespace {
     using namespace insoulforge;
 
     void require(bool value, const char *message) {
-        if (!value) throw std::runtime_error(message);
+        if (!value) {
+            throw std::runtime_error(message);
+        }
     }
 
     struct Fixture {
@@ -35,8 +37,9 @@ namespace {
 
         auto record(const std::string &key, const json &body) -> int {
             std::lock_guard lock(mutex);
-            if (const auto found = bodies.find(key); found != bodies.end())
+            if (const auto found = bodies.find(key); found != bodies.end()) {
                 consistent = consistent && found->second == body;
+            }
             bodies[key] = body;
             consistent = consistent && !body.contains("timeoutSeconds") && !body.contains("maxRetries");
             return ++attempts[key];
@@ -49,34 +52,29 @@ namespace {
 
     void testConfiguration(const std::filesystem::path &path) {
         auto &config = Config::instance();
-        { std::ofstream file(path); file << R"({"llm":{"memory":{}}})"; }
-        require(config.initialize(path.string()).has_value(), "old configuration failed to load");
-        require(!config.execution.routeWhileReplying.load() && config.getExecutionConfig()["routeWhileReplying"] == false,
-          "busy routing must default off for old configurations");
-        auto execution = config.getExecutionConfig();
-        execution["routeWhileReplying"] = true;
-        require(config.saveExecutionConfig(execution).has_value() && config.execution.routeWhileReplying.load(),
-          "busy routing did not hot update");
-        for (const auto &bad: json::array({0, "true", nullptr})) {
-            auto invalid = execution;
-            invalid["routeWhileReplying"] = bad;
-            require(!config.saveExecutionConfig(invalid) && config.execution.routeWhileReplying.load() &&
-                      config.getExecutionConfig() == execution, "invalid busy routing setting changed configuration");
+        {
+            std::ofstream file(path);
+            file << R"({"llm":{"memory":{}},"execution":{"routeWhileReplying":true}})";
         }
-        execution.erase("routeWhileReplying");
-        require(config.saveExecutionConfig(execution).has_value() && config.execution.routeWhileReplying.load() &&
-                  config.initialize(path.string()).has_value() && config.execution.routeWhileReplying.load(),
-          "old client or restart reset busy routing");
-        execution["routeWhileReplying"] = false;
-        require(config.saveExecutionConfig(execution).has_value() && !config.execution.routeWhileReplying.load(),
-          "busy routing could not be disabled");
-        for (const auto *role: {"router", "executor", "executorFallback", "executorThinking", "image",
-               "memory", "imageGeneration", "embedding", "jev"}) {
+        require(config.initialize(path.string()).has_value(), "old configuration failed to load");
+        require(!config.getExecutionConfig().contains("routeWhileReplying"), "obsolete setting exposed");
+        auto execution = config.getExecutionConfig();
+        execution["routeWhileReplying"] = "ignored legacy value";
+        require(config.saveExecutionConfig(execution).has_value() &&
+                  !config.getExecutionConfig().contains("routeWhileReplying") &&
+                  config.initialize(path.string()).has_value() &&
+                  !config.getExecutionConfig().contains("routeWhileReplying"),
+          "legacy setting must be ignored and removed on save");
+        for (const auto *role: {"router", "executor", "executorFallback", "executorThinking", "image", "memory",
+               "imageGeneration", "embedding", "jev"}) {
             const std::string name(role);
-            const int timeout = name == "embedding" ? 30 : name == "jev" ? 10 :
-              (name == "memory" || name == "imageGeneration") ? 180 : 90;
-            const int retries = name == "router" || name == "executor" || name == "executorFallback" ||
-              name == "executorThinking" ? 3 : 0;
+            const int timeout = name == "embedding"                               ? 30
+                                : name == "jev"                                   ? 10
+                                : (name == "memory" || name == "imageGeneration") ? 180
+                                                                                  : 90;
+            const int retries =
+              name == "router" || name == "executor" || name == "executorFallback" || name == "executorThinking" ? 3
+                                                                                                                 : 0;
             const auto settings = config.getLLMConfig(name);
             require(settings["timeoutSeconds"] == timeout && settings["maxRetries"] == retries,
               "legacy model defaults changed");
@@ -103,7 +101,8 @@ namespace {
             auto invalid = memorySettings;
             invalid["jevWindowSize"] = bad;
             require(!config.saveMemoryConfig(invalid) && config.getMemoryConfig() == memorySettings &&
-                      config.jevWindowSize.load() == 4, "invalid Jev window changed settings");
+                      config.jevWindowSize.load() == 4,
+              "invalid Jev window changed settings");
         }
         memorySettings.erase("jevWindowSize");
         require(config.saveMemoryConfig(memorySettings).has_value() && config.jevWindowSize.load() == 4 &&
@@ -135,8 +134,8 @@ namespace {
         auto settings = config.getLLMConfig("memory");
         settings["timeoutSeconds"] = 600;
         settings["maxRetries"] = 2;
-        require(config.saveLLMConfig("memory", settings).has_value() &&
-                  config.memory.timeoutSeconds == 600 && config.memory.maxRetries == 2,
+        require(config.saveLLMConfig("memory", settings).has_value() && config.memory.timeoutSeconds == 600 &&
+                  config.memory.maxRetries == 2,
           "request settings did not hot update");
         for (const auto *key: {"timeoutSeconds", "maxRetries"}) {
             for (const auto &bad: json::array({nullptr, "3", true, 1.5, -1, 3601, 18446744073709551615ULL})) {
@@ -156,19 +155,24 @@ namespace {
             auto boundary = settings;
             boundary["timeoutSeconds"] = timeout;
             boundary["maxRetries"] = timeout == 1 ? 0 : 10;
-            require(config.saveLLMConfig("memory", boundary).has_value() &&
-                      config.memory.timeoutSeconds == timeout && config.memory.maxRetries == (timeout == 1 ? 0 : 10),
+            require(config.saveLLMConfig("memory", boundary).has_value() && config.memory.timeoutSeconds == timeout &&
+                      config.memory.maxRetries == (timeout == 1 ? 0 : 10),
               "valid boundary request settings were rejected");
         }
         require(config.saveLLMConfig("memory", settings).has_value(), "could not restore request settings");
         auto oldClient = settings;
-        oldClient.erase("timeoutSeconds"); oldClient.erase("maxRetries");
+        oldClient.erase("timeoutSeconds");
+        oldClient.erase("maxRetries");
         require(config.saveLLMConfig("memory", oldClient).has_value() && config.getLLMConfig("memory") == settings,
           "old client reset existing request settings");
         require(config.initialize(path.string()).has_value() && config.memory.timeoutSeconds == 600 &&
-                  config.memory.maxRetries == 2, "request settings did not persist");
+                  config.memory.maxRetries == 2,
+          "request settings did not persist");
         const auto invalidPath = path.string() + ".invalid";
-        { std::ofstream file(invalidPath); file << R"({"llm":{"memory":{"timeoutSeconds":"600"}}})"; }
+        {
+            std::ofstream file(invalidPath);
+            file << R"({"llm":{"memory":{"timeoutSeconds":"600"}}})";
+        }
         require(!config.initialize(invalidPath) && config.memory.timeoutSeconds == 600,
           "startup silently repaired an explicitly invalid request setting");
         std::filesystem::remove(invalidPath);
@@ -176,8 +180,12 @@ namespace {
 
     auto apiFor(const std::string &endpoint, const std::string &model, int retries = 1, int timeout = 2)
       -> LLMApiConfig {
-        return {.apiKey = "fixture", .baseUrl = endpoint, .path = "/model-fixture", .model = model,
-          .timeoutSeconds = timeout, .maxRetries = retries};
+        return {.apiKey = "fixture",
+          .baseUrl = endpoint,
+          .path = "/model-fixture",
+          .model = model,
+          .timeoutSeconds = timeout,
+          .maxRetries = retries};
     }
 
     auto testJevWindow(const std::string &endpoint) -> drogon::Task<> {
@@ -188,22 +196,25 @@ namespace {
             config.jev = apiFor(endpoint, key, 0);
             json records = json::array();
             for (int index = 0; index < size; ++index) {
-                records.push_back({{"message_id", std::to_string(index)},
-                  {"sender", {{"user_id", index == 12 ? "self" : "11"}}},
-                  {"segments", json::array({{{"type", "text"}, {"text", "test"}}})}});
+                records.push_back(
+                  {{"message_id", std::to_string(index)}, {"sender", {{"user_id", index == 12 ? "self" : "11"}}},
+                    {"segments", json::array({{{"type", "text"}, {"text", "test"}}})}});
             }
-            const auto decision =
-              co_await MessageRouter::route(insoulforge::SessionId::group("100"), std::to_string(size - 1), records);
+            records.back()["executor_processed"] = false;
+            const auto decision = co_await MessageRouter::route(insoulforge::SessionId::group("100"), records);
             require(!decision.shouldReply && fixture.count(key) == 1, "Jev decision unexpectedly fell back");
             json state;
-            { std::lock_guard lock(fixture.mutex); state = fixture.bodies.at(key).at("state"); }
-            const auto &window = state.at("chat_records");
+            {
+                std::lock_guard lock(fixture.mutex);
+                state = fixture.bodies.at(key).at("state");
+            }
+            auto window = state.at("chat_records");
+            window.push_back(state.at("new_messages").at(0));
             const int start = std::max(0, size - 10);
             require(window.size() == static_cast<size_t>(size - start), "wrong Jev window size");
             for (int index = start; index < size; ++index) {
                 const auto &record = window.at(static_cast<size_t>(index - start));
-                require(record.at("message_id") == std::to_string(index) &&
-                          record.value("is_current", false) == (index == size - 1),
+                require(record.at("message_id") == std::to_string(index) && !record.contains("is_current"),
                   "Jev window order or trigger marker changed");
             }
             const bool spoke = start <= 12 && size > 12;
@@ -211,6 +222,35 @@ namespace {
                       state["bot_silence"]["messages_since_last_speak"] == (spoke ? size - 13 : size - start),
               "Jev silence statistics used a different window");
         }
+        config.jev = apiFor(endpoint, "jev-window-groups", 0);
+        json grouped =
+          json::array({{{"message_id", "old"}, {"sender", {{"user_id", "11"}}}, {"executor_processed", true},
+                         {"segments", json::array({{{"type", "text"}, {"text", "history"}}})}},
+            {{"message_id", "new"}, {"sender", {{"user_id", "11"}}}, {"executor_processed", false},
+              {"segments", json::array({{{"type", "text"}, {"text", "new"}}})}},
+            {{"message_id", "sent-1"}, {"sender", {{"user_id", "self"}}}, {"segments", json::array()}},
+            {{"message_id", "sent-2"}, {"sender", {{"user_id", "self"}}}, {"segments", json::array()}}});
+        (void) co_await MessageRouter::route(SessionId::group("100"), grouped);
+        {
+            std::lock_guard lock(fixture.mutex);
+            const auto &state = fixture.bodies.at("jev-window-groups")["state"];
+            require(state["chat_records"].size() == 1 && state["new_messages"].size() == 1 &&
+                      state["sent_messages"].size() == 2 && !state.contains("trigger_message_id"),
+              "Jev failed to partition all three message groups");
+            require(!state["new_messages"][0].contains("executor_processed") &&
+                      !state["new_messages"][0].contains("is_current"),
+              "internal markers leaked into Jev");
+        }
+        auto silent = json{{"executor_processed", false}, {"sender", {{"user_id", "system"}}},
+          {"activity", {{"mode", "silent"}}}, {"segments", json::array()}};
+        config.jev = apiFor(endpoint, "jev-window-silent", 0);
+        require(!(co_await MessageRouter::route(SessionId::group("100"), json::array({silent}))).shouldReply &&
+                  fixture.count("jev-window-silent") == 0,
+          "silent-only batch unexpectedly requested Jev");
+        auto mixed = json::array({silent, grouped[1]});
+        require(!(co_await MessageRouter::route(SessionId::group("100"), mixed)).shouldReply &&
+                  fixture.count("jev-window-silent") == 1,
+          "silent notification prevented normal input from reaching Jev");
         // 自定义窗口独立于 Router；低置信度时 Router 仍采用原有分段窗口。
         config.jevWindowSize.store(4);
         config.jev = apiFor(endpoint, "jev-window-fallback", 0);
@@ -218,17 +258,21 @@ namespace {
         config.routerWindowTriggerCount = 20;
         config.routerWindowKeepCount = 10;
         json records = json::array();
-        for (int index = 0; index < 25; ++index)
+        for (int index = 0; index < 25; ++index) {
             records.push_back({{"message_id", std::to_string(index)}, {"sender", {{"user_id", "11"}}},
               {"segments", json::array({{{"type", "text"}, {"text", "test"}}})}});
-        (void) co_await MessageRouter::route(insoulforge::SessionId::group("100"), "24", records);
+        }
+        records.back()["executor_processed"] = false;
+        (void) co_await MessageRouter::route(insoulforge::SessionId::group("100"), records);
         {
             std::lock_guard lock(fixture.mutex);
-            require(fixture.bodies.at("jev-window-fallback")["state"]["chat_records"].size() == 4,
+            require(fixture.bodies.at("jev-window-fallback")["state"]["chat_records"].size() == 3 &&
+                      fixture.bodies.at("jev-window-fallback")["state"]["new_messages"].size() == 1,
               "custom Jev window was ignored");
             const auto &messages = fixture.bodies.at("router-window").at("messages");
             const auto context = json::parse(messages.back().at("content").get<std::string>());
-            require(context["chat_records"].size() == 15 && context["chat_records"][0]["message_id"] == "10",
+            require(context["chat_records"].size() == 14 && context["new_messages"].size() == 1 &&
+                      context["chat_records"][0]["message_id"] == "10",
               "Router fallback stopped using its batched window");
         }
     }
@@ -242,57 +286,65 @@ namespace {
             LLMModelParams cacheParams;
             const auto group = SessionId::group("123456");
             require(!LlmClient::buildChatRequestBody(apiFor(endpoint, "cache"), cacheParams, messages, {}, group)
-                       .contains("prompt_cache_key"), "disabled cache key was sent");
+                      .contains("prompt_cache_key"),
+              "disabled cache key was sent");
             cacheParams.promptCacheKeyEnabled = true;
             require(!LlmClient::buildChatRequestBody(apiFor(endpoint, "cache"), cacheParams, messages)
-                       .contains("prompt_cache_key"), "cache key without session was sent");
+                      .contains("prompt_cache_key"),
+              "cache key without session was sent");
             for (const auto *role: {"executor", "executorFallback", "executorThinking", "router", "memory"}) {
                 const std::string key = std::string("cache-") + role;
-                require((co_await LlmClient::requestChat("test", role, apiFor(endpoint, key), cacheParams,
-                          messages, {}, group)).has_value(), "cache request failed");
+                require((co_await LlmClient::requestChat(
+                           "test", role, apiFor(endpoint, key), cacheParams, messages, {}, group))
+                          .has_value(),
+                  "cache request failed");
                 std::lock_guard lock(fixture.mutex);
                 const auto &body = fixture.bodies.at(key);
-                if (std::string_view(role) == "executor" || std::string_view(role) == "executorFallback")
+                if (std::string_view(role) == "executor" || std::string_view(role) == "executorFallback") {
                     require(body.at("prompt_cache_key") == "insoulforge:executor:group:123456",
                       "reply cache key is incorrect");
-                else
+                } else {
                     require(!body.contains("prompt_cache_key"), "cache key leaked to another model role");
+                }
             }
-            require(LlmClient::buildChatRequestBody(apiFor(endpoint, "cache"), cacheParams, messages, {},
-                      SessionId::privateChat(UserId{"123456"}))["prompt_cache_key"] ==
-                      "insoulforge:executor:private:123456", "private cache key collides with group key");
+            require(
+              LlmClient::buildChatRequestBody(apiFor(endpoint, "cache"), cacheParams, messages, {},
+                SessionId::privateChat(UserId{"123456"}))["prompt_cache_key"] == "insoulforge:executor:private:123456",
+              "private cache key collides with group key");
             for (const auto *key: {"chat", "fallback", "status429", "status500", "status503"}) {
-                const auto response = co_await LlmClient::requestChat("test", "executor", apiFor(endpoint, key),
-                  LLMModelParams{}, messages);
+                const auto response = co_await LlmClient::requestChat(
+                  "test", "executor", apiFor(endpoint, key), LLMModelParams{}, messages);
                 require(response.has_value() && fixture.count(key) == 2, "recoverable error did not retry once");
             }
             for (const auto *key: {"status400", "status401", "status403", "malformed"}) {
-                const auto response = co_await LlmClient::requestChat("test", "executor", apiFor(endpoint, key, 3),
-                  LLMModelParams{}, messages);
+                const auto response = co_await LlmClient::requestChat(
+                  "test", "executor", apiFor(endpoint, key, 3), LLMModelParams{}, messages);
                 require(!response && fixture.count(key) == 1, "permanent or malformed response was retried");
             }
             for (const auto retries: {0, 2}) {
                 const auto key = "exhaust" + std::to_string(retries);
-                const auto response = co_await LlmClient::requestChat("test", "executor", apiFor(endpoint, key, retries),
-                  LLMModelParams{}, messages);
+                const auto response = co_await LlmClient::requestChat(
+                  "test", "executor", apiFor(endpoint, key, retries), LLMModelParams{}, messages);
                 require(!response && fixture.count(key) == retries + 1, "retry limit excluded the first attempt");
             }
             const auto started = std::chrono::steady_clock::now();
-            const auto timed = co_await LlmClient::requestChat("test", "executor", apiFor(endpoint, "timeout", 1, 1),
-              LLMModelParams{}, messages);
+            const auto timed = co_await LlmClient::requestChat(
+              "test", "executor", apiFor(endpoint, "timeout", 1, 1), LLMModelParams{}, messages);
             require(!timed && fixture.count("timeout") == 2 &&
                       std::chrono::steady_clock::now() - started < std::chrono::seconds{5},
               "configured timeout did not apply to each attempt");
-            const auto slow = co_await LlmClient::requestChat("test", "executor", apiFor(endpoint, "slow", 0, 2),
-              LLMModelParams{}, messages);
+            const auto slow = co_await LlmClient::requestChat(
+              "test", "executor", apiFor(endpoint, "slow", 0, 2), LLMModelParams{}, messages);
             require(slow.has_value() && fixture.count("slow") == 1, "longer timeout did not permit a slow response");
 
             auto frozen = apiFor(endpoint, "frozen");
             trantor::EventLoop::getEventLoopOfCurrentThread()->runAfter(0.2, [&frozen] {
-                frozen.baseUrl = "http://127.0.0.1:1"; frozen.maxRetries = 0; frozen.model = "changed";
+                frozen.baseUrl = "http://127.0.0.1:1";
+                frozen.maxRetries = 0;
+                frozen.model = "changed";
             });
-            const auto frozenResponse = co_await LlmClient::requestChat("test", "executor", frozen,
-              LLMModelParams{}, messages);
+            const auto frozenResponse =
+              co_await LlmClient::requestChat("test", "executor", frozen, LLMModelParams{}, messages);
             require(frozenResponse.has_value() && fixture.count("frozen") == 2 && frozen.model == "changed",
               "running retries did not retain their configuration snapshot");
 
@@ -305,7 +357,8 @@ namespace {
               "embedding ignored retry settings");
             auto jev = apiFor(endpoint, "jev");
             require((co_await JevClient::requestSystemOne(jev, json::object(), json::object())).has_value() &&
-                      fixture.count("jev") == 2, "Jev ignored retry settings");
+                      fixture.count("jev") == 2,
+              "Jev ignored retry settings");
             config.image = apiFor(endpoint, "image");
             const auto image =
               co_await ImageDescriptionService::ask("test", {endpoint + "/pixel"}, insoulforge::SessionId::group("0"));
@@ -314,8 +367,9 @@ namespace {
                 static_cast<LLMApiConfig &>(config.imageGeneration) = apiFor(endpoint, key);
                 config.imageGeneration.apiType = "openai";
                 config.imageGeneration.editPath = "/edit-fixture";
-                const std::vector<std::string> references = std::string(key) == "edit" ?
-                  std::vector<std::string>{"data:image/png;base64,fixture"} : std::vector<std::string>{};
+                const std::vector<std::string> references =
+                  std::string(key) == "edit" ? std::vector<std::string>{"data:image/png;base64,fixture"}
+                                             : std::vector<std::string>{};
                 const auto result = co_await ImageGenerationService::generate(
                   "test", "1024x1024", insoulforge::SessionId::group("0"), references);
                 require(result.image && result.source == result.image->id() && fixture.count(key) == 2,
@@ -327,21 +381,27 @@ namespace {
             const auto cancelled =
               co_await LlmClient::requestMaintenance(messages, std::nullopt, "memory", std::nullopt, control);
             require(!cancelled && fixture.count("cancel") == 1, "cancelled maintenance retried its request");
-            { std::lock_guard lock(fixture.mutex); require(fixture.consistent, "retry body changed or local settings leaked"); }
+            {
+                std::lock_guard lock(fixture.mutex);
+                require(fixture.consistent, "retry body changed or local settings leaked");
+            }
             exitCode = 0;
             std::cout << "All model request tests passed\n";
-        } catch (const std::exception &error) { std::cerr << error.what() << '\n'; }
+        } catch (const std::exception &error) {
+            std::cerr << error.what() << '\n';
+        }
         drogon::app().quit();
     }
-}
+} // namespace
 
 int main() {
     const auto path = std::filesystem::temp_directory_path() /
-      ("insoulforge-model-requests-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".json");
+                      ("insoulforge-model-requests-" +
+                        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".json");
     testConfiguration(path);
     drogon::app().addListener("127.0.0.1", 0).setThreadNum(1);
     const auto handle = [](const drogon::HttpRequestPtr &request,
-      std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+                          std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
         const auto body = json::parse(request->body());
         const auto key = body["model"].get<std::string>();
         const int attempt = fixture.record(key, body);
@@ -353,8 +413,8 @@ int main() {
             .dump());
         if (key.starts_with("jev-window-")) {
             response->setBody(key == "jev-window-fallback"
-              ? R"({"answers":{"action":{"choice":"skip","confidence":0.1}}})"
-              : R"({"answers":{"action":{"choice":"skip","confidence":1.0}}})");
+                                ? R"({"answers":{"action":{"choice":"skip","confidence":0.1}}})"
+                                : R"({"answers":{"action":{"choice":"skip","confidence":1.0}}})");
             callback(response);
             return;
         }
@@ -363,29 +423,42 @@ int main() {
             callback(response);
             return;
         }
-        if (key == "malformed") response->setBody("invalid JSON");
-        else if (key.starts_with("exhaust")) response->setStatusCode(drogon::k500InternalServerError);
-        else if (key.starts_with("status")) {
+        if (key == "malformed") {
+            response->setBody("invalid JSON");
+        } else if (key.starts_with("exhaust")) {
+            response->setStatusCode(drogon::k500InternalServerError);
+        } else if (key.starts_with("status")) {
             const int status = std::stoi(key.substr(6));
-            if (status < 429 || attempt == 1) response->setStatusCode(static_cast<drogon::HttpStatusCode>(status));
-        } else if (key != "timeout" && key != "slow" && attempt == 1)
+            if (status < 429 || attempt == 1) {
+                response->setStatusCode(static_cast<drogon::HttpStatusCode>(status));
+            }
+        } else if (key != "timeout" && key != "slow" && attempt == 1) {
             response->setStatusCode(drogon::k503ServiceUnavailable);
-        if (key == "edit" && request->getPath() != "/edit-fixture") response->setStatusCode(drogon::k400BadRequest);
-        if (key == "timeout" || key == "slow")
+        }
+        if (key == "edit" && request->getPath() != "/edit-fixture") {
+            response->setStatusCode(drogon::k400BadRequest);
+        }
+        if (key == "timeout" || key == "slow") {
             drogon::app().getLoop()->runAfter(1.3, [callback = std::move(callback), response] { callback(response); });
-        else callback(response);
+        } else {
+            callback(response);
+        }
     };
     drogon::app().registerHandler("/model-fixture", handle, {drogon::Post});
     drogon::app().registerHandler("/edit-fixture", handle, {drogon::Post});
-    drogon::app().registerHandler("/pixel", [](const drogon::HttpRequestPtr &,
-      std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
-        const std::string encoded = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9d1QAAAABJRU5ErkJggg==";
-        std::string bytes(encoded.size() / 4 * 3, '\0');
-        const int size = EVP_DecodeBlock(reinterpret_cast<unsigned char *>(bytes.data()),
-          reinterpret_cast<const unsigned char *>(encoded.data()), static_cast<int>(encoded.size()));
-        bytes.resize(static_cast<size_t>(size) - 2);
-        const auto response = drogon::HttpResponse::newHttpResponse(); response->setBody(bytes); callback(response);
-    }, {drogon::Get});
+    drogon::app().registerHandler("/pixel",
+      [](const drogon::HttpRequestPtr &, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+          const std::string encoded =
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9d1QAAAABJRU5ErkJggg==";
+          std::string bytes(encoded.size() / 4 * 3, '\0');
+          const int size = EVP_DecodeBlock(reinterpret_cast<unsigned char *>(bytes.data()),
+            reinterpret_cast<const unsigned char *>(encoded.data()), static_cast<int>(encoded.size()));
+          bytes.resize(static_cast<size_t>(size) - 2);
+          const auto response = drogon::HttpResponse::newHttpResponse();
+          response->setBody(bytes);
+          callback(response);
+      },
+      {drogon::Get});
     trantor::EventLoopThread client;
     client.run();
     int exitCode = 1;
@@ -393,10 +466,14 @@ int main() {
         const auto endpoint = "http://127.0.0.1:" + std::to_string(drogon::app().getListeners().front().toPort());
         client.getLoop()->queueInLoop([&, endpoint] {
             drogon::async_run([&, endpoint]() -> drogon::Task<> {
-                co_await runTests(endpoint, exitCode); client.getLoop()->quit();
+                co_await runTests(endpoint, exitCode);
+                client.getLoop()->quit();
             });
         });
     });
-    drogon::app().run(); client.wait(); Database::instance().close(); std::filesystem::remove(path);
+    drogon::app().run();
+    client.wait();
+    Database::instance().close();
+    std::filesystem::remove(path);
     return exitCode;
 }
