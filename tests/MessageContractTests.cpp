@@ -591,29 +591,23 @@ namespace {
         constexpr std::string_view kTestName = "classify jev choice";
         using Action = insoulforge::RouterDecision::Action;
 
-        const auto skip = insoulforge::MessageRouter::classifyJevChoice("skip", 0.9, 0.6);
-        check(skip.has_value() && *skip == Action::SKIP, "skip label maps to SKIP", kTestName);
-        const auto reply = insoulforge::MessageRouter::classifyJevChoice("reply", 0.9, 0.6);
-        check(reply.has_value() && *reply == Action::REPLY, "reply label maps to REPLY", kTestName);
-        check(!insoulforge::MessageRouter::classifyJevChoice("skip", 0.59, 0.6).has_value(),
-          "low-confidence skip falls back", kTestName);
-        check(!insoulforge::MessageRouter::classifyJevChoice("reply", 0.59, 0.6).has_value(),
-          "low-confidence reply falls back", kTestName);
-        check(!insoulforge::MessageRouter::classifyJevChoice("skip", std::nullopt, 0.6).has_value(),
-          "missing confidence falls back", kTestName);
-        check(!insoulforge::MessageRouter::classifyJevChoice("reply", std::numeric_limits<double>::quiet_NaN(), 0.6)
-                .has_value(),
-          "non-finite confidence falls back", kTestName);
-        check(insoulforge::MessageRouter::classifyJevChoice("reply", 0.6, 0.6) == Action::REPLY,
-          "threshold confidence is accepted", kTestName);
-        check(!insoulforge::MessageRouter::classifyJevChoice("skip", 0.7, 0.8).has_value(),
+        for (const auto &[label, action]: {std::pair{"skip", Action::SKIP}, std::pair{"reply", Action::REPLY}}) {
+            check(insoulforge::MessageRouter::classifyJevChoice(label, 0.9, 0.6) == action,
+              "known label maps to its action", kTestName);
+            check(insoulforge::MessageRouter::classifyJevChoice(label, 0.6, 0.6) == action,
+              "threshold confidence is accepted", kTestName);
+            for (const auto confidence: {std::optional<double>{0.59}, std::optional<double>{},
+                   std::optional<double>{std::numeric_limits<double>::quiet_NaN()}}) {
+                check(!insoulforge::MessageRouter::classifyJevChoice(label, confidence, 0.6),
+                  "low, missing or non-finite confidence falls back", kTestName);
+            }
+        }
+        check(!insoulforge::MessageRouter::classifyJevChoice("skip", 0.7, 0.8),
           "configured threshold controls fallback", kTestName);
-        check(!insoulforge::MessageRouter::classifyJevChoice("unclear", 0.9, 0.6).has_value(),
-          "unclear label falls back to nullopt", kTestName);
-        check(!insoulforge::MessageRouter::classifyJevChoice("other", 0.9, 0.6).has_value(),
-          "unknown label falls back to nullopt", kTestName);
-        check(!insoulforge::MessageRouter::classifyJevChoice("", 0.9, 0.6).has_value(),
-          "empty label falls back to nullopt", kTestName);
+        for (const auto *label: {"unclear", "other", ""}) {
+            check(!insoulforge::MessageRouter::classifyJevChoice(label, 0.9, 0.6),
+              "unclear, unknown or empty labels fall back", kTestName);
+        }
     }
 
     void testJevClientChoiceAndConfidenceParsing() {
