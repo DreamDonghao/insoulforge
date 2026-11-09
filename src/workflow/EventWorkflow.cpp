@@ -45,9 +45,9 @@ namespace insoulforge {
             }
         }
 
-        /// @brief 将已插入的完整消息记录推送至管理后台，推送失败不得影响消息工作流
+        /// @brief 将完整消息记录推送至管理后台，推送失败不得影响消息工作流
         /// @param sessionId 所属会话 ID
-        /// @param message 已写入消息列表的完整消息
+        /// @param message 完整消息记录
         void pushRecordedMessage(const SessionId &sessionId, const json &message) {
             try {
                 const auto role = MessageRecord::isAssistant(message) ? "assistant" : "user";
@@ -259,7 +259,7 @@ namespace insoulforge {
         const auto sessionId = MessageRecord::getSessionId(message);
         const auto sessionState = getOrCreateSessionState(sessionId);
         if (sessionState->enqueuePreparation(std::move(message))) {
-            drogon::async_run([this, sessionId]() -> drogon::Task<> { co_await processPreparationQueue(sessionId); });
+            drogon::async_run([this, sessionId]() -> drogon::Task<> { co_await preprocess(sessionId); });
         }
     }
 
@@ -278,7 +278,7 @@ namespace insoulforge {
         enqueueNormalizedMessage(std::move(message));
     }
 
-    auto EventWorkflow::processPreparationQueue(const SessionId sessionId) -> drogon::Task<> {
+    auto EventWorkflow::preprocess(const SessionId sessionId) -> drogon::Task<> {
         const auto sessionState = getOrCreateSessionState(sessionId);
         while (auto nextMessage = sessionState->takePreparationMessage()) {
             auto currentMessage = json(std::move(*nextMessage));
@@ -300,15 +300,12 @@ namespace insoulforge {
                     currentMessage =
                       co_await MessageContentEnricher::injectMemories(std::move(currentMessage), sessionId);
                     currentMessage.erase("session_id");
-
-                    const auto [records, startReply] = sessionState->recordIncoming(std::move(currentMessage));
-
-                    pushRecordedMessage(sessionId, records.back());
+                    currentMessage["executor_processed"] = false;
+                    pushRecordedMessage(sessionId, currentMessage);
                     recordMessageProcessingStats(sessionId);
 
-                    if (startReply) {
-                        drogon::async_run(
-                          [this, sessionId]() -> drogon::Task<> { co_await processReplyWorkflow(sessionId); });
+                    if (sessionState->recordIncoming(std::move(currentMessage))) {
+                        drogon::async_run([this, sessionId]() -> drogon::Task<> { co_await process(sessionId); });
                     }
                 } else {
                     continue;
@@ -316,19 +313,19 @@ namespace insoulforge {
                 scheduleMemoryMaintenance(m_dependencies->database, sessionId, sessionState->messageList());
             } catch (const std::exception &error) {
                 // 单条消息富化或收尾失败不能阻塞同会话后续消息。
-                Logger::error(sessionId, "Workflow", fmt::format("消息处理失败: {}", error.what()));
+                Logger::error(sessionId, "Workflow", fmt::format("消息预处理失败: {}", error.what()));
             } catch (...) {
-                Logger::error(sessionId, "Workflow", "消息处理失败: 未知异常");
+                Logger::error(sessionId, "Workflow", "消息预处理失败: 未知异常");
             }
         }
     }
 
-    auto EventWorkflow::processReplyWorkflow(SessionId sessionId) -> drogon::Task<> {
+    auto EventWorkflow::process(SessionId sessionId) -> drogon::Task<> {
         const auto sessionState = getOrCreateSessionState(sessionId);
-        while (auto request = sessionState->takeReplyRequest()) {
+        while (auto routerRecords = sessionState->takeProcessingRequest()) {
             try {
                 if (m_dependencies->agent.isRunning() && SessionStore::isSessionEnabled(sessionId)) {
-                    auto routerDecision = co_await MessageRouter::route(sessionId, request->records);
+                    auto routerDecision = co_await MessageRouter::route(sessionId, *routerRecords);
 
                     Logger::info(sessionId, "Router",
                       fmt::format("决策={} | reason={} | priority={} | maxLength={}", routerDecision.shouldReply,
@@ -336,20 +333,20 @@ namespace insoulforge {
                         routerDecision.maxLength ? std::to_string(*routerDecision.maxLength) : "未指定"));
 
                     if (routerDecision.shouldReply) {
-                        auto [inputRecords] = sessionState->takeExecutorRequest();
+                        auto inputRecords = sessionState->takeExecutorRequest();
                         const auto records = ChatRecordManager{sessionId, std::move(inputRecords)};
                         auto decision = sessionId.isPrivate() ? std::nullopt : std::optional{std::move(routerDecision)};
 
                         co_await ExecutorAgent::execute(records, decision);
                     }
                 } else {
-                    Logger::warn(sessionId, "Workflow", "回复任务跳过：Agent 不可用");
+                    Logger::warn(sessionId, "Workflow", "处理任务跳过：Agent 不可用");
                 }
             } catch (const std::exception &error) {
-                // Router、Executor 或发送失败不影响同会话后续回复任务。
-                Logger::error(sessionId, "Workflow", fmt::format("回复处理失败: {}", error.what()));
+                // Router、Executor 或发送失败不影响同会话后续处理任务。
+                Logger::error(sessionId, "Workflow", fmt::format("消息处理失败: {}", error.what()));
             } catch (...) {
-                Logger::error(sessionId, "Workflow", "回复处理失败: 未知异常");
+                Logger::error(sessionId, "Workflow", "消息处理失败: 未知异常");
             }
         }
     }

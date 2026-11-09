@@ -24,10 +24,10 @@ namespace insoulforge {
     class AgentSystem;
     /// @brief 统一事件处理工作流
     /// @details 接收 OneBot 事件、系统任务和Activity 通知。
-    ///          每个会话串行预处理入站消息；回复处理同一时间只运行一轮。预处理完成后，
-    ///          回复阶段从 MessageList 读取快照并调用 Router、Executor 和发送服务。
+    ///          每个会话串行预处理入站消息；消息处理同一时间只运行一轮。预处理完成后，
+    ///          处理阶段从 MessageList 读取快照并调用 Router、Executor 和发送服务。
     ///          空闲时协程退出，不轮询。数据库中的聊天记录用于启动恢复和正常退出时保存消息列表。
-    /// @note 预处理与回复可并行，不同会话独立处理；使用写入、入队接口前必须成功初始化。
+    /// @note 预处理与处理可并行，不同会话独立处理；使用写入、入队接口前必须成功初始化。
     ///       退出时应先停止事件入口并等待在途任务结束，再保存消息及释放依赖。
     class EventWorkflow {
     public:
@@ -63,7 +63,7 @@ namespace insoulforge {
         /// @note 线程安全。会推送管理后台，并按普通消息参与后续快照与记忆维护。
         void appendSystemStatusMessage(const SessionId &sessionId, json message);
 
-        /// @brief 保存内部助手执行记录，不发送 QQ 消息，也不投递新回复任务。
+        /// @brief 保存内部助手执行记录，不发送 QQ 消息，也不投递新的处理任务。
         /// @param sessionId 记录所属会话。
         /// @param message 已构造好的助手执行记录，包含工具历史及执行结果。
         /// @note 线程安全。写入内存消息列表并推送管理后台；追加本身不触发记忆维护。
@@ -145,15 +145,15 @@ namespace insoulforge {
         /// @note 线程安全；索引锁内完成查找与首次创建。
         [[nodiscard]] auto getOrCreateSessionState(const SessionId &sessionId) -> std::shared_ptr<SessionWorkflowState>;
 
-        /// @brief 处理一个会话的消息预处理队列，空队列时立即退出
-        /// @param sessionId 待处理队列所属会话，按值保存在协程帧中。
+        /// @brief 预处理一个会话的待处理消息，取空后立即退出
+        /// @param sessionId 待预处理消息所属会话，按值保存在协程帧中。
         /// @note 仅在取得该会话预处理执行权后启动；单条消息失败不阻塞后续消息。
-        auto processPreparationQueue(SessionId sessionId) -> drogon::Task<>;
+        auto preprocess(SessionId sessionId) -> drogon::Task<>;
 
-        /// @brief 处理一个会话的串行回复工作流，无待处理回复时立即退出
-        /// @param sessionId 回复任务所属会话，按值保存在协程帧中。
-        /// @note 仅在取得该会话回复执行权后启动；Router 只读冻结，Executor 重新冻结并消费新增需求。
+        /// @brief 处理一个会话的待处理消息，串行执行至无待处理消息
+        /// @param sessionId 消息处理任务所属会话，按值保存在协程帧中。
+        /// @note 仅在取得该会话处理执行权后启动；Router 只读冻结，Executor 重新冻结并消费新增需求。
         ///       执行期间不进行路由，结束后接续新增需求；无新增时原子释放执行权。
-        auto processReplyWorkflow(SessionId sessionId) -> drogon::Task<>;
+        auto process(SessionId sessionId) -> drogon::Task<>;
     };
 } // namespace insoulforge

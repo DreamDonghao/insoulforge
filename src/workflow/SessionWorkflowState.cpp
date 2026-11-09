@@ -34,29 +34,30 @@ namespace insoulforge {
         return message;
     }
 
-    auto SessionWorkflowState::recordIncoming(json message) -> IncomingMessageUpdate {
+    auto SessionWorkflowState::recordIncoming(json message) -> bool {
         std::lock_guard lock(m_mutex);
-        auto records = m_messageList->append(std::move(message));
-        m_pendingReply = true;
-        const bool startReply = !m_isReplyProcessing;
-        m_isReplyProcessing = true;
-        return IncomingMessageUpdate{.records = std::move(records), .startReply = startReply};
+        m_messageList->append(std::move(message));
+        m_pendingProcessing = true;
+
+        const bool startProcessing = !m_isProcessingRunning;
+        m_isProcessingRunning = true;
+        return startProcessing;
     }
 
-    auto SessionWorkflowState::takeReplyRequest() -> std::optional<ReplyRequest> {
+    auto SessionWorkflowState::takeProcessingRequest() -> std::optional<json> {
         std::lock_guard lock(m_mutex);
-        if (!m_pendingReply) {
-            m_isReplyProcessing = false;
+        if (!m_pendingProcessing) {
+            m_isProcessingRunning = false;
             return std::nullopt;
         }
-        m_pendingReply = false;
-        return ReplyRequest{m_messageList->snapshot()};
+        m_pendingProcessing = false;
+        return m_messageList->snapshot();
     }
 
-    auto SessionWorkflowState::takeExecutorRequest() -> ReplyRequest {
+    auto SessionWorkflowState::takeExecutorRequest() -> json {
         std::lock_guard lock(m_mutex);
         auto records = m_messageList->executorSnapshot();
-        m_pendingReply = false;
-        return ReplyRequest{std::move(records)};
+        m_pendingProcessing = false;
+        return records;
     }
 } // namespace insoulforge

@@ -34,7 +34,7 @@ namespace insoulforge {
         /// @brief 追加完整消息并生成冻结快照
         /// @param message 完整消息 JSON；内部不会保留工作流专用 `session_id`
         /// @return 追加后的模型窗口快照
-        [[nodiscard]] auto append(json message) -> json;
+        auto append(json message) -> json;
 
         /// @brief 结束维护任务；成功时按数量删除队首消息，失败时传入 0 保留消息
         /// @note 手动清空不会取消任务，旧任务完成时仍可能删除清空后收到的新消息。

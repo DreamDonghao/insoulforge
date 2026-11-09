@@ -391,8 +391,8 @@ namespace {
         std::filesystem::remove(path);
     }
 
-    void testSessionReplyCoalescing() {
-        constexpr std::string_view kTestName = "session reply coalescing";
+    void testSessionProcessingCoalescing() {
+        constexpr std::string_view kTestName = "session processing coalescing";
         auto &db = insoulforge::Database::instance();
         check(db.initialize(":memory:").has_value(), "initializes database", kTestName);
         {
@@ -404,37 +404,37 @@ namespace {
                 return {{"message_id", id}, {"sender", {{"user_id", "11"}}},
                   {"segments", json::array({{{"type", "text"}, {"text", id}}})}};
             };
-            check(state.recordIncoming(message("first")).startReply, "idle message owns consumer", kTestName);
-            const auto routing = state.takeReplyRequest();
-            check(routing && routing->records.size() == 1, "router freezes its own input", kTestName);
-            check(!state.recordIncoming(message("during-router")).startReply,
+            check(state.recordIncoming(message("first")), "idle message owns consumer", kTestName);
+            const auto routing = state.takeProcessingRequest();
+            check(routing && routing->size() == 1, "router freezes its own input", kTestName);
+            check(!state.recordIncoming(message("during-router")),
               "preparation continues during routing without parallel consumer", kTestName);
             const auto execution = state.takeExecutorRequest();
-            check(execution.records.size() == 2 && routing->records.size() == 1,
+            check(execution.size() == 2 && routing->size() == 1,
               "executor refreezes newer messages after positive route", kTestName);
-            check(MessageRecord::isNewForExecutor(execution.records[0]) &&
+            check(MessageRecord::isNewForExecutor(execution[0]) &&
                     !MessageRecord::isNewForExecutor(state.messageList()->snapshot()[0]),
               "executor copy retains old flags and originals are marked atomically", kTestName);
-            check(!state.recordIncoming(message("during-executor")).startReply,
-              "arrival during executor waits for same consumer", kTestName);
-            const auto after = state.takeReplyRequest();
-            check(after && after->records.size() == 3 && MessageRecord::isNewForExecutor(after->records.back()),
+            check(!state.recordIncoming(message("during-executor")), "arrival during executor waits for same consumer",
+              kTestName);
+            const auto after = state.takeProcessingRequest();
+            check(after && after->size() == 3 && MessageRecord::isNewForExecutor(after->back()),
               "executor completion has a new batch to judge", kTestName);
-            check(!state.takeReplyRequest(), "skip with no newer arrival ends without unread loop", kTestName);
-            check(state.recordIncoming(message("after-idle")).startReply,
-              "arrival after consumer exit wakes a new consumer", kTestName);
-            check(state.takeReplyRequest().has_value(), "new router batch exists", kTestName);
-            check(!state.recordIncoming(message("mention")).startReply,
+            check(!state.takeProcessingRequest(), "skip with no newer arrival ends without unread loop", kTestName);
+            check(state.recordIncoming(message("after-idle")), "arrival after consumer exit wakes a new consumer",
+              kTestName);
+            check(state.takeProcessingRequest().has_value(), "new router batch exists", kTestName);
+            check(!state.recordIncoming(message("mention")),
               "mandatory event during router does not start second consumer", kTestName);
-            check(!state.recordIncoming(message("ordinary")).startReply,
-              "ordinary arrival coalesces into the same pending batch", kTestName);
-            const auto mandatory = state.takeReplyRequest();
-            check(mandatory && mandatory->records.back()["message_id"] == "ordinary",
+            check(!state.recordIncoming(message("ordinary")), "ordinary arrival coalesces into the same pending batch",
+              kTestName);
+            const auto mandatory = state.takeProcessingRequest();
+            check(mandatory && mandatory->back()["message_id"] == "ordinary",
               "negative route retains all newer messages for Router", kTestName);
             (void) state.takeExecutorRequest();
-            check(!state.takeReplyRequest(), "positive execution consumes all pre-snapshot demands", kTestName);
-            check(state.recordIncoming(message("silent")).startReply && state.takeReplyRequest().has_value() &&
-                    !state.takeReplyRequest(),
+            check(!state.takeProcessingRequest(), "positive execution consumes all pre-snapshot demands", kTestName);
+            check(state.recordIncoming(message("silent")) && state.takeProcessingRequest().has_value() &&
+                    !state.takeProcessingRequest(),
               "every incoming event wakes one consumer and no event repeats without new input", kTestName);
 
             const auto oldLimit = config.contextWindowLimit;
@@ -4271,7 +4271,7 @@ auto main() -> int {
     testSelfIdentityNormalization();
     testNewWorkflowDetectsCommands();
     testDefaultPrivateSessionState();
-    testSessionReplyCoalescing();
+    testSessionProcessingCoalescing();
     testMessageRecordSemanticQueries();
     testNewWorkflowRouterHardRules();
     testJevUnconfiguredFallsBackToExistingBehavior();
