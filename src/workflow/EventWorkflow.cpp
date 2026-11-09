@@ -92,6 +92,13 @@ namespace insoulforge {
                 Logger::error(sessionId, "Memory", "记忆维护启动失败: 未知异常");
             }
         }
+
+        auto composeIncomingMessage(json & message, const SessionId &sessionId) -> drogon::Task<> {
+            message = co_await MessageContentEnricher::enrichImages(std::move(message), sessionId);
+            message = co_await MessageContentEnricher::injectMemories(std::move(message), sessionId);
+            message.erase("session_id");
+            message["executor_processed"] = false;
+        }
     } // namespace
 
     auto EventWorkflow::instance() -> EventWorkflow & {
@@ -218,13 +225,14 @@ namespace insoulforge {
         co_return;
     }
 
+
     void EventWorkflow::enqueueOneBotEvent(const json &body) {
         if (auto message = OneBotEventNormalizer::normalize(body)) {
             enqueueNormalizedMessage(std::move(*message));
         }
     }
 
-    void EventWorkflow::enqueueSystemMessage(const SessionId &sessionId, std::string text, std::string senderName) {
+    void EventWorkflow::enqueueSystemEvent(const SessionId &sessionId, std::string text, std::string senderName) {
         static std::atomic<u64> next{0};
         enqueueNormalizedMessage({{"session_id", sessionId.toString()}, {"time", currentDateTime()},
           {"message_id", fmt::format("{}", 9000000000ULL + next.fetch_add(1))},
@@ -248,7 +256,7 @@ namespace insoulforge {
         }
     }
 
-    void EventWorkflow::enqueueActivityMessage(const SessionId &sessionId, std::string text, std::string name,
+    void EventWorkflow::enqueueActivityEvent(const SessionId &sessionId, std::string text, std::string name,
       std::string mode, const std::vector<Image> &attachments) {
         auto message = json({{"session_id", sessionId.toString()}, {"time", currentDateTime()},
           {"message_id", "activity-" + drogon::utils::getUuid()},
@@ -280,12 +288,8 @@ namespace insoulforge {
                     Logger::info(
                       sessionId, "Message", "收到: " + dumpJson(MessageRecord::projectForAgent(currentMessage)));
 
-                    currentMessage =
-                      co_await MessageContentEnricher::enrichImages(std::move(currentMessage), sessionId);
-                    currentMessage =
-                      co_await MessageContentEnricher::injectMemories(std::move(currentMessage), sessionId);
-                    currentMessage.erase("session_id");
-                    currentMessage["executor_processed"] = false;
+                    co_await composeIncomingMessage(currentMessage,sessionId);
+
                     pushRecordedMessage(sessionId, currentMessage);
                     recordMessageProcessingStats(sessionId);
 

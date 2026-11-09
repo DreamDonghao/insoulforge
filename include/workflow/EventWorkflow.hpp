@@ -100,7 +100,7 @@ namespace insoulforge {
         /// @param text 系统消息正文。
         /// @param senderName 系统发送者的显示名称；内部身份固定为 system。
         /// @note 线程安全。沿用普通入队检查和会话启用设置，返回时不保证处理完成。
-        void enqueueSystemMessage(const SessionId &sessionId, std::string text, std::string senderName = "系统任务");
+        void enqueueSystemEvent(const SessionId &sessionId, std::string text, std::string senderName = "系统任务");
 
         /// @brief Activity 通知使用会话串行队列；silent 仅记录，judge 路由判断，force 跳过回复判断。
         /// @param sessionId 接收通知的会话。
@@ -110,7 +110,7 @@ namespace insoulforge {
         /// @param attachments 已缓存的图片；仅在本次调用期间借用，消息中保存图片 ID。
         /// @note 线程安全。仍受机器人就绪状态和会话启用设置限制，force 不绕过这些检查。
         ///       函数返回不表示通知已处理或回复已发送，也不接管图片句柄的生命周期。
-        void enqueueActivityMessage(const SessionId &sessionId, std::string text, std::string name, std::string mode,
+        void enqueueActivityEvent(const SessionId &sessionId, std::string text, std::string name, std::string mode,
           const std::vector<Image> &attachments = {});
 
     private:

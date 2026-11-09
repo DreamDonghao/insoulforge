@@ -124,7 +124,7 @@ namespace {
         notify({{"type", "notify"}, {"target_session", session.toString()}, {"mode", "force"},
           {"attachments", json::array({{{"file_id", image->id()}}})}});
         co_await waitFor([&] { return executorRequests == 1; }, "force not delivered to executor");
-        workflow.enqueueActivityMessage(session, "继续", "chess", "force");
+        workflow.enqueueActivityEvent(session, "继续", "chess", "force");
         co_await waitFor([&] { return deliveries == 2; }, "queued force events lost");
         co_await drogon::sleepCoro(trantor::EventLoop::getEventLoopOfCurrentThread(), 0.05);
         require(routerRequests == 1 && maxConcurrentExecutors == 1, "force routed or replies ran concurrently");
@@ -154,7 +154,7 @@ namespace {
         }
         const auto privateSession = SessionId::privateChat(UserId{"67890"});
         SessionStore::enableSession(privateSession);
-        workflow.enqueueActivityMessage(privateSession, "私聊", "chess", "force");
+        workflow.enqueueActivityEvent(privateSession, "私聊", "chess", "force");
         co_await waitFor([&] { return deliveries == 3; }, "private event not delivered");
         co_await drogon::sleepCoro(trantor::EventLoop::getEventLoopOfCurrentThread(), 0.05);
         {
@@ -178,7 +178,7 @@ namespace {
             require(
               !lastModelContext["response_requirements"].contains("max_length"), "mention imposed a reply length");
         }
-        workflow.enqueueSystemMessage(session, "系统任务完成");
+        workflow.enqueueSystemEvent(session, "系统任务完成");
         co_await waitFor(
           [&] { return deliveries == shortcutsDeliveryBase + 2; }, "system task did not bypass disabled auto reply");
         co_await drogon::sleepCoro(trantor::EventLoop::getEventLoopOfCurrentThread(), 0.05);
@@ -295,7 +295,7 @@ namespace {
 
         // 多轮工具调用中途发送消息也不能启动 Router。
         toolRound = true;
-        workflow.enqueueActivityMessage(session, "工具回合", "chess", "force");
+        workflow.enqueueActivityEvent(session, "工具回合", "chess", "force");
         co_await waitFor(
           [&] {
               std::lock_guard lock(fixtureMutex);
@@ -332,12 +332,12 @@ namespace {
         require(maxConcurrentExecutors == 1, "workflow generated replies concurrently");
         const int finalDeliveries = deliveries;
         agent.setRunning(false);
-        workflow.enqueueActivityMessage(session, "禁用", "chess", "force");
+        workflow.enqueueActivityEvent(session, "禁用", "chess", "force");
         co_await drogon::sleepCoro(trantor::EventLoop::getEventLoopOfCurrentThread(), 0.05);
         require(deliveries == finalDeliveries, "force bypassed bot run switch");
         agent.setRunning(true);
         SessionStore::disableSession(session);
-        workflow.enqueueActivityMessage(session, "禁用", "chess", "force");
+        workflow.enqueueActivityEvent(session, "禁用", "chess", "force");
         co_await drogon::sleepCoro(trantor::EventLoop::getEventLoopOfCurrentThread(), 0.05);
         require(deliveries == finalDeliveries, "force bypassed session switch");
         workflow.flushMessageListsToStorage();

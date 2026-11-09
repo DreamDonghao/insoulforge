@@ -42,7 +42,7 @@ namespace insoulforge {
 
         /// @brief 将任务结果作为新系统消息加入入站队列，按定时任务相同的流程触发回复。
         void enqueueResultStatus(const SessionId &sessionId, const std::string &text) {
-            EventWorkflow::instance().enqueueSystemMessage(sessionId, text, "系统异步任务");
+            EventWorkflow::instance().enqueueSystemEvent(sessionId, text, "系统异步任务");
         }
     } // namespace
 
