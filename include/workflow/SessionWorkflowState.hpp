@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <memory>
 #include <mutex>
 #include <optional>
 #include <queue>
@@ -30,7 +29,7 @@ namespace insoulforge {
         /// @return 构造时创建的唯一实例。
         /// @note 线程安全；消息内容的并发访问由 MessageList 负责。
         [[nodiscard]]
-        auto messageList() const noexcept -> const std::shared_ptr<MessageList> &;
+        auto messageList() noexcept ->MessageList &;
 
         /// @brief 将入站消息加入加工队列尾部。
         /// @param message 已归一化的入站消息。
@@ -72,7 +71,7 @@ namespace insoulforge {
 
     private:
         std::mutex m_mutex; ///< 保护以下全部可变状态。
-        std::shared_ptr<MessageList> m_messageList; ///< 该会话唯一的消息来源。
+        MessageList m_messageList; ///< 该会话唯一的消息来源。
         std::queue<json> m_pendingComposeMessages; ///< 待加工消息，先进先出。
         bool m_isComposing{false}; ///< 加工消费者已在运行中；队列取空时置为 false。
         bool m_isProcessing{false}; ///< 处理消费者已在运行中；没有待处理消息时置为 false。

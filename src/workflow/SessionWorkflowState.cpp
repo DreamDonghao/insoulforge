@@ -8,9 +8,9 @@
 
 namespace insoulforge {
     SessionWorkflowState::SessionWorkflowState(const SessionId &sessionId, const Database &database,
-      const Config &config) : m_messageList(std::make_shared<MessageList>(sessionId, database, config)) {}
+      const Config &config) : m_messageList(sessionId, database, config) {}
 
-    auto SessionWorkflowState::messageList() const noexcept -> const std::shared_ptr<MessageList> & {
+    auto SessionWorkflowState::messageList() noexcept -> MessageList & {
         return m_messageList;
     }
 
@@ -30,7 +30,7 @@ namespace insoulforge {
 
     void SessionWorkflowState::recordIncoming(json message) {
         std::lock_guard lock(m_mutex);
-        m_messageList->append(std::move(message));
+        m_messageList.append(std::move(message));
         m_pendingProcessing = true;
     }
     auto SessionWorkflowState::tryClaimProcess() -> bool {
@@ -60,12 +60,12 @@ namespace insoulforge {
             return std::nullopt;
         }
         m_pendingProcessing = false;
-        return m_messageList->snapshot();
+        return m_messageList.snapshot();
     }
 
     auto SessionWorkflowState::takeExecutorRequest() -> json {
         std::lock_guard lock(m_mutex);
-        auto records = m_messageList->executorSnapshot();
+        auto records = m_messageList.executorSnapshot();
         m_pendingProcessing = false;
         return records;
     }

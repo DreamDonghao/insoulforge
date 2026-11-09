@@ -4,6 +4,7 @@
 #include <algorithm>
 
 #include <cassert>
+#include <drogon/HttpAppFramework.h>
 #include <drogon/utils/Utilities.h>
 
 #include <admin/events/WebSocketManager.hpp>
@@ -61,15 +62,14 @@ namespace insoulforge {
 
         /// @brief 消息数达到阈值且没有记忆维护任务时，启动后台记忆维护。
         /// @details 成功后从内存消息列表中移除已处理的旧消息，失败则保留。
-        void scheduleMemoryMaintenance(
-          const Database &database, const SessionId &sessionId, const std::shared_ptr<MessageList> &messageList) {
-            auto batch = messageList->createSummaryBatch();
+        void scheduleMemoryMaintenance(const Database &database, const SessionId &sessionId, MessageList &messageList) {
+            auto batch = messageList.createSummaryBatch();
             if (!batch) {
                 return;
             }
             try {
                 drogon::async_run(
-                  [&database, sessionId, messageList, batch = std::move(*batch)]() mutable -> drogon::Task<> {
+                  [&database, sessionId, &messageList, batch = std::move(*batch)]() mutable -> drogon::Task<> {
                       const size_t removeCount = batch.messages.size();
                       bool completed = false;
                       try {
@@ -80,14 +80,17 @@ namespace insoulforge {
                       } catch (...) {
                           Logger::error(sessionId, "Memory", "记忆维护失败: 未知异常");
                       }
-                      messageList->finishSummaryBatch(completed ? removeCount : 0);
+                      messageList.finishSummaryBatch(completed ? removeCount : 0);
                       if (!completed) {
                           Logger::warn(sessionId, "Memory", "本次记忆维护未完成，等待后续消息重新触发");
                       }
                   });
+            } catch (const std::exception &error) {
+                messageList.finishSummaryBatch(0);
+                Logger::error(sessionId, "Memory", fmt::format("记忆维护启动失败: {}", error.what()));
             } catch (...) {
-                messageList->finishSummaryBatch(0);
-                throw;
+                messageList.finishSummaryBatch(0);
+                Logger::error(sessionId, "Memory", "记忆维护启动失败: 未知异常");
             }
         }
     } // namespace
@@ -137,21 +140,15 @@ namespace insoulforge {
     }
 
     void EventWorkflow::flushMessageListsToStorage() {
-        auto messageLists = std::vector<std::shared_ptr<MessageList>>{};
-        {
-            std::lock_guard lock(m_sessionsMutex);
-            for (const auto &sessionState: m_sessions | std::views::values) {
-                messageLists.push_back(sessionState->messageList());
-            }
-        }
-        for (const auto &messageList: messageLists) {
-            messageList->flushToStorage();
+        std::lock_guard lock(m_sessionsMutex);
+        for (const auto &sessionState: m_sessions | std::views::values) {
+            sessionState->messageList().flushToStorage();
         }
     }
 
     void EventWorkflow::appendDeliveredAssistantMessage(const SessionId &sessionId, json message) {
         const auto sessionState = getOrCreateSessionState(sessionId);
-        const auto update = sessionState->messageList()->append(std::move(message));
+        const auto update = sessionState->messageList().append(std::move(message));
         pushRecordedMessage(sessionId, update.back());
     }
 
@@ -161,7 +158,7 @@ namespace insoulforge {
 
     void EventWorkflow::appendSystemStatusMessage(const SessionId &sessionId, json message) {
         const auto sessionState = getOrCreateSessionState(sessionId);
-        const auto update = sessionState->messageList()->append(std::move(message));
+        const auto update = sessionState->messageList().append(std::move(message));
         pushRecordedMessage(sessionId, update.back());
     }
 
@@ -175,7 +172,7 @@ namespace insoulforge {
             }
             sessionState = found->second;
         }
-        return sessionState->messageList()->fullSnapshot();
+        return sessionState->messageList().fullSnapshot();
     }
 
     auto EventWorkflow::getSharedSessionMessages(
@@ -189,13 +186,13 @@ namespace insoulforge {
             }
             state = found->second;
         }
-        return state->messageList()->sharedSnapshot(limit, earliest, latest);
+        return state->messageList().sharedSnapshot(limit, earliest, latest);
     }
 
     void EventWorkflow::clearSessionMessages(const SessionId &sessionId) {
         std::lock_guard lock(m_sessionsMutex);
         if (const auto found = m_sessions.find(sessionId); found != m_sessions.end()) {
-            found->second->messageList()->clear();
+            found->second->messageList().clear();
         } else {
             ChatRecordStore::clearSessionChatRecords(sessionId);
         }
@@ -216,7 +213,7 @@ namespace insoulforge {
     auto EventWorkflow::executeCommand(const json &message) -> drogon::Task<> {
         const auto sessionId = MessageRecord::getSessionId(message);
         const auto sessionState = getOrCreateSessionState(sessionId);
-        const auto update = sessionState->messageList()->append(message);
+        const auto update = sessionState->messageList().append(message);
         pushRecordedMessage(sessionId, update.back());
 
         try {
@@ -335,6 +332,8 @@ namespace insoulforge {
                         routerDecision.maxLength ? std::to_string(*routerDecision.maxLength) : "未指定"));
 
                     if (routerDecision.shouldReply) {
+                        co_await drogon::sleepCoro(drogon::app().getLoop(), 1.0);
+
                         auto inputRecords = sessionState->takeExecutorRequest();
                         const auto records = ChatRecordManager{sessionId, std::move(inputRecords)};
                         auto decision = sessionId.isPrivate() ? std::nullopt : std::optional{std::move(routerDecision)};
