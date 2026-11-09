@@ -10,9 +10,9 @@ namespace insoulforge {
     SessionWorkflowState::SessionWorkflowState(const SessionId &sessionId, const Database &database,
       const Config &config) : m_messageList(sessionId, database, config) {}
 
-    auto SessionWorkflowState::messageList() noexcept -> MessageList & {
-        return m_messageList;
-    }
+    auto SessionWorkflowState::messageList() noexcept -> MessageList & { return m_messageList; }
+
+    auto SessionWorkflowState::messageList()const noexcept ->const MessageList & { return m_messageList; }
 
     void SessionWorkflowState::enqueueCompose(json message) {
         std::lock_guard lock(m_mutex);

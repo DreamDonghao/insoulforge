@@ -4,7 +4,6 @@
 #pragma once
 
 #include <atomic>
-#include <memory>
 #include <mutex>
 #include <optional>
 #include <unordered_map>
@@ -80,10 +79,10 @@ namespace insoulforge {
         /// @param limit 最多返回的消息数；为零时返回空数组。
         /// @param earliest 时间下界（含），格式为本地时间 YYYY-MM-DD HH:MM:SS。
         /// @param latest 时间上界（含），格式与 earliest 相同。
-        /// @return 时间范围内最近的可共享消息投影，按时间顺序排列；会话不存在时返回空数组。
+        /// @return 时间范围内最近的可共享消息投影，按时间顺序排列；会话不存在时返回 std::nullopt。
         /// @note 线程安全。不校验共享开关或调用权限，由调用方限制来源和可见范围。
-        [[nodiscard]] auto getSharedSessionMessages(
-          const SessionId &sessionId, size_t limit, const std::string &earliest, const std::string &latest) -> json;
+        [[nodiscard]] auto getSharedSessionMessages(const SessionId &sessionId, size_t limit,
+          const std::string &earliest, const std::string &latest) -> std::optional<json>;
 
         /// @brief 清空会话的内存消息与持久化恢复副本，保留启用状态与已提取记忆。
         /// @param sessionId 要清空消息的会话；未加载的会话只清除数据库记录。
@@ -129,7 +128,7 @@ namespace insoulforge {
         std::optional<Dependencies> m_dependencies;
         std::atomic_bool m_initialized{false};
         std::mutex m_sessionsMutex; ///< 保护会话状态索引
-        std::unordered_map<SessionId, std::shared_ptr<SessionWorkflowState>> m_sessions; ///< 已恢复或已激活的会话状态
+        std::unordered_map<SessionId, SessionWorkflowState> m_sessionStates; ///< 已恢复或已激活的会话状态
 
         EventWorkflow() = default;
 
@@ -140,10 +139,10 @@ namespace insoulforge {
 
         /// @brief 获取或创建会话工作流状态
         /// @param sessionId 状态所属会话。
-        /// @return 由工作流和在途任务共同持有的会话状态。
+        /// @return 由工作流持有的会话状态引用。
         /// @pre initialize 已成功完成。
         /// @note 线程安全；索引锁内完成查找与首次创建。
-        [[nodiscard]] auto getOrCreateSessionState(const SessionId &sessionId) -> std::shared_ptr<SessionWorkflowState>;
+        [[nodiscard]] auto getOrCreateSessionState(const SessionId &sessionId) -> SessionWorkflowState &;
 
         /// @brief 加工一个会话的待处理消息，取空后立即退出
         /// @param sessionId 待加工消息所属会话，按值保存在协程帧中。

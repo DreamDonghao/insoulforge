@@ -29,7 +29,8 @@ namespace insoulforge {
         /// @return 构造时创建的唯一实例。
         /// @note 线程安全；消息内容的并发访问由 MessageList 负责。
         [[nodiscard]]
-        auto messageList() noexcept ->MessageList &;
+        auto messageList() noexcept -> MessageList &;
+        auto messageList() const noexcept -> const MessageList &;
 
         /// @brief 将入站消息加入加工队列尾部。
         /// @param message 已归一化的入站消息。

@@ -3,7 +3,6 @@
 
 #include <algorithm>
 
-#include <cassert>
 #include <drogon/HttpAppFramework.h>
 #include <drogon/utils/Utilities.h>
 
@@ -118,22 +117,18 @@ namespace insoulforge {
             Logger::info(
               std::nullopt, "Media", fmt::format("过期图片描述缓存清理完成 | deleted={}", expiredImageCount));
 
-            std::unordered_map<SessionId, std::shared_ptr<SessionWorkflowState>> sessions;
             for (const auto &sessionId: ChatRecordStore::getSessionIds(database)) {
-                sessions.emplace(sessionId, std::make_shared<SessionWorkflowState>(sessionId, database, config));
+                m_sessionStates.try_emplace(sessionId, sessionId, database, config);
             }
-            {
-                std::lock_guard lock(m_sessionsMutex);
-                m_sessions = std::move(sessions);
-                m_dependencies.emplace(Dependencies{.database = database, .config = config, .agent = agent});
-            }
+            m_dependencies.emplace(Dependencies{.database = database, .config = config, .agent = agent});
+
             m_initialized.store(true, std::memory_order_release);
             Logger::info(std::nullopt, "Workflow", "事件工作流初始化完成");
             return {};
         } catch (const DbError &error) {
             m_initialized.store(false, std::memory_order_release);
             std::lock_guard lock(m_sessionsMutex);
-            m_sessions.clear();
+            m_sessionStates.clear();
             m_dependencies.reset();
             return std::unexpected(std::string("事件工作流恢复失败: ") + error.what());
         }
@@ -141,14 +136,14 @@ namespace insoulforge {
 
     void EventWorkflow::flushMessageListsToStorage() {
         std::lock_guard lock(m_sessionsMutex);
-        for (const auto &sessionState: m_sessions | std::views::values) {
-            sessionState->messageList().flushToStorage();
+        for (const auto &sessionState: m_sessionStates | std::views::values) {
+            sessionState.messageList().flushToStorage();
         }
     }
 
     void EventWorkflow::appendDeliveredAssistantMessage(const SessionId &sessionId, json message) {
-        const auto sessionState = getOrCreateSessionState(sessionId);
-        const auto update = sessionState->messageList().append(std::move(message));
+        auto &sessionState = getOrCreateSessionState(sessionId);
+        const auto update = sessionState.messageList().append(std::move(message));
         pushRecordedMessage(sessionId, update.back());
     }
 
@@ -157,63 +152,59 @@ namespace insoulforge {
     }
 
     void EventWorkflow::appendSystemStatusMessage(const SessionId &sessionId, json message) {
-        const auto sessionState = getOrCreateSessionState(sessionId);
-        const auto update = sessionState->messageList().append(std::move(message));
+        auto &sessionState = getOrCreateSessionState(sessionId);
+        const auto update = sessionState.messageList().append(std::move(message));
         pushRecordedMessage(sessionId, update.back());
     }
 
     auto EventWorkflow::getSessionMessages(const SessionId &sessionId) -> std::optional<json> {
-        std::shared_ptr<SessionWorkflowState> sessionState;
+        const SessionWorkflowState *state;
         {
             std::lock_guard lock(m_sessionsMutex);
-            const auto found = m_sessions.find(sessionId);
-            if (found == m_sessions.end()) {
+            const auto found = m_sessionStates.find(sessionId);
+            if (found == m_sessionStates.end()) {
                 return std::nullopt;
             }
-            sessionState = found->second;
+            state = &found->second;
         }
-        return sessionState->messageList().fullSnapshot();
+        return state->messageList().fullSnapshot();
     }
 
-    auto EventWorkflow::getSharedSessionMessages(
-      const SessionId &sessionId, const size_t limit, const std::string &earliest, const std::string &latest) -> json {
-        std::shared_ptr<SessionWorkflowState> state;
+    auto EventWorkflow::getSharedSessionMessages(const SessionId &sessionId, const size_t limit,
+      const std::string &earliest, const std::string &latest) -> std::optional<json> {
+        const SessionWorkflowState *state;
         {
             std::lock_guard lock(m_sessionsMutex);
-            const auto found = m_sessions.find(sessionId);
-            if (found == m_sessions.end()) {
-                return json::array();
+            const auto found = m_sessionStates.find(sessionId);
+            if (found == m_sessionStates.end()) {
+                return std::nullopt;
             }
-            state = found->second;
+            state = &found->second;
         }
         return state->messageList().sharedSnapshot(limit, earliest, latest);
     }
 
     void EventWorkflow::clearSessionMessages(const SessionId &sessionId) {
         std::lock_guard lock(m_sessionsMutex);
-        if (const auto found = m_sessions.find(sessionId); found != m_sessions.end()) {
-            found->second->messageList().clear();
+        if (const auto found = m_sessionStates.find(sessionId); found != m_sessionStates.end()) {
+            found->second.messageList().clear();
         } else {
             ChatRecordStore::clearSessionChatRecords(sessionId);
         }
     }
 
-    auto EventWorkflow::getOrCreateSessionState(const SessionId &sessionId) -> std::shared_ptr<SessionWorkflowState> {
+    auto EventWorkflow::getOrCreateSessionState(const SessionId &sessionId) -> SessionWorkflowState & {
         std::lock_guard lock(m_sessionsMutex);
-        if (const auto found = m_sessions.find(sessionId); found != m_sessions.end()) {
-            return found->second;
+        if (!m_sessionStates.contains(sessionId)) {
+            m_sessionStates.try_emplace(sessionId, sessionId, m_dependencies->database, m_dependencies->config);
         }
-        assert(m_initialized.load(std::memory_order_acquire) && "EventWorkflow::initialize must succeed first");
-        auto state =
-          std::make_shared<SessionWorkflowState>(sessionId, m_dependencies->database, m_dependencies->config);
-        m_sessions.emplace(sessionId, state);
-        return state;
+        return m_sessionStates.at(sessionId);
     }
 
     auto EventWorkflow::executeCommand(const json &message) -> drogon::Task<> {
         const auto sessionId = MessageRecord::getSessionId(message);
-        const auto sessionState = getOrCreateSessionState(sessionId);
-        const auto update = sessionState->messageList().append(message);
+        auto &sessionState = getOrCreateSessionState(sessionId);
+        const auto update = sessionState.messageList().append(message);
         pushRecordedMessage(sessionId, update.back());
 
         try {
@@ -228,9 +219,6 @@ namespace insoulforge {
     }
 
     void EventWorkflow::enqueueOneBotEvent(const json &body) {
-        if (!m_initialized.load(std::memory_order_acquire)) {
-            return;
-        }
         if (auto message = OneBotEventNormalizer::normalize(body)) {
             enqueueNormalizedMessage(std::move(*message));
         }
@@ -245,8 +233,7 @@ namespace insoulforge {
     }
 
     void EventWorkflow::enqueueNormalizedMessage(json message) {
-        if (!m_initialized.load(std::memory_order_acquire) || !m_dependencies->agent.isRunning() ||
-            MessageRecord::isAssistant(message)) {
+        if (!m_dependencies->agent.isRunning() || MessageRecord::isAssistant(message)) {
             return;
         }
         if (const auto sender = UserId::parse(getStr(atOrNull(message, "sender"), "user_id"));
@@ -254,9 +241,9 @@ namespace insoulforge {
             return;
         }
         const auto sessionId = MessageRecord::getSessionId(message);
-        const auto sessionState = getOrCreateSessionState(sessionId);
-        sessionState->enqueueCompose(std::move(message));
-        if (sessionState->tryClaimCompose()) {
+        auto &sessionState = getOrCreateSessionState(sessionId);
+        sessionState.enqueueCompose(std::move(message));
+        if (sessionState.tryClaimCompose()) {
             drogon::async_run([this, sessionId]() -> drogon::Task<> { co_await compose(sessionId); });
         }
     }
@@ -277,8 +264,8 @@ namespace insoulforge {
     }
 
     auto EventWorkflow::compose(const SessionId sessionId) -> drogon::Task<> {
-        const auto sessionState = getOrCreateSessionState(sessionId);
-        while (auto nextMessage = sessionState->takeComposeEvent()) {
+        auto &sessionState = getOrCreateSessionState(sessionId);
+        while (auto nextMessage = sessionState.takeComposeEvent()) {
             auto currentMessage = json(std::move(*nextMessage));
 
             try {
@@ -302,14 +289,14 @@ namespace insoulforge {
                     pushRecordedMessage(sessionId, currentMessage);
                     recordMessageProcessingStats(sessionId);
 
-                    sessionState->recordIncoming(std::move(currentMessage));
-                    if (sessionState->tryClaimProcess()) {
+                    sessionState.recordIncoming(std::move(currentMessage));
+                    if (sessionState.tryClaimProcess()) {
                         drogon::async_run([this, sessionId]() -> drogon::Task<> { co_await process(sessionId); });
                     }
                 } else {
                     continue;
                 }
-                scheduleMemoryMaintenance(m_dependencies->database, sessionId, sessionState->messageList());
+                scheduleMemoryMaintenance(m_dependencies->database, sessionId, sessionState.messageList());
             } catch (const std::exception &error) {
                 // 单条消息富化或收尾失败不能阻塞同会话后续消息。
                 Logger::error(sessionId, "Workflow", fmt::format("消息预处理失败: {}", error.what()));
@@ -320,8 +307,8 @@ namespace insoulforge {
     }
 
     auto EventWorkflow::process(SessionId sessionId) -> drogon::Task<> {
-        const auto sessionState = getOrCreateSessionState(sessionId);
-        while (auto routerRecords = sessionState->takeProcessEvents()) {
+        auto &sessionState = getOrCreateSessionState(sessionId);
+        while (auto routerRecords = sessionState.takeProcessEvents()) {
             try {
                 if (m_dependencies->agent.isRunning() && SessionStore::isSessionEnabled(sessionId)) {
                     auto routerDecision = co_await MessageRouter::route(sessionId, *routerRecords);
@@ -334,7 +321,7 @@ namespace insoulforge {
                     if (routerDecision.shouldReply) {
                         co_await drogon::sleepCoro(drogon::app().getLoop(), 1.0);
 
-                        auto inputRecords = sessionState->takeExecutorRequest();
+                        auto inputRecords = sessionState.takeExecutorRequest();
                         const auto records = ChatRecordManager{sessionId, std::move(inputRecords)};
                         auto decision = sessionId.isPrivate() ? std::nullopt : std::optional{std::move(routerDecision)};
 

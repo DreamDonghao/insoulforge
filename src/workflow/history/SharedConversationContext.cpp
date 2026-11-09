@@ -80,7 +80,7 @@ namespace insoulforge::SharedConversationContext {
         for (const auto &[sessionId, name]: SessionStore::getSharedSessions(receiverId)) {
             auto messages = EventWorkflow::instance().getSharedSessionMessages(
               sessionId, static_cast<size_t>(std::max(messagesPerSession, 1)), earliest, latest);
-            if (messages.empty()) {
+            if (!messages || messages->empty()) {
                 continue;
             }
             json session;
@@ -89,7 +89,7 @@ namespace insoulforge::SharedConversationContext {
             } else {
                 session = {{"type", "group"}, {"group_id", sessionId.targetId()}, {"group_name", name}};
             }
-            result.push_back({{"session", std::move(session)}, {"messages", std::move(messages)}});
+            result.push_back({{"session", std::move(session)}, {"messages", std::move(*messages)}});
         }
         return result;
     }
