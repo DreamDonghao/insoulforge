@@ -17,11 +17,10 @@ namespace insoulforge {
     auto SessionWorkflowState::enqueuePreparation(json message) -> bool {
         std::lock_guard lock(m_mutex);
         m_pendingPreparationMessages.push(std::move(message));
-        if (m_isPreparationRunning) {
-            return false;
-        }
+
+        const bool startPreparation = !m_isPreparationRunning;
         m_isPreparationRunning = true;
-        return true;
+        return startPreparation;
     }
 
     auto SessionWorkflowState::takePreparationMessage() -> std::optional<json> {

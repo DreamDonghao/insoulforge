@@ -258,10 +258,9 @@ namespace insoulforge {
         }
         const auto sessionId = MessageRecord::getSessionId(message);
         const auto sessionState = getOrCreateSessionState(sessionId);
-        if (!sessionState->enqueuePreparation(std::move(message))) {
-            return;
+        if (sessionState->enqueuePreparation(std::move(message))) {
+            drogon::async_run([this, sessionId]() -> drogon::Task<> { co_await processPreparationQueue(sessionId); });
         }
-        drogon::async_run([this, sessionId]() -> drogon::Task<> { co_await processPreparationQueue(sessionId); });
     }
 
     void EventWorkflow::enqueueActivityMessage(const SessionId &sessionId, std::string text, std::string name,
