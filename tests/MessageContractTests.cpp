@@ -405,7 +405,7 @@ namespace {
                   {"segments", json::array({{{"type", "text"}, {"text", id}}})}};
             };
             check(state.recordIncoming(message("first")), "idle message owns consumer", kTestName);
-            const auto routing = state.takeProcessingRequest();
+            const auto routing = state.takeProcessEvents();
             check(routing && routing->size() == 1, "router freezes its own input", kTestName);
             check(!state.recordIncoming(message("during-router")),
               "preparation continues during routing without parallel consumer", kTestName);
@@ -417,24 +417,24 @@ namespace {
               "executor copy retains old flags and originals are marked atomically", kTestName);
             check(!state.recordIncoming(message("during-executor")), "arrival during executor waits for same consumer",
               kTestName);
-            const auto after = state.takeProcessingRequest();
+            const auto after = state.takeProcessEvents();
             check(after && after->size() == 3 && MessageRecord::isNewForExecutor(after->back()),
               "executor completion has a new batch to judge", kTestName);
-            check(!state.takeProcessingRequest(), "skip with no newer arrival ends without unread loop", kTestName);
+            check(!state.takeProcessEvents(), "skip with no newer arrival ends without unread loop", kTestName);
             check(state.recordIncoming(message("after-idle")), "arrival after consumer exit wakes a new consumer",
               kTestName);
-            check(state.takeProcessingRequest().has_value(), "new router batch exists", kTestName);
+            check(state.takeProcessEvents().has_value(), "new router batch exists", kTestName);
             check(!state.recordIncoming(message("mention")),
               "mandatory event during router does not start second consumer", kTestName);
             check(!state.recordIncoming(message("ordinary")), "ordinary arrival coalesces into the same pending batch",
               kTestName);
-            const auto mandatory = state.takeProcessingRequest();
+            const auto mandatory = state.takeProcessEvents();
             check(mandatory && mandatory->back()["message_id"] == "ordinary",
               "negative route retains all newer messages for Router", kTestName);
             (void) state.takeExecutorRequest();
-            check(!state.takeProcessingRequest(), "positive execution consumes all pre-snapshot demands", kTestName);
-            check(state.recordIncoming(message("silent")) && state.takeProcessingRequest().has_value() &&
-                    !state.takeProcessingRequest(),
+            check(!state.takeProcessEvents(), "positive execution consumes all pre-snapshot demands", kTestName);
+            check(state.recordIncoming(message("silent")) && state.takeProcessEvents().has_value() &&
+                    !state.takeProcessEvents(),
               "every incoming event wakes one consumer and no event repeats without new input", kTestName);
 
             const auto oldLimit = config.contextWindowLimit;

@@ -14,40 +14,49 @@ namespace insoulforge {
         return m_messageList;
     }
 
-    auto SessionWorkflowState::enqueuePreparation(json message) -> bool {
+    void SessionWorkflowState::enqueueCompose(json message) {
         std::lock_guard lock(m_mutex);
-        m_pendingPreparationMessages.push(std::move(message));
-
-        const bool startPreparation = !m_isPreparationRunning;
-        m_isPreparationRunning = true;
-        return startPreparation;
+        m_pendingComposeMessages.push(std::move(message));
     }
 
-    auto SessionWorkflowState::takePreparationMessage() -> std::optional<json> {
+    auto SessionWorkflowState::tryClaimCompose() -> bool {
         std::lock_guard lock(m_mutex);
-        if (m_pendingPreparationMessages.empty()) {
-            m_isPreparationRunning = false;
-            return std::nullopt;
+        if (m_isComposing || m_pendingComposeMessages.empty()) {
+            return false;
         }
-        json message = std::move(m_pendingPreparationMessages.front());
-        m_pendingPreparationMessages.pop();
-        return message;
+        m_isComposing = true;
+        return true;
     }
 
-    auto SessionWorkflowState::recordIncoming(json message) -> bool {
+    void SessionWorkflowState::recordIncoming(json message) {
         std::lock_guard lock(m_mutex);
         m_messageList->append(std::move(message));
         m_pendingProcessing = true;
-
-        const bool startProcessing = !m_isProcessingRunning;
-        m_isProcessingRunning = true;
-        return startProcessing;
+    }
+    auto SessionWorkflowState::tryClaimProcess() -> bool {
+        std::lock_guard lock(m_mutex);
+        if (m_isProcessing || !m_pendingProcessing) {
+            return false;
+        }
+        m_isProcessing = true;
+        return true;
     }
 
-    auto SessionWorkflowState::takeProcessingRequest() -> std::optional<json> {
+    auto SessionWorkflowState::takeComposeEvent() -> std::optional<json> {
+        std::lock_guard lock(m_mutex);
+        if (m_pendingComposeMessages.empty()) {
+            m_isComposing = false;
+            return std::nullopt;
+        }
+        json message = std::move(m_pendingComposeMessages.front());
+        m_pendingComposeMessages.pop();
+        return message;
+    }
+
+    auto SessionWorkflowState::takeProcessEvents() -> std::optional<json> {
         std::lock_guard lock(m_mutex);
         if (!m_pendingProcessing) {
-            m_isProcessingRunning = false;
+            m_isProcessing = false;
             return std::nullopt;
         }
         m_pendingProcessing = false;

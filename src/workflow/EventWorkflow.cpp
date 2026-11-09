@@ -258,8 +258,9 @@ namespace insoulforge {
         }
         const auto sessionId = MessageRecord::getSessionId(message);
         const auto sessionState = getOrCreateSessionState(sessionId);
-        if (sessionState->enqueuePreparation(std::move(message))) {
-            drogon::async_run([this, sessionId]() -> drogon::Task<> { co_await preprocess(sessionId); });
+        sessionState->enqueueCompose(std::move(message));
+        if (sessionState->tryClaimCompose()) {
+            drogon::async_run([this, sessionId]() -> drogon::Task<> { co_await compose(sessionId); });
         }
     }
 
@@ -278,9 +279,9 @@ namespace insoulforge {
         enqueueNormalizedMessage(std::move(message));
     }
 
-    auto EventWorkflow::preprocess(const SessionId sessionId) -> drogon::Task<> {
+    auto EventWorkflow::compose(const SessionId sessionId) -> drogon::Task<> {
         const auto sessionState = getOrCreateSessionState(sessionId);
-        while (auto nextMessage = sessionState->takePreparationMessage()) {
+        while (auto nextMessage = sessionState->takeComposeEvent()) {
             auto currentMessage = json(std::move(*nextMessage));
 
             try {
@@ -304,7 +305,8 @@ namespace insoulforge {
                     pushRecordedMessage(sessionId, currentMessage);
                     recordMessageProcessingStats(sessionId);
 
-                    if (sessionState->recordIncoming(std::move(currentMessage))) {
+                    sessionState->recordIncoming(std::move(currentMessage));
+                    if (sessionState->tryClaimProcess()) {
                         drogon::async_run([this, sessionId]() -> drogon::Task<> { co_await process(sessionId); });
                     }
                 } else {
@@ -322,7 +324,7 @@ namespace insoulforge {
 
     auto EventWorkflow::process(SessionId sessionId) -> drogon::Task<> {
         const auto sessionState = getOrCreateSessionState(sessionId);
-        while (auto routerRecords = sessionState->takeProcessingRequest()) {
+        while (auto routerRecords = sessionState->takeProcessEvents()) {
             try {
                 if (m_dependencies->agent.isRunning() && SessionStore::isSessionEnabled(sessionId)) {
                     auto routerDecision = co_await MessageRouter::route(sessionId, *routerRecords);

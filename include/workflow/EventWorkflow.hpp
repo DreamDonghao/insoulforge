@@ -24,10 +24,10 @@ namespace insoulforge {
     class AgentSystem;
     /// @brief 统一事件处理工作流
     /// @details 接收 OneBot 事件、系统任务和Activity 通知。
-    ///          每个会话串行预处理入站消息；消息处理同一时间只运行一轮。预处理完成后，
+    ///          每个会话串行加工入站消息；消息处理同一时间只运行一轮。加工完成后，
     ///          处理阶段从 MessageList 读取快照并调用 Router、Executor 和发送服务。
     ///          空闲时协程退出，不轮询。数据库中的聊天记录用于启动恢复和正常退出时保存消息列表。
-    /// @note 预处理与处理可并行，不同会话独立处理；使用写入、入队接口前必须成功初始化。
+    /// @note 加工与处理可并行，不同会话独立处理；使用写入、入队接口前必须成功初始化。
     ///       退出时应先停止事件入口并等待在途任务结束，再保存消息及释放依赖。
     class EventWorkflow {
     public:
@@ -92,7 +92,7 @@ namespace insoulforge {
 
         /// @brief 将 OneBot 上报事件加入处理流程
         /// @param body 由 HTTP 或 WebSocket 入口解析得到的 OneBot 事件对象。
-        /// @details 归一化并检查机器人状态、发送者后入队；会话尚无预处理任务时启动协程。
+        /// @details 归一化并检查机器人状态、发送者后入队；会话尚无加工任务时启动协程。
         /// @note 线程安全。函数返回仅表示事件已被接受或丢弃，不表示图片识别、回复或记忆维护已经完成。
         void enqueueOneBotEvent(const json &body);
 
@@ -115,7 +115,7 @@ namespace insoulforge {
           const std::vector<Image> &attachments = {});
 
     private:
-        /// @brief 检查归一化消息的发送者与 Agent 状态，并在需要时启动会话预处理协程。
+        /// @brief 检查归一化消息的发送者与 Agent 状态，并在需要时启动会话加工协程。
         /// @param message 含 session_id 的完整内部消息；助手消息和无效或被拉黑的发送者会被丢弃。
         /// @note 取得消息所有权；未初始化或 Agent 不可用时直接丢弃。
         void enqueueNormalizedMessage(json message);
@@ -145,10 +145,10 @@ namespace insoulforge {
         /// @note 线程安全；索引锁内完成查找与首次创建。
         [[nodiscard]] auto getOrCreateSessionState(const SessionId &sessionId) -> std::shared_ptr<SessionWorkflowState>;
 
-        /// @brief 预处理一个会话的待处理消息，取空后立即退出
-        /// @param sessionId 待预处理消息所属会话，按值保存在协程帧中。
-        /// @note 仅在取得该会话预处理执行权后启动；单条消息失败不阻塞后续消息。
-        auto preprocess(SessionId sessionId) -> drogon::Task<>;
+        /// @brief 加工一个会话的待处理消息，取空后立即退出
+        /// @param sessionId 待加工消息所属会话，按值保存在协程帧中。
+        /// @note 仅在取得该会话加工执行权后启动；单条消息失败不阻塞后续消息。
+        auto compose(SessionId sessionId) -> drogon::Task<>;
 
         /// @brief 处理一个会话的待处理消息，串行执行至无待处理消息
         /// @param sessionId 消息处理任务所属会话，按值保存在协程帧中。
