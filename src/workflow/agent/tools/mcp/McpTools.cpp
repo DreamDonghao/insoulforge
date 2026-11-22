@@ -1,6 +1,6 @@
-#include <workflow/agent/llm/prompts/ExecutorSystemPrompt.hpp>
 #include <algorithm>
 #include <cmath>
+#include <format>
 #include <set>
 #include <utility>
 
@@ -9,6 +9,7 @@
 #include <infrastructure/http/HttpTrace.hpp>
 #include <infrastructure/http/HttpUtil.hpp>
 #include <infrastructure/logging/Logger.hpp>
+#include <workflow/agent/llm/prompts/ExecutorSystemPrompt.hpp>
 #include <workflow/agent/tools/ToolRegistry.hpp>
 #include <workflow/agent/tools/mcp/McpTools.hpp>
 
@@ -39,7 +40,7 @@ namespace insoulforge {
         }
 
         auto describeError(const drogonmcp::Error &error) -> std::string {
-            auto result = fmt::format("{} (code={})", error.message, error.code);
+            auto result = std::format("{} (code={})", error.message, error.code);
             if (!error.data.is_null())
                 result += " | data=" + error.data.dump();
             return result;
@@ -319,7 +320,7 @@ namespace insoulforge {
             co_return std::unexpected("MCP 工具注册失败，原有工具未被覆盖");
         server->catalog = std::make_shared<Catalog>(Catalog{.version = version, .tools = std::move(toolDefinitions)});
         Logger::info(
-          std::nullopt, "MCP", fmt::format("服务 {} 工具加载完成 | count={}", server->name, definitions.size()));
+          std::nullopt, "MCP", std::format("服务 {} 工具加载完成 | count={}", server->name, definitions.size()));
         co_return std::expected<void, std::string>{};
     }
 

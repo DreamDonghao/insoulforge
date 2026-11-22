@@ -13,7 +13,7 @@
 | C++ 编译器                    | 支持 C++23，推荐 GCC 13+ 或同等 Clang + 标准库 | 后端代码使用 C++23 与 `<format>`                       |
 | npm                           | Node.js 18+                                    | CMake 配置阶段查找 npm，`insoulforge` 目标自动构建前端 |
 | Drogon                        | 1.9.10                                         | `find_package(Drogon CONFIG REQUIRED)`                 |
-| SQLite3、spdlog、fmt、OpenSSL | 开发包                                         | 存储、日志、格式化、加密                               |
+| SQLite3、OpenSSL              | 开发包                                         | 存储、加密                                             |
 | nlohmann-json                 | 头文件或 CMake 包                              | JSON；CMake 找不到包时会直接查找头文件                 |
 | libpng、libjpeg、giflib                | 开发包                                         | 图片与 GIF 解码                                        |
 | Lua                           | 5.4 或更新的兼容版本                           | 进程内自定义工具执行器                                 |
@@ -22,6 +22,8 @@
 
 llama.cpp 通过 CMake `FetchContent` 下载固定 commit 的源码压缩包、校验 SHA-256 并静态链接，首次配置需要访问 GitHub（不克隆 Git 历史）；源码缓存于构建目录的 `_deps`，不提交到本仓库。当前仅构建 CPU 库，关闭附带工具、服务、测试和 GPU 后端，不需要 Rust、Python 或 GPU SDK。此接入尚不包含分词功能和词表资源。离线构建可通过 `-DFETCHCONTENT_SOURCE_DIR_LLAMA_CPP=/path/to/llama.cpp` 指定对应 commit 的本地源码。更新版本时修改 根 `CMakeLists.txt` 的下载 URL 和 `URL_HASH`，并重新验证构建。
 
+spdlog 同样通过 `FetchContent` 下载固定 commit 的源码压缩包并校验 SHA-256，使用 `SPDLOG_USE_STD_FORMAT` 开启标准库格式化。离线构建可通过 `-DFETCHCONTENT_SOURCE_DIR_SPDLOG=/path/to/spdlog` 指定对应 commit 的本地源码。
+
 ### Ubuntu 24.04
 
 先安装与 Dockerfile `builder` 阶段相同的系统依赖：
@@ -29,7 +31,7 @@ llama.cpp 通过 CMake `FetchContent` 下载固定 commit 的源码压缩包、�
 ```bash
 sudo apt update && sudo apt install -y \
     build-essential cmake ninja-build git ca-certificates \
-    libsqlite3-dev libspdlog-dev libfmt-dev libjsoncpp-dev nlohmann-json3-dev \
+    libsqlite3-dev libjsoncpp-dev nlohmann-json3-dev \
     zlib1g-dev libssl-dev uuid-dev libgif-dev libpng-dev libjpeg-dev liblua5.4-dev \
     nodejs npm
 ```
@@ -58,7 +60,7 @@ Ubuntu 22.04 默认编译器不满足本项目的 C++23 / `<format>` 要求。�
 ### macOS（Homebrew）
 
 ```bash
-brew install cmake drogon spdlog fmt nlohmann-json sqlite3 openssl brotli libpng jpeg-turbo giflib lua node
+brew install cmake drogon nlohmann-json sqlite3 openssl brotli libpng jpeg-turbo giflib lua node
 ```
 
 Homebrew 的 `drogon` 会提供 CMake 包。若 CMake 找不到 OpenSSL、SQLite3 等 Homebrew 前缀下的依赖，请在配置时传入对应的

@@ -2,7 +2,7 @@
 /// @brief 统一消息的媒体与长期记忆富化实现
 
 
-#include <fmt/format.h>
+#include <format>
 
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
@@ -70,7 +70,7 @@ namespace insoulforge::MessageContentEnricher {
         }
         if (!images->empty()) {
             Logger::info(
-              sessionId, "Media", fmt::format("图片识别完成 | succeeded={}/{}", succeededCount, images->size()));
+              sessionId, "Media", std::format("图片识别完成 | succeeded={}/{}", succeededCount, images->size()));
         }
         co_return message;
     }
@@ -95,7 +95,7 @@ namespace insoulforge::MessageContentEnricher {
             }
         }
         if (!memories.empty()) {
-            Logger::info(sessionId, "Memory", fmt::format("召回长期记忆: {} 条", memories.size()));
+            Logger::info(sessionId, "Memory", std::format("召回长期记忆: {} 条", memories.size()));
             message["memories"] = std::move(memories);
         }
         co_return message;

@@ -12,8 +12,6 @@
 
 #include <cstdio>
 #include <drogon/HttpAppFramework.h>
-#include <fmt/color.h>
-#include <fmt/format.h>
 #include <poll.h>
 #include <stop_token>
 #include <unistd.h>
@@ -52,10 +50,9 @@ namespace {
         }
         // 与 info 日志使用相同的终端绿色；重定向输出时保持纯文本。
         if (isatty(STDOUT_FILENO)) {
-            fmt::print(stdout, fmt::fg(fmt::terminal_color::green), "{}", loginInstructions);
-        } else {
-            fmt::print(stdout, "{}", loginInstructions);
+            loginInstructions = std::format("\x1b[32m{}\x1b[0m", loginInstructions);
         }
+        std::fputs(loginInstructions.c_str(), stdout);
         std::fflush(stdout);
     }
 
@@ -88,13 +85,13 @@ namespace {
                     return;
                 }
                 if (Logger::setLevel(level)) {
-                    Logger::info(std::nullopt, "Logger", fmt::format("日志等级已切换为 {}", level));
+                    Logger::info(std::nullopt, "Logger", std::format("日志等级已切换为 {}", level));
                 } else {
-                    Logger::warn(std::nullopt, "Logger", fmt::format("无效的日志等级: {}", level));
+                    Logger::warn(std::nullopt, "Logger", std::format("无效的日志等级: {}", level));
                 }
                 continue;
             }
-            Logger::warn(std::nullopt, "Main", fmt::format("未知命令: {}", command));
+            Logger::warn(std::nullopt, "Main", std::format("未知命令: {}", command));
         }
     }
 } // namespace
@@ -209,7 +206,7 @@ auto main() -> int {
         PersonMemoryConsolidator::instance().stop();
         PersonNameResolver::instance().stop();
         ProcessMetrics::instance().stop();
-        Logger::critical(std::nullopt, "Main", fmt::format("程序崩溃: {}", e.what()));
+        Logger::critical(std::nullopt, "Main", std::format("程序崩溃: {}", e.what()));
         Logger::shutdown();
         return EXIT_FAILURE;
     } catch (...) {

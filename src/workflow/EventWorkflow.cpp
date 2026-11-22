@@ -2,6 +2,7 @@
 /// @brief 统一事件处理工作流实现
 
 #include <algorithm>
+#include <format>
 
 #include <drogon/HttpAppFramework.h>
 #include <drogon/utils/Utilities.h>
@@ -39,9 +40,9 @@ namespace insoulforge {
                   "session_stats_updated", {{"sessionId", sessionId.toString()},
                                              {"messageCount", SessionConfigManager::getConfig(sessionId).allMesCount}});
             } catch (const std::exception &error) {
-                Logger::error(sessionId, "Workflow", fmt::format("会话统计更新失败: {}", error.what()));
+                Logger::error(sessionId, "Workflow", std::format("会话统计更新失败: {}", error.what()));
             } catch (...) {
-                Logger::error(sessionId, "Workflow", fmt::format("会话统计更新失败: 未知异常"));
+                Logger::error(sessionId, "Workflow", std::format("会话统计更新失败: 未知异常"));
             }
         }
 
@@ -53,9 +54,9 @@ namespace insoulforge {
                 const auto role = MessageRecord::isAssistant(message) ? "assistant" : "user";
                 WebSocketManager::instance().pushMessage(sessionId, role, dumpJson(message));
             } catch (const std::exception &error) {
-                Logger::error(sessionId, "Workflow", fmt::format("管理后台消息推送失败: {}", error.what()));
+                Logger::error(sessionId, "Workflow", std::format("管理后台消息推送失败: {}", error.what()));
             } catch (...) {
-                Logger::error(sessionId, "Workflow", fmt::format("管理后台消息推送失败: 未知异常"));
+                Logger::error(sessionId, "Workflow", std::format("管理后台消息推送失败: 未知异常"));
             }
         }
 
@@ -75,7 +76,7 @@ namespace insoulforge {
                           completed = co_await MemoryMaintenanceCoordinator::process(
                             database, sessionId, std::move(batch.messages), std::move(batch.contextMessages));
                       } catch (const std::exception &error) {
-                          Logger::error(sessionId, "Memory", fmt::format("记忆维护失败: {}", error.what()));
+                          Logger::error(sessionId, "Memory", std::format("记忆维护失败: {}", error.what()));
                       } catch (...) {
                           Logger::error(sessionId, "Memory", "记忆维护失败: 未知异常");
                       }
@@ -86,7 +87,7 @@ namespace insoulforge {
                   });
             } catch (const std::exception &error) {
                 messageList.finishSummaryBatch(0);
-                Logger::error(sessionId, "Memory", fmt::format("记忆维护启动失败: {}", error.what()));
+                Logger::error(sessionId, "Memory", std::format("记忆维护启动失败: {}", error.what()));
             } catch (...) {
                 messageList.finishSummaryBatch(0);
                 Logger::error(sessionId, "Memory", "记忆维护启动失败: 未知异常");
@@ -122,7 +123,7 @@ namespace insoulforge {
             // 在接收消息前清理超过十天未使用的图片描述缓存。
             const auto expiredImageCount = u64{ImageDescriptionStore::purgeExpired()};
             Logger::info(
-              std::nullopt, "Media", fmt::format("过期图片描述缓存清理完成 | deleted={}", expiredImageCount));
+              std::nullopt, "Media", std::format("过期图片描述缓存清理完成 | deleted={}", expiredImageCount));
 
             for (const auto &sessionId: ChatRecordStore::getSessionIds(database)) {
                 m_sessionStates.try_emplace(sessionId, sessionId, database, config);
@@ -218,9 +219,9 @@ namespace insoulforge {
             const auto response = co_await CommandProcessor::execute(message);
             co_await MessageService::sendToSession(sessionId, response);
         } catch (const std::exception &error) {
-            Logger::error(sessionId, "Workflow", fmt::format("命令执行或回复失败: {}", error.what()));
+            Logger::error(sessionId, "Workflow", std::format("命令执行或回复失败: {}", error.what()));
         } catch (...) {
-            Logger::error(sessionId, "Workflow", fmt::format("命令执行或回复失败: 未知错误"));
+            Logger::error(sessionId, "Workflow", std::format("命令执行或回复失败: 未知错误"));
         }
         co_return;
     }
@@ -235,7 +236,7 @@ namespace insoulforge {
     void EventWorkflow::enqueueSystemEvent(const SessionId &sessionId, std::string text, std::string senderName) {
         static std::atomic<u64> next{0};
         enqueueNormalizedMessage({{"session_id", sessionId.toString()}, {"time", currentDateTime()},
-          {"message_id", fmt::format("{}", 9000000000ULL + next.fetch_add(1))},
+          {"message_id", std::format("{}", 9000000000ULL + next.fetch_add(1))},
           {"sender", {{"user_id", "system"}, {"name", std::move(senderName)}}},
           {"segments", {{{"type", "text"}, {"text", std::move(text)}}}}});
     }
@@ -303,7 +304,7 @@ namespace insoulforge {
                 scheduleMemoryMaintenance(m_dependencies->database, sessionId, sessionState.messageList());
             } catch (const std::exception &error) {
                 // 单条消息富化或收尾失败不能阻塞同会话后续消息。
-                Logger::error(sessionId, "Workflow", fmt::format("消息预处理失败: {}", error.what()));
+                Logger::error(sessionId, "Workflow", std::format("消息预处理失败: {}", error.what()));
             } catch (...) {
                 Logger::error(sessionId, "Workflow", "消息预处理失败: 未知异常");
             }
@@ -318,7 +319,7 @@ namespace insoulforge {
                     auto routerDecision = co_await MessageRouter::route(sessionId, *routerRecords);
 
                     Logger::info(sessionId, "Router",
-                      fmt::format("决策={} | reason={} | priority={} | maxLength={}", routerDecision.shouldReply,
+                      std::format("决策={} | reason={} | priority={} | maxLength={}", routerDecision.shouldReply,
                         routerDecision.reason, routerDecision.isPriority,
                         routerDecision.maxLength ? std::to_string(*routerDecision.maxLength) : "未指定"));
 
@@ -336,7 +337,7 @@ namespace insoulforge {
                 }
             } catch (const std::exception &error) {
                 // Router、Executor 或发送失败不影响同会话后续处理任务。
-                Logger::error(sessionId, "Workflow", fmt::format("消息处理失败: {}", error.what()));
+                Logger::error(sessionId, "Workflow", std::format("消息处理失败: {}", error.what()));
             } catch (...) {
                 Logger::error(sessionId, "Workflow", "消息处理失败: 未知异常");
             }

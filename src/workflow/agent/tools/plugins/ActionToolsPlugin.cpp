@@ -1,6 +1,7 @@
 /// @file ActionToolsPlugin.cpp
 /// @brief 动作工具插件实现（ACTION，执行操作、产生副作用）
 
+#include <format>
 #include <set>
 #include <stdexcept>
 #include <vector>
@@ -49,7 +50,7 @@ namespace insoulforge {
                 if (!id)
                     return std::unexpected(id.error());
                 if (BlacklistStore::contains(*id))
-                    return std::unexpected(fmt::format("目标私聊 {} 在全局黑名单中，未发送消息", *id));
+                    return std::unexpected(std::format("目标私聊 {} 在全局黑名单中，未发送消息", *id));
                 target = SessionId::privateChat(*id);
             } else {
                 const auto id = groupIdArgument(args);
@@ -58,15 +59,15 @@ namespace insoulforge {
                 target = *id;
             }
             if (!SessionStore::isSessionEnabled(*target))
-                return std::unexpected(fmt::format("目标会话 {} 未在后台启用，未发送消息", *target));
+                return std::unexpected(std::format("目标会话 {} 未在后台启用，未发送消息", *target));
             return *target;
         }
 
         auto messageDestination(const json &args, const SessionId &target) -> std::string {
             if (args.contains("user_id"))
-                return fmt::format("目标私聊 {}：", target.targetId());
+                return std::format("目标私聊 {}：", target.targetId());
             if (args.contains("group_id"))
-                return fmt::format("目标群 {}：", target.targetId());
+                return std::format("目标群 {}：", target.targetId());
             return {};
         }
 
@@ -118,7 +119,7 @@ namespace insoulforge {
                           description = recognized->description;
                       }
                   } catch (const std::exception &error) {
-                      Logger::warn(sessionId, "ImageGeneration", fmt::format("生成图片识别失败: {}", error.what()));
+                      Logger::warn(sessionId, "ImageGeneration", std::format("生成图片识别失败: {}", error.what()));
                   }
                   co_return AsyncTaskManager::Result{.content = std::move(generated.message),
                     .image = std::move(generated.image),
@@ -126,9 +127,9 @@ namespace insoulforge {
               });
             switch (status) {
                 case AsyncTaskManager::StartResult::Status::Started:
-                    return fmt::format("图片任务 #{} 已启动，完成后会直接发送到本会话。", taskId);
+                    return std::format("图片任务 #{} 已启动，完成后会直接发送到本会话。", taskId);
                 case AsyncTaskManager::StartResult::Status::Busy:
-                    return fmt::format("本会话已有异步任务 #{} 在执行，请等待完成。", taskId);
+                    return std::format("本会话已有异步任务 #{} 在执行，请等待完成。", taskId);
                 case AsyncTaskManager::StartResult::Status::Stopping:
                     return "程序正在退出，无法启动图片任务。";
             }
@@ -188,7 +189,7 @@ namespace insoulforge {
                 if (!result) {
                     co_return "空间说说发布未成功确认：" + result.error() + "。若请求超时，请先检查空间，勿自动重试。";
                 }
-                co_return fmt::format("空间说说已发布，tid={}。", *result);
+                co_return std::format("空间说说已发布，tid={}。", *result);
             },
           },
           ToolCategory::ACTION);
@@ -266,9 +267,9 @@ namespace insoulforge {
                   });
                 switch (status) {
                     case AsyncTaskManager::StartResult::Status::Started:
-                        co_return fmt::format("演示任务 #{} 已启动，完成后会直接发送到本会话。", taskId);
+                        co_return std::format("演示任务 #{} 已启动，完成后会直接发送到本会话。", taskId);
                     case AsyncTaskManager::StartResult::Status::Busy:
-                        co_return fmt::format("本会话已有异步任务 #{} 在执行，请等待完成。", taskId);
+                        co_return std::format("本会话已有异步任务 #{} 在执行，请等待完成。", taskId);
                     case AsyncTaskManager::StartResult::Status::Stopping:
                         co_return std::string("程序正在退出，无法启动异步任务。");
                 }
@@ -295,7 +296,7 @@ namespace insoulforge {
             .parameters = faceParams,
             .handler = [](const json args, ToolCallContext) -> drogon::Task<std::string> {
                 const i32 id = getInt(args, "id", 1);
-                co_return fmt::format("[CQ:face,id={}]", id);
+                co_return std::format("[CQ:face,id={}]", id);
             },
           },
           ToolCategory::INFORMATION);
@@ -347,7 +348,7 @@ namespace insoulforge {
                               image->id(), ctx.requireSession()))
                             description = trim(recognized->description);
                     } catch (const std::exception &error) {
-                        Logger::warn(ctx.requireSession(), "Media", fmt::format("发送图片识别失败: {}", error.what()));
+                        Logger::warn(ctx.requireSession(), "Media", std::format("发送图片识别失败: {}", error.what()));
                     } catch (...) {
                         Logger::warn(ctx.requireSession(), "Media", "发送图片识别失败：未知异常");
                     }
@@ -401,14 +402,14 @@ namespace insoulforge {
                 const auto destination = messageDestination(args, *target);
                 const json emoji = co_await ToolRuntime::findFavoriteEmoji(name, ctx.requireSession(), connection);
                 if (emoji.is_null()) {
-                    co_return fmt::format(
+                    co_return std::format(
                       "{}表情'{}'不存在、名称不唯一或列表获取失败，请核对系统消息 available_stickers 中的名称",
                       destination, name);
                 }
 
                 const auto cqCode = MessageFormatter::favoriteEmojiToCQCode(emoji);
                 if (!cqCode)
-                    co_return fmt::format("{}表情'{}'{}", destination, name, cqCode.error());
+                    co_return std::format("{}表情'{}'{}", destination, name, cqCode.error());
 
                 if (connection != Config::instance().oneBotSnapshot())
                     co_return std::string("OneBot 配置已切换，请刷新收藏列表后重试");
@@ -416,11 +417,11 @@ namespace insoulforge {
                 if (const auto messageId =
                       co_await MessageService::sendToSession(*target, *cqCode, std::nullopt, {}, {}, connection);
                   !messageId) {
-                    co_return fmt::format(
+                    co_return std::format(
                       "{}表情发送未确认成功：{}。由模型决定重发、继续处理或结束；超时不代表确定未送达。", destination,
                       messageId.error());
                 }
-                co_return fmt::format("{}已发送表情「{}」", destination, name);
+                co_return std::format("{}已发送表情「{}」", destination, name);
             },
           },
           ToolCategory::ACTION);
@@ -482,7 +483,7 @@ namespace insoulforge {
                 }
                 const auto destination = messageDestination(args, *target);
                 if (const auto messageId = co_await MessageService::sendToSession(*target, content); !messageId) {
-                    co_return fmt::format(
+                    co_return std::format(
                       "{}消息发送未确认成功：{}"
                       "。请继续处理，不要认为该消息已送达，由模型决定重发、继续处理或结束；超时不代表确定未送达。",
                       destination, messageId.error());
@@ -559,7 +560,7 @@ namespace insoulforge {
                 const std::string &url = source->url;
 
                 Logger::info(sessionId, "Sticker",
-                  fmt::format("save_sticker: message_id={} image_index={} file={}", messageId, imageIndex, file));
+                  std::format("save_sticker: message_id={} image_index={} file={}", messageId, imageIndex, file));
 
                 // 优先获取容器内的图片路径；商城表情可能无法通过 get_image 获取。
                 std::string containerPath;
@@ -622,15 +623,15 @@ namespace insoulforge {
                         named = true;
                     } else {
                         Logger::warn(
-                          sessionId, "Sticker", fmt::format("设置表情描述失败: {}", getStr(newItem, "res_id")));
+                          sessionId, "Sticker", std::format("设置表情描述失败: {}", getStr(newItem, "res_id")));
                     }
                 }
 
                 ToolRuntime::invalidateFavoriteEmojiCache();
                 if (!named)
                     co_return std::string("已保存为收藏表情，但未确认名称设置成功，请刷新收藏列表后修改名称");
-                Logger::info(sessionId, "Sticker", fmt::format("已保存收藏表情: {} ({})", containerPath, name));
-                co_return fmt::format("已保存为收藏表情，名称: {}", name);
+                Logger::info(sessionId, "Sticker", std::format("已保存收藏表情: {} ({})", containerPath, name));
+                co_return std::format("已保存为收藏表情，名称: {}", name);
             },
           },
           ToolCategory::ACTION);
@@ -669,7 +670,7 @@ namespace insoulforge {
                 const auto &sessionId = ctx.requireSession();
                 const json emoji = co_await ToolRuntime::findFavoriteEmoji(name, sessionId, connection);
                 if (emoji.is_null()) {
-                    co_return fmt::format(
+                    co_return std::format(
                       "表情'{}'不存在、名称不唯一或列表获取失败，请核对系统消息 available_stickers 中的名称", name);
                 }
 
@@ -681,8 +682,8 @@ namespace insoulforge {
                     co_return std::string("改名请求失败或结果未确认，请核对收藏列表后再试");
                 }
 
-                Logger::info(sessionId, "Sticker", fmt::format("表情改名: {} -> {}", name, newName));
-                co_return fmt::format("已改名为: {}", newName);
+                Logger::info(sessionId, "Sticker", std::format("表情改名: {} -> {}", name, newName));
+                co_return std::format("已改名为: {}", newName);
             },
           },
           ToolCategory::ACTION);
@@ -713,7 +714,7 @@ namespace insoulforge {
                 const auto &sessionId = ctx.requireSession();
                 const json emoji = co_await ToolRuntime::findFavoriteEmoji(name, sessionId, connection);
                 if (emoji.is_null()) {
-                    co_return fmt::format(
+                    co_return std::format(
                       "表情'{}'不存在、名称不唯一或列表获取失败，请核对系统消息 available_stickers 中的名称", name);
                 }
 
@@ -724,8 +725,8 @@ namespace insoulforge {
                 }
 
                 ToolRuntime::invalidateFavoriteEmojiCache();
-                Logger::info(sessionId, "Sticker", fmt::format("已删除收藏表情: {}", name));
-                co_return fmt::format("已删除表情: {}", name);
+                Logger::info(sessionId, "Sticker", std::format("已删除收藏表情: {}", name));
+                co_return std::format("已删除表情: {}", name);
             },
           },
           ToolCategory::ACTION);
@@ -764,7 +765,7 @@ namespace insoulforge {
                 const auto number = id->toU64();
                 if (!number || *number == 0)
                     co_return "OneBot 11 要求非零数字用户 ID";
-                co_return fmt::format("[CQ:at,qq={}]", *number);
+                co_return std::format("[CQ:at,qq={}]", *number);
             },
             .scope = ToolScope::GROUP_ONLY,
           },
@@ -806,7 +807,7 @@ namespace insoulforge {
                     co_return std::string("禁言失败: 不能禁言机器人自身");
 
                 const bool success = co_await OneBotClient::setGroupBan(sessionId, *userId, duration);
-                co_return success ? fmt::format("已禁言用户 {} {}秒", *userId, duration)
+                co_return success ? std::format("已禁言用户 {} {}秒", *userId, duration)
                                   : "禁言请求失败或结果未确认，请核对实际状态后再决定是否重试";
             },
             .scope = ToolScope::GROUP_ONLY,
@@ -855,10 +856,10 @@ namespace insoulforge {
                     co_return std::string("加入黑名单失败: 该用户不在当前会话记录中");
                 }
                 if (BlacklistStore::contains(*userId)) {
-                    co_return fmt::format("用户 {} 已在全局黑名单中", *userId);
+                    co_return std::format("用户 {} 已在全局黑名单中", *userId);
                 }
                 BlacklistStore::add(*userId);
-                co_return fmt::format(
+                co_return std::format(
                   "已将用户 {} 加入全局黑名单；请用send_message_and_finish告知该用户拉黑结果", *userId);
             },
           },
@@ -911,7 +912,7 @@ namespace insoulforge {
                 msgJson["sender"]["user_id"] = "self";
                 msgJson["segments"] = json::array({poke});
                 EventWorkflow::instance().appendDeliveredAssistantMessage(sessionId, std::move(msgJson));
-                co_return fmt::format("已拍一拍用户 {}", *userId);
+                co_return std::format("已拍一拍用户 {}", *userId);
             },
             .scope = ToolScope::GROUP_ONLY,
           },
@@ -942,7 +943,7 @@ namespace insoulforge {
 
                 const auto &sessionId = ctx.requireSession();
                 const bool success = co_await OneBotClient::deleteMsg(messageId, sessionId);
-                co_return success ? fmt::format("已撤回消息 {}", messageId)
+                co_return success ? std::format("已撤回消息 {}", messageId)
                                   : "撤回请求失败或结果未确认，请核对消息状态后再决定是否重试";
             },
           },
@@ -969,7 +970,7 @@ namespace insoulforge {
                 },
                 "required": ["time", "content"]
             })json");
-        scheduleParams["properties"]["content"]["description"] = fmt::format(
+        scheduleParams["properties"]["content"]["description"] = std::format(
           "到点时留给自己（{}）的备忘说明，不是最终的回复文本：写清楚要提醒谁（带上对方昵称及sender."
           "user_id）、要做什么事、以及创建时对话里的相关背景。到点后你会看到这段备忘并结合当时的聊天上下文自行组织回复",
           m_botName);
@@ -994,7 +995,7 @@ namespace insoulforge {
 
                 const time_t now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
                 if (*remindTime <= now + 10) {
-                    co_return fmt::format("时间无效：必须晚于当前时间10秒以上。当前时间是 {}", currentDateTime());
+                    co_return std::format("时间无效：必须晚于当前时间10秒以上。当前时间是 {}", currentDateTime());
                 }
                 if (*remindTime > now + 366LL * 24 * 3600) {
                     co_return std::string("时间过早远：不允许设置超过一年后的提醒");
@@ -1012,14 +1013,14 @@ namespace insoulforge {
                 try {
                     const i64 id = TaskScheduler::instance().schedule(std::move(task));
                     if (isDaily) {
-                        co_return fmt::format("每日定时任务 #{} 已创建，每天 {} 在{}触发提醒", id,
+                        co_return std::format("每日定时任务 #{} 已创建，每天 {} 在{}触发提醒", id,
                           formatTimeOfDay(*remindTime), isPrivateSession ? "私聊" : "本群");
                     }
-                    co_return fmt::format("定时任务 #{} 已创建，将于 {} 在{}触发提醒", id, formatUnixTime(*remindTime),
+                    co_return std::format("定时任务 #{} 已创建，将于 {} 在{}触发提醒", id, formatUnixTime(*remindTime),
                       isPrivateSession ? "私聊" : "本群");
                 } catch (const std::exception &e) {
-                    Logger::error(sessionId, "Scheduler", fmt::format("创建定时任务入库失败: {}", e.what()));
-                    co_return fmt::format("创建定时任务失败: {}", std::string_view(e.what()).substr(0, 500));
+                    Logger::error(sessionId, "Scheduler", std::format("创建定时任务入库失败: {}", e.what()));
+                    co_return std::format("创建定时任务失败: {}", std::string_view(e.what()).substr(0, 500));
                 }
             },
           },
@@ -1048,8 +1049,8 @@ namespace insoulforge {
                     co_return std::string("请提供有效的任务编号（可先用 list_scheduled_tasks 查询）");
 
                 co_return TaskScheduler::instance().cancel(taskId)
-                  ? fmt::format("已取消定时任务 #{}", taskId)
-                  : fmt::format("取消失败：任务 #{} 不存在或已触发/已取消", taskId);
+                  ? std::format("已取消定时任务 #{}", taskId)
+                  : std::format("取消失败：任务 #{} 不存在或已触发/已取消", taskId);
             },
           },
           ToolCategory::ACTION);

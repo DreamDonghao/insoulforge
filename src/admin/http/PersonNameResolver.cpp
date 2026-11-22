@@ -1,6 +1,7 @@
 /// @file PersonNameResolver.cpp
 /// @brief 查询最多四路并发，失败冷却一分钟，停止后丢弃迟到结果。
 
+#include <format>
 #include <vector>
 
 #include <drogon/HttpAppFramework.h>
@@ -69,7 +70,7 @@ namespace insoulforge {
                 name = getStr(atOrNull(response, "data"), "nickname");
             }
         } catch (const std::exception &error) {
-            Logger::warn(std::nullopt, "Admin", fmt::format("查询人物昵称失败: userId={}, {}", userId, error.what()));
+            Logger::warn(std::nullopt, "Admin", std::format("查询人物昵称失败: userId={}, {}", userId, error.what()));
         }
         {
             std::lock_guard lock(m_mutex);

@@ -1,6 +1,7 @@
 /// @file ToolRuntime.cpp
 /// @brief 工具运行时的插件装配与自定义工具加载
 
+#include <format>
 
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
@@ -69,30 +70,30 @@ namespace insoulforge {
                       if (tool.executorType == "lua") {
                           if (const auto error = LuaToolExecutor::validate(tool.scriptContent)) {
                               Logger::warn(
-                                std::nullopt, "Tool", fmt::format("跳过无效 Lua 工具 '{}': {}", tool.name, *error));
+                                std::nullopt, "Tool", std::format("跳过无效 Lua 工具 '{}': {}", tool.name, *error));
                               continue;
                           }
                       }
                       auto definition = makeCustomTool(tool, parseCustomToolParameters(tool));
                       if (!definition) {
                           Logger::warn(std::nullopt, "Tool",
-                            fmt::format("ToolRuntime: 跳过不支持的自定义工具 '{}' ({})", tool.name, tool.executorType));
+                            std::format("ToolRuntime: 跳过不支持的自定义工具 '{}' ({})", tool.name, tool.executorType));
                           continue;
                       }
                       if (pluginRegistry.registerTool(*definition, ToolCategory::ACTION)) {
                           ++registeredCount;
                           Logger::info(std::nullopt, "Tool",
-                            fmt::format("ToolRuntime: 注册自定义工具 '{}' ({})", tool.name, tool.executorType));
+                            std::format("ToolRuntime: 注册自定义工具 '{}' ({})", tool.name, tool.executorType));
                       }
                   }
               });
 
             if (!registered) {
-                Logger::error(std::nullopt, "Tool", fmt::format("ToolRuntime: 自定义工具重载失败，已保留此前注册结果"));
+                Logger::error(std::nullopt, "Tool", std::format("ToolRuntime: 自定义工具重载失败，已保留此前注册结果"));
                 return std::unexpected("自定义工具重载失败，已保留此前注册结果");
             }
             Logger::info(
-              std::nullopt, "Tool", fmt::format("ToolRuntime: 自定义工具重载完成（共{}个）", registeredCount));
+              std::nullopt, "Tool", std::format("ToolRuntime: 自定义工具重载完成（共{}个）", registeredCount));
             return {};
         } catch (const DbError &error) {
             return std::unexpected(std::string("读取自定义工具失败: ") + error.what());

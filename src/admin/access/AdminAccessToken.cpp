@@ -2,13 +2,13 @@
 /// @brief 管理后台启动令牌与会话认证实现
 
 #include <array>
+#include <format>
 #include <mutex>
 #include <string>
 #include <unordered_set>
 #include <utility>
 
 #include <arpa/inet.h>
-#include <fmt/format.h>
 #include <ifaddrs.h>
 #include <net/if.h>
 #include <openssl/crypto.h>
@@ -90,7 +90,7 @@ namespace insoulforge {
     auto AdminAccessToken::loginUrls(const u16 port) -> std::vector<std::string> {
         std::vector<std::string> urls;
         for (const auto &address: localIpv4Addresses()) {
-            urls.push_back(fmt::format("http://{}:{}/index.html#token={}", address, port, token()));
+            urls.push_back(std::format("http://{}:{}/index.html#token={}", address, port, token()));
         }
         return urls;
     }

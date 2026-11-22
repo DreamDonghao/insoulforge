@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -738,7 +739,7 @@ namespace {
     void restoreIntegerSessionSchema(sqlite3 *db) {
         using namespace insoulforge;
         const auto integerKey = [](std::string_view column) {
-            return fmt::format("CASE WHEN {0} LIKE 'private:%' THEN CAST(substr({0},9) AS "
+            return std::format("CASE WHEN {0} LIKE 'private:%' THEN CAST(substr({0},9) AS "
                                "INTEGER)|(-9223372036854775807-1) ELSE CAST(substr({0},7) AS INTEGER) END",
               column);
         };
@@ -772,7 +773,7 @@ namespace {
             }
             std::string columns, values;
             {
-                const Statement info(db, fmt::format("PRAGMA table_info({})", table));
+                const Statement info(db, std::format("PRAGMA table_info({})", table));
                 while (info.step()) {
                     const auto name = info.getText(1);
                     if (!columns.empty()) {
@@ -792,12 +793,12 @@ namespace {
                     }
                 }
             }
-            Statement(db, fmt::format("CREATE TABLE {}_oldsession {}", table, body)).execOrThrow();
+            Statement(db, std::format("CREATE TABLE {}_oldsession {}", table, body)).execOrThrow();
             Statement(
-              db, fmt::format("INSERT INTO {}_oldsession ({}) SELECT {} FROM {}", table, columns, values, table))
+              db, std::format("INSERT INTO {}_oldsession ({}) SELECT {} FROM {}", table, columns, values, table))
               .execOrThrow();
             Statement(db, "DROP TABLE " + table).execOrThrow();
-            Statement(db, fmt::format("ALTER TABLE {}_oldsession RENAME TO {}", table, table)).execOrThrow();
+            Statement(db, std::format("ALTER TABLE {}_oldsession RENAME TO {}", table, table)).execOrThrow();
             for (auto sql: objects) {
                 if (!source && !tasks) {
                     sql = std::regex_replace(sql, std::regex("session_id"), "group_id");
@@ -828,10 +829,10 @@ namespace {
             } else {
                 body.replace(body.find("user_id TEXT"), std::string_view("user_id TEXT").size(), "user_id INTEGER");
             }
-            Statement(db, fmt::format("CREATE TABLE {}_old {}", table, body)).execOrThrow();
-            Statement(db, fmt::format("INSERT INTO {}_old SELECT * FROM {}", table, table)).execOrThrow();
+            Statement(db, std::format("CREATE TABLE {}_old {}", table, body)).execOrThrow();
+            Statement(db, std::format("INSERT INTO {}_old SELECT * FROM {}", table, table)).execOrThrow();
             Statement(db, "DROP TABLE " + table).execOrThrow();
-            Statement(db, fmt::format("ALTER TABLE {}_old RENAME TO {}", table, table)).execOrThrow();
+            Statement(db, std::format("ALTER TABLE {}_old RENAME TO {}", table, table)).execOrThrow();
         }
         Statement(db, "CREATE INDEX idx_person_memory_entries_user_id ON person_memory_entries(user_id, id)")
           .execOrThrow();
@@ -842,7 +843,7 @@ namespace {
         restoreIntegerUserSchema(db);
         for (const auto *table:
           {"admins", "blacklisted_users", "person_affinity", "person_memories", "person_memory_entries"}) {
-            insoulforge::Statement(db, fmt::format("ALTER TABLE {} RENAME COLUMN user_id TO qq_number", table))
+            insoulforge::Statement(db, std::format("ALTER TABLE {} RENAME COLUMN user_id TO qq_number", table))
               .execOrThrow();
         }
         insoulforge::Statement(db, "DROP INDEX idx_person_memory_entries_user_id").execOrThrow();
@@ -983,7 +984,7 @@ namespace {
         for (const auto *table:
           {"admins", "blacklisted_users", "person_affinity", "person_memories", "person_memory_entries"}) {
             const Statement type(
-              db.handle(), fmt::format("SELECT type FROM pragma_table_info('{}') WHERE name='user_id'", table));
+              db.handle(), std::format("SELECT type FROM pragma_table_info('{}') WHERE name='user_id'", table));
             check(type.step() && type.getText(0) == "TEXT", "all user identity columns are TEXT", kTestName);
         }
         bool triggerPreserved = false;
@@ -1159,7 +1160,7 @@ namespace {
         }
         SchemaMigrator::migrate(db.handle());
         for (const auto *table: {"chat_records", "short_term_memory", "memory_items"}) {
-            const Statement foreignKey(db.handle(), fmt::format("PRAGMA foreign_key_list({})", table));
+            const Statement foreignKey(db.handle(), std::format("PRAGMA foreign_key_list({})", table));
             check(foreignKey.step() && foreignKey.getText(2) == "group_config" &&
                     foreignKey.getText(3) == "session_id" && foreignKey.getText(4) == "session_id",
               "converts both sides of legacy foreign keys", kTestName);
@@ -1314,7 +1315,7 @@ namespace {
         check(schema() == original, "current version is unchanged on repeated startup", kTestName);
         Statement(db, "INSERT INTO prompts(prompt_key,prompt_content) VALUES('preserved','original')").execOrThrow();
         for (const auto legacyVersion: {0, 1, 12, 23}) {
-            Statement(db, fmt::format("PRAGMA user_version={}", legacyVersion)).execOrThrow();
+            Statement(db, std::format("PRAGMA user_version={}", legacyVersion)).execOrThrow();
             std::string error;
             try {
                 SchemaMigrator::migrate(db);
@@ -1326,7 +1327,7 @@ namespace {
                     version() == legacyVersion && schema() == original && data.step() && data.getText(0) == "original",
               "unsupported old database is rejected with upgrade instructions and no changes", kTestName);
         }
-        Statement(db, fmt::format("PRAGMA user_version={}", SchemaMigrator::kLatestVersion + 1)).execOrThrow();
+        Statement(db, std::format("PRAGMA user_version={}", SchemaMigrator::kLatestVersion + 1)).execOrThrow();
         bool rejectedFuture = false;
         try {
             SchemaMigrator::migrate(db);

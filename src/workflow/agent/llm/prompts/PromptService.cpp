@@ -2,6 +2,7 @@
 /// @brief 提示词服务 - 实现
 
 #include <array>
+#include <format>
 
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
@@ -99,7 +100,7 @@ skip：内容已经被回复覆盖，或只剩广告、刷屏、无实质内容�
         for (const auto &[key, content, desc]: defaultPrompts) {
             if (!PromptStore::hasPrompt(database, key)) {
                 PromptStore::setPrompt(database, key, content, desc);
-                Logger::info(std::nullopt, "Prompt", fmt::format("插入默认提示词: {}", key));
+                Logger::info(std::nullopt, "Prompt", std::format("插入默认提示词: {}", key));
             }
         }
 
@@ -108,7 +109,7 @@ skip：内容已经被回复覆盖，或只剩广告、刷屏、无实质内容�
         if (const std::string stored = PromptStore::getPrompt(database, "router_system", "");
           stored.find("不要其他内容）：\n{{") != std::string::npos) {
             PromptStore::setPrompt(database, "router_system", defaultPrompts[1].content, defaultPrompts[1].desc);
-            Logger::warn(std::nullopt, "Prompt", fmt::format("已自愈 router_system 默认值中的双花括号残留"));
+            Logger::warn(std::nullopt, "Prompt", std::format("已自愈 router_system 默认值中的双花括号残留"));
         }
 
         // 只替换旧默认指令中的确定措辞，保留其余自定义内容。
@@ -185,10 +186,10 @@ skip：内容已经被回复覆盖，或只剩广告、刷屏、无实质内容�
                 start = stop + 1;
             }
             PromptStore::setPrompt(database, key, updated);
-            Logger::info(std::nullopt, "Prompt", fmt::format("已从 Router 提示词移除 enableThinking 策略项: {}", key));
+            Logger::info(std::nullopt, "Prompt", std::format("已从 Router 提示词移除 enableThinking 策略项: {}", key));
         }
 
-        Logger::info(std::nullopt, "Prompt", fmt::format("提示词服务初始化完成"));
+        Logger::info(std::nullopt, "Prompt", std::format("提示词服务初始化完成"));
     }
 
     auto PromptService::getPrompt(const std::string &key) -> std::string {
@@ -208,7 +209,7 @@ skip：内容已经被回复覆盖，或只剩广告、刷屏、无实质内容�
     void PromptService::setPrompt(const std::string &key, const std::string &content, const std::string &description) {
         PromptStore::setPrompt(key, content, description);
         ExecutorSystemPrompt::instance().invalidate();
-        Logger::info(std::nullopt, "Prompt", fmt::format("提示词已更新: {}", key));
+        Logger::info(std::nullopt, "Prompt", std::format("提示词已更新: {}", key));
     }
 
     auto PromptService::getExecutorSystemPrompt() -> std::string { return getPrompt("executor_system"); }

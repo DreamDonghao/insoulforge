@@ -41,6 +41,20 @@ message(STATUS "Preparing llama.cpp (b11278): downloading/verifying source if ne
 FetchContent_MakeAvailable(llama_cpp)
 message(STATUS "llama.cpp source ready: ${llama_cpp_SOURCE_DIR}")
 
+set(SPDLOG_USE_STD_FORMAT ON CACHE BOOL "" FORCE)
+set(SPDLOG_FMT_EXTERNAL OFF CACHE BOOL "" FORCE)
+set(SPDLOG_FMT_EXTERNAL_HO OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(spdlog
+        # v1.15.3
+        URL https://codeload.github.com/gabime/spdlog/tar.gz/6fa36017cfd5731d617e1a934f0e5ea9c4445b13
+        URL_HASH SHA256=5097fb362e79a2bd7247beaf1f8377ed60e274fbe83a4b33e7b73383f0279022
+        DOWNLOAD_DIR "${FETCHCONTENT_BASE_DIR}/downloads"
+        DOWNLOAD_NAME spdlog-6fa36017cfd5731d617e1a934f0e5ea9c4445b13.tar.gz
+        TLS_VERIFY TRUE
+        TIMEOUT 600
+        INACTIVITY_TIMEOUT 60)
+FetchContent_MakeAvailable(spdlog)
+
 # 禁用 nlohmann/json 的隐式转换运算符（官方开关）：std::string s = j; / return j; 等代码
 # 直接编译报错，而不是编译通过、运行时抛 type_error.302；取值一律走 get<T>()/JsonUtil 宽容取值器
 add_compile_definitions(JSON_USE_IMPLICIT_CONVERSIONS=0)
@@ -50,8 +64,6 @@ find_package(Drogon CONFIG REQUIRED)
 if (NOT TARGET SQLite3 AND NOT TARGET SQLite3::SQLite3 AND NOT TARGET SQLite3_lib)
     find_package(SQLite3 REQUIRED)
 endif ()
-find_package(spdlog REQUIRED)
-find_package(fmt CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(PNG REQUIRED)
 find_package(JPEG REQUIRED)
@@ -85,7 +97,6 @@ if (INSOULFORGE_ENABLE_PCH)
             <drogon/drogon.h>
             <nlohmann/json.hpp>
             <spdlog/spdlog.h>
-            <fmt/format.h>
     )
 endif ()
 
@@ -105,7 +116,6 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
         llama
         Drogon::Drogon
         spdlog::spdlog_header_only
-        fmt::fmt-header-only
         SQLite3_lib
         OpenSSL::Crypto
         PNG::PNG JPEG::JPEG
@@ -115,7 +125,6 @@ target_link_libraries(${PROJECT_NAME}_backend PRIVATE
         llama
         Drogon::Drogon
         spdlog::spdlog_header_only
-        fmt::fmt-header-only
         SQLite3_lib
         OpenSSL::Crypto
         PNG::PNG JPEG::JPEG

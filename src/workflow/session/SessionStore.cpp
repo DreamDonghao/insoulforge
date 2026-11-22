@@ -1,9 +1,8 @@
 /// @file SessionStore.cpp
 /// @brief 会话统计与启用状态的数据库实现
 
+#include <format>
 #include <stdexcept>
-
-#include <fmt/format.h>
 
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
@@ -259,7 +258,7 @@ namespace insoulforge::SessionStore {
         stmt.bind(1, name);
         stmt.bind(2, sessionId.toString());
         stmt.exec();
-        Logger::info(sessionId, "Session", fmt::format("名称已更新: {}", name));
+        Logger::info(sessionId, "Session", std::format("名称已更新: {}", name));
     }
 
     auto getSessionName(const SessionId &sessionId) -> std::string {

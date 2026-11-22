@@ -1,6 +1,8 @@
 /// @file HttpUtil.cpp
 /// @brief HTTP 请求工具 - 实现
 
+#include <format>
+
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
 #include <infrastructure/http/HttpTrace.hpp>
@@ -120,7 +122,7 @@ namespace insoulforge::HttpUtil {
             client = drogon::HttpClient::newHttpClient(baseUrl);
         } catch (const std::exception &e) {
             Logger::error(sessionId, tag,
-              fmt::format(
+              std::format(
                 "HTTP 创建客户端失败: {} ({} {}{}) body={}", e.what(), methodName(method), baseUrl, path, bodyLog));
             trace.status = 0;
             trace.responseBody = e.what();
@@ -149,7 +151,7 @@ namespace insoulforge::HttpUtil {
             resp = co_await client->sendRequestCoro(req, timeout);
         } catch (const std::exception &e) {
             Logger::error(sessionId, tag,
-              fmt::format("HTTP 请求异常: {} ({} {}{}) body={}", e.what(), methodName(method), baseUrl, path, bodyLog));
+              std::format("HTTP 请求异常: {} ({} {}{}) body={}", e.what(), methodName(method), baseUrl, path, bodyLog));
             finishTrace(0, e.what());
             co_return std::unexpected(std::string(e.what()));
         }
@@ -162,7 +164,7 @@ namespace insoulforge::HttpUtil {
         // HTTP 错误带上目标地址；DNS 和连接异常在前面的异常分支处理。
         if (resp->getStatusCode() >= drogon::k400BadRequest) {
             Logger::warn(sessionId, tag,
-              fmt::format("HTTP 响应异常: status={} ({} {}{})", static_cast<i32>(resp->getStatusCode()),
+              std::format("HTTP 响应异常: status={} ({} {}{})", static_cast<i32>(resp->getStatusCode()),
                 methodName(method), baseUrl, path));
         }
 

@@ -1,6 +1,8 @@
 /// @file ImageDescriptionService.cpp
 /// @brief 图片与动图的视觉描述服务实现
 
+#include <format>
+
 #include <gif_lib.h>
 #include <png.h>
 
@@ -168,7 +170,7 @@ namespace insoulforge::ImageDescriptionService {
             if (!gif || gif->SWidth <= 0 || gif->SHeight <= 0 || gif->SWidth > kMaxGifDimension ||
                 gif->SHeight > kMaxGifDimension || DGifSlurp(gif.get()) != GIF_OK || gif->ImageCount <= 0 ||
                 gif->ImageCount > kMaxGifDecodedFrames) {
-                Logger::warn(sessionId, "Media", fmt::format("GIF 解码失败或超过资源限制"));
+                Logger::warn(sessionId, "Media", std::format("GIF 解码失败或超过资源限制"));
                 return {};
             }
             const i32 width = gif->SWidth;
@@ -231,7 +233,7 @@ namespace insoulforge::ImageDescriptionService {
         auto requestVision(json messages, const SessionId sessionId) -> drogon::Task<std::optional<std::string>> {
             const auto &config = Config::instance();
             if (!LlmClient::isConfigured(config.image)) {
-                Logger::debug(sessionId, "Media", fmt::format("图片识别模型未配置，跳过识别"));
+                Logger::debug(sessionId, "Media", std::format("图片识别模型未配置，跳过识别"));
                 co_return std::nullopt;
             }
             LLMApiConfig api = config.image;
@@ -300,19 +302,25 @@ namespace insoulforge::ImageDescriptionService {
         json content = json::array({{{"type", "text"}, {"text", question}}});
         for (size_t index = 0; index < sourceUrls.size(); ++index) {
             auto media = co_await download(std::move(sourceUrls[index]), sessionId, kMaxDownloadBytes);
-            if (!media) co_return std::unexpected(fmt::format("图片 {} 下载失败或格式不受支持。", index + 1));
+            if (!media) {
+                co_return std::unexpected(std::format("图片 {} 下载失败或格式不受支持。", index + 1));
+            }
             std::vector<std::string> frames;
             if (media->isGif) {
                 frames = extractGifFrames(media->bytes, sessionId);
             } else if (auto image = staticImageDataUrl(media->bytes)) {
                 frames.push_back(std::move(*image));
             }
-            if (frames.empty()) co_return std::unexpected(fmt::format("图片 {} 解码失败或格式不受支持。", index + 1));
-            content.push_back({{"type", "text"}, {"text", fmt::format("图片 {}{}", index + 1,
-                media->isGif ? "（GIF，以下各帧按播放时间顺序排列，并非完整视频）" : "（静态原图）")}});
+            if (frames.empty()) {
+                co_return std::unexpected(std::format("图片 {} 解码失败或格式不受支持。", index + 1));
+            }
+            content.push_back({{"type", "text"},
+              {"text", std::format("图片 {}{}", index + 1,
+                         media->isGif ? "（GIF，以下各帧按播放时间顺序排列，并非完整视频）" : "（静态原图）")}});
             for (size_t frame = 0; frame < frames.size(); ++frame) {
                 if (media->isGif)
-                    content.push_back({{"type", "text"}, {"text", fmt::format("图片 {}，帧 {}/{}", index + 1, frame + 1, frames.size())}});
+                    content.push_back({{"type", "text"},
+                      {"text", std::format("图片 {}，帧 {}/{}", index + 1, frame + 1, frames.size())}});
                 content.push_back({{"type", "image_url"}, {"image_url", {{"url", std::move(frames[frame])}}}});
             }
         }
@@ -351,7 +359,7 @@ namespace insoulforge::ImageDescriptionService {
     auto describe(std::string sourceUrl, const SessionId sessionId)
       -> drogon::Task<std::optional<ImageDescriptionResult>> {
         if (const auto &config = Config::instance(); !LlmClient::isConfigured(config.image)) {
-            Logger::debug(sessionId, "Media", fmt::format("图片识别模型未配置，跳过识别"));
+            Logger::debug(sessionId, "Media", std::format("图片识别模型未配置，跳过识别"));
             co_return std::nullopt;
         }
         auto media = co_await download(std::move(sourceUrl), sessionId, kMaxDownloadBytes);

@@ -4,13 +4,13 @@
 #pragma once
 
 #include <concepts>
+#include <format>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
-#include <fmt/format.h>
 #include <sqlite3.h>
 
 #include <infrastructure/NumericTypes.hpp>
@@ -30,7 +30,7 @@ namespace insoulforge {
         Statement(sqlite3 *db, std::string_view sql) : m_db(db) {
             if (sqlite3_prepare_v2(db, sql.data(), static_cast<i32>(sql.size()), &m_stmt, nullptr) != SQLITE_OK) {
                 std::string err = sqlite3_errmsg(db);
-                Logger::error(std::nullopt, "Storage", fmt::format("SQL 准备失败: {} - {}", sql, err));
+                Logger::error(std::nullopt, "Storage", std::format("SQL 准备失败: {} - {}", sql, err));
                 throw DbError(err);
             }
         }
@@ -96,7 +96,7 @@ namespace insoulforge {
                 return true;
             if (rc == SQLITE_DONE)
                 return false;
-            Logger::error(std::nullopt, "Storage", fmt::format("SQL 执行失败: {}", sqlite3_errmsg(m_db)));
+            Logger::error(std::nullopt, "Storage", std::format("SQL 执行失败: {}", sqlite3_errmsg(m_db)));
             return false;
         }
 

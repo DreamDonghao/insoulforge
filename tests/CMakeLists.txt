@@ -4,7 +4,7 @@ function(add_backend_test target source name)
     target_compile_features(${target} PRIVATE cxx_std_23)
     target_include_directories(${target} PRIVATE ${PROJECT_SOURCE_DIR}/include)
     target_link_libraries(${target} PRIVATE
-            Drogon::Drogon spdlog::spdlog_header_only fmt::fmt-header-only
+            Drogon::Drogon spdlog::spdlog_header_only
             SQLite3_lib OpenSSL::Crypto PNG::PNG JPEG::JPEG ${GIFLIB_LIBRARY} ${LUA_LIBRARIES} llama)
     if(nlohmann_json_FOUND)
         target_link_libraries(${target} PRIVATE nlohmann_json::nlohmann_json)
@@ -51,7 +51,6 @@ add_executable(insoulforge_log_buffer_tests EXCLUDE_FROM_ALL
         ${PROJECT_SOURCE_DIR}/src/infrastructure/logging/LogBuffer.cpp)
 target_compile_features(insoulforge_log_buffer_tests PRIVATE cxx_std_23)
 target_include_directories(insoulforge_log_buffer_tests PRIVATE ${PROJECT_SOURCE_DIR}/include)
-target_link_libraries(insoulforge_log_buffer_tests PRIVATE fmt::fmt-header-only)
 add_test(NAME log_buffer COMMAND insoulforge_log_buffer_tests)
 
 add_executable(insoulforge_token_counter_tests EXCLUDE_FROM_ALL TokenCounterTests.cpp

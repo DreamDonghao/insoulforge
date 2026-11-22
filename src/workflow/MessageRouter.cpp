@@ -2,6 +2,7 @@
 /// @brief 基于完整消息快照的 Router 实现
 
 #include <algorithm>
+#include <format>
 #include <ranges>
 #include <utility>
 
@@ -109,14 +110,14 @@ namespace insoulforge::MessageRouter {
             }
             if (type == "face") {
                 const std::string label = getStr(segment, "label", getStr(segment, "id"));
-                return fmt::format("[表情:{}]", label);
+                return std::format("[表情:{}]", label);
             }
             if (type == "sticker") {
-                return fmt::format("[贴纸:{}]", getStr(segment, "name"));
+                return std::format("[贴纸:{}]", getStr(segment, "name"));
             }
             if (type == "image") {
                 if (getStr(segment, "recognition_status") == "succeeded") {
-                    return fmt::format("[图片:{}]", getStr(segment, "description"));
+                    return std::format("[图片:{}]", getStr(segment, "description"));
                 }
                 return "[图片]";
             }
@@ -126,18 +127,18 @@ namespace insoulforge::MessageRouter {
                     return "@全体";
                 }
                 const std::string name = getStr(target, "name");
-                return fmt::format("@{}", name.empty() ? getStr(target, "user_id") : name);
+                return std::format("@{}", name.empty() ? getStr(target, "user_id") : name);
             }
             if (type == "poke") {
                 const json &target = atOrNull(segment, "target");
                 const std::string name = getStr(target, "name");
-                return fmt::format("[戳一戳:{}]", name.empty() ? getStr(target, "user_id") : name);
+                return std::format("[戳一戳:{}]", name.empty() ? getStr(target, "user_id") : name);
             }
             if (type == "member_event") {
-                return fmt::format("[群事件:{}]", getStr(segment, "action"));
+                return std::format("[群事件:{}]", getStr(segment, "action"));
             }
             if (type == "unsupported") {
-                return fmt::format("[不支持:{}]", getStr(segment, "segment_type"));
+                return std::format("[不支持:{}]", getStr(segment, "segment_type"));
             }
             return "";
         }
@@ -155,7 +156,7 @@ namespace insoulforge::MessageRouter {
                 record["message_id"] = messageId;
             }
             if (MessageRecord::isAssistant(message)) {
-                record["sender"] = fmt::format("[bot]{}", Config::instance().botName);
+                record["sender"] = std::format("[bot]{}", Config::instance().botName);
             } else if (const std::string name = getStr(atOrNull(projected, "sender"), "name"); !name.empty()) {
                 record["sender"] = name;
             } else {
@@ -220,7 +221,7 @@ namespace insoulforge::MessageRouter {
             action["criteria"] = {
               {"skip", "值得回应的内容已全部被回复覆盖，或仅剩广告、刷屏、无实质内容的表情复读及不宜插入的群友互聊"},
               {"reply",
-                fmt::format("仍有未覆盖且值得{0}回应的问题、补充或反馈，或有感兴趣的分享、有梗可发挥的话题值得自然接续",
+                std::format("仍有未覆盖且值得{0}回应的问题、补充或反馈，或有感兴趣的分享、有梗可发挥的话题值得自然接续",
                   botName)},
               {"unclear", "无法确定已发送内容是否覆盖问题，或是否仍有值得回应的内容"},
             };
@@ -396,15 +397,15 @@ namespace insoulforge::MessageRouter {
                 const auto action =
                   choice ? classifyJevChoice(*choice, confidence, config.jevMinConfidence) : std::nullopt;
                 Logger::info(sessionId, "Jev",
-                  fmt::format("choice={} | confidence={} | threshold={:.2f} | model={} | fallback={}",
-                    choice.value_or("n/a"), confidence ? fmt::format("{:.4f}", *confidence) : "n/a",
+                  std::format("choice={} | confidence={} | threshold={:.2f} | model={} | fallback={}",
+                    choice.value_or("n/a"), confidence ? std::format("{:.4f}", *confidence) : "n/a",
                     config.jevMinConfidence, getStr(*jevResponse, "model", config.jev.model), action ? "no" : "yes"));
                 if (action) {
                     co_return applySessionType(makeJevDecision(*jevResponse, *action), sessionId);
                 }
             } else {
                 Logger::info(sessionId, "Jev",
-                  fmt::format("choice=n/a | confidence=n/a | threshold={:.2f} | model={} | fallback=yes",
+                  std::format("choice=n/a | confidence=n/a | threshold={:.2f} | model={} | fallback=yes",
                     config.jevMinConfidence, config.jev.model));
             }
         }

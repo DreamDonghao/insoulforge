@@ -1,6 +1,8 @@
 /// @file WebSocketManager.cpp
 /// @brief 管理后台消息推送连接的实现
 
+#include <format>
+
 #include <admin/events/WebSocketManager.hpp>
 #include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/SessionId.hpp>
@@ -15,7 +17,7 @@ namespace insoulforge {
     void WebSocketManager::addConnection(const drogon::WebSocketConnectionPtr &conn) {
         std::lock_guard lock(m_mutex);
         m_connections.insert(conn);
-        Logger::info(std::nullopt, "Admin", fmt::format("WebSocket连接已建立，当前连接数: {}", m_connections.size()));
+        Logger::info(std::nullopt, "Admin", std::format("WebSocket连接已建立，当前连接数: {}", m_connections.size()));
     }
 
     void WebSocketManager::removeConnection(const drogon::WebSocketConnectionPtr &conn) {
@@ -25,13 +27,13 @@ namespace insoulforge {
         for (auto &subscribers: m_subscriptions | std::views::values) {
             subscribers.erase(conn);
         }
-        Logger::info(std::nullopt, "Admin", fmt::format("WebSocket连接已断开，当前连接数: {}", m_connections.size()));
+        Logger::info(std::nullopt, "Admin", std::format("WebSocket连接已断开，当前连接数: {}", m_connections.size()));
     }
 
     void WebSocketManager::subscribeSession(const drogon::WebSocketConnectionPtr &conn, const SessionId &sessionId) {
         std::lock_guard lock(m_mutex);
         m_subscriptions[sessionId].insert(conn);
-        Logger::info(std::nullopt, "Admin", fmt::format("WebSocket订阅会话: {}", sessionId));
+        Logger::info(std::nullopt, "Admin", std::format("WebSocket订阅会话: {}", sessionId));
     }
 
     void WebSocketManager::unsubscribeSession(const drogon::WebSocketConnectionPtr &conn, const SessionId &sessionId) {

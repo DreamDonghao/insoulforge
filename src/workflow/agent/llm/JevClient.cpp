@@ -2,6 +2,7 @@
 /// @brief Jev（TypeSafe AI System One）客户端 - 实现
 
 #include <algorithm>
+#include <format>
 
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
@@ -42,7 +43,7 @@ namespace insoulforge::JevClient {
         if ((*resp)->getStatusCode() != drogon::k200OK) {
             const i32 status = static_cast<i32>((*resp)->getStatusCode());
             const std::string respBody = std::string((*resp)->getBody()).substr(0, kErrorBodyMaxChars);
-            Logger::error(sessionId, "Jev", fmt::format("请求失败: status={} body={}", status, respBody));
+            Logger::error(sessionId, "Jev", std::format("请求失败: status={} body={}", status, respBody));
             co_return std::nullopt;
         }
 

@@ -2,6 +2,7 @@
 /// @brief 群聊与私聊的统一会话标识，用于会话状态索引、消息归属和持久化。
 #pragma once
 
+#include <format>
 #include <functional>
 #include <string>
 #include <string_view>
@@ -87,9 +88,9 @@ struct std::hash<insoulforge::SessionId> {
 
 /// @brief 使用规范字符串格式化会话身份，支持字符串格式说明符。
 template<>
-struct fmt::formatter<insoulforge::SessionId> : fmt::formatter<std::string_view> {
+struct std::formatter<insoulforge::SessionId> : std::formatter<std::string_view> {
     /// @brief 将缓存的规范字符串写入格式化上下文。
     auto format(const insoulforge::SessionId &value, format_context &ctx) const {
-        return fmt::formatter<std::string_view>::format(value.toString(), ctx);
+        return std::formatter<std::string_view>::format(value.toString(), ctx);
     }
 };

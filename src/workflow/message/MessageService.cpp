@@ -1,9 +1,8 @@
 /// @file MessageService.cpp
 /// @brief 消息发送与发送结果上下文记录
 
+#include <format>
 #include <utility>
-
-#include <fmt/format.h>
 
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
@@ -49,7 +48,7 @@ namespace insoulforge::MessageService {
         }
         EventWorkflow::instance().appendDeliveredAssistantMessage(sessionId, std::move(record));
         Logger::info(sessionId, "OneBot",
-          fmt::format("成功发送{}: {} (message_id={})", sessionId.isPrivate() ? "私聊消息" : "群消息", storedMessage,
+          std::format("成功发送{}: {} (message_id={})", sessionId.isPrivate() ? "私聊消息" : "群消息", storedMessage,
             *messageId));
         co_return *messageId;
     }

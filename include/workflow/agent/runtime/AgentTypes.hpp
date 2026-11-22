@@ -11,8 +11,6 @@
 #include <string>
 #include <string_view>
 
-#include <fmt/format.h>
-
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
 
@@ -40,15 +38,6 @@ namespace insoulforge {
     };
 
 } // namespace insoulforge
-
-// fmt::formatter 特化
-template<>
-struct fmt::formatter<insoulforge::RouterDecision::Action> : formatter<string_view> {
-    template<typename FormatContext>
-    auto format(const insoulforge::RouterDecision::Action a, FormatContext &ctx) const {
-        return formatter<string_view>::format(insoulforge::RouterDecision::actionToString(a), ctx);
-    }
-};
 
 // std::formatter 特化
 template<>

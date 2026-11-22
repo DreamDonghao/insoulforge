@@ -2,6 +2,7 @@
 /// @brief OneBot API 客户端实现
 
 #include <charconv>
+#include <format>
 
 #include <regex>
 
@@ -60,22 +61,22 @@ namespace insoulforge::OneBotClient {
                 }
                 if ((*response)->getStatusCode() != drogon::k200OK || !tryParseJson((*response)->body(), body)) {
                     Logger::error(sessionId, "OneBot",
-                      fmt::format("{} API {} 请求失败: http_status={}", tag, api,
+                      std::format("{} API {} 请求失败: http_status={}", tag, api,
                         static_cast<i32>((*response)->getStatusCode())));
-                    co_return std::unexpected(fmt::format(
+                    co_return std::unexpected(std::format(
                       "OneBot HTTP 响应无效: http_status={}", static_cast<i32>((*response)->getStatusCode())));
                 }
             }
             if (!body.is_object()) {
-                Logger::error(sessionId, "OneBot", fmt::format("{} API {} 响应不是 JSON 对象", tag, api));
+                Logger::error(sessionId, "OneBot", std::format("{} API {} 响应不是 JSON 对象", tag, api));
                 co_return std::unexpected("OneBot 响应不是 JSON 对象");
             }
             if (getStr(body, "status", "failed") != "ok") {
                 Logger::error(sessionId, "OneBot",
-                  fmt::format("{} API {} 失败: status={}, retcode={}", tag, api, getStr(body, "status"),
+                  std::format("{} API {} 失败: status={}, retcode={}", tag, api, getStr(body, "status"),
                     getInt(body, "retcode", -1)));
                 co_return std::unexpected(
-                  fmt::format("status={}, retcode={}, message={}, wording={}", getStr(body, "status"),
+                  std::format("status={}, retcode={}, message={}, wording={}", getStr(body, "status"),
                     getInt(body, "retcode", -1), getStr(body, "message"), getStr(body, "wording")));
             }
             co_return body;
@@ -93,7 +94,7 @@ namespace insoulforge::OneBotClient {
                 const auto selfId = jsonToUInt64(atOrNull(connection, "selfQQNumber"));
                 if (selfId == 0)
                     co_return std::unexpected("未配置机器人账号，无法将 self 提及转换为 OneBot 用户 ID");
-                message = std::regex_replace(message, selfMention, fmt::format("[CQ:at,qq={}", selfId));
+                message = std::regex_replace(message, selfMention, std::format("[CQ:at,qq={}", selfId));
             }
             json params;
             params[targetKey] = targetId;
@@ -107,7 +108,7 @@ namespace insoulforge::OneBotClient {
               "[Msg]", std::move(api), std::move(params), sessionId, isBase64Image ? 150.0 : 30.0, connection);
             if (!resp) {
                 Logger::error(sessionId, "OneBot",
-                  fmt::format("发送消息错误: msgLen={}, preview={}", message.size(),
+                  std::format("发送消息错误: msgLen={}, preview={}", message.size(),
                     isBase64Image ? "[图片数据已省略]" : message.substr(0, 200)));
                 co_return std::unexpected(resp.error());
             }
@@ -169,7 +170,7 @@ namespace insoulforge::OneBotClient {
         if (const auto resp = co_await callApi("[Ban]", "set_group_ban", params, groupId); !resp) {
             co_return false;
         }
-        Logger::info(groupId, "OneBot", fmt::format("禁言成功: 用户{} 时长{}秒", userId, duration));
+        Logger::info(groupId, "OneBot", std::format("禁言成功: 用户{} 时长{}秒", userId, duration));
         co_return true;
     }
 
@@ -218,7 +219,7 @@ namespace insoulforge::OneBotClient {
         if (const auto resp = co_await callApi("[Poke]", "send_poke", params, groupId); !resp) {
             co_return false;
         }
-        Logger::info(groupId, "OneBot", fmt::format("拍一拍成功: 用户{}", userId));
+        Logger::info(groupId, "OneBot", std::format("拍一拍成功: 用户{}", userId));
         co_return true;
     }
 
@@ -229,7 +230,7 @@ namespace insoulforge::OneBotClient {
         if (const auto resp = co_await callApi("[Recall]", "delete_msg", params, sessionId); !resp) {
             co_return false;
         }
-        Logger::info(sessionId, "OneBot", fmt::format("撤回消息成功: message_id={}", messageId));
+        Logger::info(sessionId, "OneBot", std::format("撤回消息成功: message_id={}", messageId));
         co_return true;
     }
 

@@ -1,6 +1,8 @@
 /// @file AdminControllerSettingsAndTools.cpp
 /// @brief 管理后台 REST API 控制器 - 模型、执行流程、提示词和自定义工具设置
 
+#include <format>
+
 #include <admin/http/AdminController.hpp>
 #include <admin/http/AdminResponse.hpp>
 #include <infrastructure/NumericTypes.hpp>
@@ -146,7 +148,7 @@ auto AdminController::savePrompt(HttpRequestPtr req, std::function<void(const Ht
     }
 
     PromptService::setPrompt(key, content, description);
-    Logger::warn(std::nullopt, "Admin", fmt::format("管理后台更新提示词: key={}, 长度={}", key, content.size()));
+    Logger::warn(std::nullopt, "Admin", std::format("管理后台更新提示词: key={}, 长度={}", key, content.size()));
 
     callback(jsonResponse(AdminResponse::okJson("提示词已保存")));
     co_return;
@@ -530,7 +532,7 @@ auto AdminController::importCustomTool(HttpRequestPtr req, std::function<void(co
         co_return;
     }
 
-    Logger::info(std::nullopt, "Admin", fmt::format("导入自定义工具: {} (ID: {})", tool.name, newId));
+    Logger::info(std::nullopt, "Admin", std::format("导入自定义工具: {} (ID: {})", tool.name, newId));
 
     json resp = AdminResponse::okJson("工具已导入");
     resp["id"] = newId;
