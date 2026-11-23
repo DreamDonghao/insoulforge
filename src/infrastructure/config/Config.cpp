@@ -179,6 +179,8 @@ namespace insoulforge {
         execution.maxToolRounds.store(
           getInt(value.at("execution"), "maxToolRounds", ExecutionSettings::kDefaultMaxToolRounds),
           std::memory_order_relaxed);
+        execution.replyDelaySeconds.store(
+          getDouble(value.at("execution"), "replyDelaySeconds", 0.0), std::memory_order_relaxed);
 
         // 加载记忆配置
         if (const auto &memCfg = value.at("memory"); !memCfg.is_null()) {
@@ -271,6 +273,8 @@ namespace insoulforge {
         applyMemoryValues(value);
         execution.maxToolRounds.store(
           value.execution.maxToolRounds.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        execution.replyDelaySeconds.store(
+          value.execution.replyDelaySeconds.load(std::memory_order_relaxed), std::memory_order_relaxed);
     }
 
     void Config::applyLLMValues(const std::string_view name, Config &value) {
@@ -560,6 +564,8 @@ namespace insoulforge {
               next.defaultPrivateEnabled.load(std::memory_order_relaxed), std::memory_order_relaxed);
             execution.maxToolRounds.store(
               next.execution.maxToolRounds.load(std::memory_order_relaxed), std::memory_order_relaxed);
+            execution.replyDelaySeconds.store(
+              next.execution.replyDelaySeconds.load(std::memory_order_relaxed), std::memory_order_relaxed);
         });
     }
 } // namespace insoulforge

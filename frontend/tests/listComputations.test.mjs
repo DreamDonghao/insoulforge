@@ -130,7 +130,7 @@ test('memory settings save the affinity switch as a boolean with the other param
   } finally { view.dispose() }
 })
 
-test('execution settings default missing private enablement to false and save private enablement with tool limits', async () => {
+test('execution settings default missing fields and save reply delay with private enablement and tool limits', async () => {
   let saved
   const loaded = {maxToolRounds: 8, mcpToolPageSize: 10, mcpMaxToolsPerEnable: 4, mcpMaxToolsPerReply: 12}
   const view = setup('agent/ExecutionConfig', async (url, options) => {
@@ -142,11 +142,13 @@ test('execution settings default missing private enablement to false and save pr
   try {
     await view.state.loadConfig()
     assert.equal(view.state.config.defaultPrivateEnabled, false)
+    assert.equal(view.state.config.replyDelaySeconds, 0)
     await view.state.saveConfig()
-    assert.deepEqual(saved, {...loaded, defaultPrivateEnabled: false})
+    assert.deepEqual(saved, {...loaded, defaultPrivateEnabled: false, replyDelaySeconds: 0})
     view.state.config.defaultPrivateEnabled = true
+    view.state.config.replyDelaySeconds = 0.5
     await view.state.saveConfig()
-    assert.deepEqual(saved, {...loaded, defaultPrivateEnabled: true})
+    assert.deepEqual(saved, {...loaded, defaultPrivateEnabled: true, replyDelaySeconds: 0.5})
     assert.equal(view.state.saving, false)
   } finally { view.dispose() }
 })

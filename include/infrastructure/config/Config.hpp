@@ -40,13 +40,15 @@ namespace insoulforge {
         bool promptCacheKeyEnabled = false; ///< 仅回复生成模型使用；按会话发送 prompt_cache_key。
     };
 
-    /// @brief 回复执行流程的参数；后台保存与 Executor 读取可并发进行。
+    /// @brief 回复执行流程的参数；后台保存与工作流读取可并发进行。
     struct ExecutionSettings {
         static constexpr i32 kDefaultMaxToolRounds = 8;
         static constexpr i32 kMinToolRounds = 1;
         static constexpr i32 kMaxToolRounds = 100;
+        static constexpr f64 kMaxReplyDelaySeconds = 3600.0;
 
         std::atomic<i32> maxToolRounds{kDefaultMaxToolRounds};
+        std::atomic<f64> replyDelaySeconds{0.0};
     };
 
     /// @brief 进程内生效的全局配置

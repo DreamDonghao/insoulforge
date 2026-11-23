@@ -205,11 +205,18 @@ test('tool JSON errors stay at the schema field and corrected drafts submit once
   assert.equal(posts, 1)
 })
 
-test('execution dependent limits identify the exact invalid field on submit', async () => {
-  globalThis.fetch = async () => response({maxToolRounds: 8, mcpToolPageSize: 10, mcpMaxToolsPerEnable: 4, mcpMaxToolsPerReply: 12})
+test('execution settings identify the exact invalid field on submit', async () => {
+  globalThis.fetch = async () => response({maxToolRounds: 8, replyDelaySeconds: 0.5,
+    mcpToolPageSize: 10, mcpMaxToolsPerEnable: 4, mcpMaxToolsPerReply: 12})
   const state = mount('agent/ExecutionConfig')
   await flush()
   const focused = observeFocus()
+  assert.equal(state.config.replyDelaySeconds, 0.5)
+  state.config.replyDelaySeconds = -0.5
+  await state.saveConfig()
+  assert.ok(state.errors['reply-delay'])
+  assert.equal(focused.at(-1), 'reply-delay')
+  state.config.replyDelaySeconds = 0.5
   state.config.mcpMaxToolsPerEnable = 15
   await state.saveConfig()
   assert.ok(state.errors.mcpMaxToolsPerEnable)

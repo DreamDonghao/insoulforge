@@ -3573,6 +3573,9 @@ namespace {
           "old files receive disabled MCP configuration", kTestName);
         check(insoulforge::Config::instance().execution.maxToolRounds.load() == 8, "loads the default runtime limit",
           kTestName);
+        check(insoulforge::Config::instance().getExecutionConfig()["replyDelaySeconds"] == 0 &&
+                insoulforge::Config::instance().execution.replyDelaySeconds.load() == 0.0,
+          "old files default to no reply delay", kTestName);
         check(insoulforge::Config::instance().getExecutionConfig()["mcpToolPageSize"] == 10 &&
                 insoulforge::Config::instance().getExecutionConfig()["mcpMaxToolsPerEnable"] == 4 &&
                 insoulforge::Config::instance().getExecutionConfig()["mcpMaxToolsPerReply"] == 12,
@@ -3641,20 +3644,25 @@ namespace {
         check(insoulforge::Config::instance().getQQConfig()["botName"] == "existing-bot",
           "saving leaves other configuration sections unchanged", kTestName);
 
-        save(R"({"maxToolRounds":100,"mcpToolPageSize":50,"mcpMaxToolsPerEnable":20,"mcpMaxToolsPerReply":64})");
+        save(
+          R"({"maxToolRounds":100,"replyDelaySeconds":0.5,"mcpToolPageSize":50,"mcpMaxToolsPerEnable":20,"mcpMaxToolsPerReply":64})");
         check(response->getStatusCode() == drogon::k200OK &&
-                insoulforge::Config::instance().getExecutionConfig()["mcpMaxToolsPerReply"] == 64,
-          "MCP boundaries save", kTestName);
+                insoulforge::Config::instance().getExecutionConfig()["mcpMaxToolsPerReply"] == 64 &&
+                insoulforge::Config::instance().execution.replyDelaySeconds.load() == 0.5,
+          "MCP boundaries save and fractional reply delay applies immediately", kTestName);
         save(R"({"maxToolRounds":100,"mcpToolPageSize":10,"mcpMaxToolsPerEnable":4,"mcpMaxToolsPerReply":12})");
         const auto stored = insoulforge::Config::instance().getExecutionConfig();
-        const auto invalidMcpValues = insoulforge::json{{"mcpToolPageSize", {0, 51, 1.5, "10"}},
-          {"mcpMaxToolsPerEnable", {0, 21, 13}}, {"mcpMaxToolsPerReply", {0, 65, 3}}};
-        for (const auto &[field, badValues]: invalidMcpValues.items()) {
+        check(stored["replyDelaySeconds"] == 0.5, "omitting reply delay preserves the stored value", kTestName);
+        const auto invalidExecutionValues =
+          insoulforge::json{{"mcpToolPageSize", {0, 51, 1.5, "10"}}, {"mcpMaxToolsPerEnable", {0, 21, 13}},
+            {"mcpMaxToolsPerReply", {0, 65, 3}}, {"replyDelaySeconds", {-0.5, 3601, "1", true, nullptr}}};
+        for (const auto &[field, badValues]: invalidExecutionValues.items()) {
             for (const auto &value: badValues) {
                 save(insoulforge::dumpJson({{"maxToolRounds", 100}, {field, value}}));
                 check(response->getStatusCode() == drogon::k400BadRequest &&
-                        insoulforge::Config::instance().getExecutionConfig() == stored,
-                  "invalid MCP limits preserve configuration", kTestName);
+                        insoulforge::Config::instance().getExecutionConfig() == stored &&
+                        insoulforge::Config::instance().execution.replyDelaySeconds.load() == 0.5,
+                  "invalid execution values preserve configuration", kTestName);
             }
         }
         const auto invalidValues =
@@ -3676,11 +3684,12 @@ namespace {
         // Blocking the temporary path makes the write fail even when tests run with elevated permissions.
         const auto temporaryPath = std::filesystem::path(path.string() + ".tmp");
         std::filesystem::create_directory(temporaryPath);
-        save(R"({"maxToolRounds":16})");
+        save(R"({"maxToolRounds":16,"replyDelaySeconds":2})");
         check(
           response->getStatusCode() == drogon::k500InternalServerError, "file write errors are reported", kTestName);
         check(insoulforge::Config::instance().getExecutionConfig() == stored &&
-                insoulforge::Config::instance().execution.maxToolRounds.load() == 100,
+                insoulforge::Config::instance().execution.maxToolRounds.load() == 100 &&
+                insoulforge::Config::instance().execution.replyDelaySeconds.load() == 0.5,
           "write failure leaves stored and runtime values unchanged", kTestName);
         const auto oldQQ = insoulforge::Config::instance().getQQConfig();
         const auto oldMemory = insoulforge::Config::instance().getMemoryConfig();
@@ -3727,7 +3736,8 @@ namespace {
         check(!std::filesystem::exists(failedPath), "failure does not create the requested config file", kTestName);
 
         check(insoulforge::Config::instance().initialize(path.string()).has_value(), "reinitializes config", kTestName);
-        check(insoulforge::Config::instance().execution.maxToolRounds.load() == 100,
+        check(insoulforge::Config::instance().execution.maxToolRounds.load() == 100 &&
+                insoulforge::Config::instance().execution.replyDelaySeconds.load() == 0.5,
           "saved values survive reinitialization", kTestName);
 
         for (const auto &value: invalidValues) {

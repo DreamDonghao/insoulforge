@@ -82,8 +82,8 @@ namespace insoulforge::ConfigStore {
                   {"personInteractionEntryMaxChars", 60}, {"personInteractionMaxChars", 250}, {"jevWindowSize", 10},
                   {"routerWindowTriggerCount", 20}, {"routerWindowKeepCount", 10}, {"longTermRecallThreshold", 0.65},
                   {"longTermInjectThreshold", 0.45}}},
-              {"execution", {{"maxToolRounds", ExecutionSettings::kDefaultMaxToolRounds}, {"mcpToolPageSize", 10},
-                              {"mcpMaxToolsPerEnable", 4}, {"mcpMaxToolsPerReply", 12}}},
+              {"execution", {{"maxToolRounds", ExecutionSettings::kDefaultMaxToolRounds}, {"replyDelaySeconds", 0.0},
+                              {"mcpToolPageSize", 10}, {"mcpMaxToolsPerEnable", 4}, {"mcpMaxToolsPerReply", 12}}},
               {"activities", {{"token", ""}, {"servers", json::array()}}}, {"builtinTools", json::object()},
               {"mcp", {{"servers", json::array()}}}};
         }
@@ -97,6 +97,14 @@ namespace insoulforge::ConfigStore {
             return value.is_number_integer() && value >= 1 && value <= maximum;
         }
 
+        auto validReplyDelay(const json &value) -> bool {
+            if (!value.is_number()) {
+                return false;
+            }
+            const auto seconds = value.get<f64>();
+            return seconds >= 0.0 && seconds <= ExecutionSettings::kMaxReplyDelaySeconds;
+        }
+
         auto validMcpLimits(const json &value) -> bool {
             return validInteger(atOrNull(value, "mcpToolPageSize"), 50) &&
                    validInteger(atOrNull(value, "mcpMaxToolsPerEnable"), 20) &&
@@ -104,11 +112,15 @@ namespace insoulforge::ConfigStore {
                    value["mcpMaxToolsPerEnable"] <= value["mcpMaxToolsPerReply"];
         }
 
-        /// @brief 启动时修复整数类型以外或越界的执行参数，不截断小数。
+        /// @brief 启动时将类型不符或超出范围的执行参数恢复为默认值。
         auto normalizeExecutionConfig(json &config) -> bool {
             auto &execution = config["execution"];
             bool changed = execution.erase("routeWhileReplying") != 0;
             const auto defaults = defaultConfig()["execution"];
+            if (!validReplyDelay(execution["replyDelaySeconds"])) {
+                execution["replyDelaySeconds"] = defaults["replyDelaySeconds"];
+                changed = true;
+            }
             for (const auto &[key, maximum]: std::array<std::pair<const char *, i32>, 3>{
                    {{"mcpToolPageSize", 50}, {"mcpMaxToolsPerEnable", 20}, {"mcpMaxToolsPerReply", 64}}}) {
                 if (!validInteger(execution[key], maximum)) {
@@ -442,6 +454,10 @@ namespace insoulforge::ConfigStore {
             executionConfig.erase("defaultPrivateEnabled");
         }
         nextConfig["execution"].update(executionConfig);
+        if (!validReplyDelay(nextConfig["execution"]["replyDelaySeconds"])) {
+            return std::unexpected(ConfigError{
+              .type = ConfigErrorType::InvalidArgument, .message = "回复前等待时间必须是 0～3600 秒之间的数值"});
+        }
         if (!validMcpLimits(nextConfig["execution"])) {
             return std::unexpected(ConfigError{.type = ConfigErrorType::InvalidArgument,
               .message = "MCP 每页数量须为 1～50，单次启用数量须为 1～20，总启用数量须为 1～64，且单次不能超过总数"});

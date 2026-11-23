@@ -8,7 +8,10 @@ import {numberError} from '../../utils/validation'
 import type {ApiResponse, ExecutionConfig} from '../../vite-env.d'
 
 const showToast = inject<(message: string, isError?: boolean) => void>('showToast')
-const config = reactive<ExecutionConfig>({maxToolRounds: 8, mcpToolPageSize: 10, mcpMaxToolsPerEnable: 4, mcpMaxToolsPerReply: 12})
+const maxReplyDelaySeconds = 3600
+const config = reactive<ExecutionConfig>({
+  maxToolRounds: 8, replyDelaySeconds: 0, mcpToolPageSize: 10, mcpMaxToolsPerEnable: 4, mcpMaxToolsPerReply: 12
+})
 const mcpFields = [
   {key: 'mcpToolPageSize', label: '查询每页工具数量', maximum: 50},
   {key: 'mcpMaxToolsPerEnable', label: '单次启用工具上限', maximum: 20},
@@ -40,6 +43,7 @@ const loadConfig = async (): Promise<void> => {
       throw new Error('执行配置数据无效')
     }
     config.maxToolRounds = data.maxToolRounds
+    config.replyDelaySeconds = data.replyDelaySeconds ?? 0
     config.defaultPrivateEnabled = data.defaultPrivateEnabled ?? false
     for (const field of mcpFields) {
       if (!Number.isInteger(data[field.key]) || data[field.key] < 1 || data[field.key] > field.maximum) throw new Error('MCP 数量配置无效')
@@ -55,7 +59,10 @@ const loadConfig = async (): Promise<void> => {
 }
 
 const {errors, fieldAttrs, validateForm} = useFormValidation(() => {
-  const result: Record<string, string> = {'max-tool-rounds': numberError(config.maxToolRounds, 1, 100)}
+  const result: Record<string, string> = {
+    'max-tool-rounds': numberError(config.maxToolRounds, 1, 100),
+    'reply-delay': numberError(config.replyDelaySeconds, 0, maxReplyDelaySeconds, false)
+  }
   for (const field of mcpFields) result[field.key] = numberError(config[field.key], 1, field.maximum)
   if (config.mcpMaxToolsPerEnable > config.mcpMaxToolsPerReply) result.mcpMaxToolsPerEnable = '单次启用上限不能大于本次回复上限'
   return result
@@ -98,6 +105,16 @@ onMounted(loadConfig)
     </div>
     <form v-else class="execution-form" :class="{'hints-dismissed': hintsDismissed}" novalidate
           @keydown.esc="hintsDismissed = true; expandedHelp = ''" @submit.prevent="saveConfig">
+      <section class="execution-section">
+        <h2 class="card-title section-heading">回复时机</h2>
+        <div class="form-group rounds-field" @focusin="hintsDismissed = false">
+          <label class="form-label" for="reply-delay">回复前等待时间（秒）</label>
+          <input v-bind="fieldAttrs('reply-delay', 'reply-delay-range')" v-model.number="config.replyDelaySeconds"
+                 :disabled="saving" class="form-input" type="number" min="0" :max="maxReplyDelaySeconds" step="any" required>
+          <p id="reply-delay-range" class="form-hint" role="tooltip">0～{{ maxReplyDelaySeconds }} 秒，支持小数。0 秒立即开始生成回复。</p>
+          <FieldError field="reply-delay" :message="errors['reply-delay']"/>
+        </div>
+      </section>
       <section class="execution-section">
         <h2 class="card-title section-heading">工具调用</h2>
         <div class="form-group rounds-field" @focusin="hintsDismissed = false">

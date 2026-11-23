@@ -324,7 +324,11 @@ namespace insoulforge {
                         routerDecision.maxLength ? std::to_string(*routerDecision.maxLength) : "未指定"));
 
                     if (routerDecision.shouldReply) {
-                        co_await drogon::sleepCoro(drogon::app().getLoop(), 1.0);
+                        const auto delay =
+                          m_dependencies->config.execution.replyDelaySeconds.load(std::memory_order_relaxed);
+                        if (delay > 0.0) {
+                            co_await drogon::sleepCoro(drogon::app().getLoop(), delay);
+                        }
 
                         auto inputRecords = sessionState.takeExecutorRequest();
                         const auto records = ChatRecordManager{sessionId, std::move(inputRecords)};
