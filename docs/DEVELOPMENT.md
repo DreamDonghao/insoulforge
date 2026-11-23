@@ -250,10 +250,10 @@ MessageService → OneBot API
   Router skip 后只有判断期间又登记新需求才重判；Executor 取得快照时消费此前需求。
   用受锁保护的待处理批次表示是否有快照后新增事件，不另维护消息 ID 或版本计数；所有入站消息（包括 silent）统一唤醒消费者，Router 在仅有 silent 或无可判断的未处理消息时直接跳过；机器人输出不唤醒消费者。
   Executor 失败不自动重放输入或工具动作；后续新事件仍可唤醒消费者。
-- 投影先提取窗口末尾连续成功发送消息为 `sent_messages`，再将未处理入站消息放入 `new_messages`，
+- 投影将窗口最后一段机器人记录中确认送达的消息放入 `sent_messages`，并将未处理入站消息放入 `new_messages`，
   其他记录进入历史字段；Router 使用 `chat_records`，Executor 保留 `earlier_messages`／`recent_messages`。
   每条只投影一次，保留时间及引用关系；分组之间可能交错，数组顺序不表示完整会话顺序。
-  失败发送、纯工具执行记录不属于发送段；更早的助手消息属于历史。静默统计使用分组前窗口。
+  失败发送、纯工具执行记录和更早的助手消息进入历史字段；内部记录不会截断发送段。静默统计使用分组前窗口。
   Executor 最近 12 条及文本截断规则按原快照位置确定，新增消息也参与人物档案加载和 UID 缩写。
   保留 contextWindowLimit，窗口外记录不标记，也不因仍未处理而反复调度；旧开关 routeWhileReplying 已移除。
 - `MessageList` 是 Router、Executor 和工具的唯一运行时消息源。它保存完整消息，但快照始终最多暴露
@@ -325,7 +325,7 @@ MessageService → OneBot API
   发送失败同样保存尝试发送的正文和工具历史，额外添加字符串字段 `send_error`，保留 OneBot 错误码及说明；
   不生成平台消息 ID，成功记录不添加该字段。模型投影保留错误字段，避免把失败正文当作已送达内容。
   网络超时仅表示结果未知，不能据此推断被禁言；记录失败本身不触发新一轮回复或自动重发。
-  MessageService 使用 `std::expected<u64, std::string>` 返回发送结果，工具直接把具体错误反馈给模型；
+  MessageService 使用 `std::expected<i64, std::string>` 返回发送结果，保留 OneBot 消息 ID 的正负号。工具直接把具体错误反馈给模型；
   工作流不再重复追加发送失败记录。助手消息构造函数接受可选消息 ID，缺失时直接省略该字段。
   不累计 `send_message_and_finish`、`send_message_and_finish` 的调用参数，避免重复保存正文和引用目标；`finish_turn` 与其他工具继续记录。
   `finish_turn` 及有工具历史的流程失败通过 `appendAssistantExecutionRecord` 直接写入 MessageList，不进入入站队列。

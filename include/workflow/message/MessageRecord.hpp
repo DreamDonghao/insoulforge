@@ -37,10 +37,10 @@ namespace insoulforge::MessageRecord {
     /// @return 不含重复 text 字段的富内容记录
     /// @details 收藏表情仅记录 `sticker.name`；普通 CQ 图片只保留图片动作，不保存外部 URL。
     [[nodiscard]] auto createAssistantRecord(
-      std::string senderName, std::optional<u64> messageId, const std::string &content) -> json;
+      std::string senderName, std::optional<i64> messageId, const std::string &content) -> json;
 
     /// @brief 创建生成图片记录，保存图片 ID 和描述，不保存传输用 URL/base64；失败记录不带消息 ID。
-    [[nodiscard]] auto createAssistantGeneratedImageRecord(std::string senderName, std::optional<u64> messageId,
+    [[nodiscard]] auto createAssistantGeneratedImageRecord(std::string senderName, std::optional<i64> messageId,
       const std::string &description, const std::string &imageId = {}) -> json;
 
     /// @brief 构造内部执行记录，不生成 QQ 消息 ID，也不表示向用户发送了消息。
@@ -76,7 +76,10 @@ namespace insoulforge::MessageRecord {
     /// @brief 判断记录是否由系统账号发送
     [[nodiscard]] auto isSystem(const json &record) -> bool;
 
-    /// @brief 取得末尾连续成功发送记录的起始位置；失败及纯执行记录不属于发送段。
+    /// @brief 判断机器人记录是否带有已确认发送的消息 ID。
+    [[nodiscard]] auto isConfirmedSend(const json &record) -> bool;
+
+    /// @brief 取得最后一段机器人记录中首条确认发送的索引，无确认发送时返回记录数。
     [[nodiscard]] auto sentMessagesStart(const json &records) -> size_t;
 
     /// @brief 判断入站记录是否尚未交给 Executor；缺少标记的旧记录视为已处理。

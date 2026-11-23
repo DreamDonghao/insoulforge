@@ -17,7 +17,7 @@
 
 namespace insoulforge::MessageService {
     auto sendToSession(const SessionId sessionId, std::string message, std::optional<std::string> imageDescription,
-      json toolHistory, std::string imageId, json connection) -> drogon::Task<std::expected<u64, std::string>> {
+      json toolHistory, std::string imageId, json connection) -> drogon::Task<std::expected<i64, std::string>> {
         // 群聊与私聊使用相同的格式转换及发送结果记录，只在协议边界选择接口。
         const std::string processedMessage = message.starts_with("[CQ:image,file=base64://")
                                                ? std::move(message)
@@ -26,7 +26,7 @@ namespace insoulforge::MessageService {
                                                   UserId{sessionId.targetId()}, processedMessage, sessionId, connection)
                                               : OneBotClient::sendGroupMsg(sessionId, processedMessage, connection);
         const auto messageId = co_await std::move(sendTask);
-        const auto recordMessageId = messageId ? std::optional<u64>{*messageId} : std::nullopt;
+        const auto recordMessageId = messageId ? std::optional<i64>{*messageId} : std::nullopt;
 
         const auto storedMessage =
           processedMessage.starts_with("[CQ:image,file=base64://") ? std::string("[生成图片]") : processedMessage;

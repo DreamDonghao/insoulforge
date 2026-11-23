@@ -515,12 +515,16 @@ namespace {
         check(MessageRecord::isNewForExecutor(records[0]) && !MessageRecord::isNewForExecutor(records[1]),
           "new input excludes assistants regardless of their processed flag", kTestName);
         records.push_back(MessageRecord::createAssistantExecutionRecord("bot", json::array(), "no_reply"));
-        check(MessageRecord::sentMessagesStart(records) == records.size(),
-          "execution status interrupts the sent suffix", kTestName);
+        check(MessageRecord::sentMessagesStart(records) == 1 && !MessageRecord::isConfirmedSend(records.back()),
+          "execution status preserves the sent suffix without joining it", kTestName);
         records.back() = MessageRecord::createAssistantRecord("bot", std::nullopt, "failed");
         records.back()["send_error"] = "failed";
-        check(MessageRecord::sentMessagesStart(records) == records.size(), "failed send is not a delivered suffix",
-          kTestName);
+        check(MessageRecord::sentMessagesStart(records) == 1 && !MessageRecord::isConfirmedSend(records.back()),
+          "unconfirmed send preserves the sent suffix without joining it", kTestName);
+        records.push_back(records[0]);
+        records.push_back(MessageRecord::createAssistantExecutionRecord("bot", json::array(), "no_reply"));
+        check(MessageRecord::sentMessagesStart(records) == records.size(),
+          "an intervening incoming message separates earlier deliveries from the suffix", kTestName);
         const auto group = SessionId::group("hard-rules");
         SessionStore::setAutoReply(group, false);
         auto mention = json{{"message_id", "mention"}, {"executor_processed", false}, {"sender", {{"user_id", "11"}}},

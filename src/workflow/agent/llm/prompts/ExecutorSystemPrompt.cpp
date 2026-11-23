@@ -108,7 +108,7 @@ execution_status=finish_turn 表示当时选择不回复；failed/send_failed �
   - image 段的 image_index 从 0 开始；图片来源不会出现在上下文。用户要求保存图片为表情时，save_sticker 传该消息的 message_id、image_index 和名称
   - 需要引用回复某条消息时，把该记录的 message_id 传给发送工具的 quote_message_id
   - earlier_messages 和 recent_messages 是历史背景；new_messages 是尚未纳入前一轮执行的入站消息。
-  - sent_messages 是聊天记录末尾连续成功发送的消息，已经送达；结合其内容避免重复回复。
+  - sent_messages 是最后一段机器人记录中确认送达的消息；结合其内容避免重复回复。
   - 分组间时间可能交错，不按字段顺序推断先后。根据全部上下文决定回复哪些内容，不绑定最新一条消息。
   - response_requirements 仅在群聊中提供 Router 回复策略；私聊不提供该字段。max_length 为可选的本轮回复字数上限，提供时尽量不超过；未提供时根据问题和人设决定回复长度。
   - current_session 标识当前正在回复的会话；群聊包含 group_id 和可选 group_name，私聊包含 type=private 和 user_id。

@@ -18,6 +18,7 @@
 #include <workflow/agent/llm/JevClient.hpp>
 #include <workflow/agent/llm/LlmClient.hpp>
 #include <workflow/agent/tools/image/ImageGenerationService.hpp>
+#include <workflow/message/MessageRecord.hpp>
 #include <workflow/message/image/ImageDescriptionService.hpp>
 
 namespace {
@@ -224,18 +225,24 @@ namespace {
         }
         config.jev = apiFor(endpoint, "jev-window-groups", 0);
         json grouped =
-          json::array({{{"message_id", "old"}, {"sender", {{"user_id", "11"}}}, {"executor_processed", true},
+          json::array({{{"message_id", "100"}, {"sender", {{"user_id", "11"}}}, {"executor_processed", true},
                          {"segments", json::array({{{"type", "text"}, {"text", "history"}}})}},
             {{"message_id", "new"}, {"sender", {{"user_id", "11"}}}, {"executor_processed", false},
               {"segments", json::array({{{"type", "text"}, {"text", "new"}}})}},
-            {{"message_id", "sent-1"}, {"sender", {{"user_id", "self"}}}, {"segments", json::array()}},
-            {{"message_id", "sent-2"}, {"sender", {{"user_id", "self"}}}, {"segments", json::array()}}});
+            MessageRecord::createAssistantRecord("bot", -101, "[CQ:image]"),
+            MessageRecord::createAssistantRecord("bot", std::nullopt, "unconfirmed"),
+            MessageRecord::createAssistantRecord("bot", 102, "[CQ:reply,id=100]answer"),
+            MessageRecord::createAssistantExecutionRecord("bot", json::array(), "no_reply")});
+        grouped[3]["send_error"] = "confirmation timed out";
         (void) co_await MessageRouter::route(SessionId::group("100"), grouped);
         {
             std::lock_guard lock(fixture.mutex);
             const auto &state = fixture.bodies.at("jev-window-groups")["state"];
-            require(state["chat_records"].size() == 1 && state["new_messages"].size() == 1 &&
-                      state["sent_messages"].size() == 2 && !state.contains("trigger_message_id"),
+            require(state["chat_records"].size() == 3 &&
+                      state["chat_records"][1]["send_error"] == "confirmation timed out" &&
+                      state["new_messages"].size() == 1 && state["sent_messages"].size() == 2 &&
+                      state["sent_messages"][0]["message_id"] == "-101" &&
+                      state["sent_messages"][1]["reply_to"] == "100" && !state.contains("trigger_message_id"),
               "Jev failed to partition all three message groups");
             require(!state["new_messages"][0].contains("executor_processed") &&
                       !state["new_messages"][0].contains("is_current"),

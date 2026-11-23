@@ -28,16 +28,16 @@ namespace insoulforge::OneBotClient {
 
     /// @brief 发送群消息（群号即会话 ID，无需单独传 sessionId）
     /// @note OneBot 11: send_group_msg
-    /// @return message_id；失败返回具体错误
+    /// @return 有符号 message_id；失败返回具体错误
     [[nodiscard]] auto sendGroupMsg(SessionId groupId, std::string message, json connection = nullptr)
-      -> drogon::Task<std::expected<u64, std::string>>;
+      -> drogon::Task<std::expected<i64, std::string>>;
 
     /// @brief 发送私聊消息
     /// @note OneBot 11: send_private_msg
-    /// @return message_id；失败返回具体错误
+    /// @return 有符号 message_id；失败返回具体错误
     [[nodiscard]] auto sendPrivateMsg(
       UserId userId, std::string message, std::optional<SessionId> sessionId = std::nullopt, json connection = nullptr)
-      -> drogon::Task<std::expected<u64, std::string>>;
+      -> drogon::Task<std::expected<i64, std::string>>;
 
     /// @brief 群组单人禁言
     /// @note OneBot 11: set_group_ban（duration=0 解除禁言）

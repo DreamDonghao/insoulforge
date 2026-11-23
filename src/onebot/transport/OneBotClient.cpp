@@ -84,7 +84,7 @@ namespace insoulforge::OneBotClient {
 
         /// @brief 发送消息的公共实现（群聊/私聊共用，仅 API 名与目标字段不同）
         auto sendMessage(std::string api, const std::string targetKey, const u64 targetId, std::string message,
-          const std::optional<SessionId> sessionId, json connection) -> drogon::Task<std::expected<u64, std::string>> {
+          const std::optional<SessionId> sessionId, json connection) -> drogon::Task<std::expected<i64, std::string>> {
             if (connection.is_null())
                 connection = Config::instance().oneBotSnapshot();
             const bool isBase64Image = message.starts_with("[CQ:image,file=base64://");
@@ -112,7 +112,8 @@ namespace insoulforge::OneBotClient {
                     isBase64Image ? "[图片数据已省略]" : message.substr(0, 200)));
                 co_return std::unexpected(resp.error());
             }
-            const auto messageId = jsonToUInt64(atOrNull(atOrNull(*resp, "data"), "message_id"));
+            const auto &rawId = atOrNull(atOrNull(*resp, "data"), "message_id");
+            const auto messageId = rawId.is_number_integer() || rawId.is_string() ? jsonToInt64(rawId) : 0;
             if (messageId == 0) {
                 co_return std::unexpected("OneBot 返回成功但缺少有效 message_id，无法确认发送结果");
             }
@@ -134,7 +135,7 @@ namespace insoulforge::OneBotClient {
     }
 
     auto sendGroupMsg(const SessionId groupId, std::string message, json connection)
-      -> drogon::Task<std::expected<u64, std::string>> {
+      -> drogon::Task<std::expected<i64, std::string>> {
         const auto number = numericGroupId(groupId);
         if (!number)
             co_return std::unexpected("OneBot 11 要求有效的数字群 ID");
@@ -143,7 +144,7 @@ namespace insoulforge::OneBotClient {
     }
 
     auto sendPrivateMsg(const UserId userId, std::string message, const std::optional<SessionId> sessionId,
-      json connection) -> drogon::Task<std::expected<u64, std::string>> {
+      json connection) -> drogon::Task<std::expected<i64, std::string>> {
         const auto number = userId.toU64();
         if (!number || *number == 0)
             co_return std::unexpected("OneBot 11 要求非零数字用户 ID");

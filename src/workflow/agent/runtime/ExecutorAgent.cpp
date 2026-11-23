@@ -127,10 +127,10 @@ namespace insoulforge::ExecutorAgent {
             const auto sentStart = MessageRecord::sentMessagesStart(records);
             for (size_t index = 0; index < totalRecords; ++index) {
                 const bool isOlder = index < olderCount;
-                auto &target = index >= sentStart                                ? context.sent
-                               : MessageRecord::isNewForExecutor(records[index]) ? context.fresh
-                               : isOlder                                         ? context.earlier
-                                                                                 : context.recent;
+                auto &target = index >= sentStart && MessageRecord::isConfirmedSend(records[index]) ? context.sent
+                               : MessageRecord::isNewForExecutor(records[index])                    ? context.fresh
+                               : isOlder                                                            ? context.earlier
+                                                                                                    : context.recent;
                 if (!isOlder || MessageRecord::isNewForExecutor(records[index])) {
                     context.senders.push_back(records[index]);
                 }

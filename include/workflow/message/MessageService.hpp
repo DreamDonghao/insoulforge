@@ -25,5 +25,5 @@ namespace insoulforge::MessageService {
     /// @param connection 可选 OneBot 配置快照，收藏发送固定使用查询时的连接；为空时读取当前配置。
     auto sendToSession(SessionId sessionId, std::string message,
       std::optional<std::string> imageDescription = std::nullopt, json toolHistory = {}, std::string imageId = {},
-      json connection = nullptr) -> drogon::Task<std::expected<u64, std::string>>;
+      json connection = nullptr) -> drogon::Task<std::expected<i64, std::string>>;
 } // namespace insoulforge::MessageService

@@ -264,7 +264,8 @@ namespace {
         {
             std::lock_guard lock(fixtureMutex);
             require(hasMessage(lastRouterContext["new_messages"], "during-executor") &&
-                      lastRouterContext["sent_messages"].size() == 1,
+                      lastRouterContext["sent_messages"].size() == 1 &&
+                      lastRouterContext["sent_messages"][0]["message_id"] == std::to_string(-(deliveryBase + 1)),
               "follow-up router omitted new input or delivered output");
             require(!lastRouterContext.contains("trigger_message_id"), "router retained target binding");
         }
@@ -652,7 +653,7 @@ auto main() -> int {
     for (const auto *path: {"/send_group_msg", "/send_private_msg"}) {
         drogon::app().registerHandler(path,
           [](const drogon::HttpRequestPtr &, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
-              callback(jsonResponse({{"status", "ok"}, {"retcode", 0}, {"data", {{"message_id", ++deliveries}}}}));
+              callback(jsonResponse({{"status", "ok"}, {"retcode", 0}, {"data", {{"message_id", -(++deliveries)}}}}));
           },
           {drogon::Post});
     }

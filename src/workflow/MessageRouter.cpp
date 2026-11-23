@@ -30,8 +30,8 @@ namespace insoulforge::MessageRouter {
     namespace {
         constexpr std::string_view kContextInstructions =
           "输入为 JSON：chat_records 是历史，new_messages 是尚未交给 Executor 的入站消息，"
-          "sent_messages 是窗口末尾连续成功发送的消息。new_messages 不代表尚未回答；"
-          "结合历史与已发送内容，判断当前是否还有未覆盖且值得回应的内容，不指定回复某条消息。"
+          "sent_messages 是窗口最后一段机器人记录中确认送达的消息。new_messages 不代表尚未回答；"
+          "send_error 表示发送未获确认。结合历史与已送达内容判断是否还有未覆盖且值得回应的内容，不指定回复某条消息。"
           "仅有表情或提问等表面特征不足以决定整批消息是否需要回复；刚发言也不代表已覆盖新内容。"
           "各组时间可能交错，不按字段顺序推断先后；activity.mode=silent 仅作背景，不构成回复理由。";
 
@@ -70,6 +70,9 @@ namespace insoulforge::MessageRouter {
             }
             if (projected.contains("activity")) {
                 compact["activity"] = {{"mode", getStr(projected["activity"], "mode")}};
+            }
+            if (projected.contains("send_error")) {
+                compact["send_error"] = projected["send_error"];
             }
             compact["message_id"] = getStr(message, "message_id");
             if (const std::string name = getStr(atOrNull(projected, "sender"), "name"); !name.empty()) {
@@ -174,6 +177,9 @@ namespace insoulforge::MessageRouter {
             if (projected.contains("activity")) {
                 record["activity"] = {{"mode", getStr(projected["activity"], "mode")}};
             }
+            if (projected.contains("send_error")) {
+                record["send_error"] = projected["send_error"];
+            }
             record["text"] = std::move(text);
             if (const json &replyTo = atOrNull(projected, "reply_to"); !replyTo.is_null() && !replyTo.empty()) {
                 record["reply_to"] = replyTo;
@@ -196,9 +202,9 @@ namespace insoulforge::MessageRouter {
             const auto sentStart = MessageRecord::sentMessagesStart(snapshot);
             for (size_t index = startIndex; index < snapshot.size(); ++index) {
                 const auto &message = snapshot[index];
-                auto &target = index >= sentStart                         ? sentMessages
-                               : MessageRecord::isNewForExecutor(message) ? newMessages
-                                                                          : records;
+                auto &target = index >= sentStart && MessageRecord::isConfirmedSend(message) ? sentMessages
+                               : MessageRecord::isNewForExecutor(message)                    ? newMessages
+                                                                                             : records;
                 target.push_back(renderJevRecord(message, includeGroupCard));
             }
 
@@ -254,9 +260,9 @@ namespace insoulforge::MessageRouter {
             const auto sentStart = MessageRecord::sentMessagesStart(snapshot);
             for (size_t index = startIndex; index < snapshot.size(); ++index) {
                 const auto &message = snapshot[index];
-                auto &target = index >= sentStart                         ? sentMessages
-                               : MessageRecord::isNewForExecutor(message) ? newMessages
-                                                                          : records;
+                auto &target = index >= sentStart && MessageRecord::isConfirmedSend(message) ? sentMessages
+                               : MessageRecord::isNewForExecutor(message)                    ? newMessages
+                                                                                             : records;
                 target.push_back(compactMessage(message, includeGroupCard));
             }
 

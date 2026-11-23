@@ -136,7 +136,7 @@ namespace insoulforge::MessageRecord {
         return SessionId::parse(getStr(record, "session_id")).value();
     }
 
-    auto createAssistantRecord(std::string senderName, const std::optional<u64> messageId, const std::string &content)
+    auto createAssistantRecord(std::string senderName, const std::optional<i64> messageId, const std::string &content)
       -> json {
         json segments = json::array();
         std::optional<std::string> replyTo;
@@ -203,7 +203,7 @@ namespace insoulforge::MessageRecord {
         return record;
     }
 
-    auto createAssistantGeneratedImageRecord(std::string senderName, const std::optional<u64> messageId,
+    auto createAssistantGeneratedImageRecord(std::string senderName, const std::optional<i64> messageId,
       const std::string &description, const std::string &imageId) -> json {
         auto record = createAssistantRecord(std::move(senderName), messageId, "[CQ:image]");
         record["segments"][0]["recognition_status"] = "generated";
@@ -294,15 +294,17 @@ namespace insoulforge::MessageRecord {
 
     auto isSystem(const json &record) -> bool { return getStr(atOrNull(record, "sender"), "user_id") == "system"; }
 
+    auto isConfirmedSend(const json &record) -> bool {
+        return isAssistant(record) && !record.contains("send_error") &&
+               getStr(record, "record_type") != "tool_execution" && !getStr(record, "message_id").empty();
+    }
+
     auto sentMessagesStart(const json &records) -> size_t {
         auto start = records.size();
-        while (start > 0) {
-            if (const auto &record = records[start - 1]; !isAssistant(record) || record.contains("send_error") ||
-                                                         getStr(record, "record_type") == "tool_execution" ||
-                                                         getStr(record, "message_id").empty()) {
-                break;
+        for (auto index = records.size(); index > 0 && isAssistant(records[index - 1]); --index) {
+            if (isConfirmedSend(records[index - 1])) {
+                start = index - 1;
             }
-            --start;
         }
         return start;
     }
