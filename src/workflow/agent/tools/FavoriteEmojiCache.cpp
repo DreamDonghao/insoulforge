@@ -1,7 +1,8 @@
+#include <format>
+
 #include <workflow/agent/llm/prompts/ExecutorSystemPrompt.hpp>
 /// @file FavoriteEmojiCache.cpp
 /// @brief QQ 收藏表情查询与缓存实现
-
 
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
@@ -68,7 +69,7 @@ namespace insoulforge {
             json emoji;
             const std::string description = sanitizeCqParameter(getStr(item, "desc"));
             const std::string md5 = getStr(item, "md5");
-            const std::string fallback = md5.size() >= 6 ? "表情" + md5.substr(0, 6) : fmt::format("表情{}", index + 1);
+            const std::string fallback = md5.size() >= 6 ? "表情" + md5.substr(0, 6) : std::format("表情{}", index + 1);
             emoji["name"] = description.empty() ? fallback : description;
             emoji["summary"] = description;
             emoji["emoji_id"] = getStr(item, "eId");

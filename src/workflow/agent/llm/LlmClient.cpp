@@ -1,6 +1,7 @@
 /// @file LlmClient.cpp
 /// @brief API 客户端 - 实现
 
+#include <format>
 
 #include <admin/events/WebSocketManager.hpp>
 #include <infrastructure/NumericTypes.hpp>
@@ -28,9 +29,9 @@ namespace insoulforge {
             }
             if (!LlmClient::isConfigured(api)) {
                 if (sessionId) {
-                    Logger::warn(*sessionId, "LLM", fmt::format("未配置服务地址、请求路径或模型名，跳过请求"));
+                    Logger::warn(*sessionId, "LLM", std::format("未配置服务地址、请求路径或模型名，跳过请求"));
                 } else {
-                    Logger::warn(std::nullopt, "LLM", fmt::format("未配置服务地址、请求路径或模型名，跳过请求"));
+                    Logger::warn(std::nullopt, "LLM", std::format("未配置服务地址、请求路径或模型名，跳过请求"));
                 }
                 co_return std::nullopt;
             }
@@ -45,10 +46,10 @@ namespace insoulforge {
             if (!respJson) {
                 if (sessionId) {
                     Logger::error(*sessionId, "LLM",
-                      fmt::format("请求出错: status={}", static_cast<i32>((*resp)->getStatusCode())));
+                      std::format("请求出错: status={}", static_cast<i32>((*resp)->getStatusCode())));
                 } else {
                     Logger::error(std::nullopt, "LLM",
-                      fmt::format("请求出错: status={}", static_cast<i32>((*resp)->getStatusCode())));
+                      std::format("请求出错: status={}", static_cast<i32>((*resp)->getStatusCode())));
                 }
                 co_return std::nullopt;
             }
@@ -143,7 +144,7 @@ namespace insoulforge {
                     (response && !isRetryableStatus(static_cast<i32>((*response)->getStatusCode())))) {
                     co_return response;
                 }
-                Logger::warn(sessionId, label, fmt::format("请求失败，第 {}/{} 次重试", attempt + 1, api.maxRetries));
+                Logger::warn(sessionId, label, std::format("请求失败，第 {}/{} 次重试", attempt + 1, api.maxRetries));
                 co_await drogon::sleepCoro(drogon::app().getLoop(), std::chrono::seconds{1});
             }
         }
@@ -166,7 +167,7 @@ namespace insoulforge {
                 co_return respJson;
             }
             Logger::error(sessionId, label,
-              fmt::format("请求失败: status={} body={}", static_cast<i32>((*resp)->getStatusCode()),
+              std::format("请求失败: status={} body={}", static_cast<i32>((*resp)->getStatusCode()),
                 std::string((*resp)->getBody()).substr(0, kErrorBodyMaxChars)));
             co_return std::nullopt;
         }
@@ -188,7 +189,7 @@ namespace insoulforge {
       -> drogon::Task<std::optional<std::vector<f32>>> {
         const auto config = Config::instance().embedding;
         if (!isConfigured(config)) {
-            Logger::debug(std::nullopt, "LLM", fmt::format("Embedding 未配置，跳过向量化"));
+            Logger::debug(std::nullopt, "LLM", std::format("Embedding 未配置，跳过向量化"));
             co_return std::nullopt;
         }
 
@@ -207,10 +208,10 @@ namespace insoulforge {
         if (!requestOk || !data.is_array() || data.empty()) {
             if (sessionId) {
                 Logger::error(*sessionId, "Embedding",
-                  fmt::format("请求出错: status={}", static_cast<i32>((*resp)->getStatusCode())));
+                  std::format("请求出错: status={}", static_cast<i32>((*resp)->getStatusCode())));
             } else {
                 Logger::error(std::nullopt, "Embedding",
-                  fmt::format("请求出错: status={}", static_cast<i32>((*resp)->getStatusCode())));
+                  std::format("请求出错: status={}", static_cast<i32>((*resp)->getStatusCode())));
             }
             co_return std::nullopt;
         }
@@ -256,14 +257,14 @@ namespace insoulforge {
         if (promptTokens > 0) {
             f32 hitRate = static_cast<f32>(cachedTokens) / static_cast<f32>(promptTokens) * 100.0f;
             Logger::info(logSessionId, "Usage",
-              fmt::format("role={} | model={} | prompt={} | completion={} | total={} | cached={} | hit_rate={:.1f}%",
+              std::format("role={} | model={} | prompt={} | completion={} | total={} | cached={} | hit_rate={:.1f}%",
                 role, model, promptTokens, completionTokens, totalTokens, cachedTokens, hitRate));
         } else if (totalTokens > 0) {
             // 网关偶尔不返回 prompt 分解，用 total - completion 兜底，避免用量统计缺 prompt 数据
             promptTokens = std::max(0, totalTokens - completionTokens);
             const auto usageText = dumpJson(usage, false);
             Logger::info(logSessionId, "Usage",
-              fmt::format("role={} | model={} | prompt={} (no breakdown) | completion={} | total={} | cached=N/A | "
+              std::format("role={} | model={} | prompt={} (no breakdown) | completion={} | total={} | cached=N/A | "
                           "hit_rate=N/A | usage={}",
                 role, model, promptTokens, completionTokens, totalTokens, usageText));
         }

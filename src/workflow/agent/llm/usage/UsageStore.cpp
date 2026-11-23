@@ -1,6 +1,8 @@
 /// @file UsageStore.cpp
 /// @brief LLM 用量统计存储 - 实现
 
+#include <format>
+
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/storage/Database.hpp>
@@ -27,7 +29,7 @@ namespace insoulforge::UsageStore {
         const auto &db = Database::instance();
         std::shared_lock lock(db.mutex());
         json result;
-        const std::string sinceDate = fmt::format("-{} days", days);
+        const std::string sinceDate = std::format("-{} days", days);
 
         // 汇总
         {

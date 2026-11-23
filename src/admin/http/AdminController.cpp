@@ -1,5 +1,6 @@
 #include <charconv>
 #include <filesystem>
+#include <format>
 
 #include <drogon/MultiPart.h>
 
@@ -336,7 +337,7 @@ auto AdminController::setBotStatus(HttpRequestPtr req, std::function<void(const 
 
     const bool running = (*body)["running"].get<bool>();
     AgentSystem::instance().setRunning(running);
-    Logger::warn(std::nullopt, "Admin", fmt::format("管理后台{}机器人", running ? "打开" : "暂停"));
+    Logger::warn(std::nullopt, "Admin", std::format("管理后台{}机器人", running ? "打开" : "暂停"));
 
     json resp = AdminResponse::okJson(running ? "机器人已打开" : "机器人已暂停");
     resp["running"] = running;
@@ -423,7 +424,7 @@ auto AdminController::updateEmojiDesc(HttpRequestPtr req, std::function<void(con
         co_return;
     }
 
-    Logger::info(std::nullopt, "Admin", fmt::format("已修改表情描述: res_id={} desc={}", resId, desc));
+    Logger::info(std::nullopt, "Admin", std::format("已修改表情描述: res_id={} desc={}", resId, desc));
 
     callback(jsonResponse(AdminResponse::okJson("描述已修改")));
     co_return;
@@ -1245,8 +1246,8 @@ auto AdminController::cancelScheduledTask(
     }
 
     if (TaskScheduler::instance().cancel(static_cast<i64>(taskId))) {
-        json resp = AdminResponse::okJson(fmt::format("定时任务 #{} 已取消", taskId));
-        Logger::info(std::nullopt, "Admin", fmt::format("已取消定时任务 #{}", taskId));
+        json resp = AdminResponse::okJson(std::format("定时任务 #{} 已取消", taskId));
+        Logger::info(std::nullopt, "Admin", std::format("已取消定时任务 #{}", taskId));
         callback(jsonResponse(resp));
     } else {
         callback(jsonResponse(AdminResponse::failJson("任务不存在或已触发/已取消")));

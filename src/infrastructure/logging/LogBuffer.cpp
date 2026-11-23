@@ -1,10 +1,10 @@
 /// @file LogBuffer.cpp
 /// @brief 运行日志内存缓冲区与查询服务 - 实现
 
+#include <algorithm>
 #include <filesystem>
+#include <format>
 #include <fstream>
-
-#include <fmt/format.h>
 
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/logging/LogBuffer.hpp>
@@ -24,7 +24,7 @@ namespace insoulforge {
         std::vector<LogEntry> loaded;
         for (i32 index = 0; index <= 5 && loaded.size() < kMaxEntries; ++index) {
             const auto path =
-              std::filesystem::path(directory) / (index == 0 ? "bot.log" : fmt::format("bot.{}.log", index));
+              std::filesystem::path(directory) / (index == 0 ? "bot.log" : std::format("bot.{}.log", index));
             std::ifstream file(path);
             if (!file) {
                 continue;

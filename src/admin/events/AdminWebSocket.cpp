@@ -1,3 +1,5 @@
+#include <format>
+
 #include <admin/events/AdminWebSocket.hpp>
 #include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/SessionId.hpp>
@@ -25,7 +27,7 @@ void AdminWebSocket::handleNewMessage(
     // 解析客户端消息
     json msg;
     if (!tryParseJson(message, msg)) {
-        Logger::warn(std::nullopt, "Admin", fmt::format("WebSocket消息解析失败"));
+        Logger::warn(std::nullopt, "Admin", std::format("WebSocket消息解析失败"));
         return;
     }
 

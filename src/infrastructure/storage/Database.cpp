@@ -2,6 +2,7 @@
 /// @brief SQLite 数据库连接管理 - 实现
 
 #include <filesystem>
+#include <format>
 #include <memory>
 
 #include <spdlog/spdlog.h>
@@ -35,20 +36,20 @@ namespace insoulforge {
         const auto openResult = sqlite3_open(dbPath.c_str(), &rawConnection);
         auto connection = std::unique_ptr<sqlite3, decltype(&sqlite3_close)>{rawConnection, sqlite3_close};
         if (openResult != SQLITE_OK) {
-            const auto error = fmt::format(
+            const auto error = std::format(
               "无法打开数据库 {}: {}", dbPath, connection ? sqlite3_errmsg(connection.get()) : "无法分配数据库连接");
             return std::unexpected(error);
         }
         try {
             SchemaMigrator::migrate(connection.get());
         } catch (const DbError &error) {
-            return std::unexpected(fmt::format("数据库迁移失败: {}", error.what()));
+            return std::unexpected(std::format("数据库迁移失败: {}", error.what()));
         }
         if (m_db && sqlite3_close(m_db) != SQLITE_OK) {
             return std::unexpected("已有数据库连接仍被使用，无法替换");
         }
         m_db = connection.release();
-        Logger::info(std::nullopt, "Storage", fmt::format("数据库初始化完成"));
+        Logger::info(std::nullopt, "Storage", std::format("数据库初始化完成"));
         return {};
     }
 
@@ -57,7 +58,7 @@ namespace insoulforge {
         if (m_db) {
             sqlite3_close(m_db);
             m_db = nullptr;
-            Logger::info(std::nullopt, "Storage", fmt::format("数据库已关闭"));
+            Logger::info(std::nullopt, "Storage", std::format("数据库已关闭"));
         }
     }
 } // namespace insoulforge

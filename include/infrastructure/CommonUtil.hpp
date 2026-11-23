@@ -12,6 +12,8 @@
 #include <string>
 #include <string_view>
 
+#include <ctime>
+
 #include <infrastructure/NumericTypes.hpp>
 
 /// @brief 去除字符串首尾空白（isspace 语义）

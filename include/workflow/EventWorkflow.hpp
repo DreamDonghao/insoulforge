@@ -4,7 +4,6 @@
 #pragma once
 
 #include <atomic>
-#include <memory>
 #include <mutex>
 #include <optional>
 #include <unordered_map>
@@ -24,10 +23,10 @@ namespace insoulforge {
     class AgentSystem;
     /// @brief 统一事件处理工作流
     /// @details 接收 OneBot 事件、系统任务和Activity 通知。
-    ///          每个会话串行预处理入站消息；回复处理同一时间只运行一轮。预处理完成后，
-    ///          回复阶段从 MessageList 读取快照并调用 Router、Executor 和发送服务。
+    ///          每个会话串行加工入站消息；消息处理同一时间只运行一轮。加工完成后，
+    ///          处理阶段从 MessageList 读取快照并调用 Router、Executor 和发送服务。
     ///          空闲时协程退出，不轮询。数据库中的聊天记录用于启动恢复和正常退出时保存消息列表。
-    /// @note 预处理与回复可并行，不同会话独立处理；使用写入、入队接口前必须成功初始化。
+    /// @note 加工与处理可并行，不同会话独立处理；使用写入、入队接口前必须成功初始化。
     ///       退出时应先停止事件入口并等待在途任务结束，再保存消息及释放依赖。
     class EventWorkflow {
     public:
@@ -63,7 +62,7 @@ namespace insoulforge {
         /// @note 线程安全。会推送管理后台，并按普通消息参与后续快照与记忆维护。
         void appendSystemStatusMessage(const SessionId &sessionId, json message);
 
-        /// @brief 保存内部助手执行记录，不发送 QQ 消息，也不投递新回复任务。
+        /// @brief 保存内部助手执行记录，不发送 QQ 消息，也不投递新的处理任务。
         /// @param sessionId 记录所属会话。
         /// @param message 已构造好的助手执行记录，包含工具历史及执行结果。
         /// @note 线程安全。写入内存消息列表并推送管理后台；追加本身不触发记忆维护。
@@ -80,10 +79,10 @@ namespace insoulforge {
         /// @param limit 最多返回的消息数；为零时返回空数组。
         /// @param earliest 时间下界（含），格式为本地时间 YYYY-MM-DD HH:MM:SS。
         /// @param latest 时间上界（含），格式与 earliest 相同。
-        /// @return 时间范围内最近的可共享消息投影，按时间顺序排列；会话不存在时返回空数组。
+        /// @return 时间范围内最近的可共享消息投影，按时间顺序排列；会话不存在时返回 std::nullopt。
         /// @note 线程安全。不校验共享开关或调用权限，由调用方限制来源和可见范围。
-        [[nodiscard]] auto getSharedSessionMessages(
-          const SessionId &sessionId, size_t limit, const std::string &earliest, const std::string &latest) -> json;
+        [[nodiscard]] auto getSharedSessionMessages(const SessionId &sessionId, size_t limit,
+          const std::string &earliest, const std::string &latest) -> std::optional<json>;
 
         /// @brief 清空会话的内存消息与持久化恢复副本，保留启用状态与已提取记忆。
         /// @param sessionId 要清空消息的会话；未加载的会话只清除数据库记录。
@@ -92,7 +91,7 @@ namespace insoulforge {
 
         /// @brief 将 OneBot 上报事件加入处理流程
         /// @param body 由 HTTP 或 WebSocket 入口解析得到的 OneBot 事件对象。
-        /// @details 归一化并检查机器人状态、发送者后入队；会话尚无预处理任务时启动协程。
+        /// @details 归一化并检查机器人状态、发送者后入队；会话尚无加工任务时启动协程。
         /// @note 线程安全。函数返回仅表示事件已被接受或丢弃，不表示图片识别、回复或记忆维护已经完成。
         void enqueueOneBotEvent(const json &body);
 
@@ -101,7 +100,7 @@ namespace insoulforge {
         /// @param text 系统消息正文。
         /// @param senderName 系统发送者的显示名称；内部身份固定为 system。
         /// @note 线程安全。沿用普通入队检查和会话启用设置，返回时不保证处理完成。
-        void enqueueSystemMessage(const SessionId &sessionId, std::string text, std::string senderName = "系统任务");
+        void enqueueSystemEvent(const SessionId &sessionId, std::string text, std::string senderName = "系统任务");
 
         /// @brief Activity 通知使用会话串行队列；silent 仅记录，judge 路由判断，force 跳过回复判断。
         /// @param sessionId 接收通知的会话。
@@ -111,11 +110,11 @@ namespace insoulforge {
         /// @param attachments 已缓存的图片；仅在本次调用期间借用，消息中保存图片 ID。
         /// @note 线程安全。仍受机器人就绪状态和会话启用设置限制，force 不绕过这些检查。
         ///       函数返回不表示通知已处理或回复已发送，也不接管图片句柄的生命周期。
-        void enqueueActivityMessage(const SessionId &sessionId, std::string text, std::string name, std::string mode,
+        void enqueueActivityEvent(const SessionId &sessionId, std::string text, std::string name, std::string mode,
           const std::vector<Image> &attachments = {});
 
     private:
-        /// @brief 检查归一化消息的发送者与 Agent 状态，并在需要时启动会话预处理协程。
+        /// @brief 检查归一化消息的发送者与 Agent 状态，并在需要时启动会话加工协程。
         /// @param message 含 session_id 的完整内部消息；助手消息和无效或被拉黑的发送者会被丢弃。
         /// @note 取得消息所有权；未初始化或 Agent 不可用时直接丢弃。
         void enqueueNormalizedMessage(json message);
@@ -129,7 +128,7 @@ namespace insoulforge {
         std::optional<Dependencies> m_dependencies;
         std::atomic_bool m_initialized{false};
         std::mutex m_sessionsMutex; ///< 保护会话状态索引
-        std::unordered_map<SessionId, std::shared_ptr<SessionWorkflowState>> m_sessions; ///< 已恢复或已激活的会话状态
+        std::unordered_map<SessionId, SessionWorkflowState> m_sessionStates; ///< 已恢复或已激活的会话状态
 
         EventWorkflow() = default;
 
@@ -140,20 +139,20 @@ namespace insoulforge {
 
         /// @brief 获取或创建会话工作流状态
         /// @param sessionId 状态所属会话。
-        /// @return 由工作流和在途任务共同持有的会话状态。
+        /// @return 由工作流持有的会话状态引用。
         /// @pre initialize 已成功完成。
         /// @note 线程安全；索引锁内完成查找与首次创建。
-        [[nodiscard]] auto getOrCreateSessionState(const SessionId &sessionId) -> std::shared_ptr<SessionWorkflowState>;
+        [[nodiscard]] auto getOrCreateSessionState(const SessionId &sessionId) -> SessionWorkflowState &;
 
-        /// @brief 处理一个会话的消息预处理队列，空队列时立即退出
-        /// @param sessionId 待处理队列所属会话，按值保存在协程帧中。
-        /// @note 仅在取得该会话预处理执行权后启动；单条消息失败不阻塞后续消息。
-        auto processPreparationQueue(SessionId sessionId) -> drogon::Task<>;
+        /// @brief 加工一个会话的待处理消息，取空后立即退出
+        /// @param sessionId 待加工消息所属会话，按值保存在协程帧中。
+        /// @note 仅在取得该会话加工执行权后启动；单条消息失败不阻塞后续消息。
+        auto compose(SessionId sessionId) -> drogon::Task<>;
 
-        /// @brief 处理一个会话的串行回复工作流，无待处理回复时立即退出
-        /// @param sessionId 回复任务所属会话，按值保存在协程帧中。
-        /// @note 仅在取得该会话回复执行权后启动；Router 只读冻结，Executor 重新冻结并消费新增需求。
+        /// @brief 处理一个会话的待处理消息，串行执行至无待处理消息
+        /// @param sessionId 消息处理任务所属会话，按值保存在协程帧中。
+        /// @note 仅在取得该会话处理执行权后启动；Router 只读冻结，Executor 重新冻结并消费新增需求。
         ///       执行期间不进行路由，结束后接续新增需求；无新增时原子释放执行权。
-        auto processReplyWorkflow(SessionId sessionId) -> drogon::Task<>;
+        auto process(SessionId sessionId) -> drogon::Task<>;
     };
 } // namespace insoulforge

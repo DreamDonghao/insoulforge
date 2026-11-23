@@ -1,6 +1,7 @@
 /// @file ToolRegistry.cpp
 /// @brief 工具注册中心 - 实现
 
+#include <format>
 #include <mutex>
 
 #include <infrastructure/NumericTypes.hpp>
@@ -39,7 +40,7 @@ namespace insoulforge {
 
     auto ToolRegistry::registerPlugin(std::string pluginId, const PluginRegistrar &registrar) -> bool {
         if (pluginId.empty() || !registrar || !m_activePluginId.empty()) {
-            Logger::error(std::nullopt, "Tool", fmt::format("工具插件注册失败：插件 ID、注册函数无效或发生嵌套注册"));
+            Logger::error(std::nullopt, "Tool", std::format("工具插件注册失败：插件 ID、注册函数无效或发生嵌套注册"));
             return false;
         }
         ToolRegistry staged;
@@ -47,10 +48,10 @@ namespace insoulforge {
         try {
             registrar(staged);
         } catch (const std::exception &e) {
-            Logger::error(std::nullopt, "Tool", fmt::format("工具插件 '{}' 注册异常: {}", pluginId, e.what()));
+            Logger::error(std::nullopt, "Tool", std::format("工具插件 '{}' 注册异常: {}", pluginId, e.what()));
             return false;
         } catch (...) {
-            Logger::error(std::nullopt, "Tool", fmt::format("工具插件 '{}' 注册发生未知异常", pluginId));
+            Logger::error(std::nullopt, "Tool", std::format("工具插件 '{}' 注册发生未知异常", pluginId));
             return false;
         }
         if (staged.m_pluginRegistrationFailed) {
@@ -61,7 +62,7 @@ namespace insoulforge {
             if (const auto existing = m_tools.find(name);
               existing != m_tools.end() && existing->second.pluginId != pluginId) {
                 Logger::error(std::nullopt, "Tool",
-                  fmt::format("工具插件 '{}' 与 '{}' 的工具 '{}' 冲突", pluginId, existing->second.pluginId, name));
+                  std::format("工具插件 '{}' 与 '{}' 的工具 '{}' 冲突", pluginId, existing->second.pluginId, name));
                 return false;
             }
         }
@@ -93,7 +94,7 @@ namespace insoulforge {
     auto ToolRegistry::registerTool(const Tool &tool, const ToolCategory category) -> bool {
         std::unique_lock lock(m_mutex);
         if (tool.name.empty() || !tool.handler) {
-            Logger::error(std::nullopt, "Tool", fmt::format("工具注册失败：工具名称或处理器为空"));
+            Logger::error(std::nullopt, "Tool", std::format("工具注册失败：工具名称或处理器为空"));
             if (!m_activePluginId.empty())
                 m_pluginRegistrationFailed = true;
             return false;
@@ -102,7 +103,7 @@ namespace insoulforge {
         const std::string pluginId = m_activePluginId.empty() ? "application" : m_activePluginId;
         if (const auto it = m_tools.find(tool.name); it != m_tools.end() && it->second.pluginId != pluginId) {
             Logger::error(std::nullopt, "Tool",
-              fmt::format(
+              std::format(
                 "工具注册冲突: '{}' 已由插件 '{}' 注册，插件 '{}' 不能覆盖", tool.name, it->second.pluginId, pluginId));
             if (!m_activePluginId.empty())
                 m_pluginRegistrationFailed = true;
@@ -200,7 +201,7 @@ namespace insoulforge {
                 if (!isEnabled(it->second))
                     co_return "工具已关闭，未执行: " + name;
                 if (ctx.replyOnly && it->second.category != ToolCategory::REPLY) {
-                    Logger::warn(ctx.sessionId, "Tool", fmt::format("最后一轮拒绝非回复工具: {}", name));
+                    Logger::warn(ctx.sessionId, "Tool", std::format("最后一轮拒绝非回复工具: {}", name));
                     co_return "最后一轮只允许回复类工具，未执行: " + name;
                 }
                 if (const auto offered = ctx.offeredMcpTools.find(name);
@@ -217,11 +218,11 @@ namespace insoulforge {
             try {
                 co_return co_await handler(std::move(args), std::move(ctx));
             } catch (const std::exception &error) {
-                Logger::error(logSession, "Tool", fmt::format("工具 '{}' 执行异常: {}", name, error.what()));
-                co_return fmt::format("工具 '{}' 执行失败: {}", name, std::string_view(error.what()).substr(0, 500));
+                Logger::error(logSession, "Tool", std::format("工具 '{}' 执行异常: {}", name, error.what()));
+                co_return std::format("工具 '{}' 执行失败: {}", name, std::string_view(error.what()).substr(0, 500));
             } catch (...) {
-                Logger::error(logSession, "Tool", fmt::format("工具 '{}' 执行发生未知异常", name));
-                co_return fmt::format("工具 '{}' 执行失败: 未知异常", name);
+                Logger::error(logSession, "Tool", std::format("工具 '{}' 执行发生未知异常", name));
+                co_return std::format("工具 '{}' 执行失败: 未知异常", name);
             }
         }
         co_return "工具未找到: " + name;

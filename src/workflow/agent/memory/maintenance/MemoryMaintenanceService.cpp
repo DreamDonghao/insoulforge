@@ -1,6 +1,7 @@
 /// @file MemoryMaintenanceService.cpp
 /// @brief 从消息批次提取并整理聊天记忆
 
+#include <format>
 #include <set>
 #include <unordered_set>
 
@@ -23,17 +24,17 @@ namespace insoulforge {
         [[nodiscard]] auto parseLlmJson(const std::optional<std::string> &result, const std::string_view tag,
           const SessionId &sessionId) -> std::optional<json> {
             if (!result) {
-                Logger::error(sessionId, "Memory", fmt::format("{}: API 请求失败", tag));
+                Logger::error(sessionId, "Memory", std::format("{}: API 请求失败", tag));
                 return std::nullopt;
             }
             std::string payload;
             if (!tryExtractJsonObject(*result, payload)) {
-                Logger::warn(sessionId, "Memory", fmt::format("{}: 响应中无 JSON: {}", tag, result->substr(0, 100)));
+                Logger::warn(sessionId, "Memory", std::format("{}: 响应中无 JSON: {}", tag, result->substr(0, 100)));
                 return std::nullopt;
             }
             json parsed;
             if (!tryParseJson(payload, parsed) || !parsed.is_object()) {
-                Logger::warn(sessionId, "Memory", fmt::format("{}: JSON 解析失败", tag));
+                Logger::warn(sessionId, "Memory", std::format("{}: JSON 解析失败", tag));
                 return std::nullopt;
             }
             return parsed;
@@ -126,14 +127,13 @@ namespace insoulforge {
 只输出下列字段，不添加其他字段：
 
 )";
-            prompt += fmt::format(
-              "- `conversation_summary`：字符串，概括本批消息聊了什么，不能为空，最多 {} 字。\n"
-              "- `memories`：人物记忆数组。没有值得记录的人物信息时返回 `[]`。\n",
+            prompt += std::format("- `conversation_summary`：字符串，概括本批消息聊了什么，不能为空，最多 {} 字。\n"
+                                  "- `memories`：人物记忆数组。没有值得记录的人物信息时返回 `[]`。\n",
               summaryMaxChars);
             if (affinityEnabled)
                 prompt += "- `affinity_changes`：好感度变化数组。没有明显变化时返回 `[]`。\n";
             prompt += affinityEnabled ? "\n以上三个字段都必须提供。\n" : "\n以上两个字段都必须提供。\n";
-            prompt += fmt::format(R"(
+            prompt += std::format(R"(
 ### 人物记忆格式
 
 `memories` 中每项包含：
@@ -143,7 +143,8 @@ namespace insoulforge {
 
 同一个用户 ID 最多出现一次，多条记忆合并到该用户的 `entries` 中，去掉重复内容。
 没有值得记录的内容时，不输出该用户，不使用空字符串占位。
-)", entryMaxChars);
+)",
+              entryMaxChars);
             if (affinityEnabled)
                 prompt += R"(
 ### 好感度格式
@@ -318,7 +319,7 @@ aliases 和 longTerm 必须都是数组。longTerm 的每一项是非空字符�
                 entries.insert(entries.end(), pending.begin(), pending.end());
             const json input = {{"aliases", currentAliases}, {"pending_entries", entries},
               {"recalled_memories", recalledContents}};
-            prompt += fmt::format("\n\n## 目标篇幅\n\nlongTerm 每条最多 {} 字，尽量简短且语义完整，不凑字数。",
+            prompt += std::format("\n\n## 目标篇幅\n\nlongTerm 每条最多 {} 字，尽量简短且语义完整，不凑字数。",
               Config::instance().longTermMemoryEntryMaxChars.load(std::memory_order_relaxed));
             const json messages = json::array({
               {{"role", "system"}, {"content", std::move(prompt)}},

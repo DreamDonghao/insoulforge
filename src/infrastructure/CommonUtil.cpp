@@ -4,10 +4,23 @@
 #include <cctype>
 #include <charconv>
 #include <chrono>
+#include <iomanip>
+#include <utility>
 
-#include <fmt/chrono.h>
+#include <locale>
+#include <sstream>
 
 #include <infrastructure/CommonUtil.hpp>
+
+namespace {
+    auto formatLocalTime(const std::time_t timestamp, const char *format) -> std::string {
+        const auto time = localTime(timestamp);
+        std::ostringstream output;
+        output.imbue(std::locale::classic());
+        output << std::put_time(&time, format);
+        return std::move(output).str();
+    }
+} // namespace
 
 auto trim(std::string s) -> std::string {
     const auto isSpace = [](const unsigned char c) -> bool { return std::isspace(c) != 0; };
@@ -46,13 +59,11 @@ auto localTime(const std::time_t t) -> std::tm {
 
 auto currentDateTime() -> std::string {
     using namespace std::chrono;
-    return fmt::format("{:%Y-%m-%d %H:%M:%S}", localTime(system_clock::to_time_t(system_clock::now())));
+    return formatUnixTime(system_clock::to_time_t(system_clock::now()));
 }
 
 auto formatUnixTime(const insoulforge::i64 unixSec) -> std::string {
-    return fmt::format("{:%Y-%m-%d %H:%M:%S}", localTime(unixSec));
+    return formatLocalTime(unixSec, "%Y-%m-%d %H:%M:%S");
 }
 
-auto formatTimeOfDay(const insoulforge::i64 unixSec) -> std::string {
-    return fmt::format("{:%H:%M}", localTime(unixSec));
-}
+auto formatTimeOfDay(const insoulforge::i64 unixSec) -> std::string { return formatLocalTime(unixSec, "%H:%M"); }

@@ -1,6 +1,7 @@
 /// @file V25.cpp
 /// @brief 从已发布 v24 一次性迁移到当前结构与消息格式；调用方负责整次升级事务及版本号。
 #include <algorithm>
+#include <format>
 #include <optional>
 #include <unordered_set>
 #include <vector>
@@ -188,7 +189,7 @@ namespace insoulforge::SchemaMigrator {
         void migrateLegacyData(sqlite3 *db) {
             for (const auto *table:
               {"admins", "blacklisted_users", "person_affinity", "person_memories", "person_memory_entries"})
-                Statement(db, fmt::format("ALTER TABLE {} RENAME COLUMN qq_number TO user_id", table)).execOrThrow();
+                Statement(db, std::format("ALTER TABLE {} RENAME COLUMN qq_number TO user_id", table)).execOrThrow();
             Statement(db, "DROP INDEX IF EXISTS idx_person_memory_entries_qq").execOrThrow();
             Statement(db, "CREATE INDEX idx_person_memory_entries_user_id ON person_memory_entries(user_id, id)")
               .execOrThrow();
@@ -199,7 +200,7 @@ namespace insoulforge::SchemaMigrator {
                 try {
                     updateRecord.bind(1, dumpJson(migrateRecord(records.getText(1), records.getText(2))));
                 } catch (const std::exception &error) {
-                    throw DbError(fmt::format("聊天记录 {} 转换失败：{}", records.getInt64(0), error.what()));
+                    throw DbError(std::format("聊天记录 {} 转换失败：{}", records.getInt64(0), error.what()));
                 }
                 updateRecord.bind(2, records.getInt64(0));
                 updateRecord.execOrThrow();
@@ -211,7 +212,7 @@ namespace insoulforge::SchemaMigrator {
                 try {
                     updateMemory.bind(1, dumpJson(migrateMemory(memories.getText(1))));
                 } catch (const std::exception &error) {
-                    throw DbError(fmt::format("会话 {} 记忆转换失败：{}", memories.getInt64(0), error.what()));
+                    throw DbError(std::format("会话 {} 记忆转换失败：{}", memories.getInt64(0), error.what()));
                 }
                 updateMemory.bind(2, memories.getInt64(0));
                 updateMemory.execOrThrow();
@@ -257,7 +258,7 @@ namespace insoulforge::SchemaMigrator {
                 }
                 std::string columns, values;
                 {
-                    const Statement info(db, fmt::format("PRAGMA table_info({})", table));
+                    const Statement info(db, std::format("PRAGMA table_info({})", table));
                     while (info.step()) {
                         const auto name = info.getText(1);
                         if (!columns.empty()) {
@@ -271,12 +272,12 @@ namespace insoulforge::SchemaMigrator {
                                                     : name;
                     }
                 }
-                Statement(db, fmt::format("CREATE TABLE {}_migration {}", table, body)).execOrThrow();
+                Statement(db, std::format("CREATE TABLE {}_migration {}", table, body)).execOrThrow();
                 Statement(
-                  db, fmt::format("INSERT INTO {}_migration ({}) SELECT {} FROM {}", table, columns, values, table))
+                  db, std::format("INSERT INTO {}_migration ({}) SELECT {} FROM {}", table, columns, values, table))
                   .execOrThrow();
                 Statement(db, "DROP TABLE " + table).execOrThrow();
-                Statement(db, fmt::format("ALTER TABLE {}_migration RENAME TO {}", table, table)).execOrThrow();
+                Statement(db, std::format("ALTER TABLE {}_migration RENAME TO {}", table, table)).execOrThrow();
                 for (const auto &sql: objects)
                     Statement(db, sql).execOrThrow();
                 if (sequence) {
@@ -294,7 +295,7 @@ namespace insoulforge::SchemaMigrator {
                                 : SessionId::group(std::to_string(value));
         }
         auto legacyExpression(std::string_view column) -> std::string {
-            return fmt::format("CASE WHEN {0}<0 THEN 'private:'||printf('%llu',{0}&9223372036854775807) ELSE "
+            return std::format("CASE WHEN {0}<0 THEN 'private:'||printf('%llu',{0}&9223372036854775807) ELSE "
                                "'group:'||printf('%llu',{0}) END",
               column);
         }
@@ -339,7 +340,7 @@ namespace insoulforge::SchemaMigrator {
             }
             std::string columns, values;
             {
-                const Statement info(db, fmt::format("PRAGMA table_info({})", table));
+                const Statement info(db, std::format("PRAGMA table_info({})", table));
                 while (info.step()) {
                     const auto name = info.getText(1);
                     if (tasks && name == "session_type")
@@ -360,11 +361,11 @@ namespace insoulforge::SchemaMigrator {
                     }
                 }
             }
-            Statement(db, fmt::format("CREATE TABLE {}_migration {}", table, body)).execOrThrow();
-            Statement(db, fmt::format("INSERT INTO {}_migration ({}) SELECT {} FROM {}", table, columns, values, table))
+            Statement(db, std::format("CREATE TABLE {}_migration {}", table, body)).execOrThrow();
+            Statement(db, std::format("INSERT INTO {}_migration ({}) SELECT {} FROM {}", table, columns, values, table))
               .execOrThrow();
             Statement(db, "DROP TABLE " + table).execOrThrow();
-            Statement(db, fmt::format("ALTER TABLE {}_migration RENAME TO {}", table, table)).execOrThrow();
+            Statement(db, std::format("ALTER TABLE {}_migration RENAME TO {}", table, table)).execOrThrow();
             for (auto sql: objects) {
                 if (tasks)
                     sql = std::regex_replace(sql, std::regex(R"(\btarget_id\b)"), "session_id");
@@ -408,10 +409,10 @@ namespace insoulforge::SchemaMigrator {
                 else if (value.is_string()) {
                     const auto parsed = UserId::parse(value.get_ref<const std::string &>());
                     if (!parsed || !parsed->toU64())
-                        throw DbError(fmt::format("聊天记录 {} 的会话 ID 无效", records.getInt64(0)));
+                        throw DbError(std::format("聊天记录 {} 的会话 ID 无效", records.getInt64(0)));
                     old = *parsed->toU64();
                 } else
-                    throw DbError(fmt::format("聊天记录 {} 的会话 ID 无效", records.getInt64(0)));
+                    throw DbError(std::format("聊天记录 {} 的会话 ID 无效", records.getInt64(0)));
                 record["session_id"] = legacyKey(old).toString();
                 update.bind(1, dumpJson(record));
                 update.bind(2, records.getInt64(0));

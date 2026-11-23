@@ -34,7 +34,7 @@ namespace insoulforge {
         /// @brief 追加完整消息并生成冻结快照
         /// @param message 完整消息 JSON；内部不会保留工作流专用 `session_id`
         /// @return 追加后的模型窗口快照
-        [[nodiscard]] auto append(json message) -> json;
+        auto append(json message) -> json;
 
         /// @brief 结束维护任务；成功时按数量删除队首消息，失败时传入 0 保留消息
         /// @note 手动清空不会取消任务，旧任务完成时仍可能删除清空后收到的新消息。
@@ -52,8 +52,8 @@ namespace insoulforge {
         /// @note 复制和标记在同一把锁内完成。
         [[nodiscard]] auto executorSnapshot() -> json;
 
-        /// @brief 获取管理后台与持久化恢复使用的完整消息值快照
-        /// @note 线程安全。与模型上下文窗口无关，不会截断尚未总结删除的较早消息。
+        /// @brief 获取当前列表中全部消息的独立值快照
+        /// @note 线程安全。不受模型上下文窗口限制，按旧到新顺序返回。
         [[nodiscard]] auto fullSnapshot() const -> json;
 
         /// @brief 从尚未总结移除的消息中读取共享快照（旧→新），时间格式为本地 YYYY-MM-DD HH:MM:SS。

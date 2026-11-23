@@ -21,7 +21,10 @@
 using namespace insoulforge;
 namespace {
     json favorites = json::array({json{{"resId", "old"}, {"desc", "same"}, {"md5", "abc"}}});
-    const std::string gif = drogon::utils::base64Decode("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==");
+    auto gifBytes() -> const std::string & {
+        static const auto bytes = drogon::utils::base64Decode("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==");
+        return bytes;
+    }
     int uploads = 0;
     bool snowMode = false;
     bool switchDuringDownload = false;
@@ -65,6 +68,7 @@ namespace {
     }
     auto runTests(const std::string host, int &exitCode) -> drogon::Task<> {
         try {
+            const auto &gif = gifBytes();
             auto client = drogon::HttpClient::newHttpClient(host);
             for (const auto &route: {"/admin/api/emoji/add", "/admin/api/emoji/delete"}) {
                 auto resp = co_await request(client, route, json::object(), false);
@@ -298,7 +302,7 @@ int main() {
           const auto body = json::parse(req->body());
           if (body.contains("base64")) {
               ++uploads;
-              require(body["base64"] == Image::encode(gif), "upload contains exact binary Base64");
+              require(body["base64"] == Image::encode(gifBytes()), "upload contains exact binary Base64");
               require(!body.contains("url"), "upload uses documented base64 field");
               callback(
                 jsonResponse({{"status", failUpload ? "failed" : "ok"}, {"data", {{"file", "/napcat/image.gif"}}}}));

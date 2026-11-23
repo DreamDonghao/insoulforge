@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -391,8 +392,8 @@ namespace {
         std::filesystem::remove(path);
     }
 
-    void testSessionReplyCoalescing() {
-        constexpr std::string_view kTestName = "session reply coalescing";
+    void testSessionProcessingCoalescing() {
+        constexpr std::string_view kTestName = "session processing coalescing";
         auto &db = insoulforge::Database::instance();
         check(db.initialize(":memory:").has_value(), "initializes database", kTestName);
         {
@@ -404,43 +405,48 @@ namespace {
                 return {{"message_id", id}, {"sender", {{"user_id", "11"}}},
                   {"segments", json::array({{{"type", "text"}, {"text", id}}})}};
             };
-            check(state.recordIncoming(message("first")).startReply, "idle message owns consumer", kTestName);
-            const auto routing = state.takeReplyRequest();
-            check(routing && routing->records.size() == 1, "router freezes its own input", kTestName);
-            check(!state.recordIncoming(message("during-router")).startReply,
-              "preparation continues during routing without parallel consumer", kTestName);
+            check(!state.tryClaimProcess(), "empty session cannot start a consumer", kTestName);
+            state.recordIncoming(message("first"));
+            check(state.tryClaimProcess(), "first message lets an idle session start a consumer", kTestName);
+            const auto routing = state.takeProcessEvents();
+            check(routing && routing->size() == 1, "router freezes its own input", kTestName);
+            state.recordIncoming(message("during-router"));
+            check(
+              !state.tryClaimProcess(), "preparation continues during routing without parallel consumer", kTestName);
             const auto execution = state.takeExecutorRequest();
-            check(execution.records.size() == 2 && routing->records.size() == 1,
+            check(execution.size() == 2 && routing->size() == 1,
               "executor refreezes newer messages after positive route", kTestName);
-            check(MessageRecord::isNewForExecutor(execution.records[0]) &&
-                    !MessageRecord::isNewForExecutor(state.messageList()->snapshot()[0]),
+            check(MessageRecord::isNewForExecutor(execution[0]) &&
+                    !MessageRecord::isNewForExecutor(state.messageList().snapshot()[0]),
               "executor copy retains old flags and originals are marked atomically", kTestName);
-            check(!state.recordIncoming(message("during-executor")).startReply,
-              "arrival during executor waits for same consumer", kTestName);
-            const auto after = state.takeReplyRequest();
-            check(after && after->records.size() == 3 && MessageRecord::isNewForExecutor(after->records.back()),
+            state.recordIncoming(message("during-executor"));
+            check(!state.tryClaimProcess(), "arrival during executor waits for same consumer", kTestName);
+            const auto after = state.takeProcessEvents();
+            check(after && after->size() == 3 && MessageRecord::isNewForExecutor(after->back()),
               "executor completion has a new batch to judge", kTestName);
-            check(!state.takeReplyRequest(), "skip with no newer arrival ends without unread loop", kTestName);
-            check(state.recordIncoming(message("after-idle")).startReply,
-              "arrival after consumer exit wakes a new consumer", kTestName);
-            check(state.takeReplyRequest().has_value(), "new router batch exists", kTestName);
-            check(!state.recordIncoming(message("mention")).startReply,
-              "mandatory event during router does not start second consumer", kTestName);
-            check(!state.recordIncoming(message("ordinary")).startReply,
-              "ordinary arrival coalesces into the same pending batch", kTestName);
-            const auto mandatory = state.takeReplyRequest();
-            check(mandatory && mandatory->records.back()["message_id"] == "ordinary",
-              "negative route retains all newer messages for Router", kTestName);
+            check(!state.takeProcessEvents(), "skip with no newer arrival ends without unread loop", kTestName);
+            state.recordIncoming(message("after-idle"));
+            check(state.tryClaimProcess(), "arrival after consumer exit wakes a new consumer", kTestName);
+            check(state.takeProcessEvents().has_value(), "new router batch exists", kTestName);
+            state.recordIncoming(message("mention"));
+            check(!state.tryClaimProcess(), "arrival during router does not start a second consumer", kTestName);
+            state.recordIncoming(message("ordinary"));
+            check(!state.tryClaimProcess(), "second arrival waits for the same consumer", kTestName);
+            const auto coalesced = state.takeProcessEvents();
+            check(coalesced && coalesced->size() >= 2 &&
+                    (*coalesced)[coalesced->size() - 2]["message_id"] == "mention" &&
+                    coalesced->back()["message_id"] == "ordinary",
+              "negative route retains both newer messages in order for Router", kTestName);
             (void) state.takeExecutorRequest();
-            check(!state.takeReplyRequest(), "positive execution consumes all pre-snapshot demands", kTestName);
-            check(state.recordIncoming(message("silent")).startReply && state.takeReplyRequest().has_value() &&
-                    !state.takeReplyRequest(),
+            check(!state.takeProcessEvents(), "positive execution consumes all pre-snapshot demands", kTestName);
+            state.recordIncoming(message("silent"));
+            check(state.tryClaimProcess() && state.takeProcessEvents().has_value() && !state.takeProcessEvents(),
               "every incoming event wakes one consumer and no event repeats without new input", kTestName);
 
             const auto oldLimit = config.contextWindowLimit;
             config.contextWindowLimit = 2;
-            auto copy = state.messageList()->executorSnapshot();
-            check(copy.size() == 2 && state.messageList()->fullSnapshot().size() > 2,
+            auto copy = state.messageList().executorSnapshot();
+            check(copy.size() == 2 && state.messageList().fullSnapshot().size() > 2,
               "executor retains existing window bound", kTestName);
             MessageList limited(SessionId::group("101"), db, config);
             (void) limited.append(message("outside"));
@@ -452,9 +458,9 @@ namespace {
                     !MessageRecord::isNewForExecutor(all[2]),
               "records outside executor window remain unprocessed", kTestName);
             config.contextWindowLimit = oldLimit;
-            state.messageList()->flushToStorage();
+            state.messageList().flushToStorage();
             MessageList restored(session, db, config);
-            check(restored.fullSnapshot() == state.messageList()->fullSnapshot(),
+            check(restored.fullSnapshot() == state.messageList().fullSnapshot(),
               "processed flags survive record persistence", kTestName);
             check(!MessageRecord::isNewForExecutor(message("legacy")), "old records default processed", kTestName);
         }
@@ -733,7 +739,7 @@ namespace {
     void restoreIntegerSessionSchema(sqlite3 *db) {
         using namespace insoulforge;
         const auto integerKey = [](std::string_view column) {
-            return fmt::format("CASE WHEN {0} LIKE 'private:%' THEN CAST(substr({0},9) AS "
+            return std::format("CASE WHEN {0} LIKE 'private:%' THEN CAST(substr({0},9) AS "
                                "INTEGER)|(-9223372036854775807-1) ELSE CAST(substr({0},7) AS INTEGER) END",
               column);
         };
@@ -767,7 +773,7 @@ namespace {
             }
             std::string columns, values;
             {
-                const Statement info(db, fmt::format("PRAGMA table_info({})", table));
+                const Statement info(db, std::format("PRAGMA table_info({})", table));
                 while (info.step()) {
                     const auto name = info.getText(1);
                     if (!columns.empty()) {
@@ -787,12 +793,12 @@ namespace {
                     }
                 }
             }
-            Statement(db, fmt::format("CREATE TABLE {}_oldsession {}", table, body)).execOrThrow();
+            Statement(db, std::format("CREATE TABLE {}_oldsession {}", table, body)).execOrThrow();
             Statement(
-              db, fmt::format("INSERT INTO {}_oldsession ({}) SELECT {} FROM {}", table, columns, values, table))
+              db, std::format("INSERT INTO {}_oldsession ({}) SELECT {} FROM {}", table, columns, values, table))
               .execOrThrow();
             Statement(db, "DROP TABLE " + table).execOrThrow();
-            Statement(db, fmt::format("ALTER TABLE {}_oldsession RENAME TO {}", table, table)).execOrThrow();
+            Statement(db, std::format("ALTER TABLE {}_oldsession RENAME TO {}", table, table)).execOrThrow();
             for (auto sql: objects) {
                 if (!source && !tasks) {
                     sql = std::regex_replace(sql, std::regex("session_id"), "group_id");
@@ -823,10 +829,10 @@ namespace {
             } else {
                 body.replace(body.find("user_id TEXT"), std::string_view("user_id TEXT").size(), "user_id INTEGER");
             }
-            Statement(db, fmt::format("CREATE TABLE {}_old {}", table, body)).execOrThrow();
-            Statement(db, fmt::format("INSERT INTO {}_old SELECT * FROM {}", table, table)).execOrThrow();
+            Statement(db, std::format("CREATE TABLE {}_old {}", table, body)).execOrThrow();
+            Statement(db, std::format("INSERT INTO {}_old SELECT * FROM {}", table, table)).execOrThrow();
             Statement(db, "DROP TABLE " + table).execOrThrow();
-            Statement(db, fmt::format("ALTER TABLE {}_old RENAME TO {}", table, table)).execOrThrow();
+            Statement(db, std::format("ALTER TABLE {}_old RENAME TO {}", table, table)).execOrThrow();
         }
         Statement(db, "CREATE INDEX idx_person_memory_entries_user_id ON person_memory_entries(user_id, id)")
           .execOrThrow();
@@ -837,7 +843,7 @@ namespace {
         restoreIntegerUserSchema(db);
         for (const auto *table:
           {"admins", "blacklisted_users", "person_affinity", "person_memories", "person_memory_entries"}) {
-            insoulforge::Statement(db, fmt::format("ALTER TABLE {} RENAME COLUMN user_id TO qq_number", table))
+            insoulforge::Statement(db, std::format("ALTER TABLE {} RENAME COLUMN user_id TO qq_number", table))
               .execOrThrow();
         }
         insoulforge::Statement(db, "DROP INDEX idx_person_memory_entries_user_id").execOrThrow();
@@ -978,7 +984,7 @@ namespace {
         for (const auto *table:
           {"admins", "blacklisted_users", "person_affinity", "person_memories", "person_memory_entries"}) {
             const Statement type(
-              db.handle(), fmt::format("SELECT type FROM pragma_table_info('{}') WHERE name='user_id'", table));
+              db.handle(), std::format("SELECT type FROM pragma_table_info('{}') WHERE name='user_id'", table));
             check(type.step() && type.getText(0) == "TEXT", "all user identity columns are TEXT", kTestName);
         }
         bool triggerPreserved = false;
@@ -1154,7 +1160,7 @@ namespace {
         }
         SchemaMigrator::migrate(db.handle());
         for (const auto *table: {"chat_records", "short_term_memory", "memory_items"}) {
-            const Statement foreignKey(db.handle(), fmt::format("PRAGMA foreign_key_list({})", table));
+            const Statement foreignKey(db.handle(), std::format("PRAGMA foreign_key_list({})", table));
             check(foreignKey.step() && foreignKey.getText(2) == "group_config" &&
                     foreignKey.getText(3) == "session_id" && foreignKey.getText(4) == "session_id",
               "converts both sides of legacy foreign keys", kTestName);
@@ -1309,7 +1315,7 @@ namespace {
         check(schema() == original, "current version is unchanged on repeated startup", kTestName);
         Statement(db, "INSERT INTO prompts(prompt_key,prompt_content) VALUES('preserved','original')").execOrThrow();
         for (const auto legacyVersion: {0, 1, 12, 23}) {
-            Statement(db, fmt::format("PRAGMA user_version={}", legacyVersion)).execOrThrow();
+            Statement(db, std::format("PRAGMA user_version={}", legacyVersion)).execOrThrow();
             std::string error;
             try {
                 SchemaMigrator::migrate(db);
@@ -1321,7 +1327,7 @@ namespace {
                     version() == legacyVersion && schema() == original && data.step() && data.getText(0) == "original",
               "unsupported old database is rejected with upgrade instructions and no changes", kTestName);
         }
-        Statement(db, fmt::format("PRAGMA user_version={}", SchemaMigrator::kLatestVersion + 1)).execOrThrow();
+        Statement(db, std::format("PRAGMA user_version={}", SchemaMigrator::kLatestVersion + 1)).execOrThrow();
         bool rejectedFuture = false;
         try {
             SchemaMigrator::migrate(db);
@@ -4271,7 +4277,7 @@ auto main() -> int {
     testSelfIdentityNormalization();
     testNewWorkflowDetectsCommands();
     testDefaultPrivateSessionState();
-    testSessionReplyCoalescing();
+    testSessionProcessingCoalescing();
     testMessageRecordSemanticQueries();
     testNewWorkflowRouterHardRules();
     testJevUnconfiguredFallsBackToExistingBehavior();

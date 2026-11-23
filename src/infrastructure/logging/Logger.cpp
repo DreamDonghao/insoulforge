@@ -2,11 +2,11 @@
 /// @brief 统一运行日志入口 - 实现
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
+#include <format>
 
 #include <cstdio>
-#include <fmt/chrono.h>
-#include <fmt/format.h>
 #include <spdlog/async.h>
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -14,6 +14,7 @@
 #include <trantor/utils/Logger.h>
 
 #include <admin/logging/LogWebSocketManager.hpp>
+#include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
 #include <infrastructure/logging/ConnectionRefusedLogFilter.hpp>
@@ -71,15 +72,9 @@ namespace insoulforge {
 
         [[nodiscard]] auto formatTimestamp(const spdlog::log_clock::time_point timestamp) -> std::string {
             const auto time = spdlog::log_clock::to_time_t(timestamp);
-            std::tm localTime{};
-#ifdef _WIN32
-            localtime_s(&localTime, &time);
-#else
-            localtime_r(&time, &localTime);
-#endif
             const auto milliseconds =
               std::chrono::duration_cast<std::chrono::milliseconds>(timestamp.time_since_epoch()).count() % 1000;
-            return fmt::format("{:%Y-%m-%d %H:%M:%S}.{:03d}", localTime, milliseconds);
+            return std::format("{}.{:03d}", formatUnixTime(time), milliseconds);
         }
     } // namespace
 
@@ -97,7 +92,7 @@ namespace insoulforge {
                 fileSink->set_pattern("[%Y-%m-%d %H:%M:%S.%e] %v");
                 sinks.push_back(fileSink);
             } catch (const std::exception &e) {
-                fmt::print(stderr, "警告: 文件日志不可用 ({})，仅输出到控制台\n", e.what());
+                std::fputs(std::format("警告: 文件日志不可用 ({})，仅输出到控制台\n", e.what()).c_str(), stderr);
             }
 
             spdlog::init_thread_pool(8192, 1);
@@ -114,7 +109,7 @@ namespace insoulforge {
                 if (connectionRefusedLogFilter().shouldWrite(std::string_view(message, static_cast<size_t>(length))))
                     std::fwrite(message, 1, static_cast<size_t>(length), stdout);
             }, [] { std::fflush(stdout); });
-            info(std::nullopt, "Logger", fmt::format("日志系统初始化完成 | file={}", sinks.size() > 1));
+            info(std::nullopt, "Logger", std::format("日志系统初始化完成 | file={}", sinks.size() > 1));
             return {};
         } catch (const spdlog::spdlog_ex &error) {
             return std::unexpected(std::string("日志系统初始化失败: ") + error.what());
@@ -186,7 +181,7 @@ namespace insoulforge {
           .sessionId = sessionId,
           .source = std::move(sourceName),
           .content = std::move(content)};
-        const std::string line = fmt::format("[{}][{}][{}][{}]", entry.level,
+        const std::string line = std::format("[{}][{}][{}][{}]", entry.level,
           entry.sessionId ? entry.sessionId->toString() : "-", entry.source, entry.content);
 
         spdlog::log(spdlogLevel, "{}", line);

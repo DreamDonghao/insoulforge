@@ -1,7 +1,7 @@
 /// @file BlacklistStore.cpp
 /// @brief 全局用户黑名单持久化实现
 
-#include <fmt/format.h>
+#include <format>
 
 #include <infrastructure/UserId.hpp>
 #include <infrastructure/logging/Logger.hpp>
@@ -24,7 +24,7 @@ namespace insoulforge::BlacklistStore {
         const Statement statement(database.handle(), "INSERT OR IGNORE INTO blacklisted_users (user_id) VALUES (?)");
         statement.bind(1, userId.toString());
         statement.exec();
-        Logger::info(std::nullopt, "Blacklist", fmt::format("已添加: {}", userId));
+        Logger::info(std::nullopt, "Blacklist", std::format("已添加: {}", userId));
     }
 
     void remove(const UserId &userId) {
@@ -33,7 +33,7 @@ namespace insoulforge::BlacklistStore {
         const Statement statement(database.handle(), "DELETE FROM blacklisted_users WHERE user_id = ?");
         statement.bind(1, userId.toString());
         statement.exec();
-        Logger::info(std::nullopt, "Blacklist", fmt::format("已移除: {}", userId));
+        Logger::info(std::nullopt, "Blacklist", std::format("已移除: {}", userId));
     }
 
     auto getAll() -> std::vector<UserId> {

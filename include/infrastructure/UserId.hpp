@@ -3,6 +3,7 @@
 #pragma once
 
 #include <concepts>
+#include <format>
 #include <functional>
 #include <stdexcept>
 #include <string>
@@ -10,7 +11,6 @@
 
 #include <compare>
 #include <expected>
-#include <fmt/format.h>
 #include <type_traits>
 
 #include <infrastructure/NumericTypes.hpp>
@@ -69,8 +69,8 @@ struct std::hash<insoulforge::UserId> {
 };
 
 template<>
-struct fmt::formatter<insoulforge::UserId> : fmt::formatter<std::string_view> {
+struct std::formatter<insoulforge::UserId> : std::formatter<std::string_view> {
     auto format(const insoulforge::UserId &value, format_context &ctx) const {
-        return fmt::formatter<std::string_view>::format(value.toString(), ctx);
+        return std::formatter<std::string_view>::format(value.toString(), ctx);
     }
 };

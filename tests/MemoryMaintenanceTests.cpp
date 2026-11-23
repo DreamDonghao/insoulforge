@@ -5,6 +5,7 @@
 #include <atomic>
 #include <chrono>
 #include <filesystem>
+#include <format>
 #include <functional>
 #include <iostream>
 #include <mutex>
@@ -996,9 +997,9 @@ auto main() -> int {
           const auto &config = Config::instance();
           const bool validLimits =
             extraction
-              ? prompt.contains(fmt::format("不能为空，最多 {} 字", config.conversationSummaryMaxChars.load())) &&
-                  prompt.contains(fmt::format("每条记忆最多 {} 字", config.personMemoryEntryMaxChars.load()))
-              : prompt.contains(fmt::format("longTerm 每条最多 {} 字", config.longTermMemoryEntryMaxChars.load()));
+              ? prompt.contains(std::format("不能为空，最多 {} 字", config.conversationSummaryMaxChars.load())) &&
+                  prompt.contains(std::format("每条记忆最多 {} 字", config.personMemoryEntryMaxChars.load()))
+              : prompt.contains(std::format("longTerm 每条最多 {} 字", config.longTermMemoryEntryMaxChars.load()));
           if (!validLimits) {
               auto reply = drogon::HttpResponse::newHttpResponse();
               reply->setStatusCode(drogon::k400BadRequest);

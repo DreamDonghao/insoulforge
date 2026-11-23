@@ -1,6 +1,8 @@
 /// @file TaskScheduler.cpp
 /// @brief 定时任务调度器 - 实现
 
+#include <format>
+
 #include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
@@ -40,9 +42,9 @@ namespace insoulforge {
         auto buildText(const TaskStore::ScheduledTask &task, const bool delayed) -> std::string {
             // 正文必须是对机器人下达的指令而非对用户的陈述，
             // content 是备忘而非现成回复，具体怎么说由到点时的 AI 结合上下文自行决定
-            const std::string when = task.isDaily ? fmt::format("你设定的每日 {}", formatTimeOfDay(task.remindTime))
-                                                  : fmt::format("你在 {} 设定的", formatUnixTime(task.remindTime));
-            std::string text = fmt::format("【{}】{}，{}定时任务到点了。你留下的备忘：「{}」。"
+            const std::string when = task.isDaily ? std::format("你设定的每日 {}", formatTimeOfDay(task.remindTime))
+                                                  : std::format("你在 {} 设定的", formatUnixTime(task.remindTime));
+            std::string text = std::format("【{}】{}，{}定时任务到点了。你留下的备忘：「{}」。"
                                            "请结合会话上下文自行决定如何完成这件事并作出回应",
               kSystemTaskLabel, Config::instance().botName, when, task.content);
             if (delayed) {
@@ -90,7 +92,7 @@ namespace insoulforge {
         entry.fireTime = entry.task.remindTime - kFireLead.count();
 
         Logger::info(std::nullopt, "Scheduler",
-          fmt::format("已创建{}定时任务 #{}: {}({}) 于 {}", entry.task.isDaily ? "每日" : "", id,
+          std::format("已创建{}定时任务 #{}: {}({}) 于 {}", entry.task.isDaily ? "每日" : "", id,
             entry.task.sessionId.isPrivate() ? "私聊" : "群聊", entry.task.sessionId.targetId(),
             formatUnixTime(entry.task.remindTime)));
 
@@ -139,7 +141,7 @@ namespace insoulforge {
             }
         }
         Logger::info(std::nullopt, "Scheduler",
-          fmt::format("恢复待触发定时任务 {} 条（其中已过期 {} 条）", tasks.size(), overdue));
+          std::format("恢复待触发定时任务 {} 条（其中已过期 {} 条）", tasks.size(), overdue));
         if (!tasks.empty()) {
             m_cv.notify_all();
         }
@@ -185,18 +187,18 @@ namespace insoulforge {
         const std::time_t now = std::time(nullptr);
         const bool delayed = now > task.remindTime;
         Logger::info(logSessionId, "Scheduler",
-          fmt::format("触发{}定时任务 #{} ({}{} | 计划={} | 实际={})", task.isDaily ? "每日" : "", task.id,
+          std::format("触发{}定时任务 #{} ({}{} | 计划={} | 实际={})", task.isDaily ? "每日" : "", task.id,
             delayed ? "延时，" : "", task.content.substr(0, 50), formatUnixTime(task.remindTime), formatUnixTime(now)));
 
         try {
-            EventWorkflow::instance().enqueueSystemMessage(
+            EventWorkflow::instance().enqueueSystemEvent(
               task.sessionId, buildText(task, delayed), std::string(kSystemTaskLabel));
-            Logger::info(logSessionId, "Scheduler", fmt::format("定时任务 #{} 已加入消息工作流", task.id));
+            Logger::info(logSessionId, "Scheduler", std::format("定时任务 #{} 已加入消息工作流", task.id));
         } catch (const std::exception &error) {
             Logger::error(
-              logSessionId, "Scheduler", fmt::format("定时任务 #{} 加入消息工作流失败: {}", task.id, error.what()));
+              logSessionId, "Scheduler", std::format("定时任务 #{} 加入消息工作流失败: {}", task.id, error.what()));
         } catch (...) {
-            Logger::error(logSessionId, "Scheduler", fmt::format("定时任务 #{} 加入消息工作流失败: 未知错误", task.id));
+            Logger::error(logSessionId, "Scheduler", std::format("定时任务 #{} 加入消息工作流失败: 未知错误", task.id));
         }
 
         if (!task.isDaily) {
@@ -214,7 +216,7 @@ namespace insoulforge {
         entry.task.remindTime = nextFire;
         entry.fireTime = nextFire - kFireLead.count();
         Logger::info(logSessionId, "Scheduler",
-          fmt::format("每日任务 #{} 已重排至下次触发：{}", entry.task.id, formatUnixTime(nextFire)));
+          std::format("每日任务 #{} 已重排至下次触发：{}", entry.task.id, formatUnixTime(nextFire)));
         instance().pushEntry(std::move(entry));
     }
 

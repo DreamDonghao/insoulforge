@@ -2,6 +2,7 @@
 /// @brief 数据库 Schema 版本迁移 - 实现
 
 #include <array>
+#include <format>
 
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/logging/Logger.hpp>
@@ -17,7 +18,7 @@ namespace insoulforge {
             if (sqlite3_exec(db, std::string(sql).c_str(), nullptr, nullptr, &errMsg) != SQLITE_OK) {
                 std::string err = errMsg ? errMsg : sqlite3_errmsg(db);
                 sqlite3_free(errMsg);
-                Logger::error(std::nullopt, "Storage", fmt::format("迁移 SQL 执行失败: {} - {}", sql, err));
+                Logger::error(std::nullopt, "Storage", std::format("迁移 SQL 执行失败: {} - {}", sql, err));
                 throw DbError(err);
             }
         }
@@ -145,7 +146,7 @@ namespace insoulforge {
         }
 
         void setUserVersion(sqlite3 *db, const i32 version) {
-            execSQL(db, fmt::format("PRAGMA user_version = {}", version));
+            execSQL(db, std::format("PRAGMA user_version = {}", version));
         }
 
         auto hasUserTables(sqlite3 *db) -> bool {
@@ -161,7 +162,7 @@ namespace insoulforge {
             const i32 version = getUserVersion(db);
             if (version == 0 && !hasUserTables(db)) {
                 Logger::info(
-                  std::nullopt, "Storage", fmt::format("检测到全新数据库，直接创建最新 Schema (v{})", kLatestVersion));
+                  std::nullopt, "Storage", std::format("检测到全新数据库，直接创建最新 Schema (v{})", kLatestVersion));
                 Transaction transaction(db);
                 execAll(db, currentTables);
                 execAll(db, indexes);
@@ -172,12 +173,12 @@ namespace insoulforge {
 
             // 在执行任何写入前检查兼容范围，旧库必须先用 v1.7.x 完成中转升级。
             if (version < kMinimumSupportedVersion)
-                throw DbError(fmt::format(
+                throw DbError(std::format(
                   "数据库版本 v{} 过旧，最低支持 v{}（InSoulForge v1.7.0）。"
                   "请先运行支持旧库迁移的 InSoulForge v1.7.x（例如 v1.7.2）完成数据库升级，再安装当前版本。",
                   version, kMinimumSupportedVersion));
             if (version > kLatestVersion)
-                throw DbError(fmt::format(
+                throw DbError(std::format(
                   "数据库版本 v{} 高于当前程序支持的 v{}，请使用匹配或更新的程序版本。", version, kLatestVersion));
             if (version == kLatestVersion)
                 return;
@@ -192,7 +193,7 @@ namespace insoulforge {
               }};
             static_assert(steps.size() == kLatestVersion - kMinimumSupportedVersion);
             Logger::info(
-              std::nullopt, "Storage", fmt::format("数据库版本 v{}，开始迁移到 v{}", version, kLatestVersion));
+              std::nullopt, "Storage", std::format("数据库版本 v{}，开始迁移到 v{}", version, kLatestVersion));
             for (i32 v = version; v < kLatestVersion; ++v) {
                 try {
                     Transaction transaction(db);
@@ -200,10 +201,10 @@ namespace insoulforge {
                     setUserVersion(db, v + 1);
                     transaction.commit();
                 } catch (...) {
-                    Logger::error(std::nullopt, "Storage", fmt::format("数据库迁移 v{} -> v{} 失败，已回滚", v, v + 1));
+                    Logger::error(std::nullopt, "Storage", std::format("数据库迁移 v{} -> v{} 失败，已回滚", v, v + 1));
                     throw;
                 }
-                Logger::info(std::nullopt, "Storage", fmt::format("数据库迁移完成: v{} -> v{}", v, v + 1));
+                Logger::info(std::nullopt, "Storage", std::format("数据库迁移完成: v{} -> v{}", v, v + 1));
             }
         }
     } // namespace SchemaMigrator

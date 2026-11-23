@@ -1,6 +1,7 @@
 /// @file ImageGenerationService.cpp
 /// @brief 调用图片生成接口并解析图片结果
 
+#include <format>
 #include <stdexcept>
 #include <string_view>
 
@@ -116,7 +117,7 @@ namespace insoulforge::ImageGenerationService {
                 if (detail.empty())
                     detail = getStr(errorBody, "message");
             }
-            throw std::runtime_error(fmt::format("图片生成接口请求失败: HTTP {}{}",
+            throw std::runtime_error(std::format("图片生成接口请求失败: HTTP {}{}",
               static_cast<i32>((*response)->getStatusCode()), detail.empty() ? "" : ", " + detail.substr(0, 500)));
         }
 

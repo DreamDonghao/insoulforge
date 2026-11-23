@@ -1,6 +1,8 @@
 /// @file OneBotWebSocketTransport.cpp
 /// @brief OneBot 正向 WebSocket 连接管理器实现
 
+#include <format>
+
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/config/Config.hpp>
 #include <infrastructure/logging/Logger.hpp>
@@ -172,7 +174,7 @@ namespace insoulforge {
         }
         if (!splitWebSocketUrl(getStr(connectionConfig, "qqWebSocketHost"), origin, path)) {
             Logger::error(std::nullopt, "OneBot",
-              fmt::format("OneBot WebSocket 地址无效: {}", getStr(connectionConfig, "qqWebSocketHost")));
+              std::format("OneBot WebSocket 地址无效: {}", getStr(connectionConfig, "qqWebSocketHost")));
             return;
         }
 
@@ -238,11 +240,11 @@ namespace insoulforge {
               Logger::resetConnectionRefusedWarnings();
               if (recovered) {
                   Logger::info(std::nullopt, "OneBot",
-                    fmt::format("OneBot WebSocket 已恢复连接，离线 {} 秒，失败尝试 {} 次", recovered->offlineSeconds,
+                    std::format("OneBot WebSocket 已恢复连接，离线 {} 秒，失败尝试 {} 次", recovered->offlineSeconds,
                       recovered->failedAttempts));
               } else {
                   Logger::info(std::nullopt, "OneBot",
-                    fmt::format("OneBot WebSocket 已连接: {}", Config::instance().qqWebSocketHost));
+                    std::format("OneBot WebSocket 已连接: {}", Config::instance().qqWebSocketHost));
               }
           });
     }
@@ -267,7 +269,7 @@ namespace insoulforge {
                       matchesConnection && atOrNull(expectedConnection, key) == atOrNull(m_connectionConfig, key);
             }
             if (!matchesConnection || !m_running || !m_connection || !m_connection->connected()) {
-                Logger::warn(std::nullopt, "OneBot", fmt::format("OneBot WebSocket 未连接，无法调用动作: {}", action));
+                Logger::warn(std::nullopt, "OneBot", std::format("OneBot WebSocket 未连接，无法调用动作: {}", action));
                 return false;
             }
             echo = "insoulforge-" + std::to_string(++m_nextEcho);
@@ -282,7 +284,7 @@ namespace insoulforge {
         try {
             connection->send(dumpJson(request));
         } catch (const std::exception &error) {
-            Logger::warn(std::nullopt, "OneBot", fmt::format("OneBot WebSocket 动作发送失败: {}", error.what()));
+            Logger::warn(std::nullopt, "OneBot", std::format("OneBot WebSocket 动作发送失败: {}", error.what()));
             std::scoped_lock lock(m_mutex);
             m_pendingRequests.erase(echo);
             return false;
@@ -297,19 +299,19 @@ namespace insoulforge {
             const u16 closeCode = message.size() >= 2 ? static_cast<u16>((data[0] << 8U) | data[1]) : 0;
             const std::string reason = message.size() > 2 ? message.substr(2) : "";
             Logger::warn(std::nullopt, "OneBot",
-              fmt::format("OneBot WebSocket 收到关闭帧: code={}, reason={}", closeCode, reason));
+              std::format("OneBot WebSocket 收到关闭帧: code={}, reason={}", closeCode, reason));
             return;
         }
         if (type == drogon::WebSocketMessageType::Ping || type == drogon::WebSocketMessageType::Pong) {
             return;
         }
         if (type != drogon::WebSocketMessageType::Text) {
-            Logger::warn(std::nullopt, "OneBot", fmt::format("忽略 OneBot WebSocket 非文本消息"));
+            Logger::warn(std::nullopt, "OneBot", std::format("忽略 OneBot WebSocket 非文本消息"));
             return;
         }
         json body;
         if (!tryParseJson(message, body) || !body.is_object()) {
-            Logger::warn(std::nullopt, "OneBot", fmt::format("忽略 OneBot WebSocket 非法 JSON 消息"));
+            Logger::warn(std::nullopt, "OneBot", std::format("忽略 OneBot WebSocket 非法 JSON 消息"));
             return;
         }
         if (const std::string echo = jsonToString(atOrNull(body, "echo")); !echo.empty()) {
@@ -346,14 +348,14 @@ namespace insoulforge {
         failRequests(callbacks);
         if (shouldReconnect) {
             if (report) {
-                const auto error = report->lastError ? fmt::format("result={}", *report->lastError) : "连接已断开";
+                const auto error = report->lastError ? std::format("result={}", *report->lastError) : "连接已断开";
                 if (report->first) {
                     Logger::warn(std::nullopt, "OneBot",
-                      fmt::format("OneBot WebSocket 连接不可用: {}，每 {} 秒重试，持续失败每 5 分钟汇总", error,
+                      std::format("OneBot WebSocket 连接不可用: {}，每 {} 秒重试，持续失败每 5 分钟汇总", error,
                         kReconnectDelaySeconds));
                 } else {
                     Logger::warn(std::nullopt, "OneBot",
-                      fmt::format(
+                      std::format(
                         "OneBot WebSocket 仍未连接，已离线 {} 秒，失败尝试 {} 次，最近错误: {}，继续每 {} 秒重试",
                         report->offlineSeconds, report->failedAttempts, error, kReconnectDelaySeconds));
                 }

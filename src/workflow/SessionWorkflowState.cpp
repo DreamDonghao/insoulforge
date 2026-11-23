@@ -8,56 +8,65 @@
 
 namespace insoulforge {
     SessionWorkflowState::SessionWorkflowState(const SessionId &sessionId, const Database &database,
-      const Config &config) : m_messageList(std::make_shared<MessageList>(sessionId, database, config)) {}
+      const Config &config) : m_messageList(sessionId, database, config) {}
 
-    auto SessionWorkflowState::messageList() const noexcept -> const std::shared_ptr<MessageList> & {
-        return m_messageList;
+    auto SessionWorkflowState::messageList() noexcept -> MessageList & { return m_messageList; }
+
+    auto SessionWorkflowState::messageList()const noexcept ->const MessageList & { return m_messageList; }
+
+    void SessionWorkflowState::enqueueCompose(json message) {
+        std::lock_guard lock(m_mutex);
+        m_pendingComposeMessages.push(std::move(message));
     }
 
-    auto SessionWorkflowState::enqueuePreparation(json message) -> bool {
+    auto SessionWorkflowState::tryClaimCompose() -> bool {
         std::lock_guard lock(m_mutex);
-        m_pendingPreparationMessages.push(std::move(message));
-        if (m_isPreparationRunning) {
+        if (m_isComposing || m_pendingComposeMessages.empty()) {
             return false;
         }
-        m_isPreparationRunning = true;
+        m_isComposing = true;
         return true;
     }
 
-    auto SessionWorkflowState::takePreparationMessage() -> std::optional<json> {
+    void SessionWorkflowState::recordIncoming(json message) {
         std::lock_guard lock(m_mutex);
-        if (m_pendingPreparationMessages.empty()) {
-            m_isPreparationRunning = false;
+        m_messageList.append(std::move(message));
+        m_pendingProcessing = true;
+    }
+    auto SessionWorkflowState::tryClaimProcess() -> bool {
+        std::lock_guard lock(m_mutex);
+        if (m_isProcessing || !m_pendingProcessing) {
+            return false;
+        }
+        m_isProcessing = true;
+        return true;
+    }
+
+    auto SessionWorkflowState::takeComposeEvent() -> std::optional<json> {
+        std::lock_guard lock(m_mutex);
+        if (m_pendingComposeMessages.empty()) {
+            m_isComposing = false;
             return std::nullopt;
         }
-        json message = std::move(m_pendingPreparationMessages.front());
-        m_pendingPreparationMessages.pop();
+        json message = std::move(m_pendingComposeMessages.front());
+        m_pendingComposeMessages.pop();
         return message;
     }
 
-    auto SessionWorkflowState::recordIncoming(json message) -> IncomingMessageUpdate {
+    auto SessionWorkflowState::takeProcessEvents() -> std::optional<json> {
         std::lock_guard lock(m_mutex);
-        auto records = m_messageList->append(std::move(message));
-        m_pendingReply = true;
-        const bool startReply = !m_isReplyProcessing;
-        m_isReplyProcessing = true;
-        return IncomingMessageUpdate{.records = std::move(records), .startReply = startReply};
-    }
-
-    auto SessionWorkflowState::takeReplyRequest() -> std::optional<ReplyRequest> {
-        std::lock_guard lock(m_mutex);
-        if (!m_pendingReply) {
-            m_isReplyProcessing = false;
+        if (!m_pendingProcessing) {
+            m_isProcessing = false;
             return std::nullopt;
         }
-        m_pendingReply = false;
-        return ReplyRequest{m_messageList->snapshot()};
+        m_pendingProcessing = false;
+        return m_messageList.snapshot();
     }
 
-    auto SessionWorkflowState::takeExecutorRequest() -> ReplyRequest {
+    auto SessionWorkflowState::takeExecutorRequest() -> json {
         std::lock_guard lock(m_mutex);
-        auto records = m_messageList->executorSnapshot();
-        m_pendingReply = false;
-        return ReplyRequest{std::move(records)};
+        auto records = m_messageList.executorSnapshot();
+        m_pendingProcessing = false;
+        return records;
     }
 } // namespace insoulforge

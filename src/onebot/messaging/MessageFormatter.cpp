@@ -3,10 +3,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <format>
 #include <utility>
 #include <vector>
 
-#include <fmt/format.h>
 #include <regex>
 
 #include <onebot/messaging/MessageFormatter.hpp>
@@ -16,10 +16,10 @@ namespace insoulforge {
     auto MessageFormatter::favoriteEmojiToCQCode(const json &emoji) -> std::expected<std::string, std::string> {
         if (getBool(emoji, "is_mark_face") && !getStr(emoji, "emoji_id").empty() &&
             !getStr(emoji, "emoji_package_id").empty() && !getStr(emoji, "key").empty())
-            return fmt::format("[CQ:mface,summary={},emoji_id={},emoji_package_id={},key={}]", getStr(emoji, "summary"),
+            return std::format("[CQ:mface,summary={},emoji_id={},emoji_package_id={},key={}]", getStr(emoji, "summary"),
               getStr(emoji, "emoji_id"), getStr(emoji, "emoji_package_id"), getStr(emoji, "key"));
         if (const auto url = getStr(emoji, "url"); !url.empty())
-            return fmt::format("[CQ:image,file={},sub_type=1,summary={}]", url, getStr(emoji, "summary"));
+            return std::format("[CQ:image,file={},sub_type=1,summary={}]", url, getStr(emoji, "summary"));
         return std::unexpected("缺少图片地址或完整商城表情字段，无法发送");
     }
     auto MessageFormatter::convertAtToCQCode(std::string text) -> std::string {
@@ -55,7 +55,7 @@ namespace insoulforge {
                         pos = endPos;
                         continue;
                     }
-                    std::string cqCode = fmt::format("[CQ:at,qq={}]", *number);
+                    std::string cqCode = std::format("[CQ:at,qq={}]", *number);
                     result.replace(pos, mention.length(), cqCode);
                     pos += cqCode.length();
                 } else {

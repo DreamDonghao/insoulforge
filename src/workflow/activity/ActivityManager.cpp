@@ -104,7 +104,7 @@ namespace insoulforge {
     ActivityManager::ActivityManager(EventSink sink) : m_sink(std::move(sink)), m_timer(0) {}
     auto ActivityManager::instance() -> ActivityManager & {
         static auto manager = ActivityManager{[](Event event) {
-            EventWorkflow::instance().enqueueActivityMessage(
+            EventWorkflow::instance().enqueueActivityEvent(
               event.sessionId, std::move(event.text), std::move(event.name), std::move(event.mode), event.attachments);
         }};
         return manager;

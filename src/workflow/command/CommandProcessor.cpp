@@ -1,6 +1,8 @@
 /// @file CommandProcessor.cpp
 /// @brief 消息工作流的管理命令处理实现
 
+#include <format>
+
 #include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
@@ -82,7 +84,7 @@ namespace insoulforge::CommandProcessor {
         if (command == "/status" || command == "/状态") {
             const bool enabled = SessionStore::isSessionEnabled(sessionId);
             const auto config = SessionConfigManager::getConfig(sessionId);
-            co_return fmt::format("会话 {} 状态:\n- 启用: {}\n- 消息数: {}\n- 发送群名片: {}\n- 自动回复: {}",
+            co_return std::format("会话 {} 状态:\n- 启用: {}\n- 消息数: {}\n- 发送群名片: {}\n- 自动回复: {}",
               sessionId, enabled ? "是" : "否", config.allMesCount, config.sendGroupCard ? "是" : "否",
               config.autoReply ? "是" : "否");
         }
@@ -93,7 +95,7 @@ namespace insoulforge::CommandProcessor {
             }
             std::string response = "管理员列表:\n";
             for (const auto &userId: admins) {
-                response += fmt::format("- {}\n", userId);
+                response += std::format("- {}\n", userId);
             }
             co_return response;
         }
@@ -106,7 +108,7 @@ namespace insoulforge::CommandProcessor {
                       "许可证: AGPL-3.0-only";
         }
         if (!hasPermission) {
-            co_return fmt::format("权限不足，你({})不是管理员", getStr(atOrNull(message, "sender"), "user_id"));
+            co_return std::format("权限不足，你({})不是管理员", getStr(atOrNull(message, "sender"), "user_id"));
         }
         if (command == "/enable" || command == "/启用") {
             SessionId targetSession = sessionId;
@@ -118,7 +120,7 @@ namespace insoulforge::CommandProcessor {
                 }
             }
             SessionStore::enableSession(targetSession);
-            co_return fmt::format("已启用会话: {}", targetSession);
+            co_return std::format("已启用会话: {}", targetSession);
         }
         if (command == "/disable" || command == "/禁用") {
             SessionId targetSession = sessionId;
@@ -130,7 +132,7 @@ namespace insoulforge::CommandProcessor {
                 }
             }
             SessionStore::disableSession(targetSession);
-            co_return fmt::format("已禁用会话: {}", targetSession);
+            co_return std::format("已禁用会话: {}", targetSession);
         }
         if (command == "/autoreply" || command == "/自动回复") {
             if (sessionId.isPrivate())
@@ -160,7 +162,7 @@ namespace insoulforge::CommandProcessor {
             }
             std::string response = "启用的群聊列表:\n";
             for (const auto &groupId: groups) {
-                response += fmt::format("- {}\n", groupId);
+                response += std::format("- {}\n", groupId);
             }
             co_return response;
         }
@@ -171,7 +173,7 @@ namespace insoulforge::CommandProcessor {
             }
             if (const auto userId = UserId::parse(argument)) {
                 AdminStore::addAdmin(*userId);
-                co_return fmt::format("已添加管理员: {}", *userId);
+                co_return std::format("已添加管理员: {}", *userId);
             }
             co_return "无效的用户 ID格式";
         }
@@ -182,7 +184,7 @@ namespace insoulforge::CommandProcessor {
             }
             if (const auto userId = UserId::parse(argument)) {
                 AdminStore::removeAdmin(*userId);
-                co_return fmt::format("已移除管理员: {}", *userId);
+                co_return std::format("已移除管理员: {}", *userId);
             }
             co_return "无效的用户 ID格式";
         }
@@ -193,7 +195,7 @@ namespace insoulforge::CommandProcessor {
             }
             std::string response = "黑名单:\n";
             for (const auto &userId: users) {
-                response += fmt::format("- {}\n", userId);
+                response += std::format("- {}\n", userId);
             }
             co_return response;
         }
@@ -204,7 +206,7 @@ namespace insoulforge::CommandProcessor {
             }
             if (const auto userId = UserId::parse(argument); userId) {
                 BlacklistStore::add(*userId);
-                co_return fmt::format("已添加黑名单: {}", *userId);
+                co_return std::format("已添加黑名单: {}", *userId);
             }
             co_return "无效的用户 ID格式";
         }
@@ -215,12 +217,12 @@ namespace insoulforge::CommandProcessor {
             }
             if (const auto userId = UserId::parse(argument); userId) {
                 BlacklistStore::remove(*userId);
-                co_return fmt::format("已移除黑名单: {}", *userId);
+                co_return std::format("已移除黑名单: {}", *userId);
             }
             co_return "无效的用户 ID格式";
         }
         if (command == "/clearimagecache" || command == "/清除图片缓存") {
-            co_return fmt::format("已清除 {} 条图片识别缓存", ImageDescriptionStore::clearAll());
+            co_return std::format("已清除 {} 条图片识别缓存", ImageDescriptionStore::clearAll());
         }
         if (command == "/delemoji" || command == "/删除表情") {
             std::string name;
@@ -230,13 +232,13 @@ namespace insoulforge::CommandProcessor {
             const auto connection = Config::instance().oneBotSnapshot();
             const json emoji = co_await ToolRuntime::findFavoriteEmoji(name, std::nullopt, connection);
             if (emoji.is_null()) {
-                co_return fmt::format("收藏表情中找不到'{}'", name);
+                co_return std::format("收藏表情中找不到'{}'", name);
             }
             if (!co_await ToolRuntime::deleteFavoriteEmoji(getStr(emoji, "res_id"), std::nullopt, connection)) {
-                co_return fmt::format("删除失败: {}（QQ 客户端操作失败）", name);
+                co_return std::format("删除失败: {}（QQ 客户端操作失败）", name);
             }
             ToolRuntime::invalidateFavoriteEmojiCache();
-            co_return fmt::format("已从收藏表情中删除: {}", getStr(emoji, "name"));
+            co_return std::format("已从收藏表情中删除: {}", getStr(emoji, "name"));
         }
         if (command == "/listemoji" || command == "/表情列表") {
             const json emojis = co_await ToolRuntime::fetchFavoriteEmojis();
@@ -245,10 +247,10 @@ namespace insoulforge::CommandProcessor {
             }
             std::string response = "收藏表情列表:\n";
             for (const json &emoji: emojis) {
-                response += fmt::format("- {}\n", getStr(emoji, "name"));
+                response += std::format("- {}\n", getStr(emoji, "name"));
             }
-            co_return fmt::format("{}\n共 {} 个表情", response, emojis.size());
+            co_return std::format("{}\n共 {} 个表情", response, emojis.size());
         }
-        co_return fmt::format("未知命令: {}\n使用 /help 查看可用命令", command);
+        co_return std::format("未知命令: {}\n使用 /help 查看可用命令", command);
     }
 } // namespace insoulforge::CommandProcessor

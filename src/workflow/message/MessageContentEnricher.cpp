@@ -2,7 +2,7 @@
 /// @brief 统一消息的媒体与长期记忆富化实现
 
 
-#include <fmt/format.h>
+#include <format>
 
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
@@ -31,17 +31,20 @@ namespace insoulforge::MessageContentEnricher {
             co_return message;
         }
         const auto assets = message.find("assets");
-        if (assets == message.end() || !assets->is_object())
+        if (assets == message.end() || !assets->is_object()) {
             co_return message;
+        }
         const auto images = assets->find("images");
-        if (images == assets->end() || !images->is_array())
+        if (images == assets->end() || !images->is_array()) {
             co_return message;
+        }
 
         size_t succeededCount = 0;
         for (json &image: *images) {
             // 活动附件已经在接入处验证；保留资产 ID，按需由 ask_images 读取。
-            if (!getStr(image, "image_id").empty() && getStr(image, "recognition_status") == "available")
+            if (!getStr(image, "image_id").empty() && getStr(image, "recognition_status") == "available") {
                 continue;
+            }
             const std::string sourceUrl = getStr(atOrNull(image, "source"), "url");
             if (sourceUrl.empty()) {
                 image["recognition_status"] = "failed";
@@ -67,7 +70,7 @@ namespace insoulforge::MessageContentEnricher {
         }
         if (!images->empty()) {
             Logger::info(
-              sessionId, "Media", fmt::format("图片识别完成 | succeeded={}/{}", succeededCount, images->size()));
+              sessionId, "Media", std::format("图片识别完成 | succeeded={}/{}", succeededCount, images->size()));
         }
         co_return message;
     }
@@ -92,7 +95,7 @@ namespace insoulforge::MessageContentEnricher {
             }
         }
         if (!memories.empty()) {
-            Logger::info(sessionId, "Memory", fmt::format("召回长期记忆: {} 条", memories.size()));
+            Logger::info(sessionId, "Memory", std::format("召回长期记忆: {} 条", memories.size()));
             message["memories"] = std::move(memories);
         }
         co_return message;

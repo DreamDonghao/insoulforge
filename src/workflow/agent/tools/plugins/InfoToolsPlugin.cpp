@@ -1,6 +1,8 @@
 /// @file InfoToolsPlugin.cpp
 /// @brief 信息工具插件实现（INFORMATION，查询数据、获取答案，不产生副作用）
 
+#include <format>
+
 #include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
@@ -89,7 +91,7 @@ namespace insoulforge {
                 if (!groupId)
                     co_return groupId.error();
                 if (!SessionStore::isSessionEnabled(*groupId))
-                    co_return fmt::format("目标群 {} 未在后台启用，无法读取消息", *groupId);
+                    co_return std::format("目标群 {} 未在后台启用，无法读取消息", *groupId);
 
                 json messages = json::array();
                 if (const auto records = EventWorkflow::instance().getSessionMessages(*groupId)) {
@@ -188,7 +190,7 @@ namespace insoulforge {
                 }
 
                 Logger::debug(sessionId, "DeepThink",
-                  fmt::format("结果: {}...", content.substr(0, std::min(kThinkingPreviewChars, content.length()))));
+                  std::format("结果: {}...", content.substr(0, std::min(kThinkingPreviewChars, content.length()))));
                 co_return "【深度思考结果】\n" + content;
             },
           },
@@ -208,14 +210,14 @@ namespace insoulforge {
                     co_return std::string("当前会话没有待触发的定时任务");
                 }
 
-                std::string out = fmt::format("当前会话共有 {} 个待触发定时任务：\n", tasks.size());
+                std::string out = std::format("当前会话共有 {} 个待触发定时任务：\n", tasks.size());
                 for (const auto &task: tasks) {
                     if (task.isDaily) {
-                        out += fmt::format("- 任务#{}：每天 {} 「{}」（每日重复）\n", task.id,
+                        out += std::format("- 任务#{}：每天 {} 「{}」（每日重复）\n", task.id,
                           formatTimeOfDay(task.remindTime), task.content);
                     } else {
                         out +=
-                          fmt::format("- 任务#{}：{} 「{}」\n", task.id, formatUnixTime(task.remindTime), task.content);
+                          std::format("- 任务#{}：{} 「{}」\n", task.id, formatUnixTime(task.remindTime), task.content);
                     }
                 }
                 out += "如需取消某个任务，调用 cancel_scheduled_task 并传入任务编号（#后的数字）";

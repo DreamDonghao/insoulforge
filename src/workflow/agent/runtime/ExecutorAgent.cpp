@@ -1,9 +1,12 @@
 /// @file ExecutorAgent.cpp
 /// @brief Executor Agent - 实现
 
+#include <format>
 #include <map>
 #include <memory>
 #include <stdexcept>
+
+#include <regex>
 
 #include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
@@ -274,7 +277,7 @@ namespace insoulforge::ExecutorAgent {
 
             for (const auto &toolCall: message["tool_calls"]) {
                 const std::string name = jsonToString(atOrNull(atOrNull(toolCall, "function"), "name"));
-                Logger::info(sessionId, "Executor", fmt::format("工具: {}", name));
+                Logger::info(sessionId, "Executor", std::format("工具: {}", name));
 
                 if (hasDecision) {
                     appendToolResult(messages, toolCall, "回合已结束，未执行: " + name);
@@ -343,7 +346,7 @@ namespace insoulforge::ExecutorAgent {
                 ctx.offeredMcpTools = offeredMcpTools;
 
                 const std::string result = co_await ToolRegistry::instance().executeTool(name, args, std::move(ctx));
-                Logger::debug(sessionId, "Executor", fmt::format("工具结果: {}", result));
+                Logger::debug(sessionId, "Executor", std::format("工具结果: {}", result));
                 recordCall(replyOnly ? "rejected" : "returned");
                 if (!replyOnly && isCqCodeTool(name)) {
                     accumulatedCQCodes += result;
@@ -467,7 +470,7 @@ namespace insoulforge::ExecutorAgent {
                 toolHistory = std::move(nextToolHistory);
             }
 
-            Logger::error(sessionId, "Executor", fmt::format("达到最大迭代次数: {}", maxToolRounds));
+            Logger::error(sessionId, "Executor", std::format("达到最大迭代次数: {}", maxToolRounds));
             co_return failedDecision("达到最大迭代轮数，未生成最终回复");
         }
 
@@ -538,7 +541,7 @@ namespace insoulforge::ExecutorAgent {
         const SessionId sessionId = chatRecords.getSessionId();
         if (decision) {
             Logger::info(sessionId, "Executor",
-              fmt::format("开始执行 | priority={} | maxLength={}", decision->isPriority,
+              std::format("开始执行 | priority={} | maxLength={}", decision->isPriority,
                 decision->maxLength ? std::to_string(*decision->maxLength) : "未指定"));
         } else {
             Logger::info(sessionId, "Executor", "开始执行 | 无 Router 回复策略");
@@ -550,7 +553,7 @@ namespace insoulforge::ExecutorAgent {
             // 首次使用或显式失效时刷新；成功结果由表情模块主动发布给 Builder。
             co_await ToolRuntime::fetchFavoriteEmojis(sessionId);
         } catch (const std::exception &error) {
-            Logger::warn(sessionId, "Executor", fmt::format("收藏表情列表获取失败: {}", error.what()));
+            Logger::warn(sessionId, "Executor", std::format("收藏表情列表获取失败: {}", error.what()));
         }
         json messages = buildPrompt(chatRecords, decision);
 

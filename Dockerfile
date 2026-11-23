@@ -1,49 +1,47 @@
 # 多阶段构建：builder 编译后端 + 前端，runtime 只保留部署产物
-FROM ubuntu:24.04 AS builder
+FROM ubuntu:26.04 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive TZ=Asia/Shanghai
 RUN ln -fs /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential cmake ninja-build git ca-certificates \
-        libsqlite3-dev libspdlog-dev libfmt-dev libjsoncpp-dev nlohmann-json3-dev \
-        zlib1g-dev libssl-dev libc-ares-dev uuid-dev libgif-dev libpng-dev libjpeg-dev liblua5.4-dev \
+        build-essential ninja-build git curl ca-certificates libarchive-tools \
+        libsqlite3-dev \
+        zlib1g-dev libssl-dev libc-ares-dev uuid-dev libgif-dev libpng-dev libjpeg-dev \
         nodejs npm \
     && rm -rf /var/lib/apt/lists/*
 
-# Ubuntu 仓库没有 drogon 包，从源码编译安装（静态库，OpenSSL 也用静态版）
-ARG DROGON_VERSION=v1.9.10
-RUN git clone --depth 1 --branch ${DROGON_VERSION} --recurse-submodules --shallow-submodules \
-        https://github.com/drogonframework/drogon.git /tmp/drogon \
-    && cmake -S /tmp/drogon -B /tmp/drogon/build -G Ninja \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DBUILD_SHARED_LIBS=OFF \
-        -DBUILD_C-ARES=ON \
-        -DOPENSSL_USE_STATIC_LIBS=ON \
-        -DBUILD_EXAMPLES=OFF \
-        -DBUILD_CTL=OFF \
-        -DBUILD_ORM=OFF \
-        -DMYSQL_SUPPORT=OFF \
-        -DLIBPQ_SUPPORT=OFF \
-    # 必须使用异步 DNS，避免退回按 CPU 核心数创建线程池的 NormalResolver。
-    && (grep -q 'trantor/net/inner/AresResolver.cc' /tmp/drogon/build/build.ninja \
-        || { echo '错误：Trantor 未启用 c-ares，停止构建' >&2; exit 1; }) \
-    && cmake --build /tmp/drogon/build \
-    && cmake --install /tmp/drogon/build \
-    && rm -rf /tmp/drogon
+ARG TARGETARCH
+RUN cmake_version=4.3.6 \
+    && case "$TARGETARCH" in \
+        amd64) \
+            cmake_arch=x86_64; \
+            cmake_sha256=fba967b44c7b40f155f9492dacb5477aab8333699986e1e07a7d90803aba7219 ;; \
+        arm64) \
+            cmake_arch=aarch64; \
+            cmake_sha256=310df7369f818779e269d900ae5a3ef02c6089fb7b1a49fc1a2aaf7e7275a2dc ;; \
+        *) echo "Unsupported CMake architecture: $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && cmake_archive="cmake-${cmake_version}-linux-${cmake_arch}.tar.gz" \
+    && curl -fsSLo /tmp/cmake.tar.gz "https://cmake.org/files/v${cmake_version%.*}/${cmake_archive}" \
+    && printf '%s  /tmp/cmake.tar.gz\n' "$cmake_sha256" | sha256sum -c - \
+    && mkdir -p /opt/cmake \
+    && bsdtar -xzf /tmp/cmake.tar.gz --strip-components=1 -C /opt/cmake \
+    && rm /tmp/cmake.tar.gz
+ENV PATH="/opt/cmake/bin:${PATH}"
 
 WORKDIR /src
 COPY . .
 
 # 构建后端；CMake 会自动触发前端 npm install + build
 # 产物输出到 build/insoulforge/（exe/、public/）
-RUN cmake -S . -B build-cmake -G Ninja -DCMAKE_BUILD_TYPE=Release \
+RUN cmake -S . -B build-cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DOPENSSL_USE_STATIC_LIBS=OFF \
     && cmake --build build-cmake -j"$(nproc)"
 
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 ENV DEBIAN_FRONTEND=noninteractive TZ=Asia/Shanghai
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates tzdata libc-ares2 libsqlite3-0 libjsoncpp25 libssl3t64 libpng16-16 libjpeg-turbo8 libgif7 liblua5.4-0 \
+        ca-certificates tzdata libcares2 libsqlite3-0 libssl3t64 libpng16-16t64 libjpeg-turbo8 libgif7 \
     && rm -rf /var/lib/apt/lists/* \
     && ln -fs /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 

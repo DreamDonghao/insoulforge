@@ -6,7 +6,6 @@
 #include <drogon/utils/coroutine.h>
 
 #include <infrastructure/JsonUtil.hpp>
-#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
 
 namespace insoulforge::MessageContentEnricher {

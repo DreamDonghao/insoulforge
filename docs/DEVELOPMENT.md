@@ -9,48 +9,41 @@
 
 | 依赖                          | 要求                                           | CMake / 构建用途                                       |
 |-------------------------------|------------------------------------------------|--------------------------------------------------------|
-| CMake                         | 3.20 或更高                                    | 项目构建系统                                           |
+| CMake                         | 4.3 或更高                                     | 项目构建系统                                           |
 | C++ 编译器                    | 支持 C++23，推荐 GCC 13+ 或同等 Clang + 标准库 | 后端代码使用 C++23 与 `<format>`                       |
 | npm                           | Node.js 18+                                    | CMake 配置阶段查找 npm，`insoulforge` 目标自动构建前端 |
-| Drogon                        | 1.9.10                                         | `find_package(Drogon CONFIG REQUIRED)`                 |
-| SQLite3、spdlog、fmt、OpenSSL | 开发包                                         | 存储、日志、格式化、加密                               |
-| nlohmann-json                 | 头文件或 CMake 包                              | JSON；CMake 找不到包时会直接查找头文件                 |
+| Git                           | 可访问 GitHub 的 Git 客户端                     | 下载固定版本的 Drogon 和 Trantor                       |
+| c-ares、zlib                   | 开发包                                         | Trantor 的异步 DNS、Drogon 的压缩支持                  |
+| SQLite3、OpenSSL              | 开发包                                         | 存储、加密                                             |
 | libpng、libjpeg、giflib                | 开发包                                         | 图片与 GIF 解码                                        |
-| Lua                           | 5.4 或更新的兼容版本                           | 进程内自定义工具执行器                                 |
 
 `ninja` 不是必需依赖，但与 Dockerfile 一致，推荐作为 CMake 生成器使用。
 
-llama.cpp 通过 CMake `FetchContent` 下载固定 commit 的源码压缩包、校验 SHA-256 并静态链接，首次配置需要访问 GitHub（不克隆 Git 历史）；源码缓存于构建目录的 `_deps`，不提交到本仓库。当前仅构建 CPU 库，关闭附带工具、服务、测试和 GPU 后端，不需要 Rust、Python 或 GPU SDK。此接入尚不包含分词功能和词表资源。离线构建可通过 `-DFETCHCONTENT_SOURCE_DIR_LLAMA_CPP=/path/to/llama.cpp` 指定对应 commit 的本地源码。更新版本时修改 根 `CMakeLists.txt` 的下载 URL 和 `URL_HASH`，并重新验证构建。
+llama.cpp 通过 CMake `FetchContent` 下载固定 commit 的源码压缩包、校验 SHA-256 并静态链接，首次配置需要访问 GitHub（不克隆 Git 历史）；源码缓存于构建目录的 `_deps`，不提交到本仓库。当前仅构建 CPU 库，关闭附带工具、服务、测试和 GPU 后端，不需要 Rust、Python 或 GPU SDK。离线构建可通过 `-DFETCHCONTENT_SOURCE_DIR_LLAMA_CPP=/path/to/llama.cpp` 指定对应 commit 的本地源码。更新版本时修改 [cmake/Dependencies.cmake](../cmake/Dependencies.cmake) 的下载 URL 和 `URL_HASH`，并重新验证构建。
 
-### Ubuntu 24.04
+spdlog 同样通过 `FetchContent` 下载固定 commit 的源码压缩包并校验 SHA-256，使用 `SPDLOG_USE_STD_FORMAT` 开启标准库格式化。离线构建可通过 `-DFETCHCONTENT_SOURCE_DIR_SPDLOG=/path/to/spdlog` 指定对应 commit 的本地源码。
 
-先安装与 Dockerfile `builder` 阶段相同的系统依赖：
+nlohmann/json 通过 `FetchContent` 下载 GitHub 上的 3.12.0 发布包，校验 SHA-256 并使用多头文件版。项目关闭 JSON 隐式转换。离线构建可通过 `-DFETCHCONTENT_SOURCE_DIR_NLOHMANN_JSON=/path/to/json` 指定解压后的源码目录。
+
+JsonCpp 1.9.8 通过 `FetchContent` 从 GitHub 下载固定提交的源码并校验 SHA-256。CMake 将 Drogon 的 JsonCpp 查找重定向到该源码构建的静态库。离线构建可通过 `-DFETCHCONTENT_SOURCE_DIR_JSONCPP=/path/to/jsoncpp` 指定对应源码。
+
+Drogon 1.9.14 由项目的 `FetchContent` 按固定 Git commit 获取，Trantor 使用该提交记录的子模块版本。本地和 Docker 使用同一套构建选项。CMake 配置时会检查 Trantor 是否选用了 c-ares 异步 DNS。离线构建可通过 `-DFETCHCONTENT_SOURCE_DIR_DROGON=/path/to/drogon` 指定已初始化 Trantor 子模块的对应源码。
+
+Lua 5.4.9 通过 `FetchContent` 下载 [Lua 官网](https://www.lua.org/ftp/)的正式源码包，校验官方 SHA-256，并静态链接供自定义工具在进程内执行。离线构建可通过 `-DFETCHCONTENT_SOURCE_DIR_LUA=/path/to/lua-5.4.9` 指定解压后的源码目录。
+
+### Ubuntu 26.04
+
+先安装与 Dockerfile `builder` 阶段相同的系统依赖。Docker 构建通过 `-DOPENSSL_USE_STATIC_LIBS=OFF` 链接发行版的共享 OpenSSL：
 
 ```bash
 sudo apt update && sudo apt install -y \
-    build-essential cmake ninja-build git ca-certificates \
-    libsqlite3-dev libspdlog-dev libfmt-dev libjsoncpp-dev nlohmann-json3-dev \
-    zlib1g-dev libssl-dev uuid-dev libgif-dev libpng-dev libjpeg-dev liblua5.4-dev \
+    build-essential ninja-build git curl ca-certificates libarchive-tools \
+    libsqlite3-dev \
+    zlib1g-dev libssl-dev libc-ares-dev uuid-dev libgif-dev libpng-dev libjpeg-dev \
     nodejs npm
 ```
 
-Ubuntu 官方仓库不保证提供可供本项目使用的 Drogon CMake 包，因此按 Dockerfile 固定构建 Drogon 1.9.10：
-
-```bash
-git clone --depth 1 --branch v1.9.10 --recurse-submodules --shallow-submodules \
-    https://github.com/drogonframework/drogon.git /tmp/drogon
-cmake -S /tmp/drogon -B /tmp/drogon/build -G Ninja \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DBUILD_SHARED_LIBS=OFF \
-    -DOPENSSL_USE_STATIC_LIBS=ON \
-    -DBUILD_EXAMPLES=OFF \
-    -DBUILD_CTL=OFF \
-    -DBUILD_ORM=OFF \
-    -DMYSQL_SUPPORT=OFF \
-    -DLIBPQ_SUPPORT=OFF
-cmake --build /tmp/drogon/build
-sudo cmake --install /tmp/drogon/build
-```
+Ubuntu 26.04 的 apt 提供 CMake 4.2。Docker 构建阶段从 Kitware 下载并校验 CMake 4.3.6。源码构建可下载同版本的 Linux 二进制发行包，校验后将解压目录中的 `bin` 加入 `PATH`。[Kitware CMake 4.3.6](https://github.com/Kitware/CMake/releases/tag/v4.3.6)
 
 Ubuntu 22.04 默认编译器不满足本项目的 C++23 / `<format>` 要求。请升级到 GCC 13+ 后，在首次 CMake 配置时指定
 `-DCMAKE_CXX_COMPILER=g++-13`。
@@ -58,11 +51,10 @@ Ubuntu 22.04 默认编译器不满足本项目的 C++23 / `<format>` 要求。�
 ### macOS（Homebrew）
 
 ```bash
-brew install cmake drogon spdlog fmt nlohmann-json sqlite3 openssl brotli libpng jpeg-turbo giflib lua node
+brew install cmake c-ares sqlite3 openssl libpng jpeg-turbo giflib node
 ```
 
-Homebrew 的 `drogon` 会提供 CMake 包。若 CMake 找不到 OpenSSL、SQLite3 等 Homebrew 前缀下的依赖，请在配置时传入对应的
-`CMAKE_PREFIX_PATH`。
+若 CMake 找不到 Homebrew 安装的 OpenSSL，可通过 `OPENSSL_ROOT_DIR` 指定 `brew --prefix openssl` 的输出路径。其他 Homebrew 依赖的搜索路径可通过 `CMAKE_PREFIX_PATH` 指定。
 
 用 CLion 打开项目后，选择或创建 `cmake-build-debug/` 构建目录即可；CMake 配置和 `insoulforge` 构建会自动安装前端依赖并生成管理后台静态文件。
 
@@ -80,8 +72,7 @@ cmake --build cmake-build-release -j    # Linux 可用 -j$(nproc)
 - 可执行文件 → `build/insoulforge/exe/insoulforge`
 - 前端静态文件 → `build/insoulforge/public/`（CMake 会在前端源码变化时自动执行 `npm run build`）
 
-后端源码由 CMake 的 `${PROJECT_NAME}_backend` 对象库统一编译，主程序和契约测试复用同一组对象文件；新增后端 `.cpp`
-仍由 `src/` 的自动发现规则纳入构建，无需分别维护两个目标的源文件清单。
+根 CMakeLists.txt 定义后端对象库和主程序。主程序和后端集成测试链接 `insoulforge_backend`，共享对象文件和依赖。新增后端 `.cpp` 由 `src/` 的自动发现规则纳入构建。第三方依赖定义见 [cmake/Dependencies.cmake](../cmake/Dependencies.cmake)，前端和词表产物规则见 [cmake/DeploymentAssets.cmake](../cmake/DeploymentAssets.cmake)。
 
 ### 日常开发
 
@@ -215,9 +206,9 @@ EventWorkflow::enqueueOneBotEvent
     │ 4. 跳过未启用会话
     │ 5. 图片/GIF 识别与长期记忆召回
     │ 6. 写入 MessageList，推送管理后台并生成不可变快照
-    │ 7. 原子登记新增回复需求；空闲时启动唯一回复消费者
+    │ 7. 原子登记新增处理需求；空闲时启动唯一处理消费者
     ▼
-回复队列（每会话最多一个执行任务）
+处理队列（每会话最多一个执行任务）
     │ 忙碌时合并新增需求，不阻塞预处理；执行整轮结束后再判断
     ▼
 MessageRouter
@@ -248,13 +239,14 @@ MessageService → OneBot API
   解码后最多提交 16 帧，超出时按播放时长均匀抽样并保留首尾帧。成功描述长期缓存，失败结果只缓存 10
   分钟；缓存和记录仅保存哈希、媒体类型、抽帧数与描述，不保存 Base64 内容。
 - 同一会话的消息预处理阶段严格 FIFO：图片识别与向量召回完成后才写入消息列表和创建快照，Router 与 Executor 分别冻结各自输入，后到消息不能改变已经冻结的副本。
-- 回复阶段与消息预处理阶段解耦。Router 不再阻塞预处理消费者；Executor 期间不运行 Router，
+- 消息处理阶段与消息预处理阶段解耦。Router 不再阻塞预处理消费者；Executor 期间不运行 Router，
   已富化的新消息持续入库。整轮执行及发送结束后，有新增需求才继续路由，Router 对未处理的私聊、@机器人和普通系统任务直接判定回复。
   Activity force 直接执行，judge 根据上下文判断，silent 记录后由 Router 跳过，不请求模型。群自动回复关闭时普通消息不请求模型。
-- Router 快照只读；reply 后 Executor 重新取最新窗口，包含判断期间到达的消息，同时原子更新窗口内
+- Router 快照只读；reply 后异步等待固定 1 秒，期间消息加工继续运行，新增消息不重置等待时间。
+  随后 Executor 重新取最新窗口，包含判断和等待期间已完成加工的消息，同时原子更新窗口内
   `executor_processed` 标记。该标记表示已纳入 Executor，不表示已回复；新记录为 false，旧记录缺省为 true。
   标记随原记录 JSON 恢复和保存，无数据库表结构变更，启动不自动补发。
-- 会话状态在同一把锁内登记消息及新增需求、取得快照和交接唯一回复消费者；不跨 co_await 持锁。
+- 会话状态在同一把锁内登记消息及新增需求、取得快照和交接唯一处理消费者；不跨 co_await 持锁。
   Router skip 后只有判断期间又登记新需求才重判；Executor 取得快照时消费此前需求。
   用受锁保护的待处理批次表示是否有快照后新增事件，不另维护消息 ID 或版本计数；所有入站消息（包括 silent）统一唤醒消费者，Router 在仅有 silent 或无可判断的未处理消息时直接跳过；机器人输出不唤醒消费者。
   Executor 失败不自动重放输入或工具动作；后续新事件仍可唤醒消费者。
@@ -286,10 +278,10 @@ MessageService → OneBot API
   `answers.action.confidence` 有效并达到 `jevMinConfidence` 时采纳；`unclear`、低置信度、响应异常或请求失败均交给原有
   Router LLM。`probabilities.reply` 不是当前阈值的比较对象。Jev 默认超时 10 秒、不重试，可在模型配置中调整；Router LLM 兜底仍保留原有
   fail-open 行为。
-- 预处理、路由、执行或发送的异常均限制在当前消息或当前回复任务内，不能使同会话队列停滞。工作流不使用轮询或忙等待。
+- 预处理、路由、执行或发送的异常均限制在当前消息或当前处理任务内，不能使同会话队列停滞。工作流不使用轮询或忙等待。
 
-新增主处理步骤时，先确定其属于消息预处理阶段还是回复阶段，再在 `EventWorkflow` 的对应队列处理函数中调用一个职责单一的组件。
-不得跨阶段持有锁或修改已交给回复队列的消息快照；需要扩展的后处理应在工作流中定义明确的调用边界。
+新增主处理步骤时，先确定其属于消息预处理阶段还是消息处理阶段，再在 `EventWorkflow` 的对应队列处理函数中调用一个职责单一的组件。
+不得跨阶段持有锁或修改已交给处理队列的消息快照；需要扩展的后处理应在工作流中定义明确的调用边界。
 
 ### 工具系统
 
@@ -656,7 +648,7 @@ OneBot 11 的数字要求仅保留在协议适配层，目标无法转换时不�
   `LogBuffer` 启动时从滚动文件恢复最近 5000 条；旧格式日志以 `Legacy` 来源保留可查看性。排查消息流水线问题时优先按会话和
   `Router`、`Executor` 来源筛选。
 - **协程**：所有异步 I/O 使用 `drogon::Task<T>` / `co_await`，注意 `co_await` 后对象生命周期（捕获 `shared_ptr` 而非裸指针）
-- **会话并发**：`EventWorkflow` 为每个会话分别维护消息预处理队列、回复队列和 `MessageList`。不要在外部直接并发修改
+- **会话并发**：`EventWorkflow` 为每个会话分别维护消息预处理队列、处理队列和 `MessageList`。不要在外部直接并发修改
   `MessageList`，也不要跨 `co_await` 持有其内部或工作流内部锁。
 - **前端**：`npm run dev` + 浏览器 DevTools；后端日志会打印收到的 OneBot 原始 JSON
 
