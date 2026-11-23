@@ -94,7 +94,7 @@ namespace insoulforge {
             }
         }
 
-        auto composeIncomingMessage(json & message, const SessionId &sessionId) -> drogon::Task<> {
+        auto composeIncomingMessage(json &message, const SessionId &sessionId) -> drogon::Task<> {
             message = co_await MessageContentEnricher::enrichImages(std::move(message), sessionId);
             message = co_await MessageContentEnricher::injectMemories(std::move(message), sessionId);
             message.erase("session_id");
@@ -289,7 +289,7 @@ namespace insoulforge {
                     Logger::info(
                       sessionId, "Message", "收到: " + dumpJson(MessageRecord::projectForAgent(currentMessage)));
 
-                    co_await composeIncomingMessage(currentMessage,sessionId);
+                    co_await composeIncomingMessage(currentMessage, sessionId);
 
                     pushRecordedMessage(sessionId, currentMessage);
                     recordMessageProcessingStats(sessionId);

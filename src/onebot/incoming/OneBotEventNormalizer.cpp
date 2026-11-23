@@ -120,13 +120,16 @@ namespace insoulforge::OneBotEventNormalizer {
         /// @brief 从原始上报提取统一会话 ID
         /// @details 群聊与私聊通过显式类型区分；原始数字仅在 OneBot 11 边界解析。
         [[nodiscard]] auto extractSessionId(const json &body, const u64 senderId) -> std::optional<SessionId> {
-            if (const auto groupId = getUInt(body, "group_id"); groupId != 0)
+            if (const auto groupId = getUInt(body, "group_id"); groupId != 0) {
                 return SessionId::group(std::to_string(groupId));
-            if (getStr(body, "post_type") == "message" && getStr(body, "message_type") != "private")
+            }
+            if (getStr(body, "post_type") == "message" && getStr(body, "message_type") != "private") {
                 return std::nullopt;
+            }
             const auto userId = getUInt(body, "user_id", senderId);
-            if (userId == 0)
+            if (userId == 0) {
                 return std::nullopt;
+            }
             return SessionId::privateChat(UserId{userId});
         }
 
@@ -220,8 +223,9 @@ namespace insoulforge::OneBotEventNormalizer {
             return std::nullopt;
         }
         (*record)["session_id"] = *sessionId;
-        if (const auto botId = selfId(body); botId != 0)
+        if (const auto botId = selfId(body); botId != 0) {
             (void) MessageRecord::normalizeSelfReferences(*record, UserId{botId});
+        }
         return record;
     }
 } // namespace insoulforge::OneBotEventNormalizer
