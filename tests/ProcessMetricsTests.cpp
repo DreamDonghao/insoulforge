@@ -5,6 +5,7 @@
 #include <stdexcept>
 
 #include <sstream>
+#include <trantor/net/EventLoop.h>
 
 #include <infrastructure/monitoring/ProcessMetrics.hpp>
 
@@ -57,11 +58,10 @@ auto main() -> int {
             require(readProcessSample().threads == native.threads, "sampling leaked thread resources");
 #endif
         require(native.timestamp > 0, "sample timestamp unavailable");
-        auto *loop = trantor::EventLoop::getEventLoopOfCurrentThread();
-        require(loop != nullptr, "Drogon main event loop unavailable");
+        trantor::EventLoop loop;
         auto &metrics = ProcessMetrics::instance();
-        metrics.start(*loop);
-        metrics.start(*loop);
+        metrics.start(loop);
+        metrics.start(loop);
         require(metrics.snapshot().size() == 1, "start must sample immediately and avoid duplicate timers");
         metrics.stop();
         metrics.stop();
