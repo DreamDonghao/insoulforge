@@ -76,10 +76,12 @@ namespace insoulforge::ExecutorAgent {
             if (!truncateText) {
                 return content;
             }
+            constexpr size_t kOldRecordMaxChars = 500;
             for (auto &segment: content["segments"]) {
                 if (getStr(segment, "type") == "text") {
-                    constexpr size_t kOldRecordMaxChars = 500;
                     segment["text"] = truncateUtf8(getStr(segment, "text"), kOldRecordMaxChars);
+                } else if (getStr(segment, "type") == "audio" && segment.contains("transcript")) {
+                    segment["transcript"] = truncateUtf8(getStr(segment, "transcript"), kOldRecordMaxChars);
                 }
             }
             return content;

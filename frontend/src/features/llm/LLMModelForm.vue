@@ -9,7 +9,7 @@ import {useUnsavedChanges} from '../../composables/useUnsavedChanges'
 import type {ApiResponse, LLMConfig} from '../../vite-env'
 
 const props = defineProps<{name: string, initialConfig: LLMConfig, title?: string}>()
-const hasParameters = computed(() => !['embedding', 'imageGeneration'].includes(props.name))
+const hasParameters = computed(() => !['embedding', 'imageGeneration', 'asr'].includes(props.name))
 const hasGenerationParameters = computed(() => hasParameters.value && props.name !== 'jev')
 const supportsPromptCacheKey = computed(() => ['executor', 'executorFallback'].includes(props.name))
 const emit = defineEmits<{saved: [name: string, config: LLMConfig]}>()
@@ -51,8 +51,13 @@ const parameterFields = computed(() => hasGenerationParameters.value ? generatio
 const fieldId = (key: string): string => `model-${props.name}-${key}`
 const {errors, fieldAttrs, validateForm} = useFormValidation(() => {
   const result: Record<string, string> = {
-    [fieldId('timeoutSeconds')]: numberError(llmConfig.timeoutSeconds, 1, 3600),
-    [fieldId('maxRetries')]: numberError(llmConfig.maxRetries, 0, 10)
+    [fieldId('timeoutSeconds')]: numberError(llmConfig.timeoutSeconds, 1, 3600)
+  }
+  if (props.name !== 'asr') {
+    result[fieldId('maxRetries')] = numberError(llmConfig.maxRetries, 0, 10)
+  } else if (llmConfig.apiKey?.trim()) {
+    if (!llmConfig.baseUrl?.trim()) result[fieldId('baseUrl')] = '请输入接口地址'
+    if (!llmConfig.path?.trim()) result[fieldId('path')] = '请输入请求路径'
   }
   if (hasGenerationParameters.value) {
     result[fieldId('maxTokens')] = numberError(llmConfig.maxTokens, 1, I32_MAX)
@@ -77,6 +82,10 @@ const saveLLMConfig = async (): Promise<void> => {
   saving.value = true
   try {
     const config: Partial<LLMConfig> = {...snapshot, name}
+    if (name === 'asr') {
+      delete config.model
+      delete config.maxRetries
+    }
     if (!supportsPromptCacheKey.value) delete config.promptCacheKeyEnabled
     if (!hasGenerationParameters.value) {
       delete config.maxTokens
@@ -138,20 +147,20 @@ const saveLLMConfig = async (): Promise<void> => {
       </div>
       <div class="form-group">
         <label :for="fieldId('baseUrl')" class="form-label">接口地址（Base URL）</label>
-        <input v-bind="fieldAttrs(fieldId('baseUrl'))" :disabled="saving" v-model="llmConfig.baseUrl" class="form-input" placeholder="https://api.example.com" type="text">
+        <input v-bind="fieldAttrs(fieldId('baseUrl'))" :disabled="saving" v-model="llmConfig.baseUrl" class="form-input" :placeholder="name === 'asr' ? 'https://api.deepseek.com' : 'https://api.example.com'" type="text">
         <FieldError :field="fieldId('baseUrl')" :message="errors[fieldId('baseUrl')]"/>
       </div>
       <div class="form-group">
         <label :for="fieldId('path')" class="form-label">{{ name === 'imageGeneration' ? '生成路径（Path）' : '请求路径（Path）' }}</label>
-        <input v-bind="fieldAttrs(fieldId('path'))" :disabled="saving" v-model="llmConfig.path" class="form-input" placeholder="/v1/chat/completions" type="text">
+        <input v-bind="fieldAttrs(fieldId('path'))" :disabled="saving" v-model="llmConfig.path" class="form-input" :placeholder="name === 'asr' ? '/v1/tools/asr' : '/v1/chat/completions'" type="text">
         <FieldError :field="fieldId('path')" :message="errors[fieldId('path')]"/>
       </div>
-      <div class="form-group">
+      <div v-if="name !== 'asr'" class="form-group">
         <label :for="fieldId('model')" class="form-label">模型名称</label>
         <input v-bind="fieldAttrs(fieldId('model'))" :disabled="saving" v-model="llmConfig.model" class="form-input" placeholder="gpt-4" type="text">
         <FieldError :field="fieldId('model')" :message="errors[fieldId('model')]"/>
       </div>
-      <div v-for="field in requestFields" :key="field.key" class="form-group numeric-field">
+      <div v-for="field in (name === 'asr' ? requestFields.slice(0, 1) : requestFields)" :key="field.key" class="form-group numeric-field">
         <div v-if="field.help" class="field-label">
           <label :for="fieldId(field.key)" class="form-label">{{ field.label }}</label>
           <FieldHelp :id="fieldId(field.key + '-details')" :label="field.label">{{ field.help }}</FieldHelp>

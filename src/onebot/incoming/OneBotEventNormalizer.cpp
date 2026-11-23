@@ -68,6 +68,8 @@ namespace insoulforge::OneBotEventNormalizer {
                 const size_t imageIndex = images.size();
                 images.push_back({{"source", {{"file", getStr(data, "file")}, {"url", getStr(data, "url")}}}});
                 segments.push_back({{"type", "image"}, {"image_index", imageIndex}});
+            } else if (type == "record") {
+                segments.push_back({{"type", "audio"}, {"onebot_file", getStr(data, "file")}});
             } else if (type == "poke") {
                 const u64 actorId = getUInt(data, "actor_id");
                 json target{{"user_id", jsonToString(atOrNull(data, "target_id"))}};

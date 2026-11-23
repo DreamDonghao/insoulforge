@@ -34,4 +34,7 @@ namespace insoulforge::HttpUtil {
     auto send(std::string_view tag, std::string baseUrl, std::string path, drogon::HttpMethod method, json body,
       std::string bearerToken, f64 timeout, std::optional<SessionId> sessionId = std::nullopt,
       bool traceResponse = true) -> drogon::Task<std::expected<drogon::HttpResponsePtr, std::string>>;
+    /// @brief 发送内存中的 WAV 文件，避免将上传内容或响应体写入请求调试记录。
+    auto uploadWav(std::string baseUrl, std::string path, std::string bytes, std::string bearerToken, f64 timeout)
+      -> drogon::Task<drogon::HttpResponsePtr>;
 } // namespace insoulforge::HttpUtil

@@ -149,9 +149,18 @@ namespace insoulforge {
     auto Config::loadValues(const json &value) -> std::expected<void, ConfigError> {
         const auto &llm = value.at("llm");
         for (const auto *role: {"router", "executor", "executorFallback", "executorThinking", "image",
-               "imageGeneration", "memory", "embedding", "jev"}) {
+               "imageGeneration", "memory", "embedding", "jev", "asr"}) {
             if (auto result = validateFields(llm.at(role)); !result) {
                 return result;
+            }
+        }
+        const auto &asr = llm.at("asr");
+        if (!trim(getStr(asr, "apiKey")).empty()) {
+            const auto url = trim(getStr(asr, "baseUrl"));
+            const auto path = trim(getStr(asr, "path"));
+            if ((!url.starts_with("https://") && !url.starts_with("http://")) || path.empty()) {
+                return std::unexpected(ConfigError{
+                  .type = ConfigErrorType::InvalidArgument, .message = "语音识别需要 HTTP(S) 接口地址和请求路径"});
             }
         }
         for (const auto *section: {"qq", "memory", "execution"}) {

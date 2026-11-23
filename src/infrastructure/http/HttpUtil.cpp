@@ -3,6 +3,8 @@
 
 #include <format>
 
+#include <drogon/UploadFile.h>
+
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
 #include <infrastructure/http/HttpTrace.hpp>
@@ -178,5 +180,22 @@ namespace insoulforge::HttpUtil {
         }
 
         co_return resp;
+    }
+    auto uploadWav(std::string baseUrl, std::string path, std::string bytes, std::string bearerToken, const f64 timeout)
+      -> drogon::Task<drogon::HttpResponsePtr> {
+        normalizeTarget(baseUrl, path);
+        if (!path.starts_with('/')) {
+            path.insert(path.begin(), '/');
+        }
+        try {
+            const auto client = drogon::HttpClient::newHttpClient(baseUrl);
+            const auto request = drogon::HttpRequest::newFileUploadRequest(
+              {drogon::UploadFile(bytes.data(), bytes.size(), "voice.wav", "file", drogon::CT_AUDIO_WAVE)});
+            request->setPath(path);
+            request->addHeader("Authorization", "Bearer " + bearerToken);
+            co_return co_await client->sendRequestCoro(request, timeout);
+        } catch (const std::exception &) {
+            co_return nullptr;
+        }
     }
 } // namespace insoulforge::HttpUtil

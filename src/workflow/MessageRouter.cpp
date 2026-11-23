@@ -118,6 +118,10 @@ namespace insoulforge::MessageRouter {
             if (type == "sticker") {
                 return std::format("[贴纸:{}]", getStr(segment, "name"));
             }
+            if (type == "audio") {
+                const auto transcript = getStr(segment, "transcript");
+                return transcript.empty() ? "[语音]" : std::format("[语音:{}]", transcript);
+            }
             if (type == "image") {
                 if (getStr(segment, "recognition_status") == "succeeded") {
                     return std::format("[图片:{}]", getStr(segment, "description"));

@@ -102,6 +102,14 @@ namespace insoulforge::MessageRecord {
                 result.push_back({{"type", "at"}, {"target", atOrNull(segment, "target")}});
                 return;
             }
+            if (type == "audio") {
+                json audio{{"type", "audio"}, {"recognition_status", getStr(segment, "recognition_status", "skipped")}};
+                if (auto transcript = getStr(segment, "transcript"); !transcript.empty()) {
+                    audio["transcript"] = std::move(transcript);
+                }
+                result.push_back(std::move(audio));
+                return;
+            }
             if (type == "image") {
                 const size_t imageIndex = static_cast<size_t>(getUInt(segment, "image_index"));
                 const json &image = imageIndex < images.size() ? images[imageIndex] : segment;
@@ -380,6 +388,13 @@ namespace insoulforge::MessageRecord {
         for (const json projected = projectForAgent(record); const auto &segment: atOrNull(projected, "segments")) {
             if (const std::string type = getStr(segment, "type"); type == "text") {
                 text += getStr(segment, "text");
+            } else if (type == "audio" && getStr(segment, "recognition_status") == "succeeded") {
+                if (const auto transcript = getStr(segment, "transcript"); !transcript.empty()) {
+                    if (!text.empty()) {
+                        text += '\n';
+                    }
+                    text += "语音：" + transcript + '\n';
+                }
             } else if (type == "image" && (getStr(segment, "recognition_status") == "succeeded" ||
                                             getStr(segment, "recognition_status") == "generated")) {
                 if (const std::string description = getStr(segment, "description"); !description.empty()) {

@@ -165,8 +165,8 @@ auto main() -> int {
         // 活动附件允许 24 MiB；为 multipart 边界和表单头预留 1 MiB。
         drogon::app().setClientMaxBodySize(25U * 1024U * 1024U);
         drogon::app().setClientMaxMemoryBodySize(25U * 1024U * 1024U);
-        // 活动详情响应允许最多 1 MiB；活动事件仍在协议入口限制为 128 KiB。
-        drogon::app().setClientMaxWebSocketMessageSize(1024U * 1024U);
+        // 反向 OneBot WebSocket 的 get_record 响应包含最多 8 MiB WAV 的 Base64 和 JSON 元数据。
+        drogon::app().setClientMaxWebSocketMessageSize(12U * 1024U * 1024U);
         // 前端构建产物位于运行目录的 public/，由同一 HTTP 服务提供。
         drogon::app().setDocumentRoot("public");
         Logger::info(std::nullopt, "Main", "HTTP 服务启动 | port=7778");

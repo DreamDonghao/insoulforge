@@ -70,6 +70,9 @@ namespace insoulforge::OneBotClient {
     [[nodiscard]] auto getImage(std::string file, std::optional<SessionId> sessionId = std::nullopt,
       json connection = nullptr) -> drogon::Task<std::optional<std::string>>;
 
+    /// @brief 请求协议端转码，返回 get_record 的 Base64 解码结果，最多 8 MiB。
+    [[nodiscard]] auto getRecordWav(std::string file, SessionId sessionId) -> drogon::Task<std::optional<std::string>>;
+
     /// @brief 下载文件到 QQ 客户端缓存目录
     /// @note go-cqhttp: download_file
     /// @return data.file 路径；失败返回 nullopt

@@ -17,7 +17,7 @@ namespace insoulforge {
 
     void LogWebSocket::handleNewMessage(
       const drogon::WebSocketConnectionPtr &conn, std::string &&message, const drogon::WebSocketMessageType &type) {
-        if (type != drogon::WebSocketMessageType::Text) {
+        if (type != drogon::WebSocketMessageType::Text || message.size() > 1024U * 1024U) {
             return;
         }
         json msg;

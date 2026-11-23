@@ -3,8 +3,10 @@
 
 #include <charconv>
 #include <format>
-
 #include <regex>
+#include <string_view>
+
+#include <drogon/utils/Utilities.h>
 
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
@@ -55,7 +57,7 @@ namespace insoulforge::OneBotClient {
             } else {
                 const auto response = co_await HttpUtil::send(tag, getStr(connection, "qqHttpHost"), "/" + api,
                   drogon::Post, std::move(params), getStr(connection, "accessToken"), timeout, sessionId,
-                  api != "download_file" && api != "add_custom_face");
+                  api != "download_file" && api != "add_custom_face" && api != "get_record");
                 if (!response) {
                     co_return std::unexpected(response.error());
                 }
@@ -247,6 +249,31 @@ namespace insoulforge::OneBotClient {
             co_return std::nullopt;
         }
         co_return jsonToString(atOrNull(atOrNull(*resp, "data"), "file"));
+    }
+
+    auto getRecordWav(std::string file, const SessionId sessionId) -> drogon::Task<std::optional<std::string>> {
+        constexpr size_t kMaxWavBytes = 8U * 1024U * 1024U;
+        constexpr size_t kMaxBase64Bytes = ((kMaxWavBytes + 2) / 3) * 4;
+        json params{{"file", std::move(file)}, {"out_format", "wav"}};
+        const auto response = co_await callApi("[ASR]", "get_record", std::move(params), sessionId);
+        if (!response) {
+            co_return std::nullopt;
+        }
+        const auto &encoded = atOrNull(atOrNull(*response, "data"), "base64");
+        if (!encoded.is_string()) {
+            co_return std::nullopt;
+        }
+        const auto &base64 = encoded.get_ref<const std::string &>();
+        const auto padding = base64.ends_with("==") ? 2U : (base64.ends_with('=') ? 1U : 0U);
+        if (base64.empty() || base64.size() > kMaxBase64Bytes || base64.size() % 4 != 0 ||
+            base64.size() / 4 * 3 - padding > kMaxWavBytes ||
+            std::string_view(base64)
+                .substr(0, base64.size() - padding)
+                .find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/") !=
+              std::string_view::npos) {
+            co_return std::nullopt;
+        }
+        co_return drogon::utils::base64Decode(base64);
     }
 
     auto downloadFile(std::string url, const std::optional<SessionId> sessionId, json connection)
