@@ -6,11 +6,11 @@
 
 #pragma once
 
+#include <expected>
 #include <optional>
 #include <string>
 
 #include <drogon/utils/coroutine.h>
-#include <expected>
 
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
@@ -66,20 +66,24 @@ namespace insoulforge::OneBotClient {
 
     /// @brief 获取图片在 QQ 客户端容器内的路径
     /// @note OneBot 11: get_image
-    /// @return data.file 路径；失败返回 nullopt（15 秒超时，商城表情等会失败）
+    /// @return data.file 路径；失败时返回协议错误（15 秒超时，部分商城表情无法获取）
     [[nodiscard]] auto getImage(std::string file, std::optional<SessionId> sessionId = std::nullopt,
-      json connection = nullptr) -> drogon::Task<std::optional<std::string>>;
+      json connection = nullptr) -> drogon::Task<std::expected<std::string, std::string>>;
+
+    /// @brief 请求协议端转码，返回 get_record 的 Base64 解码结果，最多 8 MiB。
+    [[nodiscard]] auto getRecordWav(std::string file, SessionId sessionId)
+      -> drogon::Task<std::expected<std::string, std::string>>;
 
     /// @brief 下载文件到 QQ 客户端缓存目录
     /// @note go-cqhttp: download_file
-    /// @return data.file 路径；失败返回 nullopt
+    /// @return data.file 路径；失败时返回协议错误
     [[nodiscard]] auto downloadFile(std::string url, std::optional<SessionId> sessionId = std::nullopt,
-      json connection = nullptr) -> drogon::Task<std::optional<std::string>>;
+      json connection = nullptr) -> drogon::Task<std::expected<std::string, std::string>>;
 
     /// @brief 将图片保存为 QQ 收藏表情
     /// @brief 使用 download_file.base64 将原始字节传到协议主机。
     [[nodiscard]] auto uploadFile(std::string bytes, std::optional<SessionId> sessionId = std::nullopt,
-      json connection = nullptr) -> drogon::Task<std::optional<std::string>>;
+      json connection = nullptr) -> drogon::Task<std::expected<std::string, std::string>>;
 
     /// @note NapCat 扩展: add_custom_face（api.md 未收录）
     [[nodiscard]] auto addCustomFace(std::string file, std::optional<SessionId> sessionId = std::nullopt,

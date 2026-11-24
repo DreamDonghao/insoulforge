@@ -66,7 +66,9 @@ namespace insoulforge::ConfigStore {
                               {"image", defaultChatConfig(1024, 0.7, 0.9, 90, 0)},
                               {"imageGeneration", defaultImageGenerationConfig()},
                               {"memory", defaultChatConfig(4000, 0.4, 0.9, 180, 0)},
-                              {"embedding", defaultEmbeddingConfig()}, {"jev", defaultJevConfig()}}},
+                              {"embedding", defaultEmbeddingConfig()}, {"jev", defaultJevConfig()},
+                              {"asr", {{"apiKey", ""}, {"baseUrl", "https://api.deepseek.com"},
+                                        {"path", "/v1/tools/asr"}, {"timeoutSeconds", 90}}}}},
               {"qq",
                 {{"accessToken", ""}, {"selfQQNumber", 0}, {"oneBotImplementation", "napcat"},
                   {"oneBotTransport", "websocket"}, {"qqHttpHost", "http://127.0.0.1:3000"},
@@ -358,7 +360,11 @@ namespace insoulforge::ConfigStore {
             persistedConfig.erase("apiType");
             persistedConfig.erase("editPath");
         }
-        if (name == "embedding" || name == "jev" || name == "imageGeneration") {
+        if (name == "asr") {
+            persistedConfig.erase("model");
+            persistedConfig.erase("maxRetries");
+        }
+        if (name == "embedding" || name == "jev" || name == "imageGeneration" || name == "asr") {
             persistedConfig.erase("maxTokens");
             persistedConfig.erase("temperature");
             persistedConfig.erase("topP");

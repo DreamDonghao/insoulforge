@@ -68,9 +68,9 @@ namespace insoulforge {
               registry.registerPlugin("custom", [&tools, &registeredCount](ToolRegistry &pluginRegistry) -> void {
                   for (const auto &tool: tools) {
                       if (tool.executorType == "lua") {
-                          if (const auto error = LuaToolExecutor::validate(tool.scriptContent)) {
-                              Logger::warn(
-                                std::nullopt, "Tool", std::format("跳过无效 Lua 工具 '{}': {}", tool.name, *error));
+                          if (const auto validation = LuaToolExecutor::validate(tool.scriptContent); !validation) {
+                              Logger::warn(std::nullopt, "Tool",
+                                std::format("跳过无效 Lua 工具 '{}': {}", tool.name, validation.error()));
                               continue;
                           }
                       }

@@ -14,16 +14,22 @@ auto AdminController::getCharacterImage(HttpRequestPtr, std::function<void(const
   -> Task<> {
     const auto image = CharacterImageStore::load();
     if (!image) {
+        auto response = jsonResponse(AdminResponse::failJson(image.error()));
+        response->setStatusCode(k500InternalServerError);
+        callback(response);
+        co_return;
+    }
+    if (!*image) {
         auto response = jsonResponse(AdminResponse::failJson("尚未上传角色形象图"));
         response->setStatusCode(k404NotFound);
         callback(response);
         co_return;
     }
     auto response = HttpResponse::newHttpResponse();
-    response->setContentTypeString(image->mimeType);
+    response->setContentTypeString((*image)->mimeType);
     response->addHeader("Cache-Control", "no-store");
     response->addHeader("X-Content-Type-Options", "nosniff");
-    response->setBody(image->bytes);
+    response->setBody((*image)->bytes);
     callback(response);
     co_return;
 }
@@ -43,8 +49,8 @@ auto AdminController::saveCharacterImage(
         callback(response);
         co_return;
     }
-    if (const auto error = CharacterImageStore::save(parser.getFiles()[0].fileContent())) {
-        auto response = jsonResponse(AdminResponse::failJson(*error));
+    if (const auto saved = CharacterImageStore::save(parser.getFiles()[0].fileContent()); !saved) {
+        auto response = jsonResponse(AdminResponse::failJson(saved.error()));
         response->setStatusCode(k400BadRequest);
         callback(response);
         co_return;

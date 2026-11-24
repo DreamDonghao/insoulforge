@@ -14,7 +14,7 @@ import SlidingTabs from '../../components/SlidingTabs.vue'
 
 const showToast = inject<(msg: string, isError?: boolean) => void>('showToast')
 
-const llmNames = ['router', 'jev', 'executor', 'executorThinking', 'image', 'imageGeneration', 'memory', 'embedding']
+const llmNames = ['router', 'jev', 'executor', 'executorThinking', 'image', 'asr', 'imageGeneration', 'memory', 'embedding']
 const llmLabels: Record<string, string> = {
   router: '回复决策',
   jev: 'Jev',
@@ -22,6 +22,7 @@ const llmLabels: Record<string, string> = {
   executorFallback: '备用模型',
   executorThinking: '深度思考',
   image: '图片识别',
+  asr: '语音识别',
   imageGeneration: '图片生成',
   memory: '记忆维护',
   embedding: '向量化'
@@ -36,6 +37,7 @@ const llmUsages: Record<string, string> = {
   executorFallback: '用途：默认 Executor 请求失败时重试本次请求；留空不启用，下次仍优先使用默认模型',
   executorThinking: '用途：深度思考模式的分析阶段（最终执行仍走 Executor）',
   image: '用途：图片识别与描述',
+  asr: '自动转写已启用会话的语音。填写 API 密钥后启用，音频将发送到配置的语音识别服务。',
   imageGeneration: '用途：异步文生图，生成完成后直接发送到会话',
   memory: '用途：人物记忆提取、会话记忆与人物档案整理',
   embedding: '用途：长期记忆向量化（记忆写入与检索时计算文本向量）'

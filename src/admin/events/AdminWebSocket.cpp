@@ -20,7 +20,7 @@ void AdminWebSocket::handleNewConnection(const HttpRequestPtr &req, const WebSoc
 
 void AdminWebSocket::handleNewMessage(
   const WebSocketConnectionPtr &conn, std::string &&message, const WebSocketMessageType &type) {
-    if (type != WebSocketMessageType::Text) {
+    if (type != WebSocketMessageType::Text || message.size() > 1024U * 1024U) {
         return;
     }
 

@@ -9,7 +9,6 @@
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
-#include <infrastructure/logging/Logger.hpp>
 #include <workflow/agent/llm/LlmClient.hpp>
 #include <workflow/agent/memory/LongTermMemoryStore.hpp>
 #include <workflow/agent/memory/MemoryStore.hpp>
@@ -21,27 +20,24 @@ namespace insoulforge {
     namespace {
         constexpr i32 kRecallPerMemory = 2;
         constexpr size_t kMaxRecalledEntries = 20;
-        [[nodiscard]] auto parseLlmJson(const std::optional<std::string> &result, const std::string_view tag,
-          const SessionId &sessionId) -> std::optional<json> {
+        [[nodiscard]] auto parseLlmJson(const std::expected<std::string, std::string> &result,
+          const std::string_view tag) -> std::expected<json, std::string> {
             if (!result) {
-                Logger::error(sessionId, "Memory", std::format("{}: API 请求失败", tag));
-                return std::nullopt;
+                return std::unexpected(std::format("{}: {}", tag, result.error()));
             }
             std::string payload;
             if (!tryExtractJsonObject(*result, payload)) {
-                Logger::warn(sessionId, "Memory", std::format("{}: 响应中无 JSON: {}", tag, result->substr(0, 100)));
-                return std::nullopt;
+                return std::unexpected(std::format("{}: 响应中未找到 JSON 对象", tag));
             }
             json parsed;
             if (!tryParseJson(payload, parsed) || !parsed.is_object()) {
-                Logger::warn(sessionId, "Memory", std::format("{}: JSON 解析失败", tag));
-                return std::nullopt;
+                return std::unexpected(std::format("{}: 响应 JSON 解析失败", tag));
             }
             return parsed;
         }
 
         auto extractMemories(const json &records, const json &context, const SessionId sessionId)
-          -> drogon::Task<std::optional<MemoryMaintenanceResult>> {
+          -> drogon::Task<std::expected<MemoryMaintenanceResult, std::string>> {
             std::unordered_set<UserId> participants;
             for (const auto &record: records) {
                 if (const auto userId = UserId::parse(getStr(atOrNull(record, "sender"), "user_id"));
@@ -171,21 +167,18 @@ namespace insoulforge {
                 {"content", "=== 待提取消息 ===\n" + dumpJson(records) + "\n=== 补充上下文（不得提取） ===\n" +
                               dumpJson(context) + "\n\n请输出提取结果 JSON："}},
             });
-            const auto parsed =
-              parseLlmJson(co_await LlmClient::requestMaintenance(messages, sessionId), "记忆提取", sessionId);
+            const auto parsed = parseLlmJson(co_await LlmClient::requestMaintenance(messages, sessionId), "记忆提取");
             if (!parsed) {
-                co_return std::nullopt;
+                co_return std::unexpected(parsed.error());
             }
             const json &values = atOrNull(*parsed, "memories");
             const auto &affinity = atOrNull(*parsed, "affinity_changes");
             if (!values.is_array() || (affinityEnabled && !affinity.is_array())) {
-                Logger::warn(sessionId, "Memory", "记忆提取: 缺少 memories 或 affinity_changes 数组");
-                co_return std::nullopt;
+                co_return std::unexpected("记忆提取: 缺少 memories 或 affinity_changes 数组");
             }
             const auto &summary = atOrNull(*parsed, "conversation_summary");
             if (!summary.is_string() || trim(summary.get_ref<const std::string &>()).empty()) {
-                Logger::warn(sessionId, "Memory", "记忆提取: 缺少有效的 conversation_summary，本批次不提交");
-                co_return std::nullopt;
+                co_return std::unexpected("记忆提取: 缺少有效的 conversation_summary");
             }
             MemoryMaintenanceResult result;
             result.conversationSummary = trim(summary.get<std::string>());
@@ -194,12 +187,11 @@ namespace insoulforge {
                 const auto userId = UserId::parse(getStr(value, "user_id"));
                 if (!value.is_object() || !userId || !participants.contains(*userId) ||
                     !atOrNull(value, "entries").is_array()) {
-                    Logger::warn(sessionId, "Memory", "人物记忆格式或用户 ID 归属无效，本批次不提交");
-                    co_return std::nullopt;
+                    co_return std::unexpected("记忆提取: 人物记忆格式或用户 ID 归属无效");
                 }
                 for (const auto &entry: value["entries"]) {
                     if (!entry.is_string())
-                        co_return std::nullopt;
+                        co_return std::unexpected("记忆提取: 人物记忆条目必须为字符串");
                     if (auto content = trim(entry.get<std::string>());
                       !content.empty() && seenEntries.emplace(*userId, content).second) {
                         result.personEntries.push_back({.userId = *userId, .content = std::move(content)});
@@ -214,8 +206,7 @@ namespace insoulforge {
                 const auto &delta = atOrNull(value, "delta");
                 if (!value.is_object() || !userId || !participants.contains(*userId) || !delta.is_number_integer() ||
                     !seenAffinity.insert(*userId).second) {
-                    Logger::warn(sessionId, "Memory", "好感度格式、用户 ID 归属或重复项无效，本批次不提交");
-                    co_return std::nullopt;
+                    co_return std::unexpected("记忆提取: 好感度格式或用户 ID 归属无效，或存在重复项");
                 }
                 if (const auto bounded = static_cast<i32>(std::clamp(jsonToDouble(delta), -5.0, 5.0)); bounded != 0)
                     result.affinity.emplace_back(*userId, bounded);
@@ -224,14 +215,13 @@ namespace insoulforge {
         }
 
         auto recallForMerge(const std::vector<std::string> &memories, const SessionId sessionId)
-          -> drogon::Task<std::optional<std::vector<SimilarMemory>>> {
+          -> drogon::Task<std::expected<std::vector<SimilarMemory>, std::string>> {
             const f32 threshold = static_cast<f32>(Config::instance().longTermRecallThreshold);
             std::unordered_map<i64, SimilarMemory> recalled;
             for (const std::string &memory: memories) {
                 const auto embedding = co_await LlmClient::requestEmbedding(memory, sessionId);
                 if (!embedding) {
-                    Logger::warn(sessionId, "Memory", "记忆召回: 向量化失败，本次维护不提交");
-                    co_return std::nullopt;
+                    co_return std::unexpected("记忆召回向量化失败: " + embedding.error());
                 }
                 for (const SimilarMemory &hit:
                   LongTermMemoryStore::searchSimilar(sessionId, *embedding, kRecallPerMemory)) {
@@ -265,7 +255,8 @@ namespace insoulforge {
 
         auto reconcileMemory(const json &currentAliases, const std::vector<std::string> &pending,
           const std::vector<std::string> &newMemories, const std::vector<SimilarMemory> &recalled,
-          const bool longTermEnabled, const SessionId sessionId) -> drogon::Task<std::optional<ReconcileResult>> {
+          const bool longTermEnabled, const SessionId sessionId)
+          -> drogon::Task<std::expected<ReconcileResult, std::string>> {
             std::string prompt = R"(# 会话记忆整理器
 
 将本批待整理条目和召回的旧记忆整理为长期记忆，同时更新本会话的外号。
@@ -325,21 +316,24 @@ aliases 和 longTerm 必须都是数组。longTerm 的每一项是非空字符�
               {{"role", "system"}, {"content", std::move(prompt)}},
               {{"role", "user"}, {"content", dumpJson(input)}},
             });
-            const auto parsed =
-              parseLlmJson(co_await LlmClient::requestMaintenance(messages, sessionId), "记忆整理", sessionId);
-            if (!parsed || !atOrNull(*parsed, "longTerm").is_array())
-                co_return std::nullopt;
+            const auto parsed = parseLlmJson(co_await LlmClient::requestMaintenance(messages, sessionId), "记忆整理");
+            if (!parsed) {
+                co_return std::unexpected(parsed.error());
+            }
+            if (!atOrNull(*parsed, "longTerm").is_array()) {
+                co_return std::unexpected("记忆整理: 缺少 longTerm 数组");
+            }
             const auto aliases = MemoryStore::normalizeSessionMemory({{"aliases", atOrNull(*parsed, "aliases")}});
             if (!aliases)
-                co_return std::nullopt;
+                co_return std::unexpected("记忆整理: aliases 格式无效");
             ReconcileResult result{.aliases = (*aliases)["aliases"]};
             std::unordered_set<std::string> seen;
             for (const auto &entry: (*parsed)["longTerm"]) {
                 if (!entry.is_string())
-                    co_return std::nullopt;
+                    co_return std::unexpected("记忆整理: 长期记忆条目必须为字符串");
                 auto content = trim(entry.get<std::string>());
                 if (content.empty() || !longTermEnabled)
-                    co_return std::nullopt;
+                    co_return std::unexpected("记忆整理: 长期记忆条目为空或长期记忆未启用");
                 if (seen.insert(content).second)
                     result.longTerm.push_back(std::move(content));
             }
@@ -362,7 +356,7 @@ aliases 和 longTerm 必须都是数组。longTerm 的每一项是非空字符�
     } // namespace
 
     auto MemoryMaintenanceService::prepare(const SessionId sessionId, json messages, json contextMessages)
-      -> drogon::Task<std::optional<MemoryMaintenanceResult>> {
+      -> drogon::Task<std::expected<MemoryMaintenanceResult, std::string>> {
         const auto records = projectMessages(messages);
         if (records.empty()) {
             co_return MemoryMaintenanceResult{};
@@ -372,7 +366,7 @@ aliases 和 longTerm 必须都是数组。longTerm 的每一项是非空字符�
         const auto contextRecords = projectMessages(contextMessages);
         auto extracted = co_await extractMemories(records, contextRecords, sessionId);
         if (!extracted) {
-            co_return std::nullopt;
+            co_return std::unexpected(extracted.error());
         }
 
         std::vector<std::string> newMemories;
@@ -400,7 +394,7 @@ aliases 和 longTerm 必须都是数组。longTerm 的每一项是非空字符�
         if (longTermEnabled) {
             auto result = co_await recallForMerge(candidates, sessionId);
             if (!result) {
-                co_return std::nullopt;
+                co_return std::unexpected(result.error());
             }
             recalled = std::move(*result);
         }
@@ -408,7 +402,7 @@ aliases 和 longTerm 必须都是数组。longTerm 的每一项是非空字符�
         const auto reconciled =
           co_await reconcileMemory(currentAliases, pending, newMemories, recalled, longTermEnabled, sessionId);
         if (!reconciled) {
-            co_return std::nullopt;
+            co_return std::unexpected(reconciled.error());
         }
 
         std::vector<PreparedLongTermMemory> prepared;
@@ -416,8 +410,7 @@ aliases 和 longTerm 必须都是数组。longTerm 的每一项是非空字符�
             PreparedLongTermMemory item{.content = content};
             const auto embedding = co_await LlmClient::requestEmbedding(item.content, sessionId);
             if (!embedding) {
-                Logger::warn(sessionId, "Memory", "长期记忆向量化失败，本次维护不提交");
-                co_return std::nullopt;
+                co_return std::unexpected("长期记忆向量化失败: " + embedding.error());
             }
             item.embedding = *embedding;
             prepared.push_back(std::move(item));

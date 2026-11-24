@@ -16,6 +16,7 @@ namespace insoulforge::MemoryMaintenanceCoordinator {
         const auto memory =
           co_await MemoryMaintenanceService::prepare(sessionId, std::move(messages), std::move(contextMessages));
         if (!memory) {
+            Logger::warn(sessionId, "Memory", std::format("记忆维护未提交: {}", memory.error()));
             co_return false;
         }
         MemoryMaintenanceStore::apply(database, sessionId, *memory);

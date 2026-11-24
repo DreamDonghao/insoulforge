@@ -50,6 +50,10 @@ const text = computed(() => {
         const user_id = getString(target?.user_id)
         return name ? `@${name}` : user_id ? `@${user_id}` : '@成员'
       }
+      case 'audio': {
+        const transcript = getString(item.transcript)
+        return transcript ? `[语音] ${transcript}` : '[语音]'
+      }
       case 'image': {
         const description = imageDescription(value, item)
         return description ? `[图片] ${description}` : '[图片]'

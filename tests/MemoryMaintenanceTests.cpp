@@ -13,7 +13,9 @@
 #include <string>
 #include <unordered_map>
 
+#include <drogon/MultiPart.h>
 #include <drogon/drogon.h>
+#include <drogon/utils/Utilities.h>
 #include <trantor/net/EventLoopThread.h>
 
 #include <admin/http/AdminController.hpp>
@@ -21,9 +23,11 @@
 #include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/SessionId.hpp>
 #include <infrastructure/config/Config.hpp>
+#include <infrastructure/http/HttpTrace.hpp>
 #include <infrastructure/storage/Database.hpp>
 #include <infrastructure/storage/Statement.hpp>
 #include <infrastructure/tokenizer/TokenCounter.hpp>
+#include <onebot/incoming/OneBotEventNormalizer.hpp>
 #include <workflow/EventWorkflow.hpp>
 #include <workflow/MessageList.hpp>
 #include <workflow/agent/llm/prompts/PromptService.hpp>
@@ -41,6 +45,7 @@
 #include <workflow/agent/tools/ToolRuntime.hpp>
 #include <workflow/agent/tools/plugins/InfoToolsPlugin.hpp>
 #include <workflow/history/ChatRecordManager.hpp>
+#include <workflow/message/MessageContentEnricher.hpp>
 #include <workflow/message/MessageRecord.hpp>
 #include <workflow/session/QQNameDirectory.hpp>
 #include <workflow/session/SessionStore.hpp>
@@ -457,9 +462,95 @@ namespace {
           "stopped resolver updated nickname cache or accepted new work");
     }
 
+    auto voiceWav(const u32 samples = 80) -> std::string {
+        std::string bytes = "RIFF";
+        const auto write = [&](const u32 value, const size_t count) {
+            for (size_t index = 0; index < count; ++index) {
+                bytes.push_back(static_cast<char>((value >> (8 * index)) & 0xffU));
+            }
+        };
+        write(36 + samples * 2, 4);
+        bytes += "WAVEfmt ";
+        write(16, 4);
+        write(1, 2);
+        write(1, 2);
+        write(8000, 4);
+        write(16000, 4);
+        write(2, 2);
+        write(16, 2);
+        bytes += "data";
+        write(samples * 2, 4);
+        bytes.append(samples * 2, '\0');
+        return bytes;
+    }
+
+    std::atomic<i32> voiceRequests{0};
+    std::atomic<i32> asrRequests{0};
+
+    auto testVoiceRecognition(const std::string endpoint) -> drogon::Task<> {
+        auto &config = Config::instance();
+        const auto originalQQ = config.getQQConfig();
+        const auto originalASR = config.getLLMConfig("asr");
+        require(originalASR["apiKey"] == "" && originalASR["timeoutSeconds"] == 90, "ASR must default to disabled");
+        auto qq = originalQQ;
+        qq["oneBotTransport"] = "http";
+        qq["qqHttpHost"] = endpoint;
+        require(config.saveQQConfig(qq).has_value(), "could not set ASR fixture OneBot endpoint");
+
+        auto message = OneBotEventNormalizer::normalize(
+          {{"post_type", "message"}, {"message_type", "private"}, {"user_id", 11}, {"message_id", 12},
+            {"message",
+              json::array({{{"type", "text"}, {"data", {{"text", "开头"}}}},
+                {{"type", "record"}, {"data", {{"file", "fixture.amr"}, {"url", "https://voice.invalid/secret"}}}},
+                {{"type", "at"}, {"data", {{"qq", "42"}}}}})}});
+        require(message.has_value(), "could not normalize incoming voice event");
+        const auto session = MessageRecord::getSessionId(*message);
+        require(!MessageRecord::projectForAgent(*message)["segments"][1].contains("onebot_file"),
+          "audio projection exposed the OneBot file identifier before enrichment");
+        const auto skipped = co_await MessageContentEnricher::transcribeAudio(*message, session);
+        require(skipped["segments"][1]["recognition_status"] == "skipped" && voiceRequests == 0 && asrRequests == 0 &&
+                  !skipped["segments"][1].contains("onebot_file"),
+          "disabled ASR requested or retained audio");
+
+        auto asr = originalASR;
+        asr["apiKey"] = "fixture-asr-key";
+        asr["baseUrl"] = endpoint + "/fixture";
+        asr["path"] = "/asr";
+        require(config.saveLLMConfig("asr", asr).has_value(), "could not save ASR fixture endpoint");
+        const auto recognized = co_await MessageContentEnricher::transcribeAudio(*message, session);
+        const auto &segments = recognized["segments"];
+        require(
+          segments.size() == 3 && segments[0]["text"] == "开头" && segments[2]["type"] == "at" &&
+            segments[1] == json{{"type", "audio"}, {"recognition_status", "succeeded"}, {"transcript", "语音正文"}},
+          "recognition changed segment order, lost the transcript or retained transport data");
+        require(MessageRecord::projectForAgent(recognized)["segments"][1]["transcript"] == "语音正文" &&
+                  MessageRecord::extractRecallText(recognized).find("语音正文") != std::string::npos,
+          "recognized voice was missing from model projection or recall text");
+        const auto trace = HttpTrace::instance().query(0, 8);
+        require(std::ranges::any_of(trace, [](const auto &entry) { return entry.url.ends_with("/get_record"); }) &&
+                  std::ranges::none_of(trace,
+                    [](const auto &entry) {
+                        return entry.responseBody.contains("UklGR") || entry.requestBody.contains("fixture-asr-key") ||
+                               entry.requestBody.contains("voice.wav");
+                    }),
+          "debug trace retained WAV bytes or ASR request details");
+
+        for (const auto *file: {"too-long.amr", "oversized.amr", "broken.amr", "empty.amr", "failure.amr"}) {
+            (*message)["segments"][1]["onebot_file"] = file;
+            const auto failed = co_await MessageContentEnricher::transcribeAudio(*message, session);
+            require(failed["segments"][1] == json{{"type", "audio"}, {"recognition_status", "failed"}} &&
+                      failed["segments"][0]["text"] == "开头" && failed["segments"][2]["type"] == "at",
+              "ASR failure lost other message segments or retained transport data");
+        }
+        require(voiceRequests == 6 && asrRequests == 3, "invalid audio reached ASR or a request was retried");
+        require(config.saveLLMConfig("asr", originalASR).has_value() && config.saveQQConfig(originalQQ).has_value(),
+          "could not restore configuration after ASR fixture");
+    }
+
     auto runTests(const std::string endpoint, std::atomic<Mode> &mode, std::atomic<i32> &requests,
       std::atomic<i32> &nameRequests, i32 &exitCode) -> drogon::Task<> {
         try {
+            co_await testVoiceRecognition(endpoint);
             auto &database = Database::instance();
             auto &config = Config::instance();
             require(database.initialize(":memory:").has_value(), "database initialization failed");
@@ -871,6 +962,41 @@ auto main() -> int {
     json frozenStickers;
     json fallbackMessages;
     drogon::app().setLogLevel(trantor::Logger::kWarn).addListener("127.0.0.1", 0);
+    drogon::app().registerHandler("/get_record",
+      [](const drogon::HttpRequestPtr &request, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+          ++voiceRequests;
+          const auto body = json::parse(request->body());
+          const auto file = getStr(body, "file");
+          const auto response = drogon::HttpResponse::newHttpResponse();
+          if (getStr(body, "out_format") != "wav" || !file.ends_with(".amr")) {
+              response->setStatusCode(drogon::k400BadRequest);
+          } else {
+              const auto wav = file == "too-long.amr"    ? voiceWav(8000 * 120 + 1)
+                               : file == "oversized.amr" ? std::string(8 * 1024 * 1024 + 1, 'x')
+                                                         : voiceWav();
+              const auto encoded = file == "broken.amr" ? std::string("bad!") : drogon::utils::base64Encode(wav);
+              response->setBody(json{{"status", "ok"}, {"data", {{"base64", encoded}}}}.dump());
+          }
+          callback(response);
+      },
+      {drogon::Post});
+    drogon::app().registerHandler("/fixture/asr",
+      [](const drogon::HttpRequestPtr &request, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+          const auto call = ++asrRequests;
+          const auto response = drogon::HttpResponse::newHttpResponse();
+          drogon::MultiPartParser parser;
+          if (request->getHeader("authorization") != "Bearer fixture-asr-key" || parser.parse(request) != 0 ||
+              parser.getFiles().size() != 1 || parser.getFiles().front().getItemName() != "file" ||
+              parser.getFiles().front().fileContent() != voiceWav()) {
+              response->setStatusCode(drogon::k400BadRequest);
+          } else if (call == 3) {
+              response->setStatusCode(drogon::k503ServiceUnavailable);
+          } else {
+              response->setBody(json{{"text", call == 1 ? " 语音正文 " : "  "}}.dump());
+          }
+          callback(response);
+      },
+      {drogon::Post});
     drogon::app().registerHandler("/thinking-fixture",
       [](const drogon::HttpRequestPtr &request, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
           ++thinkingRequests;

@@ -23,9 +23,9 @@ namespace insoulforge {
         /// @brief 通用 API 请求函数
         auto requestStr(json messages, const LLMApiConfig api, const LLMModelParams params, const std::string role,
           const std::optional<SessionId> sessionId, const std::shared_ptr<LlmClient::MaintenanceRequestControl> control)
-          -> drogon::Task<std::optional<std::string>> {
+          -> drogon::Task<std::expected<std::string, std::string>> {
             if (control && control->isCancelled()) {
-                co_return std::nullopt;
+                co_return std::unexpected("模型请求已取消");
             }
             if (!LlmClient::isConfigured(api)) {
                 if (sessionId) {
@@ -33,13 +33,16 @@ namespace insoulforge {
                 } else {
                     Logger::warn(std::nullopt, "LLM", std::format("未配置服务地址、请求路径或模型名，跳过请求"));
                 }
-                co_return std::nullopt;
+                co_return std::unexpected("维护模型配置不完整");
             }
             json body = LlmClient::buildChatRequestBody(api, params, std::move(messages));
             const auto resp =
               co_await LlmClient::sendModelRequest("LLM", api, std::move(body), sessionId, true, control);
-            if (!resp || (control && control->isCancelled())) {
-                co_return std::nullopt;
+            if (control && control->isCancelled()) {
+                co_return std::unexpected("模型请求已取消");
+            }
+            if (!resp) {
+                co_return std::unexpected(resp.error());
             }
 
             const auto respJson = LlmClient::validChatJson(*resp);
@@ -51,12 +54,12 @@ namespace insoulforge {
                     Logger::error(std::nullopt, "LLM",
                       std::format("请求出错: status={}", static_cast<i32>((*resp)->getStatusCode())));
                 }
-                co_return std::nullopt;
+                co_return std::unexpected(respJson.error());
             }
 
             if (control) {
                 if (!control->recordUsage(*respJson, api.model, role, sessionId)) {
-                    co_return std::nullopt;
+                    co_return std::unexpected("模型请求已取消");
                 }
             } else {
                 LlmClient::logUsage(*respJson, api.model, role, sessionId);
@@ -113,17 +116,21 @@ namespace insoulforge {
             return body;
         }
 
-        auto validChatJson(const drogon::HttpResponsePtr &resp) -> std::optional<json> {
-            if (!resp || resp->getStatusCode() != drogon::k200OK) {
-                return std::nullopt;
+        auto validChatJson(const drogon::HttpResponsePtr &resp) -> std::expected<json, std::string> {
+            if (!resp) {
+                return std::unexpected("模型未返回 HTTP 响应");
+            }
+            if (resp->getStatusCode() != drogon::k200OK) {
+                return std::unexpected(
+                  std::format("模型 HTTP 请求失败: status={}", static_cast<i32>(resp->getStatusCode())));
             }
             json parsed;
             if (!tryParseJson(resp->body(), parsed)) {
-                return std::nullopt;
+                return std::unexpected("模型响应 JSON 解析失败");
             }
             // choices 必须为非空数组（调用方直接按 [choices][0] 取 message）
             if (const json &choices = atOrNull(parsed, "choices"); !choices.is_array() || choices.empty()) {
-                return std::nullopt;
+                return std::unexpected("模型响应缺少非空 choices 数组");
             }
             return parsed;
         }
@@ -150,32 +157,34 @@ namespace insoulforge {
         }
 
         auto requestChat(std::string label, std::string usageRole, LLMApiConfig apiConfig, LLMModelParams params,
-          json messages, json tools, const std::optional<SessionId> sessionId) -> drogon::Task<std::optional<json>> {
+          json messages, json tools, const std::optional<SessionId> sessionId)
+          -> drogon::Task<std::expected<json, std::string>> {
             if (!isConfigured(apiConfig)) {
                 Logger::warn(sessionId, label, "未配置服务地址、请求路径或模型名，跳过请求");
-                co_return std::nullopt;
+                co_return std::unexpected("聊天模型配置不完整");
             }
             const json body = buildChatRequestBody(apiConfig, params, std::move(messages), std::move(tools),
               usageRole == "executor" || usageRole == "executorFallback" ? sessionId : std::nullopt);
             const auto resp = co_await sendModelRequest(label, apiConfig, body, sessionId);
             if (!resp) {
                 Logger::warn(sessionId, label, "网络异常");
-                co_return std::nullopt;
+                co_return std::unexpected(resp.error());
             }
-            if (const auto respJson = validChatJson(*resp)) {
+            const auto respJson = validChatJson(*resp);
+            if (respJson) {
                 logUsage(*respJson, apiConfig.model, usageRole, sessionId);
                 co_return respJson;
             }
             Logger::error(sessionId, label,
               std::format("请求失败: status={} body={}", static_cast<i32>((*resp)->getStatusCode()),
                 std::string((*resp)->getBody()).substr(0, kErrorBodyMaxChars)));
-            co_return std::nullopt;
+            co_return std::unexpected(respJson.error());
         }
     } // namespace LlmClient
 
     auto LlmClient::requestMaintenance(json messages, const std::optional<SessionId> sessionId, std::string usageRole,
       const std::optional<i32> maxTokens, std::shared_ptr<MaintenanceRequestControl> control)
-      -> drogon::Task<std::optional<std::string>> {
+      -> drogon::Task<std::expected<std::string, std::string>> {
         const auto &config = Config::instance();
         auto params = config.memoryParams;
         if (maxTokens) {
@@ -186,11 +195,11 @@ namespace insoulforge {
     }
 
     auto LlmClient::requestEmbedding(std::string text, const std::optional<SessionId> sessionId)
-      -> drogon::Task<std::optional<std::vector<f32>>> {
+      -> drogon::Task<std::expected<std::vector<f32>, std::string>> {
         const auto config = Config::instance().embedding;
         if (!isConfigured(config)) {
             Logger::debug(std::nullopt, "LLM", std::format("Embedding 未配置，跳过向量化"));
-            co_return std::nullopt;
+            co_return std::unexpected("Embedding 模型配置不完整");
         }
 
         json body;
@@ -199,7 +208,7 @@ namespace insoulforge {
 
         const auto resp = co_await LlmClient::sendModelRequest("Embedding", config, std::move(body), sessionId);
         if (!resp) {
-            co_return std::nullopt;
+            co_return std::unexpected(resp.error());
         }
 
         json respJson;
@@ -213,7 +222,8 @@ namespace insoulforge {
                 Logger::error(std::nullopt, "Embedding",
                   std::format("请求出错: status={}", static_cast<i32>((*resp)->getStatusCode())));
             }
-            co_return std::nullopt;
+            co_return std::unexpected(
+              std::format("Embedding 模型响应无效: status={}", static_cast<i32>((*resp)->getStatusCode())));
         }
 
         logUsage(respJson, config.model, "embedding", sessionId);
@@ -223,7 +233,7 @@ namespace insoulforge {
             embedding.push_back(static_cast<f32>(jsonToDouble(value)));
         }
         if (embedding.empty()) {
-            co_return std::nullopt;
+            co_return std::unexpected("Embedding 模型响应缺少向量");
         }
         co_return embedding;
     }

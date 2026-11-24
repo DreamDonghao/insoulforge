@@ -96,8 +96,9 @@ namespace insoulforge {
                   if (characterDataUrl)
                       references.push_back(std::move(*characterDataUrl));
                   for (const auto &url: referenceUrls) {
-                      auto dataUrl = co_await ImageDescriptionService::referenceDataUrl(url, sessionId);
+                      auto dataUrl = co_await ImageDescriptionService::referenceDataUrl(url);
                       if (!dataUrl) {
+                          Logger::warn(sessionId, "ImageGeneration", dataUrl.error());
                           throw std::runtime_error("原图下载失败或格式不受支持，请重新发送静态图片");
                       }
                       references.push_back(std::move(*dataUrl));
@@ -117,6 +118,8 @@ namespace insoulforge {
                       if (const auto recognized =
                             co_await ImageDescriptionService::describeGeneratedImage(generated.source, sessionId)) {
                           description = recognized->description;
+                      } else {
+                          Logger::debug(sessionId, "ImageGeneration", recognized.error());
                       }
                   } catch (const std::exception &error) {
                       Logger::warn(sessionId, "ImageGeneration", std::format("生成图片识别失败: {}", error.what()));
@@ -232,9 +235,12 @@ namespace insoulforge {
                 if (getBool(args, "use_self_reference")) {
                     const auto image = CharacterImageStore::load();
                     if (!image) {
+                        co_return image.error();
+                    }
+                    if (!*image) {
                         co_return std::string("尚未在管理后台上传角色形象图，无法按自身形象生图。请先上传后重试。");
                     }
-                    referenceDataUrl = ImageDescriptionService::staticImageDataUrl(image->bytes);
+                    referenceDataUrl = ImageDescriptionService::staticImageDataUrl((*image)->bytes);
                     if (!referenceDataUrl) {
                         co_return std::string("角色形象图格式无效，请在管理后台重新上传。");
                     }
@@ -345,8 +351,11 @@ namespace insoulforge {
                 if (description.empty()) {
                     try {
                         if (const auto recognized = co_await ImageDescriptionService::describeGeneratedImage(
-                              image->id(), ctx.requireSession()))
+                              image->id(), ctx.requireSession())) {
                             description = trim(recognized->description);
+                        } else {
+                            Logger::debug(ctx.requireSession(), "Media", recognized.error());
+                        }
                     } catch (const std::exception &error) {
                         Logger::warn(ctx.requireSession(), "Media", std::format("发送图片识别失败: {}", error.what()));
                     } catch (...) {
@@ -566,6 +575,8 @@ namespace insoulforge {
                 std::string containerPath;
                 if (const auto path = co_await OneBotClient::getImage(file, sessionId, connection)) {
                     containerPath = *path;
+                } else {
+                    Logger::debug(sessionId, "Sticker", path.error());
                 }
 
                 // 获取路径失败时，通过 URL 将图片下载到容器内。
@@ -575,8 +586,8 @@ namespace insoulforge {
                     }
                     if (const auto path = co_await OneBotClient::downloadFile(url, sessionId, connection)) {
                         containerPath = *path;
-                    }
-                    if (containerPath.empty()) {
+                    } else {
+                        Logger::warn(sessionId, "Sticker", path.error());
                         co_return std::string("获取图片失败，可能是图片链接已过期，请让对方重新发送后立即保存");
                     }
                 }

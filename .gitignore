@@ -1,20 +1,31 @@
+# CMake / IDE
 /*build*
 /.idea
 /.vs
+
+# AI / tooling
 /.claude
-/lib
-/memory
+/.codex
+/.awb
+.mcp.json
+CLAUDE.md
+/AGENTS.md
+
+# Frontend
 /frontend/node_modules
 /frontend/.DS_Store
 /frontend/*.tsbuildinfo
 /public
-.DS_Store
-.mcp.json
-CLAUDE.md
-/AGENTS.md
-/debugtest/
-/.codex
-__pycache__/
 
+# Dependencies
+/lib
+
+# Runtime data / cache
+/memory
 /cache/
-/.awb/
+/tmp/
+/debugtest/
+
+# OS / Python
+.DS_Store
+__pycache__/

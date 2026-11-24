@@ -15,7 +15,6 @@
 
 #include <admin/logging/LogWebSocketManager.hpp>
 #include <infrastructure/CommonUtil.hpp>
-#include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
 #include <infrastructure/logging/ConnectionRefusedLogFilter.hpp>
 #include <infrastructure/logging/LogBuffer.hpp>
@@ -105,10 +104,13 @@ namespace insoulforge {
             LogBuffer::instance().loadFromDirectory(kLogDir.data());
             resetConnectionRefusedWarnings();
             // Trantor 默认直接写 stdout，不经过我们的 Logger；只限频同类连接拒绝警告。
-            trantor::Logger::setOutputFunction([](const char *message, const uint64_t length) {
-                if (connectionRefusedLogFilter().shouldWrite(std::string_view(message, static_cast<size_t>(length))))
-                    std::fwrite(message, 1, static_cast<size_t>(length), stdout);
-            }, [] { std::fflush(stdout); });
+            trantor::Logger::setOutputFunction(
+              [](const char *message, const uint64_t length) -> void {
+                  if (connectionRefusedLogFilter().shouldWrite(std::string_view(message, length))) {
+                      std::fwrite(message, 1, length, stdout);
+                  }
+              },
+              [] -> void { std::fflush(stdout); });
             info(std::nullopt, "Logger", std::format("日志系统初始化完成 | file={}", sinks.size() > 1));
             return {};
         } catch (const spdlog::spdlog_ex &error) {
@@ -192,9 +194,9 @@ namespace insoulforge {
     void Logger::resetConnectionRefusedWarnings() { connectionRefusedLogFilter().reset(); }
 
     void Logger::shutdown() {
-        trantor::Logger::setOutputFunction([](const char *message, const uint64_t length) {
-            std::fwrite(message, 1, static_cast<size_t>(length), stdout);
-        }, [] { std::fflush(stdout); });
+        trantor::Logger::setOutputFunction(
+          [](const char *message, const uint64_t length) -> void { std::fwrite(message, 1, length, stdout); },
+          [] -> void { std::fflush(stdout); });
         spdlog::shutdown();
     }
 } // namespace insoulforge

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <expected>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -15,7 +16,7 @@
 
 namespace insoulforge::LuaToolExecutor {
     /// @brief 在受限运行环境中检查脚本，并确认存在 run 入口
-    [[nodiscard]] auto validate(std::string_view source) -> std::optional<std::string>;
+    [[nodiscard]] auto validate(std::string_view source) -> std::expected<void, std::string>;
 
     /// @brief 执行 run 或 background；测试模式模拟有副作用的宿主操作
     /// @throws std::runtime_error 脚本错误、超限或返回值无效

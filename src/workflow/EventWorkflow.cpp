@@ -96,6 +96,7 @@ namespace insoulforge {
 
         auto composeIncomingMessage(json &message, const SessionId &sessionId) -> drogon::Task<> {
             message = co_await MessageContentEnricher::enrichImages(std::move(message), sessionId);
+            message = co_await MessageContentEnricher::transcribeAudio(std::move(message), sessionId);
             message = co_await MessageContentEnricher::injectMemories(std::move(message), sessionId);
             message.erase("session_id");
             message["executor_processed"] = false;
@@ -284,6 +285,12 @@ namespace insoulforge {
                 }
                 if (CommandProcessor::isCommand(currentMessage)) {
                     Logger::info(sessionId, "Command", "执行: " + MessageRecord::extractText(currentMessage));
+                    for (auto &segment: currentMessage["segments"]) {
+                        if (getStr(segment, "type") == "audio") {
+                            segment.erase("onebot_file");
+                            segment["recognition_status"] = "skipped";
+                        }
+                    }
                     co_await executeCommand(currentMessage);
                 } else if (SessionStore::isSessionEnabled(sessionId)) {
                     Logger::info(
