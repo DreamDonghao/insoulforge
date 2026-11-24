@@ -1382,6 +1382,10 @@ auto main() -> int {
                       !entry["created_at"].get<std::string>().empty();
           }
           const auto systemPrompt = messages[0]["content"].get<std::string>();
+          valid = valid && systemPrompt.contains("new_messages 是我收到、还没纳入任何一轮回复生成的消息") &&
+                  systemPrompt.contains("sent_messages 是我在最近一条收到的消息之后发出的消息") &&
+                  systemPrompt.contains("reply_to 指向被引用消息的 message_id") &&
+                  !systemPrompt.contains("bot_silence");
           if (!Config::instance().affinityEnabled) {
               valid = valid && !systemPrompt.contains("affinity") && !systemPrompt.contains("好感度");
           }

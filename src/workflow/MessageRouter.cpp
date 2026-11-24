@@ -20,15 +20,15 @@
 
 namespace insoulforge::MessageRouter {
     namespace {
+        constexpr std::string_view kGroupRoutingTask = "判断群聊中的机器人接下来是否需要回复。\n\n";
         constexpr std::string_view kContextInstructions =
-          "输入为 JSON：chat_records 是历史，new_messages 是尚未交给 Executor 的入站消息，"
-          "sent_messages 是窗口最后一段机器人记录中确认送达的消息。new_messages 不代表尚未回答；"
-          "send_error 表示发送未获确认。结合历史与已送达内容判断是否还有未覆盖且值得回应的内容，不指定回复某条消息。"
-          "仅有表情或提问等表面特征不足以决定整批消息是否需要回复；刚发言也不代表已覆盖新内容。"
-          "各组时间可能交错，不按字段顺序推断先后；activity.mode=silent 仅作背景，不构成回复理由。";
-
-        constexpr std::string_view kRecordInstructions =
-          "记录用 text 表示消息内容，reply_to 是被引用消息的 message_id，[bot] 标记机器人。";
+          "sender 以 [bot] 开头表示机器人。\n"
+          "new_messages 是机器人收到、还没纳入任何一轮回复生成的消息。\n"
+          "sent_messages 是机器人在最近一条收到的消息之后发出的消息。\n"
+          "chat_records 是其余聊天记录。\n"
+          "reply_to 指向被引用消息的 message_id。\n"
+          "bot_silence.messages_since_last_speak 是这批记录中，最近一条机器人记录之后的消息条数。"
+          "如果这批记录里没有机器人记录，则取消息总数。";
 
         constexpr std::string_view kJevActionSkip = "skip";
         constexpr std::string_view kJevActionReply = "reply";
@@ -113,8 +113,8 @@ namespace insoulforge::MessageRouter {
         }
 
         /// @brief 压平消息段，保留消息 ID 与引用 ID 以便识别回复关系。
-        [[nodiscard]] auto renderRouterRecord(const json &message, const bool includeGroupCard) -> json {
-            const json projected = MessageRecord::projectForAgent(message, false, includeGroupCard);
+        [[nodiscard]] auto renderRouterRecord(const json &message) -> json {
+            const json projected = MessageRecord::projectForAgent(message);
             std::string text;
             for (const json &segment: atOrNull(projected, "segments")) {
                 text += renderRouterSegment(segment);
@@ -131,15 +131,6 @@ namespace insoulforge::MessageRouter {
             } else {
                 record["sender"] = getStr(atOrNull(projected, "sender"), "user_id");
             }
-            if (const auto card = getStr(atOrNull(projected, "sender"), "card"); !card.empty()) {
-                record["card"] = card;
-            }
-            if (const auto role = getStr(atOrNull(projected, "sender"), "role"); !role.empty()) {
-                record["role"] = role;
-            }
-            if (projected.contains("time")) {
-                record["time"] = projected["time"];
-            }
             if (projected.contains("activity")) {
                 record["activity"] = {{"mode", getStr(projected["activity"], "mode")}};
             }
@@ -154,9 +145,7 @@ namespace insoulforge::MessageRouter {
         }
 
         /// @brief 构建 Jev 与 Router LLM 共用的最近 N 条消息上下文。
-        [[nodiscard]] auto buildRouterContext(const SessionId &sessionId, const json &snapshot) -> json {
-            const bool includeGroupCard =
-              !sessionId.isPrivate() && SessionStore::getSessionConfig(sessionId).sendGroupCard;
+        [[nodiscard]] auto buildRouterContext(const json &snapshot) -> json {
             const auto windowSize =
               static_cast<size_t>(std::max(1, Config::instance().jevWindowSize.load(std::memory_order_relaxed)));
             const size_t startIndex = snapshot.size() > windowSize ? snapshot.size() - windowSize : 0;
@@ -171,7 +160,7 @@ namespace insoulforge::MessageRouter {
                 auto &target = index >= sentStart && MessageRecord::isConfirmedSend(message) ? sentMessages
                                : MessageRecord::isNewForExecutor(message)                    ? newMessages
                                                                                              : records;
-                target.push_back(renderRouterRecord(message, includeGroupCard));
+                target.push_back(renderRouterRecord(message));
             }
 
             json state;
@@ -187,7 +176,7 @@ namespace insoulforge::MessageRouter {
         [[nodiscard]] auto buildJevQuestions() -> json {
             json action;
             action["type"] = "choice";
-            action["instructions"] = std::string(kContextInstructions) + std::string(kRecordInstructions);
+            action["instructions"] = std::string(kGroupRoutingTask).append(kContextInstructions);
             const std::string &botName = Config::instance().botName;
             action["criteria"] = {
               {"skip", "值得回应的内容已全部被回复覆盖，或仅剩广告、刷屏、无实质内容的表情复读及不宜插入的群友互聊"},
@@ -215,14 +204,11 @@ namespace insoulforge::MessageRouter {
         }
 
         [[nodiscard]] auto buildPrompt(const SessionId &sessionId, const json &context) -> json {
-            json prompt = json::array();
-            prompt.push_back(
-              {{"role", "system"}, {"content", sessionId.isPrivate() ? PromptService::getRouterPrivateSystemPrompt()
-                                                                     : PromptService::getRouterSystemPrompt()}});
-            prompt.push_back(
-              {{"role", "system"}, {"content", std::string(kContextInstructions) + std::string(kRecordInstructions)}});
-            prompt.push_back({{"role", "user"}, {"content", dumpJson(context)}});
-            return prompt;
+            auto systemPrompt = sessionId.isPrivate() ? PromptService::getRouterPrivateSystemPrompt()
+                                                      : PromptService::getRouterSystemPrompt();
+            systemPrompt.append("\n\n").append(kContextInstructions);
+            return json::array({{{"role", "system"}, {"content", std::move(systemPrompt)}},
+              {{"role", "user"}, {"content", dumpJson(context)}}});
         }
 
         [[nodiscard]] auto parseDecision(const json &response) -> std::optional<RouterDecision> {
@@ -329,7 +315,7 @@ namespace insoulforge::MessageRouter {
             co_return makeDecision(RouterDecision::Action::SKIP, "本群已关闭自动回复");
         }
         const auto &config = Config::instance();
-        const auto context = buildRouterContext(sessionId, snapshot);
+        const auto context = buildRouterContext(snapshot);
 
         // 群聊先由 Jev 判断；无法确定时沿用原有 Router LLM。
         if (!sessionId.isPrivate() && JevClient::isConfigured(config.jev)) {

@@ -231,8 +231,9 @@ namespace {
         json grouped =
           json::array({{{"message_id", "100"}, {"sender", {{"user_id", "11"}}}, {"executor_processed", true},
                          {"segments", json::array({{{"type", "text"}, {"text", "history"}}})}},
-            {{"message_id", "new"}, {"sender", {{"user_id", "11"}}}, {"executor_processed", false},
-              {"segments", json::array({{{"type", "text"}, {"text", "new"}}})}},
+            {{"message_id", "new"}, {"time", "2026-11-24 10:00:00"},
+              {"sender", {{"user_id", "11"}, {"name", "sender"}, {"role", "owner"}, {"card", "card"}}},
+              {"executor_processed", false}, {"segments", json::array({{{"type", "text"}, {"text", "new"}}})}},
             MessageRecord::createAssistantRecord("bot", -101, "[CQ:image]"),
             MessageRecord::createAssistantRecord("bot", std::nullopt, "unconfirmed"),
             MessageRecord::createAssistantRecord("bot", 102, "[CQ:reply,id=100]answer"),
@@ -248,9 +249,8 @@ namespace {
                       state["sent_messages"][0]["message_id"] == "-101" &&
                       state["sent_messages"][1]["reply_to"] == "100" && !state.contains("trigger_message_id"),
               "Jev failed to partition all three message groups");
-            require(!state["new_messages"][0].contains("executor_processed") &&
-                      !state["new_messages"][0].contains("is_current"),
-              "internal markers leaked into Jev");
+            require(state["new_messages"][0] == json{{"message_id", "new"}, {"sender", "sender"}, {"text", "new"}},
+              "unexpected fields in routing message");
         }
         auto silent = json{{"executor_processed", false}, {"sender", {{"user_id", "system"}}},
           {"activity", {{"mode", "silent"}}}, {"segments", json::array()}};
@@ -269,8 +269,10 @@ namespace {
               "Jev projection lost silent mode in mixed input");
             const auto &action = body["questions"]["action"];
             const auto instructions = getStr(action, "instructions");
-            require(instructions.find("不代表尚未回答") != std::string::npos &&
-                      instructions.find("silent") != std::string::npos &&
+            require(instructions.starts_with("判断群聊中的机器人接下来是否需要回复。") &&
+                      instructions.contains("还没纳入任何一轮回复生成") &&
+                      instructions.contains("bot_silence.messages_since_last_speak") &&
+                      !instructions.contains("Executor") &&
                       getStr(action["criteria"], "skip").find("覆盖") != std::string::npos &&
                       getStr(action["criteria"], "reply").find("未覆盖") != std::string::npos,
               "Jev instructions and criteria do not judge coverage of the whole context");
@@ -300,10 +302,11 @@ namespace {
               "Router fallback did not reuse the Jev context");
             require(
               context["chat_records"].back()["activity"]["mode"] == "silent", "Router projection lost Activity mode");
-            const auto contract = getStr(messages[1], "content");
-            require(contract.find("不代表尚未回答") != std::string::npos &&
-                      contract.find("silent") != std::string::npos && contract.find("未覆盖") != std::string::npos,
-              "Router runtime contract does not explain coverage and silent background");
+            const auto jevInstructions =
+              getStr(fixture.bodies.at("jev-window-fallback")["questions"]["action"], "instructions");
+            require(messages.size() == 2 && messages[0]["role"] == "system" && messages[1]["role"] == "user" &&
+                      getStr(messages[0], "content").ends_with(jevInstructions.substr(jevInstructions.find("sender"))),
+              "Router did not include the shared context instructions in its single system message");
         }
         config.jev.apiKey.clear();
         (void) co_await MessageRouter::route(SessionId::group("100"), records);

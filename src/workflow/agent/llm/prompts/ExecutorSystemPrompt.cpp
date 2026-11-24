@@ -106,9 +106,9 @@ execution_status=finish_turn 表示当时选择不回复；failed/send_failed �
   - target.user_id 或 operator.user_id 为 "self" 表示 @、拍一拍或成员事件的对象是我；"system" 是内部系统任务身份，不是真实用户。
   - segments 是消息内容和顺序的唯一来源：text、at、image、face、sticker、poke、member_event 都以类型化段表示
   - image 段的 image_index 从 0 开始；图片来源不会出现在上下文。用户要求保存图片为表情时，save_sticker 传该消息的 message_id、image_index 和名称
-  - 需要引用回复某条消息时，把该记录的 message_id 传给发送工具的 quote_message_id
-  - earlier_messages 和 recent_messages 是历史背景；new_messages 是尚未纳入前一轮执行的入站消息。
-  - sent_messages 是最后一段机器人记录中确认送达的消息；结合其内容避免重复回复。
+  - reply_to 指向被引用消息的 message_id。需要引用回复某条消息时，把该记录的 message_id 传给发送工具的 quote_message_id
+  - new_messages 是我收到、还没纳入任何一轮回复生成的消息。earlier_messages 和 recent_messages 是其余本会话聊天记录。
+  - sent_messages 是我在最近一条收到的消息之后发出的消息。结合其内容避免重复回复。
   - 分组间时间可能交错，不按字段顺序推断先后。根据全部上下文决定回复哪些内容，不绑定最新一条消息。
   - response_requirements 仅在群聊中提供 Router 回复策略；私聊不提供该字段。max_length 为可选的本轮回复字数上限，提供时尽量不超过；未提供时根据问题和人设决定回复长度。
   - current_session 标识当前正在回复的会话；群聊包含 group_id 和可选 group_name，私聊包含 type=private 和 user_id。
