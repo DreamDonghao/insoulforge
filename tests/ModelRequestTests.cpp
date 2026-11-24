@@ -55,7 +55,8 @@ namespace {
         auto &config = Config::instance();
         {
             std::ofstream file(path);
-            file << R"({"llm":{"memory":{}},"execution":{"routeWhileReplying":true}})";
+            file
+              << R"({"llm":{"memory":{}},"execution":{"routeWhileReplying":true},"memory":{"routerWindowTriggerCount":40,"routerWindowKeepCount":25}})";
         }
         require(config.initialize(path.string()).has_value(), "old configuration failed to load");
         require(!config.getExecutionConfig().contains("routeWhileReplying"), "obsolete setting exposed");
@@ -83,6 +84,9 @@ namespace {
         require(config.jevWindowSize.load() == 10 && config.getMemoryConfig()["jevWindowSize"] == 10,
           "legacy Jev window did not default to ten");
         const auto compressionDefaults = config.getMemoryConfig();
+        require(!compressionDefaults.contains("routerWindowTriggerCount") &&
+                  !compressionDefaults.contains("routerWindowKeepCount"),
+          "obsolete Router window settings survived migration");
         require(config.personCompressionTriggerTokens == 0, "compression must default off");
         auto compression = compressionDefaults;
         compression["personCompressionTriggerTokens"] = 2000;
@@ -271,12 +275,10 @@ namespace {
                       getStr(action["criteria"], "reply").find("未覆盖") != std::string::npos,
               "Jev instructions and criteria do not judge coverage of the whole context");
         }
-        // 自定义窗口独立于 Router；低置信度时 Router 仍采用原有分段窗口。
+        // 低置信度时 Router LLM 收到和 Jev 完全相同的路由上下文。
         config.jevWindowSize.store(4);
         config.jev = apiFor(endpoint, "jev-window-fallback", 0);
         config.router = apiFor(endpoint, "router-window", 0);
-        config.routerWindowTriggerCount = 20;
-        config.routerWindowKeepCount = 10;
         json records = json::array();
         for (int index = 0; index < 25; ++index) {
             records.push_back({{"message_id", std::to_string(index)}, {"sender", {{"user_id", "11"}}},
@@ -290,18 +292,29 @@ namespace {
             std::lock_guard lock(fixture.mutex);
             require(fixture.bodies.at("jev-window-fallback")["state"]["chat_records"].size() == 3 &&
                       fixture.bodies.at("jev-window-fallback")["state"]["new_messages"].size() == 1,
-              "custom Jev window was ignored");
+              "custom routing window was ignored");
             const auto &messages = fixture.bodies.at("router-window").at("messages");
             const auto context = json::parse(messages.back().at("content").get<std::string>());
-            require(context["chat_records"].size() == 14 && context["new_messages"].size() == 1 &&
-                      context["chat_records"][0]["message_id"] == "10",
-              "Router fallback stopped using its batched window");
+            require(context == fixture.bodies.at("jev-window-fallback").at("state") &&
+                      context["chat_records"][0]["message_id"] == "21",
+              "Router fallback did not reuse the Jev context");
             require(
               context["chat_records"].back()["activity"]["mode"] == "silent", "Router projection lost Activity mode");
             const auto contract = getStr(messages[1], "content");
             require(contract.find("不代表尚未回答") != std::string::npos &&
                       contract.find("silent") != std::string::npos && contract.find("未覆盖") != std::string::npos,
               "Router runtime contract does not explain coverage and silent background");
+        }
+        config.jev.apiKey.clear();
+        (void) co_await MessageRouter::route(SessionId::group("100"), records);
+        require(fixture.count("jev-window-fallback") == 1 && fixture.count("router-window") == 2,
+          "Router did not run directly with Jev disabled");
+        {
+            std::lock_guard lock(fixture.mutex);
+            const auto &messages = fixture.bodies.at("router-window").at("messages");
+            require(json::parse(messages.back().at("content").get<std::string>()) ==
+                      fixture.bodies.at("jev-window-fallback").at("state"),
+              "Router without Jev used a different context");
         }
     }
 

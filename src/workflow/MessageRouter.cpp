@@ -19,14 +19,6 @@
 #include <workflow/session/SessionStore.hpp>
 
 namespace insoulforge::MessageRouter {
-    [[nodiscard]] auto windowStartIndex(const size_t snapshotSize) -> size_t {
-        const auto &config = Config::instance();
-        const size_t keep = static_cast<size_t>(config.routerWindowKeepCount);
-        const size_t slide = std::max<size_t>(1, static_cast<size_t>(config.routerWindowTriggerCount) - keep);
-        const size_t windowSize = keep + snapshotSize % slide;
-        return snapshotSize > windowSize ? snapshotSize - windowSize : 0;
-    }
-
     namespace {
         constexpr std::string_view kContextInstructions =
           "输入为 JSON：chat_records 是历史，new_messages 是尚未交给 Executor 的入站消息，"
@@ -34,6 +26,9 @@ namespace insoulforge::MessageRouter {
           "send_error 表示发送未获确认。结合历史与已送达内容判断是否还有未覆盖且值得回应的内容，不指定回复某条消息。"
           "仅有表情或提问等表面特征不足以决定整批消息是否需要回复；刚发言也不代表已覆盖新内容。"
           "各组时间可能交错，不按字段顺序推断先后；activity.mode=silent 仅作背景，不构成回复理由。";
+
+        constexpr std::string_view kRecordInstructions =
+          "记录用 text 表示消息内容，reply_to 是被引用消息的 message_id，[bot] 标记机器人。";
 
         constexpr std::string_view kJevActionSkip = "skip";
         constexpr std::string_view kJevActionReply = "reply";
@@ -51,39 +46,6 @@ namespace insoulforge::MessageRouter {
         [[nodiscard]] auto applySessionType(RouterDecision decision, const SessionId &sessionId) -> RouterDecision {
             decision.isPrivate = sessionId.isPrivate();
             return decision;
-        }
-
-        [[nodiscard]] auto compactMessage(const json &message, const bool includeGroupCard) -> json {
-            const json projected = MessageRecord::projectForAgent(message, false, includeGroupCard);
-            json compact;
-            if (const auto card = getStr(atOrNull(projected, "sender"), "card"); !card.empty()) {
-                compact["card"] = card;
-            }
-            if (const auto role = getStr(atOrNull(projected, "sender"), "role"); !role.empty()) {
-                compact["role"] = role;
-            }
-            if (message.contains("time")) {
-                compact["time"] = message["time"];
-            }
-            if (projected.contains("reply_to")) {
-                compact["reply_to"] = projected["reply_to"];
-            }
-            if (projected.contains("activity")) {
-                compact["activity"] = {{"mode", getStr(projected["activity"], "mode")}};
-            }
-            if (projected.contains("send_error")) {
-                compact["send_error"] = projected["send_error"];
-            }
-            compact["message_id"] = getStr(message, "message_id");
-            if (const std::string name = getStr(atOrNull(projected, "sender"), "name"); !name.empty()) {
-                compact["sender"] = name;
-            }
-            json content;
-            if (const json &segments = atOrNull(projected, "segments"); segments.is_array() && !segments.empty()) {
-                content["segments"] = segments;
-            }
-            compact["content"] = std::move(content);
-            return compact;
         }
 
         /// @brief 统计窗口内机器人是否发言，以及此后的消息数。
@@ -105,8 +67,8 @@ namespace insoulforge::MessageRouter {
         constexpr std::string_view kJevToneQuestion = "tone";
         constexpr std::string_view kJevMaxLengthQuestion = "maxLength";
 
-        /// @brief 将 Agent 可见的消息段转为 Jev 可读的文本。
-        [[nodiscard]] auto renderJevSegment(const json &segment) -> std::string {
+        /// @brief 将消息段压平为路由模型可读的文本。
+        [[nodiscard]] auto renderRouterSegment(const json &segment) -> std::string {
             const std::string type = getStr(segment, "type");
             if (type == "text") {
                 return getStr(segment, "text");
@@ -151,11 +113,11 @@ namespace insoulforge::MessageRouter {
         }
 
         /// @brief 压平消息段，保留消息 ID 与引用 ID 以便识别回复关系。
-        [[nodiscard]] auto renderJevRecord(const json &message, const bool includeGroupCard) -> json {
+        [[nodiscard]] auto renderRouterRecord(const json &message, const bool includeGroupCard) -> json {
             const json projected = MessageRecord::projectForAgent(message, false, includeGroupCard);
             std::string text;
             for (const json &segment: atOrNull(projected, "segments")) {
-                text += renderJevSegment(segment);
+                text += renderRouterSegment(segment);
             }
 
             json record;
@@ -191,8 +153,8 @@ namespace insoulforge::MessageRouter {
             return record;
         }
 
-        /// @brief 使用独立的最近 N 条滑动窗口构建 Jev 状态。
-        [[nodiscard]] auto buildJevState(const SessionId &sessionId, const json &snapshot) -> json {
+        /// @brief 构建 Jev 与 Router LLM 共用的最近 N 条消息上下文。
+        [[nodiscard]] auto buildRouterContext(const SessionId &sessionId, const json &snapshot) -> json {
             const bool includeGroupCard =
               !sessionId.isPrivate() && SessionStore::getSessionConfig(sessionId).sendGroupCard;
             const auto windowSize =
@@ -209,7 +171,7 @@ namespace insoulforge::MessageRouter {
                 auto &target = index >= sentStart && MessageRecord::isConfirmedSend(message) ? sentMessages
                                : MessageRecord::isNewForExecutor(message)                    ? newMessages
                                                                                              : records;
-                target.push_back(renderJevRecord(message, includeGroupCard));
+                target.push_back(renderRouterRecord(message, includeGroupCard));
             }
 
             json state;
@@ -225,8 +187,7 @@ namespace insoulforge::MessageRouter {
         [[nodiscard]] auto buildJevQuestions() -> json {
             json action;
             action["type"] = "choice";
-            action["instructions"] = std::string(kContextInstructions) +
-                                     "记录用 text 表示消息内容，reply_to 是被引用消息的 message_id，[bot] 标记机器人。";
+            action["instructions"] = std::string(kContextInstructions) + std::string(kRecordInstructions);
             const std::string &botName = Config::instance().botName;
             action["criteria"] = {
               {"skip", "值得回应的内容已全部被回复覆盖，或仅剩广告、刷屏、无实质内容的表情复读及不宜插入的群友互聊"},
@@ -253,40 +214,13 @@ namespace insoulforge::MessageRouter {
               {std::string(kJevMaxLengthQuestion), std::move(maxLength)}};
         }
 
-        [[nodiscard]] auto buildPrompt(const SessionId &sessionId, const json &snapshot) -> json {
-            const bool includeGroupCard =
-              !sessionId.isPrivate() && SessionStore::getSessionConfig(sessionId).sendGroupCard;
-            const size_t startIndex = windowStartIndex(snapshot.size());
-
-            json records = json::array();
-            json newMessages = json::array();
-            json sentMessages = json::array();
-            const auto sentStart = MessageRecord::sentMessagesStart(snapshot);
-            for (size_t index = startIndex; index < snapshot.size(); ++index) {
-                const auto &message = snapshot[index];
-                auto &target = index >= sentStart && MessageRecord::isConfirmedSend(message) ? sentMessages
-                               : MessageRecord::isNewForExecutor(message)                    ? newMessages
-                                                                                             : records;
-                target.push_back(compactMessage(message, includeGroupCard));
-            }
-
-            const auto [spokeInWindow, silentCount] = computeBotSilence(snapshot, startIndex);
-
-            json context;
-            context["chat_records"] = std::move(records);
-            context["new_messages"] = std::move(newMessages);
-            context["sent_messages"] = std::move(sentMessages);
-            context["bot_silence"] = {{"spoke_in_window", spokeInWindow},
-              {"messages_since_last_speak", spokeInWindow ? silentCount : snapshot.size() - startIndex}};
-
+        [[nodiscard]] auto buildPrompt(const SessionId &sessionId, const json &context) -> json {
             json prompt = json::array();
             prompt.push_back(
               {{"role", "system"}, {"content", sessionId.isPrivate() ? PromptService::getRouterPrivateSystemPrompt()
                                                                      : PromptService::getRouterSystemPrompt()}});
             prompt.push_back(
-              {{"role", "system"}, {"content", std::string(kContextInstructions) +
-                                                 "记录以 sender 表示显示名，content.segments 表示有序消息段，reply_to "
-                                                 "通过 message_id 表示引用关系。"}});
+              {{"role", "system"}, {"content", std::string(kContextInstructions) + std::string(kRecordInstructions)}});
             prompt.push_back({{"role", "user"}, {"content", dumpJson(context)}});
             return prompt;
         }
@@ -395,11 +329,12 @@ namespace insoulforge::MessageRouter {
             co_return makeDecision(RouterDecision::Action::SKIP, "本群已关闭自动回复");
         }
         const auto &config = Config::instance();
+        const auto context = buildRouterContext(sessionId, snapshot);
 
         // 群聊先由 Jev 判断；无法确定时沿用原有 Router LLM。
         if (!sessionId.isPrivate() && JevClient::isConfigured(config.jev)) {
-            const auto jevResponse = co_await JevClient::requestSystemOne(
-              config.jev, buildJevState(sessionId, snapshot), buildJevQuestions(), sessionId);
+            const auto jevResponse =
+              co_await JevClient::requestSystemOne(config.jev, context, buildJevQuestions(), sessionId);
             if (jevResponse) {
                 const auto choice = JevClient::readChoice(
                   *jevResponse, std::string(kJevActionQuestion), {kJevActionSkip, kJevActionReply, kJevActionUnclear});
@@ -422,7 +357,7 @@ namespace insoulforge::MessageRouter {
 
         // 保持原有 fail-open 行为：LLM 请求失败或响应无效时仍尝试回复。
         const auto response = co_await LlmClient::requestChat(
-          "Router", "router", config.router, config.routerParams, buildPrompt(sessionId, snapshot), {}, sessionId);
+          "Router", "router", config.router, config.routerParams, buildPrompt(sessionId, context), {}, sessionId);
         if (!response) {
             co_return applySessionType(makeDecision(RouterDecision::Action::REPLY, "Router 请求失败"), sessionId);
         }

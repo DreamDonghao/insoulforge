@@ -94,9 +94,7 @@ namespace insoulforge {
         std::atomic<i32> personRelationshipMaxChars{150}; // 机器人关系合计目标字数
         std::atomic<i32> personInteractionEntryMaxChars{60}; // 近期互动单条目标字数
         std::atomic<i32> personInteractionMaxChars{250}; // 近期互动合计目标字数
-        std::atomic<i32> jevWindowSize{10}; // Jev 每次读取的最近消息数（逐条滑动）
-        i32 routerWindowTriggerCount = 20; // Router 子窗口触发条数（批量滑动）
-        i32 routerWindowKeepCount = 10; // Router 子窗口保留条数
+        std::atomic<i32> jevWindowSize{10}; // Jev 与 Router LLM 共用的最近消息数（逐条滑动）
         f64 longTermRecallThreshold = 0.65; // 长期记忆召回合并的相似度阈值（独立于 recall_memory 的 0.3）
         f64 longTermInjectThreshold = 0.45; // 长期记忆被动注入提示词的相似度阈值（消息入库时逐条召回）
 

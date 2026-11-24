@@ -24,13 +24,12 @@ namespace insoulforge {
                 constexpr std::array stringFields{"apiKey", "baseUrl", "path", "model", "reasoningEffort",
                   "accessToken", "oneBotTransport", "qqHttpHost", "qqWebSocketHost", "botName"};
                 constexpr std::array integerFields{"maxTokens", "contextWindowLimit", "memorySummaryTriggerCount",
-                  "memorySummaryBatchSize", "memorySummaryContextCount", "routerWindowTriggerCount",
-                  "routerWindowKeepCount", "conversationSummaryMaxChars", "conversationSummaryMaxCount",
-                  "personMemoryEntryMaxChars", "longTermMemoryEntryMaxChars", "personProfileEntryMaxChars",
-                  "personProfileMaxChars", "personRelationshipEntryMaxChars", "personRelationshipMaxChars",
-                  "personInteractionEntryMaxChars", "personInteractionMaxChars", "jevWindowSize", "maxToolRounds",
-                  "sharedConversationMessageCount", "timeoutSeconds", "maxRetries", "personCompressionTriggerTokens",
-                  "personCompressionTargetTokens"};
+                  "memorySummaryBatchSize", "memorySummaryContextCount", "conversationSummaryMaxChars",
+                  "conversationSummaryMaxCount", "personMemoryEntryMaxChars", "longTermMemoryEntryMaxChars",
+                  "personProfileEntryMaxChars", "personProfileMaxChars", "personRelationshipEntryMaxChars",
+                  "personRelationshipMaxChars", "personInteractionEntryMaxChars", "personInteractionMaxChars",
+                  "jevWindowSize", "maxToolRounds", "sharedConversationMessageCount", "timeoutSeconds", "maxRetries",
+                  "personCompressionTriggerTokens", "personCompressionTargetTokens"};
                 if (std::ranges::find(integerFields, key) != integerFields.end()) {
                     if (!field.is_number_integer() ||
                         (field.is_number_unsigned()
@@ -222,8 +221,6 @@ namespace insoulforge {
             personInteractionMaxChars.store(
               getInt(memCfg, "personInteractionMaxChars", 250), std::memory_order_relaxed);
             jevWindowSize.store(getInt(memCfg, "jevWindowSize", 10), std::memory_order_relaxed);
-            routerWindowTriggerCount = getInt(memCfg, "routerWindowTriggerCount");
-            routerWindowKeepCount = getInt(memCfg, "routerWindowKeepCount");
             longTermRecallThreshold = getDouble(memCfg, "longTermRecallThreshold");
             longTermInjectThreshold = getDouble(memCfg, "longTermInjectThreshold");
             if (contextWindowLimit <= 0) {
@@ -237,12 +234,6 @@ namespace insoulforge {
             }
             if (memorySummaryContextCount < 0) {
                 memorySummaryContextCount = 0;
-            }
-            if (routerWindowTriggerCount <= 0) {
-                routerWindowTriggerCount = 20;
-            }
-            if (routerWindowKeepCount <= 0 || routerWindowKeepCount >= routerWindowTriggerCount) {
-                routerWindowKeepCount = routerWindowTriggerCount / 2;
             }
             if (longTermRecallThreshold <= 0.0 || longTermRecallThreshold >= 1.0) {
                 longTermRecallThreshold = 0.65;
@@ -372,8 +363,6 @@ namespace insoulforge {
         personInteractionMaxChars.store(
           value.personInteractionMaxChars.load(std::memory_order_relaxed), std::memory_order_relaxed);
         jevWindowSize.store(value.jevWindowSize.load(std::memory_order_relaxed), std::memory_order_relaxed);
-        routerWindowTriggerCount = value.routerWindowTriggerCount;
-        routerWindowKeepCount = value.routerWindowKeepCount;
         longTermRecallThreshold = value.longTermRecallThreshold;
         longTermInjectThreshold = value.longTermInjectThreshold;
     }
@@ -514,6 +503,8 @@ namespace insoulforge {
         if (!normalized.contains("affinityEnabled")) {
             normalized["affinityEnabled"] = affinityEnabled.load(std::memory_order_relaxed);
         }
+        normalized.erase("routerWindowTriggerCount");
+        normalized.erase("routerWindowKeepCount");
         if (auto result = validateFields(normalized); !result) {
             return result;
         }
@@ -534,14 +525,6 @@ namespace insoulforge {
         }
         if (getInt(normalized, "memorySummaryContextCount") < 0) {
             normalized["memorySummaryContextCount"] = memorySummaryContextCount;
-        }
-        // Router 子窗口校验: 保留条数必须小于触发条数
-        if (getInt(normalized, "routerWindowTriggerCount") <= 0) {
-            normalized["routerWindowTriggerCount"] = routerWindowTriggerCount;
-        }
-        if (getInt(normalized, "routerWindowKeepCount") <= 0 ||
-            getInt(normalized, "routerWindowKeepCount") >= getInt(normalized, "routerWindowTriggerCount")) {
-            normalized["routerWindowKeepCount"] = getInt(normalized, "routerWindowTriggerCount") / 2;
         }
         // 召回阈值: 必须在 (0,1) 开区间内
         if (getDouble(normalized, "longTermRecallThreshold") <= 0.0 ||

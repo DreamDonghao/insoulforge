@@ -8,7 +8,7 @@ import {I32_MAX, numberError} from '../../utils/validation'
 import {useUnsavedChanges} from '../../composables/useUnsavedChanges'
 import type {ApiResponse, LLMConfig} from '../../vite-env'
 
-const props = defineProps<{name: string, initialConfig: LLMConfig, title?: string}>()
+const props = defineProps<{name: string, initialConfig: LLMConfig}>()
 const hasParameters = computed(() => !['embedding', 'imageGeneration', 'asr'].includes(props.name))
 const hasGenerationParameters = computed(() => hasParameters.value && props.name !== 'jev')
 const supportsPromptCacheKey = computed(() => ['executor', 'executorFallback'].includes(props.name))
@@ -118,10 +118,8 @@ const saveLLMConfig = async (): Promise<void> => {
 <template>
   <form class="model-config" :class="{'range-hints-dismissed': rangeHintsDismissed}" novalidate
         @focusin="rangeHintsDismissed = false" @keydown.esc="rangeHintsDismissed = true" @submit.prevent="saveLLMConfig">
-    <h2 v-if="title" class="model-title">{{ title }}</h2>
-    <p v-if="name === 'executorFallback'" class="fallback-hint">仅在默认模型请求失败时用于本次重试；留空不启用，下次请求仍优先使用默认模型。</p>
     <section class="config-section">
-      <h3 class="section-title">接口与模型</h3>
+      <h2 class="section-title">接口与模型</h2>
       <div v-if="name === 'imageGeneration'" class="form-group">
         <label :for="fieldId('apiType')" class="form-label">接口类型</label>
         <select v-bind="fieldAttrs(fieldId('apiType'))" :disabled="saving" v-model="llmConfig.apiType" class="form-input">
@@ -173,7 +171,7 @@ const saveLLMConfig = async (): Promise<void> => {
       <p v-if="name === 'imageGeneration'" class="important-note">生图超时不代表服务端未完成，开启重试可能重复生成并计费，默认不重试。</p>
     </section>
     <section v-if="hasParameters" class="config-section">
-      <h3 class="section-title">{{ name === 'jev' ? '决策参数' : '生成参数' }}</h3>
+      <h2 class="section-title">{{ name === 'jev' ? '决策参数' : '生成参数' }}</h2>
       <div v-for="field in parameterFields" :key="field.key" class="form-group numeric-field">
         <div v-if="field.help" class="field-label">
           <label :for="fieldId(field.key)" class="form-label">{{ field.label }}</label>
@@ -221,7 +219,6 @@ const saveLLMConfig = async (): Promise<void> => {
 
 <style scoped>
 .model-config { display: grid; gap: 16px; max-width: 1120px; margin-bottom: 24px; }
-.model-title { margin: 0; font-size: 16px; font-weight: 600; color: var(--text-secondary); }
 .config-section { min-width: 0; padding: 20px 24px; background: var(--card-bg); border-radius: var(--radius-md); }
 .section-title { margin-bottom: 12px; font-size: 16px; font-weight: 600; color: var(--text-secondary); }
 .config-section .form-group {
@@ -263,7 +260,7 @@ const saveLLMConfig = async (): Promise<void> => {
 .checkbox-description { min-width: 0; }
 .checkbox-field .form-label { cursor: pointer; }
 .checkbox-field > input { flex-shrink: 0; }
-.fallback-hint, .setting-summary, .save-hint, .important-note { margin: 0; font-size: 12px; color: var(--text-secondary); }
+.setting-summary, .save-hint, .important-note { margin: 0; font-size: 12px; color: var(--text-secondary); }
 .setting-summary { margin-top: 4px; }
 .important-note { color: var(--warning); }
 .save-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }

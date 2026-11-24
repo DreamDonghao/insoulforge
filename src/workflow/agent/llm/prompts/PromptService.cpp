@@ -138,9 +138,10 @@ skip：内容已经被回复覆盖，或只剩广告、刷屏、无实质内容�
             auto stored = PromptStore::getPrompt(database, key, "");
             auto updated = stored;
             for (const auto &[before, after]:
-              std::array<std::pair<std::string_view, std::string_view>, 13>{
-                {{"- [{botName}]: 机器人发送的消息",
-                   "- 聊天记录使用 JSON，sender 是显示名，content.segments 是有序消息段"},
+              std::array<std::pair<std::string_view, std::string_view>, 14>{
+                {{"- [{botName}]: 机器人发送的消息", "- 聊天记录使用 JSON，sender 是显示名，text 是消息内容"},
+                  {"- 聊天记录使用 JSON，sender 是显示名，content.segments 是有序消息段",
+                    "- 聊天记录使用 JSON，sender 是显示名，text 是消息内容"},
                   {"- [用户]: 用户发送的消息", "- reply_to 通过 message_id 表示引用关系"},
                   {"- 用户主动来私聊，就是想和{botName}说话，默认应该 reply",
                     "- 私聊优先回应尚未被已发送内容覆盖的正常交流"},

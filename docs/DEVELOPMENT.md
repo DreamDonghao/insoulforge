@@ -271,13 +271,12 @@ MessageService → OneBot API
 - 拍一拍、入群、退群均归一化为类型化消息段：`poke`、`member_event`。拍一拍不再按参与者区分，所有拍一拍通知均与普通消息一样交由
   Router 决策。
 - Router 只判断当前上下文是否仍需回复，不绑定触发消息。空快照及群自动回复开关先于 Jev；硬规则只扫描未处理入站消息，由 Router 统一执行。
-  Jev 独立取最近 `memory.jevWindowSize` 条消息（默认 10，正整数，保存后热更新），逐条滑动；不足时全部读取，
-  实际范围受 `contextWindowLimit` 限制。Router LLM 仍使用原有分段窗口；各自在窗口内计算机器人静默状态，不修改冻结快照。
-  Jev 使用压平的消息段，并保留
-  `message_id` / `reply_to` 供引用关系判断。两种投影均保留系统 Activity 的 `activity.mode`，使混合批次中的 silent 通知仅作为背景。
+  Jev 和 Router LLM 共用同一份上下文 JSON，从冻结快照取最近 `memory.jevWindowSize` 条消息。默认 10 条，支持热更新，实际范围受
+  `contextWindowLimit` 限制。消息段压平为 `text`，保留 `message_id`、`reply_to` 和系统 Activity 的 `activity.mode`。
+  旧的 Router 批量滑动参数在加载配置时移除，原有 `jevWindowSize` 设置用于两条路由路径。
   Router LLM 与 Jev 共用分组和阅读状态说明，按已发送内容是否覆盖当前问题或话题判断是否还值得回复，
   不以单条消息类型、机器人刚发言或是否出现提问单独决定。skip 不会安排延时自动回复。
-- Jev 一次请求给出 `action`、`tone` 和 `maxLength`。仅当 `answers.action.choice` 为 `send_message_and_finish` / `skip` 且
+- Jev 一次请求给出 `action`、`tone` 和 `maxLength`。仅当 `answers.action.choice` 为 `reply` / `skip` 且
   `answers.action.confidence` 有效并达到 `jevMinConfidence` 时采纳；`unclear`、低置信度、响应异常或请求失败均交给原有
   Router LLM。`probabilities.reply` 不是当前阈值的比较对象。Jev 默认超时 10 秒、不重试，可在模型配置中调整；Router LLM 兜底仍保留原有
   fail-open 行为。
@@ -423,8 +422,7 @@ MessageService → OneBot API
 - **清空消息**：不会取消执行中的维护任务；旧任务成功后仍按原批次数量删除队首，可能删除清空后收到的新消息。
   前端清空确认框会提示此行为，不影响群内实际发送的消息。
 - 人物记忆与好感度联合提取、旧记忆整理使用独立 memory 模型（`LlmClient::requestMaintenance`，采用 memory 输出上限，不再单独发起 256 token 的评分请求）；向量化使用独立 embedding 配置（
-  `LlmClient::requestEmbedding`）。`recall_memory` 工具按余弦相似度（阈值 0.3）检索长期记忆，Router 另有
-  `routerWindowTriggerCount` / `routerWindowKeepCount` 子窗口参数。
+  `LlmClient::requestEmbedding`）。`recall_memory` 工具按余弦相似度（阈值 0.3）检索长期记忆。
 - **被动召回**：消息预处理阶段从文本段和成功图片描述构建查询，命中结果直接写入当前完整消息的 `memories` 字段；该字段随快照进入
   Executor
   上下文，不依赖独立缓存或聊天记录读取时的二次注入。
