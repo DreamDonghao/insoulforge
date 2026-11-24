@@ -113,6 +113,7 @@ namespace insoulforge::MessageContentEnricher {
             image["image_id"] = cached->id();
             const auto description = co_await ImageDescriptionService::describe(cached->id(), sessionId);
             if (!description) {
+                Logger::debug(sessionId, "Media", description.error());
                 image["recognition_status"] = "failed";
                 continue;
             }
@@ -154,7 +155,11 @@ namespace insoulforge::MessageContentEnricher {
                 continue;
             }
             auto wav = co_await OneBotClient::getRecordWav(std::move(file), sessionId);
-            if (!wav || !isSupportedWav(*wav)) {
+            if (!wav) {
+                Logger::warn(sessionId, "ASR", wav.error());
+                continue;
+            }
+            if (!isSupportedWav(*wav)) {
                 Logger::warn(sessionId, "ASR", "未取得符合要求的 WAV 语音");
                 continue;
             }

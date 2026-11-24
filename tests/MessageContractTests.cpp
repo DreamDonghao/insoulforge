@@ -1472,7 +1472,7 @@ namespace {
         };
         for (const auto &name:
           {"fetch_webpage", "search_web", "random", "get_weather", "deepseek_search", "deepseek_fetch"}) {
-            check(!insoulforge::LuaToolExecutor::validate(load(name)), "valid Lua example", kTestName);
+            check(insoulforge::LuaToolExecutor::validate(load(name)).has_value(), "valid Lua example", kTestName);
         }
         const auto execute = [&load](const std::string &name, insoulforge::json args) -> std::string {
             return drogon::sync_wait(insoulforge::LuaToolExecutor::execute(
@@ -1535,9 +1535,9 @@ namespace {
                 return payload.text .. ":" .. ctx.session_id
             end
         )lua";
-        check(!insoulforge::LuaToolExecutor::validate(script), "valid script accepted", kTestName);
-        check(insoulforge::LuaToolExecutor::validate("function other() end").has_value(), "missing run rejected",
-          kTestName);
+        check(insoulforge::LuaToolExecutor::validate(script).has_value(), "valid script accepted", kTestName);
+        const auto invalidScript = insoulforge::LuaToolExecutor::validate("function other() end");
+        check(!invalidScript && invalidScript.error().contains("run"), "missing run rejected with a reason", kTestName);
         const std::string result = drogon::sync_wait(insoulforge::LuaToolExecutor::execute(
           std::string(script), {{"text", "你好"}}, insoulforge::SessionId::group("123"), false, true));
         check(result == "group:123:test-message:started", "host operations resume script", kTestName);
@@ -1764,20 +1764,27 @@ namespace {
           ("insoulforge-character-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         std::filesystem::create_directories(testPath);
         std::filesystem::current_path(testPath);
-        check(!insoulforge::CharacterImageStore::load(), "initially empty", kTestName);
-        check(!insoulforge::CharacterImageStore::save(image), "upload succeeds", kTestName);
+        const auto initial = insoulforge::CharacterImageStore::load();
+        check(initial && !*initial, "initially empty", kTestName);
+        check(insoulforge::CharacterImageStore::save(image).has_value(), "upload succeeds", kTestName);
         check(!std::filesystem::exists("cache/images"), "role image stays outside transient cache", kTestName);
         const auto stored = insoulforge::CharacterImageStore::load();
-        check(stored && stored->bytes == image && stored->mimeType == "image/png", "saved bytes persist", kTestName);
-        check(insoulforge::CharacterImageStore::save("invalid").has_value(), "invalid replacement rejected", kTestName);
-        check(insoulforge::CharacterImageStore::load() && insoulforge::CharacterImageStore::load()->bytes == image,
-          "failed replacement preserves original", kTestName);
+        check(stored && *stored && (*stored)->bytes == image && (*stored)->mimeType == "image/png",
+          "saved bytes persist", kTestName);
+        const auto invalidImage = insoulforge::CharacterImageStore::save("invalid");
+        check(!invalidImage && !invalidImage.error().empty(), "invalid replacement rejected with a reason", kTestName);
+        const auto unchanged = insoulforge::CharacterImageStore::load();
         check(
-          insoulforge::CharacterImageStore::save(std::string(insoulforge::CharacterImageStore::kMaxImageBytes + 1, 'x'))
-            .has_value(),
+          unchanged && *unchanged && (*unchanged)->bytes == image, "failed replacement preserves original", kTestName);
+        check(!insoulforge::CharacterImageStore::save(
+                std::string(insoulforge::CharacterImageStore::kMaxImageBytes + 1, 'x')),
           "oversized image rejected", kTestName);
+        std::ofstream("data/character-image", std::ios::binary | std::ios::trunc) << "invalid";
+        const auto corrupt = insoulforge::CharacterImageStore::load();
+        check(!corrupt && !corrupt.error().empty(), "corrupt image returns an error", kTestName);
         check(insoulforge::CharacterImageStore::remove(), "delete succeeds", kTestName);
-        check(!insoulforge::CharacterImageStore::load(), "deleted image is absent", kTestName);
+        const auto removed = insoulforge::CharacterImageStore::load();
+        check(removed && !*removed, "deleted image is absent", kTestName);
         std::filesystem::current_path(originalPath);
         std::filesystem::remove_all(testPath);
     }

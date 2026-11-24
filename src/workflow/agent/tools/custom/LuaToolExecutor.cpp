@@ -396,16 +396,16 @@ namespace insoulforge::LuaToolExecutor {
         }
     } // namespace
 
-    auto validate(const std::string_view source) -> std::optional<std::string> {
+    auto validate(const std::string_view source) -> std::expected<void, std::string> {
         try {
             const LuaState vm;
             vm.load(source);
             if (!vm.hasFunction("run")) {
-                return "Lua 脚本必须定义 run(args, ctx)";
+                return std::unexpected("Lua 脚本必须定义 run(args, ctx)");
             }
-            return std::nullopt;
+            return {};
         } catch (const std::exception &error) {
-            return error.what();
+            return std::unexpected(error.what());
         }
     }
 

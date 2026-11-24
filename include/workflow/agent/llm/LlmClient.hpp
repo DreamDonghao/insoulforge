@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <expected>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -11,7 +12,6 @@
 #include <vector>
 
 #include <drogon/utils/coroutine.h>
-#include <expected>
 
 #include <infrastructure/JsonUtil.hpp>
 #include <infrastructure/NumericTypes.hpp>
@@ -54,8 +54,8 @@ namespace insoulforge::LlmClient {
       std::optional<SessionId> sessionId = std::nullopt) -> json;
 
     /// @brief 校验 chat 响应：200 + JSON body + choices 为非空数组
-    /// @return 合法时返回完整响应 JSON；否则 nullopt（错误日志由调用方按上下文输出）
-    auto validChatJson(const drogon::HttpResponsePtr &resp) -> std::optional<json>;
+    /// @return 合法时返回完整响应 JSON；否则返回 HTTP 或响应结构错误
+    auto validChatJson(const drogon::HttpResponsePtr &resp) -> std::expected<json, std::string>;
 
     /// @brief 请求 chat completion（网络异常或临时性 HTTP 错误 503/429/500 时重试）
     /// @param label 日志与请求标签（如 "LLM" / "深度思考"）
@@ -65,18 +65,19 @@ namespace insoulforge::LlmClient {
     /// @param messages 消息列表
     /// @param tools 工具定义；null 表示不附带
     /// @param sessionId 会话 ID
-    /// @return 校验通过的完整响应 JSON；不可恢复错误或重试耗尽时返回 std::nullopt
+    /// @return 校验通过的完整响应 JSON；失败时返回配置、传输或响应错误
     auto requestChat(std::string label, std::string usageRole, LLMApiConfig apiConfig, LLMModelParams params,
       json messages, json tools = {}, std::optional<SessionId> sessionId = std::nullopt)
-      -> drogon::Task<std::optional<json>>;
+      -> drogon::Task<std::expected<json, std::string>>;
 
     /// @brief 使用 Memory 模型配置执行记忆或好感度维护请求。
     /// @param usageRole 用量记录中的角色（memory 或 affinity）。
     /// @param maxTokens 单次请求的输出上限；未指定时使用 Memory 模型配置。
     /// @param control 可选取消状态，取消后丢弃迟到响应且不记录用量。
+    /// @return 维护模型生成的文本；请求取消或失败时返回原因。
     auto requestMaintenance(json messages, std::optional<SessionId> sessionId, std::string usageRole = "memory",
       std::optional<i32> maxTokens = std::nullopt, std::shared_ptr<MaintenanceRequestControl> control = {})
-      -> drogon::Task<std::optional<std::string>>;
+      -> drogon::Task<std::expected<std::string, std::string>>;
 
     /// @brief 从 API 响应中提取 usage 信息并输出缓存命中率日志
     /// @param responseJson API 返回的完整 JSON
@@ -89,7 +90,7 @@ namespace insoulforge::LlmClient {
     /// @brief 请求 Embedding API（使用 Embedding 配置）
     /// @param text 待向量化的文本
     /// @param sessionId 关联日志的会话 ID；缺省时按全局请求记录
-    /// @return 向量，未配置或失败返回 std::nullopt
+    /// @return 向量；未配置或请求失败时返回原因
     auto requestEmbedding(std::string text, std::optional<SessionId> sessionId = std::nullopt)
-      -> drogon::Task<std::optional<std::vector<f32>>>;
+      -> drogon::Task<std::expected<std::vector<f32>, std::string>>;
 } // namespace insoulforge::LlmClient

@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <expected>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -28,11 +29,10 @@ namespace insoulforge::JevClient {
     /// @param state 被评估的程序状态；按值接管，由协程帧持有
     /// @param questions 问题映射，须非空；按值接管，由协程帧持有
     /// @param sessionId 会话 ID，仅用于日志归属
-    /// @return 校验通过的完整响应 JSON（含 answers/model/usage）；未配置、网络异常、
-    ///         非 200、JSON 非法或 answers 缺失/为空时返回 std::nullopt
+    /// @return 校验通过的完整响应 JSON（含 answers/model/usage）；失败时返回原因。
     /// @details 超时及重试次数使用 Jev 配置；尝试耗尽后由 Router 转交 LLM 判断。
     [[nodiscard]] auto requestSystemOne(LLMApiConfig api, json state, json questions,
-      std::optional<SessionId> sessionId = std::nullopt) -> drogon::Task<std::optional<json>>;
+      std::optional<SessionId> sessionId = std::nullopt) -> drogon::Task<std::expected<json, std::string>>;
 
     /// @brief 从响应中读取 choice 类型答案的胜出 label
     /// @param response requestSystemOne 返回的响应 JSON

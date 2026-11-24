@@ -358,7 +358,7 @@ namespace {
           ("insoulforge-image-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         std::filesystem::create_directories(temporary);
         std::filesystem::current_path(temporary);
-        require(!CharacterImageStore::save(imageBytes()), "character image fixture could not be saved");
+        require(CharacterImageStore::save(imageBytes()).has_value(), "character image fixture could not be saved");
         auto mixed = args;
         mixed["use_self_reference"] = true;
         mixed["reference_images"][0]["message_id"] = "5002";

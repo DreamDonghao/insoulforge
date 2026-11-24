@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <expected>
 #include <optional>
 #include <string>
 
@@ -18,6 +19,7 @@ namespace insoulforge::LongTermMemory {
     /// @param query 查询文本
     /// @param topK 返回结果数量
     /// @param sessionId 会话 ID
-    /// @return 检索结果文本；向量化失败返回 std::nullopt，无相似记忆返回 "未找到相关信息"
-    auto searchMemory(std::string query, i32 topK, SessionId sessionId) -> drogon::Task<std::optional<std::string>>;
+    /// @return 无相似记忆时返回成功的空值；向量化失败时返回原因
+    auto searchMemory(std::string query, i32 topK, SessionId sessionId)
+      -> drogon::Task<std::expected<std::optional<std::string>, std::string>>;
 } // namespace insoulforge::LongTermMemory

@@ -348,6 +348,12 @@ namespace {
                 const auto response = co_await LlmClient::requestChat(
                   "test", "executor", apiFor(endpoint, key, 3), LLMModelParams{}, messages);
                 require(!response && fixture.count(key) == 1, "permanent or malformed response was retried");
+                if (std::string_view(key) == "malformed") {
+                    require(response.error().contains("JSON"), "malformed response lost its parse error");
+                } else {
+                    require(response.error().contains(std::string_view(key).substr(6)),
+                      "permanent HTTP failure lost its status");
+                }
             }
             for (const auto retries: {0, 2}) {
                 const auto key = "exhaust" + std::to_string(retries);
@@ -408,7 +414,8 @@ namespace {
             trantor::EventLoop::getEventLoopOfCurrentThread()->runAfter(0.2, [control] { control->cancel(); });
             const auto cancelled =
               co_await LlmClient::requestMaintenance(messages, std::nullopt, "memory", std::nullopt, control);
-            require(!cancelled && fixture.count("cancel") == 1, "cancelled maintenance retried its request");
+            require(!cancelled && cancelled.error().contains("取消") && fixture.count("cancel") == 1,
+              "cancelled maintenance retried its request or lost its cancellation reason");
             {
                 std::lock_guard lock(fixture.mutex);
                 require(fixture.consistent, "retry body changed or local settings leaked");

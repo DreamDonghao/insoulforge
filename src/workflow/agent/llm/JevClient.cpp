@@ -26,10 +26,10 @@ namespace insoulforge::JevClient {
     }
 
     auto requestSystemOne(LLMApiConfig api, json state, json questions, const std::optional<SessionId> sessionId)
-      -> drogon::Task<std::optional<json>> {
+      -> drogon::Task<std::expected<json, std::string>> {
         if (!isConfigured(api)) {
             Logger::warn(sessionId, "Jev", "未配置服务地址、请求路径、模型名或密钥，跳过请求");
-            co_return std::nullopt;
+            co_return std::unexpected("Jev 模型配置不完整");
         }
 
         json body{{"state", std::move(state)}, {"model", api.model}, {"questions", std::move(questions)}};
@@ -37,25 +37,25 @@ namespace insoulforge::JevClient {
         const auto resp = co_await LlmClient::sendModelRequest("Jev", api, std::move(body), sessionId);
         if (!resp) {
             Logger::warn(sessionId, "Jev", "网络异常");
-            co_return std::nullopt;
+            co_return std::unexpected(resp.error());
         }
 
         if ((*resp)->getStatusCode() != drogon::k200OK) {
             const i32 status = static_cast<i32>((*resp)->getStatusCode());
             const std::string respBody = std::string((*resp)->getBody()).substr(0, kErrorBodyMaxChars);
             Logger::error(sessionId, "Jev", std::format("请求失败: status={} body={}", status, respBody));
-            co_return std::nullopt;
+            co_return std::unexpected(std::format("Jev HTTP 请求失败: status={}", status));
         }
 
         json parsed;
         if (!tryParseJson((*resp)->body(), parsed)) {
             Logger::error(sessionId, "Jev", "响应 JSON 解析失败");
-            co_return std::nullopt;
+            co_return std::unexpected("Jev 响应 JSON 解析失败");
         }
 
         if (const json &answers = atOrNull(parsed, "answers"); !answers.is_object() || answers.empty()) {
             Logger::error(sessionId, "Jev", "响应缺少 answers 或为空对象");
-            co_return std::nullopt;
+            co_return std::unexpected("Jev 响应缺少非空 answers 对象");
         }
 
         // Jev 与聊天模型的用量字段不同，只转换记账所需的字段。

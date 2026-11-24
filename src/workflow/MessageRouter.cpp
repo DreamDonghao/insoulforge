@@ -421,8 +421,8 @@ namespace insoulforge::MessageRouter {
         }
 
         // 保持原有 fail-open 行为：LLM 请求失败或响应无效时仍尝试回复。
-        const auto response = std::optional{co_await LlmClient::requestChat(
-          "Router", "router", config.router, config.routerParams, buildPrompt(sessionId, snapshot), {}, sessionId)};
+        const auto response = co_await LlmClient::requestChat(
+          "Router", "router", config.router, config.routerParams, buildPrompt(sessionId, snapshot), {}, sessionId);
         if (!response) {
             co_return applySessionType(makeDecision(RouterDecision::Action::REPLY, "Router 请求失败"), sessionId);
         }

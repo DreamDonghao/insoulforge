@@ -121,6 +121,16 @@ namespace insoulforge::OneBotClient {
             }
             co_return messageId;
         }
+        auto filePath(const std::expected<json, std::string> &response) -> std::expected<std::string, std::string> {
+            if (!response) {
+                return std::unexpected(response.error());
+            }
+            const auto &path = atOrNull(atOrNull(*response, "data"), "file");
+            if (!path.is_string() || path.get_ref<const std::string &>().empty()) {
+                return std::unexpected("OneBot 响应缺少有效的文件路径");
+            }
+            return path.get<std::string>();
+        }
     } // namespace
 
     auto sendQzoneMsg(json params, const std::optional<SessionId> sessionId)
@@ -238,30 +248,28 @@ namespace insoulforge::OneBotClient {
     }
 
     auto getImage(std::string file, const std::optional<SessionId> sessionId, json connection)
-      -> drogon::Task<std::optional<std::string>> {
+      -> drogon::Task<std::expected<std::string, std::string>> {
         if (connection.is_null())
             connection = Config::instance().oneBotSnapshot();
         json params;
         params["file"] = std::move(file);
 
         const auto resp = co_await callApi("[Sticker]", "get_image", params, sessionId, 15.0, connection);
-        if (!resp) {
-            co_return std::nullopt;
-        }
-        co_return jsonToString(atOrNull(atOrNull(*resp, "data"), "file"));
+        co_return filePath(resp);
     }
 
-    auto getRecordWav(std::string file, const SessionId sessionId) -> drogon::Task<std::optional<std::string>> {
+    auto getRecordWav(std::string file, const SessionId sessionId)
+      -> drogon::Task<std::expected<std::string, std::string>> {
         constexpr size_t kMaxWavBytes = 8U * 1024U * 1024U;
         constexpr size_t kMaxBase64Bytes = ((kMaxWavBytes + 2) / 3) * 4;
         json params{{"file", std::move(file)}, {"out_format", "wav"}};
         const auto response = co_await callApi("[ASR]", "get_record", std::move(params), sessionId);
         if (!response) {
-            co_return std::nullopt;
+            co_return std::unexpected(response.error());
         }
         const auto &encoded = atOrNull(atOrNull(*response, "data"), "base64");
         if (!encoded.is_string()) {
-            co_return std::nullopt;
+            co_return std::unexpected("OneBot 响应缺少语音 Base64 字段");
         }
         const auto &base64 = encoded.get_ref<const std::string &>();
         const auto padding = base64.ends_with("==") ? 2U : (base64.ends_with('=') ? 1U : 0U);
@@ -271,36 +279,31 @@ namespace insoulforge::OneBotClient {
                 .substr(0, base64.size() - padding)
                 .find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/") !=
               std::string_view::npos) {
-            co_return std::nullopt;
+            co_return std::unexpected("OneBot 返回的语音 Base64 格式或大小无效");
         }
         co_return drogon::utils::base64Decode(base64);
     }
 
     auto downloadFile(std::string url, const std::optional<SessionId> sessionId, json connection)
-      -> drogon::Task<std::optional<std::string>> {
+      -> drogon::Task<std::expected<std::string, std::string>> {
         if (connection.is_null())
             connection = Config::instance().oneBotSnapshot();
         json params;
         params["url"] = std::move(url);
 
         const auto resp = co_await callApi("[Sticker]", "download_file", params, sessionId, 30.0, connection);
-        if (!resp) {
-            co_return std::nullopt;
-        }
-        co_return jsonToString(atOrNull(atOrNull(*resp, "data"), "file"));
+        co_return filePath(resp);
     }
 
     auto uploadFile(std::string bytes, const std::optional<SessionId> sessionId, json connection)
-      -> drogon::Task<std::optional<std::string>> {
+      -> drogon::Task<std::expected<std::string, std::string>> {
         if (connection.is_null())
             connection = Config::instance().oneBotSnapshot();
         json params;
         params["base64"] = Image::encode(bytes);
         const auto resp =
           co_await callApi("[Sticker]", "download_file", std::move(params), sessionId, 30.0, connection);
-        if (!resp)
-            co_return std::nullopt;
-        co_return jsonToString(atOrNull(atOrNull(*resp, "data"), "file"));
+        co_return filePath(resp);
     }
 
     auto addCustomFace(std::string file, const std::optional<SessionId> sessionId, json connection)

@@ -224,8 +224,8 @@ auto AdminController::addCustomTool(HttpRequestPtr req, std::function<void(const
     tool.enabled = getBool(*body, "enabled", true);
 
     if (tool.executorType == "lua") {
-        if (const auto error = LuaToolExecutor::validate(tool.scriptContent)) {
-            callback(jsonResponse(AdminResponse::errorJson(*error)));
+        if (const auto validation = LuaToolExecutor::validate(tool.scriptContent); !validation) {
+            callback(jsonResponse(AdminResponse::errorJson(validation.error())));
             co_return;
         }
     } else {
@@ -276,8 +276,8 @@ auto AdminController::updateCustomTool(const HttpRequestPtr req,
     tool.enabled = getBool(*body, "enabled", true);
 
     if (tool.executorType == "lua") {
-        if (const auto error = LuaToolExecutor::validate(tool.scriptContent)) {
-            callback(jsonResponse(AdminResponse::errorJson(*error)));
+        if (const auto validation = LuaToolExecutor::validate(tool.scriptContent); !validation) {
+            callback(jsonResponse(AdminResponse::errorJson(validation.error())));
             co_return;
         }
     } else {
@@ -508,8 +508,8 @@ auto AdminController::importCustomTool(HttpRequestPtr req, std::function<void(co
 
     tool.scriptContent = getStr(*body, "scriptContent");
     if (tool.executorType == "lua") {
-        if (const auto error = LuaToolExecutor::validate(tool.scriptContent)) {
-            callback(jsonResponse(AdminResponse::failJson(*error)));
+        if (const auto validation = LuaToolExecutor::validate(tool.scriptContent); !validation) {
+            callback(jsonResponse(AdminResponse::failJson(validation.error())));
             co_return;
         }
     }

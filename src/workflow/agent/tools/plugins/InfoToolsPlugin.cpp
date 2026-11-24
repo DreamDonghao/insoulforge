@@ -132,10 +132,14 @@ namespace insoulforge {
 
                 const SessionId &sessionId = ctx.requireSession();
                 const auto result = co_await LongTermMemory::searchMemory(query, 3, sessionId);
-                if (!result || result->empty()) {
+                if (!result) {
+                    Logger::warn(sessionId, "Memory", result.error());
+                    co_return std::string("暂时无法检索相关记忆");
+                }
+                if (!*result) {
                     co_return "想不起来了，没有找到相关记忆";
                 }
-                co_return "回忆起：" + result.value();
+                co_return "回忆起：" + **result;
             },
           },
           ToolCategory::INFORMATION);

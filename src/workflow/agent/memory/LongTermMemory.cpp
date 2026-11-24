@@ -3,18 +3,16 @@
 
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
-#include <infrastructure/logging/Logger.hpp>
 #include <workflow/agent/llm/LlmClient.hpp>
 #include <workflow/agent/memory/LongTermMemory.hpp>
 #include <workflow/agent/memory/LongTermMemoryStore.hpp>
 
 namespace insoulforge {
     auto LongTermMemory::searchMemory(std::string query, const i32 topK, const SessionId sessionId)
-      -> drogon::Task<std::optional<std::string>> {
+      -> drogon::Task<std::expected<std::optional<std::string>, std::string>> {
         const auto embedding = co_await LlmClient::requestEmbedding(std::move(query), sessionId);
         if (!embedding) {
-            Logger::warn(sessionId, "Memory", "记忆检索向量化失败（Embedding 未配置或请求失败）");
-            co_return std::nullopt;
+            co_return std::unexpected(embedding.error());
         }
 
         const auto rows = LongTermMemoryStore::searchSimilar(sessionId, *embedding, topK);
@@ -25,8 +23,9 @@ namespace insoulforge {
             result += memory.content + "\n";
         }
 
-        if (result.empty())
-            co_return std::optional<std::string>("未找到相关信息");
-        co_return result;
+        if (result.empty()) {
+            co_return std::nullopt;
+        }
+        co_return std::move(result);
     }
 } // namespace insoulforge

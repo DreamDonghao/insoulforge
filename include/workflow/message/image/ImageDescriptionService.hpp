@@ -3,13 +3,13 @@
 
 #pragma once
 
+#include <expected>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include <drogon/utils/coroutine.h>
-#include <expected>
 
 #include <infrastructure/NumericTypes.hpp>
 #include <infrastructure/SessionId.hpp>
@@ -35,19 +35,19 @@ namespace insoulforge {
         [[nodiscard]] auto staticImageDataUrl(std::string_view bytes) -> std::optional<std::string>;
 
         /// @brief 按需下载静态图片并编码为图生图接口可用的 base64 data URL。
-        [[nodiscard]] auto referenceDataUrl(std::string sourceUrl, SessionId sessionId)
-          -> drogon::Task<std::optional<std::string>>;
+        [[nodiscard]] auto referenceDataUrl(std::string sourceUrl)
+          -> drogon::Task<std::expected<std::string, std::string>>;
 
         /// @brief 下载媒体、查询缓存并生成视觉描述
         /// @param sourceUrl OneBot 提供的媒体 URL
         /// @param sessionId 关联日志与用量的会话 ID
-        /// @return 成功时返回描述；下载、解码或模型调用失败时返回空值
+        /// @return 成功时返回描述；下载、解码或模型调用失败时返回原因
         /// @details GIF 最多向视觉模型提交 16 帧；超过时按播放时间均匀抽样并保留首尾帧。
         [[nodiscard]] auto describe(std::string sourceUrl, SessionId sessionId)
-          -> drogon::Task<std::optional<ImageDescriptionResult>>;
+          -> drogon::Task<std::expected<ImageDescriptionResult, std::string>>;
 
         /// @brief 识别生成接口返回的 HTTP 图片或 base64:// 图片，复用相同的缓存和视觉模型。
         [[nodiscard]] auto describeGeneratedImage(std::string source, SessionId sessionId)
-          -> drogon::Task<std::optional<ImageDescriptionResult>>;
+          -> drogon::Task<std::expected<ImageDescriptionResult, std::string>>;
     } // namespace ImageDescriptionService
 } // namespace insoulforge

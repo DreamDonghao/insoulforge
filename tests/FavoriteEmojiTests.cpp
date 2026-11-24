@@ -107,7 +107,12 @@ namespace {
             failDownload = true;
             auto failed = co_await request(client, "/admin/api/emoji/add", {{"url", "https://example.com/image.gif"}});
             require(!json::parse(failed->body()).value("success", true) && adds == 1, "download failure prevents save");
+            const auto downloadError = co_await OneBotClient::downloadFile("https://example.com/image.gif");
+            require(!downloadError && downloadError.error().contains("retcode=1200"),
+              "file download lost the protocol error");
             failDownload = false;
+            const auto missingPath = co_await OneBotClient::downloadFile("https://example.com/no-path.gif");
+            require(!missingPath && missingPath.error().contains("文件路径"), "missing path reported as success");
             failAdd = true;
             failed = co_await request(client, "/admin/api/emoji/add", {{"url", "https://example.com/image.gif"}});
             require(!json::parse(failed->body()).value("success", true), "QQ save failure reported");
@@ -313,9 +318,16 @@ int main() {
               Config::instance().oneBotImplementation = "napcat";
           }
           ++downloads;
+          if (body["url"] == "https://example.com/no-path.gif") {
+              callback(jsonResponse({{"status", "ok"}, {"data", json::object()}}));
+              return;
+          }
           require(body["url"] == "https://example.com/image.gif", "download receives original URL");
-          callback(
-            jsonResponse({{"status", failDownload ? "failed" : "ok"}, {"data", {{"file", "/napcat/image.gif"}}}}));
+          if (failDownload) {
+              callback(jsonResponse({{"status", "failed"}, {"retcode", 1200}}));
+              return;
+          }
+          callback(jsonResponse({{"status", "ok"}, {"data", {{"file", "/napcat/image.gif"}}}}));
       },
       {drogon::Post});
     drogon::app().registerHandler("/add_custom_face",
