@@ -11,6 +11,8 @@ namespace insoulforge::ConfigStore {
         bool changed = config.erase("version") > 0;
         if (const auto memory = config.find("memory"); memory != config.end() && memory->is_object()) {
             changed = memory->erase("shortTermMemoryMax") > 0 || changed;
+            changed = memory->erase("routerWindowTriggerCount") > 0 || changed;
+            changed = memory->erase("routerWindowKeepCount") > 0 || changed;
         }
         const auto llm = config.find("llm");
         if (llm == config.end() || !llm->is_object())

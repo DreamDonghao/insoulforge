@@ -143,14 +143,14 @@ test('memory validation preserves invalid drafts and reports both numeric and de
   assert.equal(state.isDirty(), false)
   state.memoryConfig.contextWindowLimit = ''
   state.memoryConfig.memorySummaryBatchSize = 101
-  state.memoryConfig.routerWindowKeepCount = 20
+  state.memoryConfig.jevWindowSize = 0
   state.memoryConfig.longTermRecallThreshold = 1
   await state.saveMemoryConfig()
   assert.equal(posts, 0)
   assert.equal(state.memoryConfig.contextWindowLimit, '')
   assert.equal(focused[0], 'memory-contextWindowLimit')
-  for (const key of ['contextWindowLimit','memorySummaryBatchSize','routerWindowKeepCount','longTermRecallThreshold']) assert.ok(state.errors[`memory-${key}`])
-  Object.assign(state.memoryConfig, {contextWindowLimit: 100, memorySummaryBatchSize: 50, routerWindowKeepCount: 10, longTermRecallThreshold: 0.65})
+  for (const key of ['contextWindowLimit','memorySummaryBatchSize','jevWindowSize','longTermRecallThreshold']) assert.ok(state.errors[`memory-${key}`])
+  Object.assign(state.memoryConfig, {contextWindowLimit: 100, memorySummaryBatchSize: 50, jevWindowSize: 10, longTermRecallThreshold: 0.65})
   await state.saveMemoryConfig()
   assert.equal(posts, 1)
   assert.equal(state.isDirty(), false)

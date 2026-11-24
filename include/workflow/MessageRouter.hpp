@@ -28,14 +28,4 @@ namespace insoulforge::MessageRouter {
     /// @return 达到阈值的 skip/reply 返回对应动作；否则交给 LLM 判断
     [[nodiscard]] auto classifyJevChoice(std::string_view label, std::optional<double> confidence, f64 minConfidence)
       -> std::optional<RouterDecision::Action>;
-
-    /// @brief 计算 Router 上下文窗口的起始下标
-    /// @param snapshotSize 完整快照的消息条数
-    /// @details 该窗口按消息条数分段扩展：窗口大小在 [keep, keep + slide - 1] 之间周期性
-    ///          变化（默认 10~19），同一批次内起始下标保持不变，只有跨越批次边界时前缀
-    ///          才整体前移。此设计意在保留稳定的上下文前缀，提高请求缓存命中率；逐条
-    ///          滑动会让聊天记录部分几乎每轮都变，命中率显著下降。
-    ///          仅 Router LLM 使用此窗口；Jev 独立读取最近 jevWindowSize 条消息。
-    ///          导出到头文件用于支持无网络的离线测试，与请求构建共用同一窗口算法。
-    [[nodiscard]] auto windowStartIndex(size_t snapshotSize) -> size_t;
 } // namespace insoulforge::MessageRouter

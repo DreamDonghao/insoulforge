@@ -122,18 +122,31 @@ test('model save keeps edits made during a request and saves only the submitted 
   assert.equal(state.dirty, true)
 })
 
-test('model switch checks every form, including the fallback, and blocks while saving', async () => {
+test('switching model groups or variants protects the active form', async () => {
   const state = mount('llm/LLMConfig')
   await flush()
-  state.modelForms = [{dirty: false, saving: false}, {dirty: true, saving: false}]
-  state.selectModel('image')
+  assert.deepEqual(state.modelVariants.map(tab => tab.key), ['router', 'jev'])
+  assert.ok(!state.modelTabs.some(tab => tab.key === 'jev'))
+  state.modelForm = {dirty: true, saving: false}
+  const selector = {value: 'jev'}
+  state.changeVariant({currentTarget: selector})
+  assert.equal(state.activeModel, 'router')
+  assert.equal(selector.value, 'router')
+  state.selectModel('executor')
   assert.equal(state.selectedLLM, 'router')
   confirmResult = true
-  state.selectModel('image')
-  assert.equal(state.selectedLLM, 'image')
-  state.modelForms = [{dirty: false, saving: true}]
+  selector.value = 'jev'
+  state.changeVariant({currentTarget: selector})
+  assert.equal(state.activeModel, 'jev')
+  state.selectModel('executor')
+  assert.equal(state.selectedLLM, 'executor')
+  assert.equal(state.activeModel, 'executor')
+  assert.deepEqual(state.modelVariants.map(tab => tab.key), ['executor', 'executorFallback'])
+  state.modelForm = {dirty: false, saving: true}
+  state.selectVariant('executorFallback')
+  assert.equal(state.activeModel, 'executor')
   state.selectModel('memory')
-  assert.equal(state.selectedLLM, 'image')
+  assert.equal(state.selectedLLM, 'executor')
 })
 
 test('tool close rejects losing changes; successful save closes without asking to discard', async () => {

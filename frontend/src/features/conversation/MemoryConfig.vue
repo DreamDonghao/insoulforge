@@ -35,8 +35,6 @@ const memoryConfig = reactive<MemoryConfig>({
   personInteractionEntryMaxChars: 60,
   personInteractionMaxChars: 250,
   jevWindowSize: 10,
-  routerWindowTriggerCount: 20,
-  routerWindowKeepCount: 10,
   longTermRecallThreshold: 0.65,
   longTermInjectThreshold: 0.45
 })
@@ -48,9 +46,7 @@ const settingSections: {title: string, summary: string, fields: MemoryField[]}[]
     summary: '',
     fields: [
       {key: 'contextWindowLimit', label: '近期上下文上限', minimum: 1, help: 'Jev、Router 与 Agent 实际可见的最近消息数上限'},
-      {key: 'jevWindowSize', label: 'Jev 窗口条数', minimum: 1, help: '每次取最近 N 条消息判断是否回复，默认 10 条；受近期上下文上限限制'},
-      {key: 'routerWindowTriggerCount', label: 'Router 窗口触发条数', minimum: 1, help: 'Router 上下文超过 N 条时批量滑动（建议 40~60，前缀需超过缓存阈值）'},
-      {key: 'routerWindowKeepCount', label: 'Router 窗口保留条数', minimum: 1, help: '滑动后保留的条数，必须小于触发条数'},
+      {key: 'jevWindowSize', label: '路由窗口条数', minimum: 1, help: 'Jev 和 Router LLM 共用最近 N 条消息判断是否回复，默认 10 条；受近期上下文上限限制'},
       {key: 'sharedConversationMessageCount', label: '每会话共享消息数', minimum: 1, help: ''},
     ]
   },
@@ -128,7 +124,6 @@ const {errors, fieldAttrs, validateForm} = useFormValidation(() => {
     if (threshold && typeof value === 'number' && (value <= 0 || value >= 1)) result[`memory-${key}`] = '请输入大于 0 且小于 1 的数值'
   }
   if (memoryConfig.memorySummaryBatchSize > memoryConfig.memorySummaryTriggerCount) result['memory-memorySummaryBatchSize'] = '每批总结条数不能超过总结触发条数'
-  if (memoryConfig.routerWindowKeepCount >= memoryConfig.routerWindowTriggerCount) result['memory-routerWindowKeepCount'] = '保留条数必须小于触发条数'
   if (memoryConfig.personCompressionTriggerTokens > 0 && (memoryConfig.personCompressionTargetTokens <= 0 || memoryConfig.personCompressionTargetTokens >= memoryConfig.personCompressionTriggerTokens)) result['memory-personCompressionTargetTokens'] = '目标必须大于 0 且小于触发 Token'
   return result
 })

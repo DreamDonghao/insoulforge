@@ -662,28 +662,6 @@ namespace {
           "missing answers yields nullopt for confidence", kTestName);
     }
 
-    void testRouterWindowStartIndexIsBatchedNotSliding() {
-        constexpr std::string_view kTestName = "router window start index is batched not sliding";
-        auto &config = insoulforge::Config::instance();
-        const i32 originalTrigger = config.routerWindowTriggerCount;
-        const i32 originalKeep = config.routerWindowKeepCount;
-        config.routerWindowTriggerCount = 20;
-        config.routerWindowKeepCount = 10;
-
-        // keep=10, slide=10 时窗口大小 = 10 + size % 10，因此 size 为 10 的整数倍时窗口收回到 keep。
-        // 以下用例锁住窗口的周期性：同一批次内起始下标保持不变，跨批次边界时前缀前移。
-        check(insoulforge::MessageRouter::windowStartIndex(30) == 20, "window resets to keep at period boundary",
-          kTestName);
-        check(insoulforge::MessageRouter::windowStartIndex(35) == 20, "window grows within a period", kTestName);
-        check(insoulforge::MessageRouter::windowStartIndex(39) == 20, "window keeps a stable prefix within a period",
-          kTestName);
-        check(insoulforge::MessageRouter::windowStartIndex(40) == 30, "next period starts a new prefix", kTestName);
-        check(insoulforge::MessageRouter::windowStartIndex(5) == 0, "short snapshot starts at zero", kTestName);
-
-        config.routerWindowTriggerCount = originalTrigger;
-        config.routerWindowKeepCount = originalKeep;
-    }
-
     void testMessageRecordProjectionHidesImageSources() {
         constexpr std::string_view kTestName = "message record projection";
         const insoulforge::json record = {
@@ -3455,19 +3433,22 @@ namespace {
         check(db.initialize(":memory:").has_value(), "initializes database", kTestName);
         PromptStore::setPrompt(db, "router_system",
           "custom prefix\n是否应该回复最新一条消息\n1. 看最新一条消息的性质\n- [{botName}]: 机器人发送的消息\n   - "
-          "如果{botName}在最近1-2条内刚发过言，除非新消息明确针对它（追问、反驳、接它的话），否则 skip\ncustom suffix");
+          "如果{botName}在最近1-2条内刚发过言，除非新消息明确针对它（追问、反驳、接它的话），否则 skip\n"
+          "未交给 Executor 不等于尚未回答；新消息可能在上一轮生成期间到达，刚发送的内容可能已经覆盖它。\ncustom "
+          "suffix");
         PromptStore::setPrompt(db, "executor_system", "custom\n只回复最新的一条消息或话题，不要同时回复多条消息");
         PromptService::initialize(db);
         const auto router = PromptStore::getPrompt(db, "router_system", "");
         const auto executor = PromptStore::getPrompt(db, "executor_system", "");
         check(router.starts_with("custom prefix") && router.ends_with("custom suffix") &&
                 router.find("最新一条消息") == std::string::npos && router.find("最近1-2条") == std::string::npos &&
-                router.find("[{botName}]") == std::string::npos,
+                router.find("[{botName}]") == std::string::npos && !router.contains("未交给 Executor") &&
+                router.contains("刚发送的内容可能已经覆盖它"),
           "known legacy rules upgrade without overwriting custom content", kTestName);
         check(executor.starts_with("custom") && executor.find("只回复最新") == std::string::npos,
           "executor legacy focus rule also upgrades", kTestName);
         const auto privatePrompt = PromptStore::getPrompt(db, "router_private_system", "");
-        check(privatePrompt.find("未交给 Executor 不等于尚未回答") != std::string::npos &&
+        check(privatePrompt.contains("刚发送的内容可能已经覆盖它") && !privatePrompt.contains("未交给 Executor") &&
                 privatePrompt.find("可以稍等") == std::string::npos &&
                 privatePrompt.find("其余情况一律 reply") == std::string::npos,
           "default private Router reasons about coverage without fictitious delayed replies", kTestName);
@@ -4304,7 +4285,6 @@ auto main() -> int {
     testJevUnconfiguredFallsBackToExistingBehavior();
     testClassifyJevChoice();
     testJevClientChoiceAndConfidenceParsing();
-    testRouterWindowStartIndexIsBatchedNotSliding();
     testMessageRecordProjectionHidesImageSources();
     testAssistantStickerRecordKeepsOnlyName();
     testGeneratedImageRecordKeepsDescription();

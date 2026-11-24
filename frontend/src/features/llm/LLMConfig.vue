@@ -3,7 +3,7 @@
  * @file LLMConfig.vue
  * @brief LLM 配置管理组件
  */
-import {inject, reactive, ref, type Ref, onMounted} from 'vue'
+import {computed, inject, reactive, ref, type Ref, onMounted} from 'vue'
 import type {LLMConfig} from '../../vite-env'
 
 import {confirmDiscard} from '../../composables/useUnsavedChanges'
@@ -14,12 +14,10 @@ import SlidingTabs from '../../components/SlidingTabs.vue'
 
 const showToast = inject<(msg: string, isError?: boolean) => void>('showToast')
 
-const llmNames = ['router', 'jev', 'executor', 'executorThinking', 'image', 'asr', 'imageGeneration', 'memory', 'embedding']
+const llmNames = ['router', 'executor', 'executorThinking', 'image', 'asr', 'imageGeneration', 'memory', 'embedding']
 const llmLabels: Record<string, string> = {
   router: '回复决策',
-  jev: 'Jev',
   executor: '回复生成',
-  executorFallback: '备用模型',
   executorThinking: '深度思考',
   image: '图片识别',
   asr: '语音识别',
@@ -28,13 +26,15 @@ const llmLabels: Record<string, string> = {
   embedding: '向量化'
 }
 const modelTabs = llmNames.map(key => ({key, label: llmLabels[key] || key}))
+const modelGroups: Record<string, {key: string, label: string}[]> = {
+  router: [{key: 'router', label: 'Router LLM'}, {key: 'jev', label: 'Jev（可选）'}],
+  executor: [{key: 'executor', label: '默认模型'}, {key: 'executorFallback', label: '备用模型（可选）'}]
+}
 
 // 各配置的实际用途（与后端代码一致）
 const llmUsages: Record<string, string> = {
-  router: '用途：Jev 未配置、结果不确定或请求失败时的回复决策',
-  jev: '用途：群聊的优先回复决策；低置信度时由 Router 再判断',
-  executor: '用途：回复生成',
-  executorFallback: '用途：默认 Executor 请求失败时重试本次请求；留空不启用，下次仍优先使用默认模型',
+  router: '群聊优先使用 Jev。Jev 未配置、判断不明确、置信度不足或请求失败时，由 Router LLM 判断。',
+  executor: '默认模型请求失败时可用备用模型，留空则关闭备用。',
   executorThinking: '用途：深度思考模式的分析阶段（最终执行仍走 Executor）',
   image: '用途：图片识别与描述',
   asr: '自动转写已启用会话的语音。填写 API 密钥后启用，音频将发送到配置的语音识别服务。',
@@ -43,14 +43,28 @@ const llmUsages: Record<string, string> = {
   embedding: '用途：长期记忆向量化（记忆写入与检索时计算文本向量）'
 }
 const selectedLLM: Ref<string> = ref('router')
-const modelForms = ref<InstanceType<typeof LLMModelForm>[]>([])
-const selectModel = (name: string): void => {
-  if (name === selectedLLM.value) return
-  if (modelForms.value.some(form => form.saving)) {
+const activeModel = ref('router')
+const modelVariants = computed(() => modelGroups[selectedLLM.value])
+const modelForm = ref<InstanceType<typeof LLMModelForm> | null>(null)
+const canSwitchModel = (): boolean => {
+  if (modelForm.value?.saving) {
     showToast?.('正在保存，请等待完成后再切换', true)
-    return
+    return false
   }
-  if (confirmDiscard(modelForms.value.some(form => form.dirty))) selectedLLM.value = name
+  return confirmDiscard(modelForm.value?.dirty ?? false)
+}
+const selectModel = (name: string): void => {
+  if (name === selectedLLM.value || !canSwitchModel()) return
+  selectedLLM.value = name
+  activeModel.value = name
+}
+const selectVariant = (name: string): void => {
+  if (name !== activeModel.value && canSwitchModel()) activeModel.value = name
+}
+const changeVariant = (event: Event): void => {
+  const select = event.currentTarget as HTMLSelectElement
+  selectVariant(select.value)
+  select.value = activeModel.value
 }
 const llmConfigs = reactive<Record<string, LLMConfig>>({})
 const loading = ref(false)
@@ -87,19 +101,20 @@ const updateConfig = (name: string, config: LLMConfig): void => {
     <p v-if="loading" role="status">加载中…</p>
     <SlidingTabs v-if="!loadError && !loading" :model-value="selectedLLM" @update:model-value="selectModel" :items="modelTabs" label="模型功能" id-prefix="model-config">
       <template #panel>
-        <div :key="selectedLLM" class="model-panel">
-          <p class="form-hint">{{ llmUsages[selectedLLM] }}</p>
-
-          <template v-for="name in (selectedLLM === 'executor' ? ['executor', 'executorFallback'] : [selectedLLM])" :key="name">
-            <LLMModelForm
-                v-if="llmConfigs[name]"
-                ref="modelForms"
-                :name="name"
-                :initial-config="llmConfigs[name]"
-                :title="selectedLLM === 'executor' ? (name === 'executor' ? '默认模型' : '备用模型（可选）') : undefined"
-                @saved="updateConfig"
-            />
-          </template>
+        <div :key="selectedLLM" class="model-panel" :class="{'has-model-selector': modelVariants}">
+          <header v-if="modelVariants" class="model-panel-header">
+            <div>
+              <h2>{{ llmLabels[selectedLLM] }}</h2>
+              <p class="form-hint">{{ llmUsages[selectedLLM] }}</p>
+            </div>
+            <select class="form-input model-selector" :aria-label="llmLabels[selectedLLM] + '模型'"
+                    :value="activeModel" :disabled="modelForm?.saving" @change="changeVariant">
+              <option v-for="variant in modelVariants" :key="variant.key" :value="variant.key">{{ variant.label }}</option>
+            </select>
+          </header>
+          <p v-else class="form-hint">{{ llmUsages[selectedLLM] }}</p>
+          <LLMModelForm v-if="llmConfigs[activeModel]" :key="activeModel" ref="modelForm"
+                        :name="activeModel" :initial-config="llmConfigs[activeModel]" @saved="updateConfig"/>
         </div>
       </template>
     </SlidingTabs>
@@ -109,6 +124,50 @@ const updateConfig = (name: string, config: LLMConfig): void => {
 <style scoped>
 .model-panel {
   animation: model-panel-enter 160ms ease-out;
+}
+
+.model-panel-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  max-width: 1120px;
+  padding: 20px 24px;
+  background: var(--card-bg);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.model-panel-header > div {
+  flex: 1 1 280px;
+}
+
+.model-panel-header h2 {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+
+.model-panel-header .form-hint {
+  margin: 0;
+}
+
+.model-selector {
+  width: auto;
+  max-width: 100%;
+  min-height: 36px;
+}
+
+.has-model-selector :deep(.config-section:first-child) {
+  border-start-start-radius: 0;
+  border-start-end-radius: 0;
+}
+
+@media (max-width: 760px) {
+  .model-selector {
+    min-height: 44px;
+    font-size: 16px;
+  }
 }
 
 @keyframes model-panel-enter {

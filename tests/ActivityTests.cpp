@@ -206,7 +206,7 @@ namespace {
         };
         const auto hasMessage = [](const json &records, const std::string &id) {
             return std::ranges::any_of(records, [&](const json &record) {
-                return MessageRecord::extractText(record.contains("content") ? record["content"] : record) == id;
+                return (record.contains("text") ? getStr(record, "text") : MessageRecord::extractText(record)) == id;
             });
         };
         const int routerBase = routerRequests;

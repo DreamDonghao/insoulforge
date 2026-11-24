@@ -49,8 +49,6 @@ export interface MemoryConfig {
     personInteractionEntryMaxChars: number
     personInteractionMaxChars: number
     jevWindowSize: number
-    routerWindowTriggerCount: number
-    routerWindowKeepCount: number
     longTermRecallThreshold: number
     longTermInjectThreshold: number
 }
