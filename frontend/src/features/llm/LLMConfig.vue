@@ -33,7 +33,7 @@ const modelGroups: Record<string, {key: string, label: string}[]> = {
 
 // 各配置的实际用途（与后端代码一致）
 const llmUsages: Record<string, string> = {
-  router: '群聊优先使用 Jev。Jev 未配置、判断不明确、置信度不足或请求失败时，由 Router LLM 判断。',
+  router: '启用并配置 Jev 后，群聊优先使用 Jev。Jev 未启用、配置不完整、判断不明确、置信度不足或请求失败时，由 Router LLM 判断。',
   executor: '默认模型请求失败时可用备用模型，留空则关闭备用。',
   executorThinking: '用途：深度思考模式的分析阶段（最终执行仍走 Executor）',
   image: '用途：图片识别与描述',

@@ -123,6 +123,13 @@ const saveLLMConfig = async (): Promise<void> => {
         @focusin="rangeHintsDismissed = false" @keydown.esc="rangeHintsDismissed = true" @submit.prevent="saveLLMConfig">
     <section class="config-section">
       <h2 class="section-title">接口与模型</h2>
+      <div v-if="name === 'jev'" class="form-group checkbox-field">
+        <div class="checkbox-description">
+          <label :for="fieldId('enabled')" class="form-label">启用 Jev</label>
+          <p :id="fieldId('enabled') + '-hint'" class="setting-summary">关闭后由 Router LLM 判断，已填写的 API 密钥和接口配置会保留。</p>
+        </div>
+        <input :id="fieldId('enabled')" v-model="llmConfig.enabled" type="checkbox" :disabled="saving" :aria-describedby="fieldId('enabled') + '-hint'">
+      </div>
       <div v-if="name === 'imageGeneration'" class="form-group">
         <label :for="fieldId('apiType')" class="form-label">接口类型</label>
         <select v-bind="fieldAttrs(fieldId('apiType'))" :disabled="saving" v-model="llmConfig.apiType" class="form-input">

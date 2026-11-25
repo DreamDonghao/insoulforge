@@ -3,6 +3,7 @@
 
 #include <utility>
 
+#include <infrastructure/CommonUtil.hpp>
 #include <infrastructure/config/ConfigMigration.hpp>
 
 namespace insoulforge::ConfigStore {
@@ -43,6 +44,10 @@ namespace insoulforge::ConfigStore {
                 continue;
             if (entry.key() == "imageGeneration" && !modelConfig.contains("apiType")) {
                 modelConfig["apiType"] = "openrouter";
+                changed = true;
+            }
+            if (entry.key() == "jev" && !modelConfig.contains("enabled")) {
+                modelConfig["enabled"] = !trim(getStr(modelConfig, "apiKey")).empty();
                 changed = true;
             }
             if (modelConfig.contains("top_P")) {

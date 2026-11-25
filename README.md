@@ -111,9 +111,9 @@ QQ 交流群：1097487360
 不生成聊天正文，而是返回选项、概率分布和置信度。InSoulForge 将其用于高频回复判断，不确定时再交给 Router LLM，
 使决策与回复生成分工处理；实际延迟与成本收益取决于消息量、阈值及兜底比例。
 
-在「模型配置 → 回复决策」中可配置 Jev 和 Router LLM。填写 Jev 的 API Key、Base URL、Path 和 Model 后启用，默认地址为
+在「模型配置 → 回复决策」中可配置 Jev 和 Router LLM。勾选「启用 Jev」，填写 API Key、Base URL、Path 和 Model 并保存。默认地址为
 `https://openrouter.ai/api/alpha`、路径为 `/decisions`、模型为 `~typesafe/jev-latest`。Jev 使用
-Decisions API，并非 OpenAI 兼容的聊天接口。默认 API Key 为空，因此不启用 Jev，原有 Router 行为不变。
+Decisions API，并非 OpenAI 兼容的聊天接口。新配置默认关闭。关闭或配置不完整时使用 Router LLM，关闭时会保留已填写的密钥。
 Jev 只处理通过硬规则的群聊消息；私聊直接进入 Executor，群内 @机器人和系统任务沿用原有处理。Jev 返回的
 `answers.action.confidence` 低于「最低置信度」（默认 0.60）、缺失或无效，或判断结果为 `unclear`、请求失败时，
 再调用 Router LLM。这里比较的是 `confidence`，不是 `probabilities.reply`；保存阈值后立即生效。

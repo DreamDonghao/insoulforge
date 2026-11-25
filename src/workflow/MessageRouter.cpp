@@ -318,26 +318,26 @@ namespace insoulforge::MessageRouter {
         const auto context = buildRouterContext(snapshot);
 
         // 群聊先由 Jev 判断；无法确定时沿用原有 Router LLM。
-        if (!sessionId.isPrivate() && JevClient::isConfigured(config.jev)) {
+        if (const auto jev = sessionId.isPrivate() ? std::nullopt : config.enabledJevRoutingConfig();
+          jev && JevClient::isConfigured(jev->api)) {
             const auto jevResponse =
-              co_await JevClient::requestSystemOne(config.jev, context, buildJevQuestions(), sessionId);
+              co_await JevClient::requestSystemOne(jev->api, context, buildJevQuestions(), sessionId);
             if (jevResponse) {
                 const auto choice = JevClient::readChoice(
                   *jevResponse, std::string(kJevActionQuestion), {kJevActionSkip, kJevActionReply, kJevActionUnclear});
                 const auto confidence = JevClient::readConfidence(*jevResponse, std::string(kJevActionQuestion));
-                const auto action =
-                  choice ? classifyJevChoice(*choice, confidence, config.jevMinConfidence) : std::nullopt;
+                const auto action = choice ? classifyJevChoice(*choice, confidence, jev->minConfidence) : std::nullopt;
                 Logger::info(sessionId, "Jev",
                   std::format("choice={} | confidence={} | threshold={:.2f} | model={} | fallback={}",
-                    choice.value_or("n/a"), confidence ? std::format("{:.4f}", *confidence) : "n/a",
-                    config.jevMinConfidence, getStr(*jevResponse, "model", config.jev.model), action ? "no" : "yes"));
+                    choice.value_or("n/a"), confidence ? std::format("{:.4f}", *confidence) : "n/a", jev->minConfidence,
+                    getStr(*jevResponse, "model", jev->api.model), action ? "no" : "yes"));
                 if (action) {
                     co_return applySessionType(makeJevDecision(*jevResponse, *action), sessionId);
                 }
             } else {
                 Logger::info(sessionId, "Jev",
                   std::format("choice=n/a | confidence=n/a | threshold={:.2f} | model={} | fallback=yes",
-                    config.jevMinConfidence, config.jev.model));
+                    jev->minConfidence, jev->api.model));
             }
         }
 

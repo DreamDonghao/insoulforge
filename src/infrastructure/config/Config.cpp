@@ -69,7 +69,7 @@ namespace insoulforge {
                           .type = ConfigErrorType::InvalidArgument, .message = "editPath 必须是非空字符串"});
                     }
                 } else if (key == "defaultPrivateEnabled" || key == "affinityEnabled" ||
-                           key == "promptCacheKeyEnabled" || key == "sessionMarkerEnabled") {
+                           key == "promptCacheKeyEnabled" || key == "sessionMarkerEnabled" || key == "enabled") {
                     if (!field.is_boolean()) {
                         return std::unexpected(
                           ConfigError{.type = ConfigErrorType::InvalidArgument, .message = key + " 必须是布尔值"});
@@ -179,6 +179,7 @@ namespace insoulforge {
         loadLLMConfig(llm, "memory", memory, &memoryParams);
         loadLLMConfig(llm, "embedding", embedding);
         loadLLMConfig(llm, "jev", jev);
+        jevEnabled = getBool(llm.at("jev"), "enabled", false);
         const f64 configuredJevConfidence = getDouble(llm.at("jev"), "minConfidence", 0.6);
         jevMinConfidence =
           std::isfinite(configuredJevConfidence) && configuredJevConfidence >= 0.0 && configuredJevConfidence <= 1.0
@@ -303,8 +304,17 @@ namespace insoulforge {
             embedding = std::move(value.embedding);
         } else if (name == "jev") {
             jev = std::move(value.jev);
+            jevEnabled = value.jevEnabled;
             jevMinConfidence = value.jevMinConfidence;
         }
+    }
+
+    auto Config::enabledJevRoutingConfig() const -> std::optional<JevRoutingConfig> {
+        std::scoped_lock lock(m_updateMutex);
+        if (!jevEnabled) {
+            return std::nullopt;
+        }
+        return JevRoutingConfig{.api = jev, .minConfidence = jevMinConfidence};
     }
 
     auto Config::oneBotSnapshot() const -> json {

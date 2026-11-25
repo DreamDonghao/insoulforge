@@ -53,10 +53,11 @@ namespace insoulforge::ConfigStore {
               {"timeoutSeconds", 180}, {"maxRetries", 0}};
         }
 
-        /// @brief 默认使用 OpenRouter Decisions API；密钥留空时不启用 Jev。
+        /// @brief 默认使用 OpenRouter Decisions API，由用户显式启用。
         auto defaultJevConfig() -> json {
-            return {{"apiKey", ""}, {"baseUrl", "https://openrouter.ai/api/alpha"}, {"path", "/decisions"},
-              {"model", "~typesafe/jev-latest"}, {"minConfidence", 0.6}, {"timeoutSeconds", 10}, {"maxRetries", 0}};
+            return {{"enabled", false}, {"apiKey", ""}, {"baseUrl", "https://openrouter.ai/api/alpha"},
+              {"path", "/decisions"}, {"model", "~typesafe/jev-latest"}, {"minConfidence", 0.6}, {"timeoutSeconds", 10},
+              {"maxRetries", 0}};
         }
 
         auto defaultConfig() -> json {
@@ -371,6 +372,9 @@ namespace insoulforge::ConfigStore {
             persistedConfig.erase("topP");
             persistedConfig.erase("reasoningEffort");
             if (name == "jev") {
+                if (!persistedConfig.contains("enabled")) {
+                    persistedConfig["enabled"] = getBool(atOrNull(llm, "jev"), "enabled", false);
+                }
                 const f64 confidence =
                   getDouble(config, "minConfidence", getDouble(atOrNull(llm, "jev"), "minConfidence", 0.6));
                 persistedConfig["minConfidence"] = std::isfinite(confidence) ? std::clamp(confidence, 0.0, 1.0) : 0.6;
@@ -379,6 +383,7 @@ namespace insoulforge::ConfigStore {
             persistedConfig["topP"] = getDouble(config, "topP", 0.9);
         }
         if (name != "jev") {
+            persistedConfig.erase("enabled");
             persistedConfig.erase("minConfidence");
         }
         llm[name] = std::move(persistedConfig);

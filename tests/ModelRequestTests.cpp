@@ -53,12 +53,29 @@ namespace {
 
     void testConfiguration(const std::filesystem::path &path) {
         auto &config = Config::instance();
+        require(config.initialize(path.string()).has_value() && config.getLLMConfig("jev")["enabled"] == false &&
+                  !config.enabledJevRoutingConfig(),
+          "Jev must default off");
         {
             std::ofstream file(path);
             file
-              << R"({"llm":{"memory":{}},"execution":{"routeWhileReplying":true},"memory":{"routerWindowTriggerCount":40,"routerWindowKeepCount":25}})";
+              << R"({"llm":{"memory":{},"jev":{"apiKey":" legacy-key "}},"execution":{"routeWhileReplying":true},"memory":{"routerWindowTriggerCount":40,"routerWindowKeepCount":25}})";
         }
         require(config.initialize(path.string()).has_value(), "old configuration failed to load");
+        auto jev = config.getLLMConfig("jev");
+        require(jev["enabled"] == true && config.enabledJevRoutingConfig().has_value(),
+          "legacy Jev key did not migrate to enabled");
+        jev["enabled"] = false;
+        require(config.saveLLMConfig("jev", jev).has_value() && !config.enabledJevRoutingConfig() &&
+                  config.getLLMConfig("jev") == jev,
+          "disabling Jev did not take effect or changed the saved credentials");
+        jev["enabled"] = "true";
+        require(
+          !config.saveLLMConfig("jev", jev) && !config.enabledJevRoutingConfig(), "Jev accepted a non-boolean setting");
+        jev.erase("enabled");
+        require(config.saveLLMConfig("jev", jev).has_value() && config.initialize(path.string()).has_value() &&
+                  config.getLLMConfig("jev")["enabled"] == false && !config.enabledJevRoutingConfig(),
+          "old client or restart reset the Jev switch");
         require(!config.getExecutionConfig().contains("routeWhileReplying"), "obsolete setting exposed");
         auto execution = config.getExecutionConfig();
         execution["routeWhileReplying"] = "ignored legacy value";
@@ -195,6 +212,7 @@ namespace {
 
     auto testJevWindow(const std::string &endpoint) -> drogon::Task<> {
         auto &config = Config::instance();
+        config.jevEnabled = true;
         config.jevWindowSize.store(10);
         for (const int size: {5, 20, 21, 22, 23}) {
             const auto key = "jev-window-" + std::to_string(size);
@@ -308,10 +326,15 @@ namespace {
                       getStr(messages[0], "content").ends_with(jevInstructions.substr(jevInstructions.find("sender"))),
               "Router did not include the shared context instructions in its single system message");
         }
-        config.jev.apiKey.clear();
+        config.jevEnabled = false;
         (void) co_await MessageRouter::route(SessionId::group("100"), records);
         require(fixture.count("jev-window-fallback") == 1 && fixture.count("router-window") == 2,
-          "Router did not run directly with Jev disabled");
+          "Router did not bypass disabled Jev with a configured key");
+        config.jevEnabled = true;
+        config.jev.apiKey.clear();
+        (void) co_await MessageRouter::route(SessionId::group("100"), records);
+        require(fixture.count("jev-window-fallback") == 1 && fixture.count("router-window") == 3,
+          "Router did not bypass enabled Jev without a key");
         {
             std::lock_guard lock(fixture.mutex);
             const auto &messages = fixture.bodies.at("router-window").at("messages");

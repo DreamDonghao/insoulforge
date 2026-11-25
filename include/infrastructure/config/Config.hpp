@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -23,6 +24,12 @@ namespace insoulforge {
         std::string reasoningEffort; // 原样发送 reasoning_effort，由服务端校验模型支持的取值；空串表示不发送
         i32 timeoutSeconds = 90; // 单次请求超时，不发送给模型服务
         i32 maxRetries = 0; // 首次请求之外的重试次数
+    };
+
+    /// @brief 单次 Jev 路由使用的请求配置与决策阈值。
+    struct JevRoutingConfig {
+        LLMApiConfig api;
+        f64 minConfidence;
     };
 
     /// @brief 生图协议及独立编辑路径；旧配置保留 OpenRouter 协议。
@@ -74,6 +81,7 @@ namespace insoulforge {
         LLMModelParams memoryParams;
         LLMApiConfig embedding; // Embedding 模型配置（长期记忆向量化）
         LLMApiConfig jev; // Jev（System One）路由优先判断模型配置；无对应 LLMModelParams，Jev 不接受采样参数
+        bool jevEnabled = false;
         f64 jevMinConfidence = 0.6; // 低于此置信度时交由 Router LLM 判断
 
         // 记忆配置
@@ -140,6 +148,9 @@ namespace insoulforge {
 
         /// @brief 原子读取 OneBot 操作所需的连接与实现配置；revision 防止切换后复用旧操作。
         [[nodiscard]] auto oneBotSnapshot() const -> json;
+
+        /// @brief 启用 Jev 时读取同一次保存对应的请求配置和阈值。
+        [[nodiscard]] auto enabledJevRoutingConfig() const -> std::optional<JevRoutingConfig>;
 
     private:
         Config() = default;

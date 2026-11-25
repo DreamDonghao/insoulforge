@@ -482,7 +482,9 @@ Agent 初始化通过返回值报告工具和提示词加载结果，失败时�
 启动初始化必须显式传递实际依赖：`AgentSystem::initialize(database, config.botName)` 将已初始化的数据库
 传给自定义工具查询和提示词初始化，将机器人名称传给内置工具注册。定时任务工具说明使用传入名称，
 不在注册阶段读取全局配置。运行时提示词接口仍沿用进程级数据库，初始化流程使用显式数据库重载。
-Jev 默认指向 OpenRouter Decisions API，API Key 默认为空，因此默认不启用；其 `minConfidence` 默认 0.6，限制在 0～1，
+Jev 默认指向 OpenRouter Decisions API，`llm.jev.enabled` 默认为 `false`。旧文件缺少开关时，根据去除首尾空白后的 API Key 是否非空补写开关；
+旧客户端保存时省略该字段会保留当前值。路由先检查开关，再检查 API Key、服务地址、路径和模型名，关闭或配置不完整时由 Router LLM 判断。
+`minConfidence` 默认 0.6，限制在 0～1，
 可在管理后台修改并即时更新运行时配置。启动时若文件不存在则创建默认配置；若
 JSON 损坏则备份为 `config.json.broken.<时间戳>` 后重建；缺失或类型不匹配的字段会补默认值并回写。管理后台保存时先写入临时文件，再原子替换原文件。
 

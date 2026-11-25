@@ -26,6 +26,7 @@ export interface LLMConfig {
     timeoutSeconds?: number
     maxRetries?: number
     minConfidence?: number
+    enabled?: boolean
     apiType?: 'openai' | 'openrouter'
     editPath?: string
 }
