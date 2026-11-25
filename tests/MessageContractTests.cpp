@@ -3826,10 +3826,12 @@ namespace {
 
     void testImageDescriptionCacheStore() {
         constexpr std::string_view kTestName = "image description cache store";
+        const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
+        const auto path = std::filesystem::temp_directory_path() /
+                          ("insoulforge-model-config-test-" + std::to_string(suffix) + ".json");
         auto &database = insoulforge::Database::instance();
         check(database.initialize(":memory:").has_value(), "initializes database", kTestName);
-        check(insoulforge::Config::instance().initialize("data/message-contract-test-config.json").has_value(),
-          "initializes config", kTestName);
+        check(insoulforge::Config::instance().initialize(path.string()).has_value(), "initializes config", kTestName);
 
         insoulforge::ImageDescriptionStore::upsert("hash", "vision-model", 1, "gif", true, "角色挥手", 16);
         const auto succeeded = insoulforge::ImageDescriptionStore::find("hash", "vision-model", 1);
@@ -3877,38 +3879,55 @@ namespace {
         auto cacheConfig = insoulforge::Config::instance().getLLMConfig("executor");
         check(!insoulforge::Config::instance().executorParams.promptCacheKeyEnabled, "cache key defaults to disabled",
           kTestName);
+        check(!insoulforge::Config::instance().executorParams.sessionMarkerEnabled &&
+                !insoulforge::Config::instance().executorFallbackParams.sessionMarkerEnabled,
+          "session marker defaults to disabled for both reply models", kTestName);
         cacheConfig["promptCacheKeyEnabled"] = true;
+        cacheConfig["sessionMarkerEnabled"] = true;
         check(insoulforge::Config::instance().saveLLMConfig("executor", cacheConfig).has_value() &&
-                insoulforge::Config::instance().executorParams.promptCacheKeyEnabled,
-          "cache key setting persists and loads", kTestName);
+                insoulforge::Config::instance().executorParams.promptCacheKeyEnabled &&
+                insoulforge::Config::instance().executorParams.sessionMarkerEnabled &&
+                !insoulforge::Config::instance().executorFallbackParams.sessionMarkerEnabled,
+          "cache settings load independently for the primary model", kTestName);
         auto unchangedCacheConfig = cacheConfig;
         unchangedCacheConfig.erase("promptCacheKeyEnabled");
+        unchangedCacheConfig.erase("sessionMarkerEnabled");
         check(insoulforge::Config::instance().saveLLMConfig("executor", unchangedCacheConfig).has_value() &&
-                insoulforge::Config::instance().executorParams.promptCacheKeyEnabled,
-          "older clients preserve the cache key setting when omitted", kTestName);
+                insoulforge::Config::instance().executorParams.promptCacheKeyEnabled &&
+                insoulforge::Config::instance().executorParams.sessionMarkerEnabled,
+          "older clients preserve the cache settings when omitted", kTestName);
         cacheConfig["promptCacheKeyEnabled"] = "true";
         check(!insoulforge::Config::instance().saveLLMConfig("executor", cacheConfig),
           "cache key setting rejects non-boolean values", kTestName);
         cacheConfig["promptCacheKeyEnabled"] = false;
+        cacheConfig["sessionMarkerEnabled"] = "true";
+        check(!insoulforge::Config::instance().saveLLMConfig("executor", cacheConfig),
+          "session marker setting rejects non-boolean values", kTestName);
+        cacheConfig["sessionMarkerEnabled"] = false;
         check(insoulforge::Config::instance().saveLLMConfig("executor", cacheConfig).has_value() &&
-                !insoulforge::Config::instance().executorParams.promptCacheKeyEnabled,
-          "cache key can be disabled", kTestName);
+                !insoulforge::Config::instance().executorParams.promptCacheKeyEnabled &&
+                !insoulforge::Config::instance().executorParams.sessionMarkerEnabled,
+          "cache settings can be disabled", kTestName);
         auto nonReplyConfig = insoulforge::Config::instance().getLLMConfig("memory");
         nonReplyConfig["promptCacheKeyEnabled"] = true;
+        nonReplyConfig["sessionMarkerEnabled"] = true;
         check(insoulforge::Config::instance().saveLLMConfig("memory", nonReplyConfig).has_value() &&
                 !insoulforge::Config::instance().memoryParams.promptCacheKeyEnabled &&
-                !insoulforge::Config::instance().getLLMConfig("memory").contains("promptCacheKeyEnabled"),
-          "non-reply models do not persist or load cache key settings", kTestName);
+                !insoulforge::Config::instance().memoryParams.sessionMarkerEnabled &&
+                !insoulforge::Config::instance().getLLMConfig("memory").contains("promptCacheKeyEnabled") &&
+                !insoulforge::Config::instance().getLLMConfig("memory").contains("sessionMarkerEnabled"),
+          "non-reply models do not persist or load cache settings", kTestName);
         const auto primaryExecutor = insoulforge::Config::instance().getLLMConfig("executor");
         check(insoulforge::Config::instance()
-                .saveLLMConfig(
-                  "executorFallback", {{"apiKey", "fallback-key"}, {"baseUrl", "https://fallback.example.com/v1"},
-                                        {"path", "/chat/completions"}, {"model", "fallback-model"}, {"maxTokens", 300},
-                                        {"temperature", 0.5}, {"topP", 0.8}, {"reasoningEffort", "none"}})
+                .saveLLMConfig("executorFallback",
+                  {{"apiKey", "fallback-key"}, {"baseUrl", "https://fallback.example.com/v1"},
+                    {"path", "/chat/completions"}, {"model", "fallback-model"}, {"maxTokens", 300},
+                    {"temperature", 0.5}, {"topP", 0.8}, {"reasoningEffort", "none"}, {"sessionMarkerEnabled", true}})
                 .has_value(),
           "saves executor fallback config", kTestName);
         check(insoulforge::Config::instance().executorFallback.model == "fallback-model" &&
-                insoulforge::Config::instance().executorFallbackParams.maxTokens == 300,
+                insoulforge::Config::instance().executorFallbackParams.maxTokens == 300 &&
+                insoulforge::Config::instance().executorFallbackParams.sessionMarkerEnabled,
           "loads independent fallback model and parameters", kTestName);
         check(insoulforge::Config::instance().getLLMConfig("executor") == primaryExecutor,
           "fallback configuration preserves primary executor", kTestName);
@@ -3933,6 +3952,7 @@ namespace {
           "preserves Jev threshold", kTestName);
         check(insoulforge::Config::instance().getLLMConfig("jev")["minConfidence"] == 0.8,
           "saving Jev without a threshold keeps the previous value", kTestName);
+        std::filesystem::remove(path);
         database.close();
     }
 

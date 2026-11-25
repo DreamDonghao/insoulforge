@@ -37,6 +37,7 @@ namespace insoulforge::ConfigStore {
               {"timeoutSeconds", timeoutSeconds}, {"maxRetries", maxRetries}};
             if (replyModel) {
                 result["promptCacheKeyEnabled"] = false;
+                result["sessionMarkerEnabled"] = false;
             }
             return result;
         }
@@ -339,13 +340,14 @@ namespace insoulforge::ConfigStore {
                 persistedConfig[key] = llm[name][key];
             }
         }
-        if (name == "executor" || name == "executorFallback") {
-            if (!persistedConfig.contains("promptCacheKeyEnabled")) {
-                persistedConfig["promptCacheKeyEnabled"] =
-                  getBool(atOrNull(llm, name.c_str()), "promptCacheKeyEnabled", false);
+        for (const auto *key: {"promptCacheKeyEnabled", "sessionMarkerEnabled"}) {
+            if (name == "executor" || name == "executorFallback") {
+                if (!persistedConfig.contains(key)) {
+                    persistedConfig[key] = getBool(atOrNull(llm, name.c_str()), key, false);
+                }
+            } else {
+                persistedConfig.erase(key);
             }
-        } else {
-            persistedConfig.erase("promptCacheKeyEnabled");
         }
         if (name == "imageGeneration") {
             const auto &current = atOrNull(llm, "imageGeneration");

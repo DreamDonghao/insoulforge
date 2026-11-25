@@ -11,7 +11,7 @@ import type {ApiResponse, LLMConfig} from '../../vite-env'
 const props = defineProps<{name: string, initialConfig: LLMConfig}>()
 const hasParameters = computed(() => !['embedding', 'imageGeneration', 'asr'].includes(props.name))
 const hasGenerationParameters = computed(() => hasParameters.value && props.name !== 'jev')
-const supportsPromptCacheKey = computed(() => ['executor', 'executorFallback'].includes(props.name))
+const isReplyModel = computed(() => ['executor', 'executorFallback'].includes(props.name))
 const emit = defineEmits<{saved: [name: string, config: LLMConfig]}>()
 const showToast = inject<(msg: string, isError?: boolean) => void>('showToast')
 const llmConfig = reactive<LLMConfig>({...props.initialConfig})
@@ -86,7 +86,10 @@ const saveLLMConfig = async (): Promise<void> => {
       delete config.model
       delete config.maxRetries
     }
-    if (!supportsPromptCacheKey.value) delete config.promptCacheKeyEnabled
+    if (!isReplyModel.value) {
+      delete config.promptCacheKeyEnabled
+      delete config.sessionMarkerEnabled
+    }
     if (!hasGenerationParameters.value) {
       delete config.maxTokens
       delete config.temperature
@@ -182,7 +185,7 @@ const saveLLMConfig = async (): Promise<void> => {
         <p :id="fieldId(field.key) + '-hint'" class="form-hint range-hint">{{ field.hint }}</p>
         <FieldError :field="fieldId(field.key)" :message="errors[fieldId(field.key)]"/>
       </div>
-      <div v-if="supportsPromptCacheKey" class="form-group checkbox-field">
+      <div v-if="isReplyModel" class="form-group checkbox-field">
         <div class="checkbox-description">
           <div class="field-label">
             <label :for="fieldId('promptCacheKeyEnabled')" class="form-label">发送提示词缓存键</label>
@@ -191,6 +194,16 @@ const saveLLMConfig = async (): Promise<void> => {
           <p :id="fieldId('promptCacheKeyEnabled') + '-hint'" class="setting-summary">需接口支持，是否命中缓存由服务端决定。</p>
         </div>
         <input :id="fieldId('promptCacheKeyEnabled')" v-model="llmConfig.promptCacheKeyEnabled" type="checkbox" :disabled="saving" :aria-describedby="fieldId('promptCacheKeyEnabled') + '-hint'">
+      </div>
+      <div v-if="isReplyModel" class="form-group checkbox-field">
+        <div class="checkbox-description">
+          <div class="field-label">
+            <label :for="fieldId('sessionMarkerEnabled')" class="form-label">首条用户消息发送会话标识</label>
+            <FieldHelp :id="fieldId('sessionMarkerEnabled-details')" label="首条用户消息发送会话标识">默认关闭。开启后在系统消息后插入独立的会话标识，例如 insoulforge:executor:group:123456，原对话上下文紧随其后。</FieldHelp>
+          </div>
+          <p :id="fieldId('sessionMarkerEnabled') + '-hint'" class="setting-summary">适用于按首条用户消息识别会话的接口。</p>
+        </div>
+        <input :id="fieldId('sessionMarkerEnabled')" v-model="llmConfig.sessionMarkerEnabled" type="checkbox" :disabled="saving" :aria-describedby="fieldId('sessionMarkerEnabled') + '-hint'">
       </div>
       <div v-if="hasGenerationParameters" class="form-group">
         <div class="field-label">

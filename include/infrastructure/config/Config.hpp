@@ -38,6 +38,7 @@ namespace insoulforge {
         f64 temperature = 0.7;
         f64 topP = 0.9;
         bool promptCacheKeyEnabled = false; ///< 仅回复生成模型使用；按会话发送 prompt_cache_key。
+        bool sessionMarkerEnabled = false; ///< 仅回复生成模型使用；将会话标识作为独立的首条 user 消息发送。
     };
 
     /// @brief 回复执行流程的参数；后台保存与工作流读取可并发进行。

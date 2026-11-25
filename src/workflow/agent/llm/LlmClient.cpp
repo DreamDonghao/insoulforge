@@ -103,6 +103,11 @@ namespace insoulforge {
             if (params.promptCacheKeyEnabled && sessionId) {
                 body["prompt_cache_key"] = "insoulforge:executor:" + sessionId->toString();
             }
+            if (params.sessionMarkerEnabled && sessionId) {
+                const bool hasLeadingSystem = !messages.empty() && getStr(messages.front(), "role") == "system";
+                messages.insert(messages.begin() + (hasLeadingSystem ? 1 : 0),
+                  json{{"role", "user"}, {"content", "insoulforge:executor:" + sessionId->toString()}});
+            }
             body["messages"] = std::move(messages);
             if (!tools.is_null()) {
                 body["tools"] = std::move(tools);

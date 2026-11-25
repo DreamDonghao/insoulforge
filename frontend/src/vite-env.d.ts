@@ -21,6 +21,7 @@ export interface LLMConfig {
     temperature: number
     topP: number
     promptCacheKeyEnabled?: boolean
+    sessionMarkerEnabled?: boolean
     reasoningEffort: string
     timeoutSeconds?: number
     maxRetries?: number

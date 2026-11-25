@@ -146,7 +146,7 @@ namespace insoulforge::ExecutorAgent {
         /// @details 上下文组装为键序固定的单个 JSON 对象（ordered_json 按插入顺序序列化）作为单条
         /// user 消息：current_session → session_memory → conversation_summaries → earlier_messages → person_memories →
         /// shared_conversations → recent_messages → new_messages → sent_messages → response_requirements（仅有 Router
-        /// 策略时）→ activities，避免连续多条 user（部分 OpenAI 兼容后端不支持）
+        /// 策略时）→ activities。可选的会话标识由 LlmClient 按模型配置在请求中插入。
         [[nodiscard]] auto buildPrompt(
           const ChatRecordManager &chatRecords, const std::optional<RouterDecision> &decision) -> json {
             json messages = json::array();

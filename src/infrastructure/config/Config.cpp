@@ -69,7 +69,7 @@ namespace insoulforge {
                           .type = ConfigErrorType::InvalidArgument, .message = "editPath 必须是非空字符串"});
                     }
                 } else if (key == "defaultPrivateEnabled" || key == "affinityEnabled" ||
-                           key == "promptCacheKeyEnabled") {
+                           key == "promptCacheKeyEnabled" || key == "sessionMarkerEnabled") {
                     if (!field.is_boolean()) {
                         return std::unexpected(
                           ConfigError{.type = ConfigErrorType::InvalidArgument, .message = key + " 必须是布尔值"});
@@ -133,8 +133,9 @@ namespace insoulforge {
                 modelParams->maxTokens = getInt(cfg, "maxTokens");
                 modelParams->temperature = getDouble(cfg, "temperature");
                 modelParams->topP = getDouble(cfg, "topP");
-                modelParams->promptCacheKeyEnabled =
-                  (name == "executor" || name == "executorFallback") && getBool(cfg, "promptCacheKeyEnabled", false);
+                const bool isReplyModel = name == "executor" || name == "executorFallback";
+                modelParams->promptCacheKeyEnabled = isReplyModel && getBool(cfg, "promptCacheKeyEnabled", false);
+                modelParams->sessionMarkerEnabled = isReplyModel && getBool(cfg, "sessionMarkerEnabled", false);
             }
         }
     } // namespace

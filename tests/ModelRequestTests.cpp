@@ -327,19 +327,26 @@ namespace {
             require(Database::instance().initialize(":memory:").has_value(), "test database failed");
             co_await testJevWindow(endpoint);
             const json messages = json::array({{{"role", "user"}, {"content", "test"}}});
+            const json cacheMessages = json::array({{{"role", "system"}, {"content", "system"}}, messages.front(),
+              {{"role", "assistant"}, {"content", "previous reply"}}});
             LLMModelParams cacheParams;
             const auto group = SessionId::group("123456");
-            require(!LlmClient::buildChatRequestBody(apiFor(endpoint, "cache"), cacheParams, messages, {}, group)
-                      .contains("prompt_cache_key"),
-              "disabled cache key was sent");
+            const auto cacheApi = apiFor(endpoint, "cache");
+            const auto defaultBody = LlmClient::buildChatRequestBody(cacheApi, cacheParams, cacheMessages, {}, group);
+            require(!defaultBody.contains("prompt_cache_key") && defaultBody.at("messages") == cacheMessages,
+              "disabled cache options changed the request");
             cacheParams.promptCacheKeyEnabled = true;
-            require(!LlmClient::buildChatRequestBody(apiFor(endpoint, "cache"), cacheParams, messages)
-                      .contains("prompt_cache_key"),
-              "cache key without session was sent");
+            cacheParams.sessionMarkerEnabled = true;
+            const auto noSessionBody = LlmClient::buildChatRequestBody(cacheApi, cacheParams, cacheMessages);
+            require(!noSessionBody.contains("prompt_cache_key") && noSessionBody.at("messages") == cacheMessages,
+              "cache options changed a request without a session");
+            const json markedMessages =
+              json::array({cacheMessages[0], {{"role", "user"}, {"content", "insoulforge:executor:group:123456"}},
+                cacheMessages[1], cacheMessages[2]});
             for (const auto *role: {"executor", "executorFallback", "executorThinking", "router", "memory"}) {
                 const std::string key = std::string("cache-") + role;
                 require((co_await LlmClient::requestChat(
-                           "test", role, apiFor(endpoint, key), cacheParams, messages, {}, group))
+                           "test", role, apiFor(endpoint, key), cacheParams, cacheMessages, {}, group))
                           .has_value(),
                   "cache request failed");
                 std::lock_guard lock(fixture.mutex);
@@ -347,14 +354,25 @@ namespace {
                 if (std::string_view(role) == "executor" || std::string_view(role) == "executorFallback") {
                     require(body.at("prompt_cache_key") == "insoulforge:executor:group:123456",
                       "reply cache key is incorrect");
+                    require(body.at("messages") == markedMessages, "session marker did not precede the original user");
                 } else {
-                    require(!body.contains("prompt_cache_key"), "cache key leaked to another model role");
+                    require(!body.contains("prompt_cache_key") && body.at("messages") == cacheMessages,
+                      "cache options leaked to another model role");
                 }
             }
-            require(
-              LlmClient::buildChatRequestBody(apiFor(endpoint, "cache"), cacheParams, messages, {},
-                SessionId::privateChat(UserId{"123456"}))["prompt_cache_key"] == "insoulforge:executor:private:123456",
-              "private cache key collides with group key");
+            const auto privateChat = SessionId::privateChat(UserId{"123456"});
+            cacheParams.sessionMarkerEnabled = false;
+            const auto keyOnly = LlmClient::buildChatRequestBody(cacheApi, cacheParams, cacheMessages, {}, privateChat);
+            require(keyOnly.at("prompt_cache_key") == "insoulforge:executor:private:123456" &&
+                      keyOnly.at("messages") == cacheMessages,
+              "private cache key is incorrect or changed the messages");
+            cacheParams.promptCacheKeyEnabled = false;
+            cacheParams.sessionMarkerEnabled = true;
+            const auto markerOnly =
+              LlmClient::buildChatRequestBody(cacheApi, cacheParams, cacheMessages, {}, privateChat);
+            require(!markerOnly.contains("prompt_cache_key") &&
+                      markerOnly.at("messages")[1].at("content") == "insoulforge:executor:private:123456",
+              "private session marker is incorrect or enabled the cache key");
             for (const auto *key: {"chat", "fallback", "status429", "status500", "status503"}) {
                 const auto response = co_await LlmClient::requestChat(
                   "test", "executor", apiFor(endpoint, key), LLMModelParams{}, messages);

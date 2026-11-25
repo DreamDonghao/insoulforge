@@ -49,7 +49,7 @@ namespace insoulforge::LlmClient {
 
     /// @brief 构建 OpenAI 兼容 chat 请求体（model/messages/采样参数；reasoningEffort 非空才附带）
     /// @param tools 工具定义；非 null 时附带 tools 字段
-    /// @param sessionId 开启缓存键时使用的会话；缺省时不发送 prompt_cache_key。
+    /// @param sessionId 用于生成缓存键和首条 user 会话标识；缺省时省略两者。
     auto buildChatRequestBody(const LLMApiConfig &api, const LLMModelParams &params, json messages, json tools = {},
       std::optional<SessionId> sessionId = std::nullopt) -> json;
 
